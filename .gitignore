@@ -1,0 +1,13 @@
+__pycache__/
+*.py[cod]
+.Python
+.venv/
+venv/
+.env
+.idea/
+.vscode/
+
+.data/
+
+web/node_modules/
+web/dist/

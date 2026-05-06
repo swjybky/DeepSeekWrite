@@ -1,0 +1,2 @@
+pywebview>=4.4
+qtpy>=2.4
