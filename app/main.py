@@ -41,6 +41,11 @@ def _dist_index_url() -> str:
     return index.resolve().as_uri()
 
 
+def _app_icon_path() -> str | None:
+    ico = _project_root() / "app" / "assets" / "app-icon.ico"
+    return str(ico.resolve()) if ico.is_file() else None
+
+
 class Api:
     def __init__(self, store: BookStore) -> None:
         self._store = store
@@ -82,6 +87,9 @@ class Api:
     ) -> dict | None:
         return self._store.save_book(book_id, content=content, stages=stages)
 
+    def delete_book(self, book_id: str) -> bool:
+        return self._store.delete_book(book_id)
+
     def get_workspace_root(self) -> str | None:
         return read_saved_workspace_root()
 
@@ -98,14 +106,14 @@ def main() -> None:
     api = Api(store)
     url = _dist_index_url()
     webview.create_window(
-        "Write Claw",
+        "涌泉写作",
         url,
         js_api=api,
-        width=1000,
-        height=700,
+        width=2000,
+        height=1048,
         min_size=(640, 480),
     )
-    webview.start(debug=False)
+    webview.start(debug=False, icon=_app_icon_path())
 
 
 if __name__ == "__main__":

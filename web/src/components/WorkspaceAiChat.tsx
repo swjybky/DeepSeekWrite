@@ -2,7 +2,7 @@ import type { AgentTool } from '@mariozechner/pi-agent-core'
 import { Agent } from '@mariozechner/pi-agent-core'
 import { ApiKeyPromptDialog, ChatPanel } from '@mariozechner/pi-web-ui'
 import { useEffect, useRef, useState } from 'react'
-import type { StageId } from '../bridge'
+import type { StageId, WorkspaceShortKind } from '../bridge'
 import { ensurePiAppStorage } from '../pi/setupPiWorkspace'
 import { resolveWorkspaceChatModel } from '../pi/resolveWorkspaceChatModel'
 import {
@@ -31,8 +31,10 @@ function mergeAgentToolsPreservingArtifacts(
 }
 
 type Props = {
-  /** 书籍 id，与 stageId 一起构成 Agent sessionId，避免跨阶段复用 OpenAI Responses 的 prompt 缓存导致 history replay 报错 */
+  /** 书籍 id；与 workstation、stageId 一起构成会话 id */
   sessionBookId: string
+  /** 短篇工作台种类：与世情 / 情感智能体拆分一致 */
+  workspaceShortKind: WorkspaceShortKind
   bookTitle: string
   stageId: StageId
   stageBody: string
@@ -78,6 +80,7 @@ export function WorkspaceAiChat({
 
       const ctx = {
         bookTitle: props.bookTitle,
+        workspaceShortKind: props.workspaceShortKind,
         stageId: props.stageId,
         stageBody: props.stageBody,
         allStages: props.allStages,
@@ -86,7 +89,7 @@ export function WorkspaceAiChat({
       const def = getWorkspaceStageAgentDefinition(ctx)
 
       const agent = new Agent({
-        sessionId: `write-claw:${props.sessionBookId}:${props.stageId}`,
+        sessionId: `write-claw:${props.sessionBookId}:${props.workspaceShortKind}:${props.stageId}`,
         initialState: {
           systemPrompt: def.systemPrompt,
           model: initialModel,
@@ -155,6 +158,7 @@ export function WorkspaceAiChat({
     if (!chatReady || !agentRef.current) return
     const ctx = {
       bookTitle: props.bookTitle,
+      workspaceShortKind: props.workspaceShortKind,
       stageId: props.stageId,
       stageBody: debouncedBody,
       allStages: props.allStages,
@@ -172,6 +176,7 @@ export function WorkspaceAiChat({
   }, [
     chatReady,
     props.bookTitle,
+    props.workspaceShortKind,
     props.stageId,
     debouncedBody,
     props.allStages,

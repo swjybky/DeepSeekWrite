@@ -5,6 +5,7 @@ import {
   type BookSummary,
   type BookType,
   createBook,
+  deleteBook,
   getStoredWorkspaceRoot,
   listBooks,
   loadPersistedWorkspaceRoot,
@@ -30,6 +31,8 @@ export function Home() {
   const [shortGenre, setShortGenre] = useState<string>(SHORT_GENRE_OPTIONS[0])
   const [workspaceRoot, setWorkspaceRoot] = useState<string | null>(() => getStoredWorkspaceRoot())
   const [submitting, setSubmitting] = useState(false)
+  const [deletingId, setDeletingId] = useState<string | null>(null)
+  const [shelfError, setShelfError] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   const refresh = useCallback(async () => {
@@ -102,6 +105,27 @@ export function Home() {
       setError(err instanceof Error ? err.message : '创建失败')
     } finally {
       setSubmitting(false)
+    }
+  }
+
+  const handleDeleteBook = async (b: BookSummary, e: React.MouseEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    const ok = window.confirm(`确定从书架移除「${b.title}」？\n书本文件夹仍会保留在工作目录中。`)
+    if (!ok) return
+    setDeletingId(b.id)
+    setShelfError(null)
+    try {
+      const removed = await deleteBook(b.id)
+      if (!removed) {
+        setShelfError('该书已不存在或删除失败')
+        return
+      }
+      await refresh()
+    } catch (err) {
+      setShelfError(err instanceof Error ? err.message : '删除失败')
+    } finally {
+      setDeletingId(null)
     }
   }
 
@@ -203,6 +227,11 @@ export function Home() {
       )}
 
       <main className="home-main">
+        {shelfError && (
+          <p className="form-error home-shelf-error" role="alert">
+            {shelfError}
+          </p>
+        )}
         {loading ? (
           <p className="muted">加载中…</p>
         ) : books.length === 0 ? (
@@ -210,8 +239,8 @@ export function Home() {
         ) : (
           <ul className="book-list">
             {books.map((b) => (
-              <li key={b.id}>
-                <Link className="book-link card" to={`/book/${b.id}`}>
+              <li key={b.id} className="book-row card">
+                <Link className="book-link" to={`/book/${b.id}`}>
                   <span className="book-name">{b.title}</span>
                   <span className="book-meta">
                     {b.book_type === 'short' ? '短篇' : '长篇'}
@@ -228,6 +257,15 @@ export function Home() {
                       : '未指定书本目录'}
                   </span>
                 </Link>
+                <button
+                  type="button"
+                  className="btn-delete"
+                  aria-label={`从书架移除《${b.title}》`}
+                  disabled={deletingId === b.id}
+                  onClick={(e) => void handleDeleteBook(b, e)}
+                >
+                  {deletingId === b.id ? '移除中…' : '移除'}
+                </button>
               </li>
             ))}
           </ul>

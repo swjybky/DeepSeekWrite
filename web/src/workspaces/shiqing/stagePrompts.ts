@@ -1,24 +1,17 @@
 /**
- * 工作区「按写作阶段」Pi Agent 的系统提示词（纯字符串正文拼装）。
- * 与 workspaceStageAgents 中的 excerpt / peekOtherStages 结果拼接。
+ * 世情工作台：Pi Agent 系统提示词拼装。
  */
 
-import { WorkspaceStagePromptBlocks } from './workspaceStagePromptBlocks'
+import { SHIQING_STAGE_LABELS } from './stages'
+import { ShiqingWorkspacePromptBlocks } from './promptBlocks'
 
-export const WORKSPACE_STAGE_LABELS = {
-  plot_design: '剧情设计',
-  plot_refine: '剧情细化',
-  outline: '大纲纲要',
-  draft: '正文编写',
-  review: '编辑审阅',
-} as const
+export { SHIQING_STAGE_LABELS as WORKSPACE_STAGE_LABELS }
 
-export function workspaceBookLine(bookTitle: string): string {
+export function shiqingBookLine(bookTitle: string): string {
   return `书名：《${bookTitle}》`
 }
 
-/** 供各阶段 system prompt 组装：书名、其它阶段摘录块、当前编辑区摘录 */
-export type WorkspaceStagePromptInput = {
+export type ShiqingStagePromptInput = {
   bookTitle: string
   otherStagesBlock: string
   stageBodyExcerpt: string
@@ -26,19 +19,27 @@ export type WorkspaceStagePromptInput = {
 
 export const PEEK_OTHER_STAGES_EMPTY = '（其它阶段暂无内容）'
 
-/** 剧情设计（静态正文，见 WorkspaceStagePromptBlocks.plotDesign） */
-export function buildPlotDesignStagePrompt(): string {
-  return WorkspaceStagePromptBlocks.plotDesign
+export function buildIntroDesignStagePrompt(): string {
+  return ShiqingWorkspacePromptBlocks.introDesign
 }
 
-/** 剧情细化 */
-export function buildPlotRefineStagePrompt(input: WorkspaceStagePromptInput): string {
+export function buildCharacterDesignStagePrompt(): string {
+  return ShiqingWorkspacePromptBlocks.characterDesign
+}
+
+export function buildPlotDesignStagePrompt(): string {
+  return ShiqingWorkspacePromptBlocks.plotDesign
+}
+
+export function buildPlotRefineStagePrompt(input: ShiqingStagePromptInput): string {
   const body = input.stageBodyExcerpt.trim() || '（暂无）'
   return [
-    '你是「剧情细化」专项助手，把粗梗落为可执行的场次、因果链与情绪起伏。',
+    ShiqingWorkspacePromptBlocks.plotRefine,
     '',
-    workspaceBookLine(input.bookTitle),
-    '当前阶段：剧情细化（场景级：目标—障碍—转折—余波）。',
+    '---',
+    '',
+    shiqingBookLine(input.bookTitle),
+    '当前阶段：剧情细化。',
     '',
     '可参考的本书其它阶段摘录：',
     input.otherStagesBlock,
@@ -47,19 +48,15 @@ export function buildPlotRefineStagePrompt(input: WorkspaceStagePromptInput): st
     '---',
     body,
     '---',
-    '',
-    '多从「信息差、动机、时限、资源」追问每场戏的必要性；避免提前写大纲编号或章名，除非用户要求。',
-    '使用简体中文，Markdown 输出。需要长期追踪的设定表可用工具生成骨架，大段润色可走 artifacts。',
   ].join('\n')
 }
 
-/** 大纲纲要 */
-export function buildOutlineStagePrompt(input: WorkspaceStagePromptInput): string {
+export function buildOutlineStagePrompt(input: ShiqingStagePromptInput): string {
   const body = input.stageBodyExcerpt.trim() || '（暂无）'
   return [
     '你是「大纲纲要」助手，负责篇章结构：分卷、分章、情节点排布与节奏分配。',
     '',
-    workspaceBookLine(input.bookTitle),
+    shiqingBookLine(input.bookTitle),
     '当前阶段：大纲纲要（结构优先于文采）。',
     '',
     '其它阶段摘录（对齐剧情与正文体量）：',
@@ -75,13 +72,12 @@ export function buildOutlineStagePrompt(input: WorkspaceStagePromptInput): strin
   ].join('\n')
 }
 
-/** 正文编写 */
-export function buildDraftStagePrompt(input: WorkspaceStagePromptInput): string {
+export function buildDraftStagePrompt(input: ShiqingStagePromptInput): string {
   const body = input.stageBodyExcerpt.trim() || '（暂无）'
   return [
     '你是「正文编写」助手，专注文笔、对白、画面感与叙事节奏，遵守已定下的大纲方向。',
     '',
-    workspaceBookLine(input.bookTitle),
+    shiqingBookLine(input.bookTitle),
     '当前阶段：正文编写（成稿优先）。',
     '',
     '可参考的设定/大纲摘要：',
@@ -97,13 +93,12 @@ export function buildDraftStagePrompt(input: WorkspaceStagePromptInput): string 
   ].join('\n')
 }
 
-/** 编辑审阅 */
-export function buildReviewStagePrompt(input: WorkspaceStagePromptInput): string {
+export function buildReviewStagePrompt(input: ShiqingStagePromptInput): string {
   const body = input.stageBodyExcerpt.trim() || '（暂无）'
   return [
     '你是「编辑审阅」助手，从编辑视角找逻辑漏洞、人设漂移、节奏问题与可删冗余，并给出可执行的删改建议。',
     '',
-    workspaceBookLine(input.bookTitle),
+    shiqingBookLine(input.bookTitle),
     '当前阶段：编辑审阅（批评为建设性，标注优先级）。',
     '',
     '跨阶段参考（核对是否前后矛盾）：',

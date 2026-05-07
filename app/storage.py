@@ -7,7 +7,15 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from app.models import Book, STAGE_KEYS, default_stages, merge_stages, new_book_id
+from app.models import (
+    Book,
+    QINGGAN_STAGE_KEYS,
+    SHIQING_STAGE_KEYS,
+    apply_stage_patch,
+    default_stages,
+    new_book_id,
+    primary_draft_stage_key,
+)
 
 ISO_FMT = "%Y-%m-%dT%H:%M:%SZ"
 
@@ -43,10 +51,22 @@ def _write_stages_to_disk(book: Book) -> None:
         root.mkdir(parents=True, exist_ok=True)
     except OSError:
         return
-    for key in STAGE_KEYS:
+    # 世情：沿用书籍根目录下的 key.txt；情感：单独子目录，与世情文件不混放
+    for key in SHIQING_STAGE_KEYS:
         text = str(book.stages.get(key, "") or "")
         try:
             (root / f"{key}.txt").write_text(text, encoding="utf-8")
+        except OSError:
+            pass
+    qg_root = root / "qinggan_workspace"
+    try:
+        qg_root.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        qg_root = root
+    for key in QINGGAN_STAGE_KEYS:
+        text = str(book.stages.get(key, "") or "")
+        try:
+            (qg_root / f"{key}.txt").write_text(text, encoding="utf-8")
         except OSError:
             pass
 
@@ -239,11 +259,21 @@ class BookStore:
         if b is None:
             return None
         if stages is not None:
-            b.stages = merge_stages(stages)
-            b.content = b.stages.get("draft", "")
+            b.stages = apply_stage_patch(b.stages, stages)
+            dk = primary_draft_stage_key(b)
+            b.content = str(b.stages.get(dk, "") or "")
         elif content is not None:
             b.content = content
         b.updated_at = _utc_now_iso()
         save_books_atomic(self._path, self._books)
         _write_stages_to_disk(b)
         return b.to_dict()
+
+    def delete_book(self, book_id: str) -> bool:
+        """从书架移除该书（不写磁盘目录）。若 id 不存在则返回 False。"""
+        bid = (book_id or "").strip()
+        if not bid or bid not in self._books:
+            return False
+        del self._books[bid]
+        save_books_atomic(self._path, self._books)
+        return True

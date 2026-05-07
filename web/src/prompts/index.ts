@@ -1,3 +1,3 @@
 export * from './writingAssistant'
-export * from './workspaceStages'
+export * from '../workspaces/shiqing/stagePrompts'
 export * from './workspaceToolTemplates'

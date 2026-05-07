@@ -1,12 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import {
-  WORKSPACE_STAGES,
   type Book,
   type StageId,
+  mergeStagePatchIntoAll,
+  normalizeStagesForWorkspaceBook,
+  resolveWorkspaceStagesForBook,
+  resolveWorkspaceShortKind,
   getBook,
-  isShiqingShortBook,
-  normalizeStages,
+  isWorkspaceShortBook,
   saveBook,
 } from '../bridge'
 import { WorkspaceAiChat } from '../components/WorkspaceAiChat'
@@ -17,16 +19,31 @@ const AI_PANEL_WIDTH_KEY = 'write-claw:workspace-ai-width'
 const AI_PANEL_MIN = 240
 /** 超宽屏下的绝对上限，避免 AI 栏占满整屏 */
 const AI_PANEL_HARD_MAX = 1000
-const AI_PANEL_DEFAULT = 280
 /** Pi ChatPanel 会注入 artifacts；false 则从 Agent 工具列表移除（对话流式优先）。改为 true 可恢复侧栏工件面板能力。 */
 const WORKSPACE_AI_INCLUDE_PI_ARTIFACTS = false
 const WORKSPACE_SPLITTER_W = 6
+/** 三栏份额：左 : 中 : 右（AI）= 18 : 36 : 36，可分配宽 = 视口宽 − 分割条 */
+const WORKSPACE_COL_L = 18
+const WORKSPACE_COL_R = 36
+const WORKSPACE_COL_SUM = 18 + 36 + 36
 /** 为中间编辑区保留的近似最小宽度（用于计算 AI 栏在当前窗口下最大能拉多宽） */
 const EDITOR_MIN_FOR_LAYOUT = 160
 
+function usableWidthLessSplitter(viewportWidth: number): number {
+  return Math.max(0, viewportWidth - WORKSPACE_SPLITTER_W)
+}
+
 function approxRailWidthPx(viewportWidth: number): number {
   return Math.round(
-    Math.min(300, Math.max(220, viewportWidth * 0.24)),
+    (usableWidthLessSplitter(viewportWidth) * WORKSPACE_COL_L) /
+      WORKSPACE_COL_SUM,
+  )
+}
+
+function defaultAiPanelWidthPx(viewportWidth: number): number {
+  return Math.round(
+    (usableWidthLessSplitter(viewportWidth) * WORKSPACE_COL_R) /
+      WORKSPACE_COL_SUM,
   )
 }
 
@@ -51,10 +68,11 @@ function readStoredAiWidth(): number {
   try {
     const raw = localStorage.getItem(AI_PANEL_WIDTH_KEY)
     const n = raw ? Number.parseInt(raw, 10) : NaN
-    if (!Number.isFinite(n)) return clampAiPanelWidth(AI_PANEL_DEFAULT, vw)
+    if (!Number.isFinite(n))
+      return clampAiPanelWidth(defaultAiPanelWidthPx(vw), vw)
     return clampAiPanelWidth(n, vw)
   } catch {
-    return clampAiPanelWidth(AI_PANEL_DEFAULT, vw)
+    return clampAiPanelWidth(defaultAiPanelWidthPx(vw), vw)
   }
 }
 
@@ -62,9 +80,9 @@ export function BookEditor() {
   const { id } = useParams<{ id: string }>()
   const [book, setBook] = useState<Book | null>(null)
   const [stages, setStages] = useState<Record<StageId, string>>(() =>
-    normalizeStages({}),
+    normalizeStagesForWorkspaceBook({ book_type: 'short', categories: ['世情'] }, {}),
   )
-  const [activeStage, setActiveStage] = useState<StageId>('plot_design')
+  const [activeStage, setActiveStage] = useState<StageId>('intro_design')
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
@@ -124,7 +142,9 @@ export function BookEditor() {
         return
       }
       setBook(b)
-      setStages(normalizeStages(b.stages))
+      const rows = resolveWorkspaceStagesForBook(b)
+      setStages(normalizeStagesForWorkspaceBook(b, b.stages))
+      setActiveStage(rows[0]!.id)
     } catch (e) {
       setError(e instanceof Error ? e.message : '加载失败')
     } finally {
@@ -133,6 +153,7 @@ export function BookEditor() {
   }, [id])
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- 进入书本页 mount 拉取数据
     void load()
   }, [load])
 
@@ -142,18 +163,14 @@ export function BookEditor() {
     setMessage(null)
     setError(null)
     try {
-      const stageKeys = Object.keys(stages) as StageId[]
-      const payload: Record<string, string> = {}
-      for (const k of stageKeys) {
-        payload[k] = stages[k]
-      }
-      const next = await saveBook(id, { stages: payload })
+      const merged = mergeStagePatchIntoAll(book.stages, stages)
+      const next = await saveBook(id, { stages: merged })
       if (!next) {
         setError('保存失败：书籍不存在')
         return
       }
       setBook(next)
-      setStages(normalizeStages(next.stages))
+      setStages(normalizeStagesForWorkspaceBook(next, next.stages))
       setMessage('已保存')
       window.setTimeout(() => setMessage(null), 2000)
     } catch (e) {
@@ -193,9 +210,9 @@ export function BookEditor() {
     )
   }
 
-  const shiqing = book ? isShiqingShortBook(book) : false
+  const useWorkspace = book ? isWorkspaceShortBook(book) : false
 
-  if (book && !shiqing) {
+  if (book && !useWorkspace) {
     return (
       <div className="editor-page editor-page--pending">
         <header className="editor-header">
@@ -216,7 +233,8 @@ export function BookEditor() {
         <div className="editor-pending-main">
           <p className="editor-pending-title">该类型工作台开发中</p>
           <p className="muted editor-pending-desc">
-            当前仅「短篇 · 勾选世情分类」可使用完整写作台（剧情设计至编辑审阅与 AI 协作）。
+            当前仅「短篇 · 世情」或「短篇 · 情感 / 现实情感」可使用完整写作台与 AI
+            协作；其余组合仍在扩展中。
           </p>
           <Link className="btn-pending-home" to="/">
             返回书架
@@ -225,6 +243,18 @@ export function BookEditor() {
       </div>
     )
   }
+
+  if (!book) {
+    return (
+      <div className="editor-wrap">
+        <p className="muted">暂无书籍数据</p>
+        <Link to="/">返回书架</Link>
+      </div>
+    )
+  }
+
+  const railStages = resolveWorkspaceStagesForBook(book)
+  const wk = resolveWorkspaceShortKind(book) ?? 'shiqing'
 
   return (
     <div className="editor-page editor-page--workspace">
@@ -272,7 +302,7 @@ export function BookEditor() {
       >
         <nav className="workspace-rail" aria-label="写作阶段">
           <ul className="workspace-rail-list">
-            {WORKSPACE_STAGES.map((s) => (
+            {railStages.map((s) => (
               <li key={s.id}>
                 <button
                   type="button"
@@ -292,7 +322,7 @@ export function BookEditor() {
 
         <div className="workspace-editor-pane">
           <label className="workspace-stage-label" htmlFor="stage-body">
-            {WORKSPACE_STAGES.find((s) => s.id === activeStage)?.label}
+            {railStages.find((s) => s.id === activeStage)?.label}
           </label>
           <textarea
             id="stage-body"
@@ -369,21 +399,37 @@ export function BookEditor() {
           <div className="workspace-ai-header">AI 助手</div>
           <div className="workspace-ai-hint muted">
             上下文：本书 ·{' '}
-            {WORKSPACE_STAGES.find((s) => s.id === activeStage)?.label}
+            {railStages.find((s) => s.id === activeStage)?.label}
+            {' · '}
+            工作台：{wk === 'qinggan' ? '情感' : '世情'}
             {' · '}
             使用 Pi（pi-ai / pi-web-ui）连接真实模型；首次可在对话内配置 API Key 与模型。
           </div>
           {book ? (
-            <WorkspaceAiChat
-              key={`${book.id}-${activeStage}`}
-              sessionBookId={book.id}
-              bookTitle={book.title}
-              stageId={activeStage}
-              stageBody={stages[activeStage]}
-              allStages={stages}
-              includePiArtifacts={WORKSPACE_AI_INCLUDE_PI_ARTIFACTS}
-              applyToStageEditor={applyToStageEditor}
-            />
+            <div className="workspace-ai-chat-stack">
+              {railStages.map((s) => (
+                <div
+                  key={`${book.id}-${wk}-${s.id}`}
+                  className={
+                    activeStage === s.id
+                      ? 'workspace-ai-chat-layer workspace-ai-chat-layer--active'
+                      : 'workspace-ai-chat-layer'
+                  }
+                  aria-hidden={activeStage !== s.id}
+                >
+                  <WorkspaceAiChat
+                    sessionBookId={book.id}
+                    workspaceShortKind={wk}
+                    bookTitle={book.title}
+                    stageId={s.id}
+                    stageBody={stages[s.id] ?? ''}
+                    allStages={stages}
+                    includePiArtifacts={WORKSPACE_AI_INCLUDE_PI_ARTIFACTS}
+                    applyToStageEditor={applyToStageEditor}
+                  />
+                </div>
+              ))}
+            </div>
           ) : null}
         </aside>
       </div>

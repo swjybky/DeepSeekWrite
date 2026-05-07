@@ -19,6 +19,7 @@ function coerceDefaults(raw: unknown): AiModelDefaults | null {
  * 桌面端：从 Python 读取 app/.env，写入 Pi 的 provider API Key，并解析初始 Model。
  * 浏览器开发或未配置时回退 openai / gpt-4o-mini。
  */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- pi-ai Model 泛型与各 provider Api 绑定
 export async function resolveWorkspaceChatModel(): Promise<Model<any>> {
   const fallback = getModel('openai', 'gpt-4o-mini')
   const api = await getBridgeApi()

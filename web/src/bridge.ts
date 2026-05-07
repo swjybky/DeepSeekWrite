@@ -1,15 +1,98 @@
 export type BookType = 'short' | 'long'
 
-/** 与后端 STAGE_KEYS 一致 */
-export const WORKSPACE_STAGES = [
-  { id: 'plot_design', label: '剧情设计' },
-  { id: 'plot_refine', label: '剧情细化' },
-  { id: 'outline', label: '大纲纲要' },
-  { id: 'draft', label: '正文编写' },
-  { id: 'review', label: '编辑审阅' },
-] as const
+import { QINGGAN_WORKSPACE_STAGES } from './workspaces/qinggan/stages'
+import type { QingganStageId } from './workspaces/qinggan/stages'
+import { SHIQING_WORKSPACE_STAGES } from './workspaces/shiqing/stages'
+import type { ShiqingStageId } from './workspaces/shiqing/stages'
+import {
+  isQingganShortBook,
+  isShiqingShortBook,
+  isWorkspaceShortBook,
+  resolveWorkspaceShortKind,
+  type WorkspaceShortKind,
+} from './workspaces/resolveWorkspace'
 
-export type StageId = (typeof WORKSPACE_STAGES)[number]['id']
+export type { QingganStageId, ShiqingStageId, WorkspaceShortKind }
+export {
+  isQingganShortBook,
+  isShiqingShortBook,
+  isWorkspaceShortBook,
+  resolveWorkspaceShortKind,
+}
+
+export type StageId = ShiqingStageId | QingganStageId
+
+/** 世情工作台左栏；历史引用名保持不变 */
+export const WORKSPACE_STAGES = SHIQING_WORKSPACE_STAGES
+
+/** 短篇可选分类（可扩展） */
+export const SHORT_GENRE_OPTIONS = ['世情', '现实情感'] as const
+
+/** 依据书籍分类解析当前应使用的左侧阶段列表（世情 vs 情感） */
+export function resolveWorkspaceStagesForBook(
+  book: Pick<Book, 'book_type' | 'categories'>,
+): typeof SHIQING_WORKSPACE_STAGES | typeof QINGGAN_WORKSPACE_STAGES {
+  if (resolveWorkspaceShortKind(book) === 'qinggan') {
+    return QINGGAN_WORKSPACE_STAGES
+  }
+  return SHIQING_WORKSPACE_STAGES
+}
+
+/** 两端存储中的「全字段」工作台 stages（与世情键 + 情感键并集对齐 Python STAGE_KEYS） */
+export function normalizeAllBookStages(
+  raw?: Partial<Record<StageId, string>> | null,
+): Record<StageId, string> {
+  const r = raw ?? {}
+  const o = {} as Record<StageId, string>
+  for (const s of SHIQING_WORKSPACE_STAGES) {
+    o[s.id] = r[s.id] ?? ''
+  }
+  for (const s of QINGGAN_WORKSPACE_STAGES) {
+    o[s.id] = r[s.id] ?? ''
+  }
+  return o
+}
+
+/** 仅当前工作台在用的阶段子集（用于编辑区 state） */
+export function normalizeStagesForWorkspaceBook(
+  book: Pick<Book, 'book_type' | 'categories'>,
+  raw?: Partial<Record<StageId, string>> | null,
+): Record<StageId, string> {
+  const full = normalizeAllBookStages(raw)
+  const rows = resolveWorkspaceStagesForBook(book)
+  const out = {} as Record<StageId, string>
+  for (const s of rows) {
+    out[s.id] = full[s.id] ?? ''
+  }
+  return out
+}
+
+/** 把部分阶段更新合并进完整存储，未出现的键保持原样 */
+export function mergeStagePatchIntoAll(
+  previous: Partial<Record<StageId, string>> | undefined,
+  patch: Partial<Record<StageId, string>>,
+): Record<StageId, string> {
+  const next = normalizeAllBookStages(previous)
+  for (const [k, v] of Object.entries(patch)) {
+    if (k in next) {
+      next[k as StageId] = String(v ?? '')
+    }
+  }
+  return next
+}
+
+function primaryDraftStageId(
+  book: Pick<Book, 'book_type' | 'categories'>,
+): StageId {
+  return resolveWorkspaceShortKind(book) === 'qinggan' ? 'qinggan_draft' : 'draft'
+}
+
+/** @deprecated 请用 normalizeAllBookStages */
+export function normalizeStages(
+  raw?: Partial<Record<StageId, string>> | null,
+): Record<StageId, string> {
+  return normalizeAllBookStages(raw)
+}
 
 export interface BookSummary {
   id: string
@@ -34,21 +117,6 @@ export interface AiModelDefaults {
   api_key: string
 }
 
-/** 短篇可选分类（可扩展） */
-export const SHORT_GENRE_OPTIONS = ['世情', '现实情感'] as const
-
-export function isShiqingShortBook(book: Pick<Book, 'book_type' | 'categories'>): boolean {
-  return book.book_type === 'short' && book.categories.includes('世情')
-}
-
-export function normalizeStages(raw?: Partial<Record<StageId, string>> | null): Record<StageId, string> {
-  const out = {} as Record<StageId, string>
-  for (const s of WORKSPACE_STAGES) {
-    out[s.id] = raw?.[s.id] ?? ''
-  }
-  return out
-}
-
 declare global {
   interface Window {
     /** API 在 pywebviewready 之后才可用 */
@@ -68,6 +136,7 @@ declare global {
           content?: string | null,
           stages?: Record<string, string> | null,
         ): Promise<Book | null>
+        delete_book(book_id: string): Promise<boolean>
         /** 上次选定的工作文件夹（持久化在应用 .data/preferences.json） */
         get_workspace_root(): Promise<string | null>
         set_workspace_root(path: string | null): Promise<void>
@@ -191,7 +260,7 @@ async function mockCreateBook(
     categories: bt === 'short' ? [...categories] : [],
     content: '',
     output_dir,
-    stages: normalizeStages({}),
+    stages: normalizeAllBookStages({}),
     created_at: now,
     updated_at: now,
   }
@@ -214,17 +283,21 @@ async function mockSaveBook(
   const now = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z')
   let next: Book = { ...b, updated_at: now }
   if (options.stages != null) {
-    const merged = normalizeStages({
-      ...(b.stages as Partial<Record<StageId, string>>),
-      ...options.stages,
-    } as Partial<Record<StageId, string>>)
-    next = { ...next, stages: merged, content: merged.draft }
+    const merged = mergeStagePatchIntoAll(b.stages, options.stages as Partial<Record<StageId, string>>)
+    next = { ...next, stages: merged, content: merged[primaryDraftStageId(next)] ?? '' }
   } else if (options.content != null) {
     next = { ...next, content: options.content }
   }
   map.set(book_id, next)
   saveMock(map)
   return next
+}
+
+async function mockDeleteBook(book_id: string): Promise<boolean> {
+  const map = loadMock()
+  const ok = map.delete(book_id)
+  if (ok) saveMock(map)
+  return ok
 }
 
 type BridgeApi = NonNullable<typeof window.pywebview>['api']
@@ -373,4 +446,10 @@ export async function saveBook(
     return api.save_book(book_id, opts.content ?? null, opts.stages ?? null)
   }
   return mockSaveBook(book_id, opts)
+}
+
+export async function deleteBook(book_id: string): Promise<boolean> {
+  const api = await getBridgeApi()
+  if (api?.delete_book) return api.delete_book(book_id)
+  return mockDeleteBook(book_id)
 }

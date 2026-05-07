@@ -178,7 +178,7 @@
   text-decoration: none;
 }
 
-/* —— 三栏工作台（横向 flex：中间 flex:1 随右侧宽度变化可靠伸缩） —— */
+/* —— 三栏工作台：左:中:AI = 18:36:36（可分配宽 = 100% − 6px 分割条） —— */
 .workspace-grid {
   flex: 1;
   display: flex;
@@ -190,8 +190,8 @@
 }
 
 .workspace-rail {
-  flex: 0 0 clamp(220px, 24vw, 300px);
-  width: clamp(220px, 24vw, 300px);
+  flex: 0 0 calc((100% - 6px) * 18 / 90);
+  width: calc((100% - 6px) * 18 / 90);
   min-width: 0;
   border-right: 1px solid var(--border);
   background: var(--surface);
@@ -284,8 +284,14 @@
 }
 
 .workspace-ai {
-  flex: 0 0 var(--workspace-ai-width, 280px);
-  width: var(--workspace-ai-width, 280px);
+  flex: 0 0 var(
+    --workspace-ai-width,
+    calc((100% - 6px) * 36 / 90)
+  );
+  width: var(
+    --workspace-ai-width,
+    calc((100% - 6px) * 36 / 90)
+  );
   min-width: 0;
   box-sizing: border-box;
   display: flex;
@@ -306,6 +312,28 @@
 .workspace-ai-hint {
   padding: 0.45rem 1rem;
   font-size: 0.75rem;
+}
+
+/* 每阶段独立 Pi 会话：保持挂载，仅切换显示，避免切 tab 后对话被清空 */
+.workspace-ai-chat-stack {
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+}
+
+.workspace-ai-chat-layer {
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  display: none;
+  flex-direction: column;
+}
+
+.workspace-ai-chat-layer--active {
+  display: flex;
 }
 
 /* Pi ChatPanel（pi-web-ui）宿主：填满侧栏剩余高度 */
