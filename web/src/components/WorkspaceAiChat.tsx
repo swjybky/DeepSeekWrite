@@ -33,6 +33,12 @@ function mergeAgentToolsPreservingArtifacts(
 type Props = {
   /** 书籍 id；与 workstation、stageId 一起构成会话 id */
   sessionBookId: string
+  /**
+   * 同一阶段内「新建对话」时递增；与 sessionBookId 等一并写入 `sessionId`，并应由上层
+   * 用 `key` 重建本组件以挂载全新的 Agent / ChatPanel。
+   * @default 0
+   */
+  sessionEpoch?: number
   /** 短篇工作台种类：与世情 / 情感智能体拆分一致 */
   workspaceShortKind: WorkspaceShortKind
   bookTitle: string
@@ -52,6 +58,7 @@ type Props = {
 
 export function WorkspaceAiChat({
   includePiArtifacts = true,
+  sessionEpoch = 0,
   ...props
 }: Props) {
   const hostRef = useRef<HTMLDivElement>(null)
@@ -110,8 +117,12 @@ export function WorkspaceAiChat({
       }
       const def = getWorkspaceStageAgentDefinition(ctx)
 
+      const baseSessionId = `write-claw:${props.sessionBookId}:${props.workspaceShortKind}:${props.stageId}`
+      const sessionId =
+        sessionEpoch > 0 ? `${baseSessionId}:${sessionEpoch}` : baseSessionId
+
       const agent = new Agent({
-        sessionId: `write-claw:${props.sessionBookId}:${props.workspaceShortKind}:${props.stageId}`,
+        sessionId,
         initialState: {
           systemPrompt: def.systemPrompt,
           model: initialModel,

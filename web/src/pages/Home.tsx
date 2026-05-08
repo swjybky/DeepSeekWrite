@@ -7,6 +7,7 @@ import {
   createBook,
   deleteBook,
   getStoredWorkspaceRoot,
+  isPywebviewDesktopBundle,
   listBooks,
   loadPersistedWorkspaceRoot,
   persistWorkspaceRoot,
@@ -66,8 +67,24 @@ export function Home() {
         if (!cancelled) setLoading(false)
       }
     })()
+
+    /** 浏览器中为 number；与 Node Timer 类型分离，避免 TS 报错 */
+    let lateTimer: number | undefined
+    if (isPywebviewDesktopBundle()) {
+      lateTimer = window.setTimeout(() => {
+        if (cancelled) return
+        void (async () => {
+          const w = await loadPersistedWorkspaceRoot()
+          if (!cancelled && w != null) {
+            setWorkspaceRoot((prev) => prev ?? w)
+          }
+        })()
+      }, 450)
+    }
+
     return () => {
       cancelled = true
+      if (lateTimer != null) window.clearTimeout(lateTimer)
     }
   }, [])
 
@@ -78,6 +95,7 @@ export function Home() {
       if (p) {
         setWorkspaceRoot(p)
         await persistWorkspaceRoot(p)
+        await refresh()
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : '选择文件夹失败')

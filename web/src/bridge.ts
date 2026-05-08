@@ -152,6 +152,13 @@ const MOCK_STORAGE_KEY = 'write_claw_dev_books'
 /** 书架「工作文件夹」持久化键（浏览器 / pywebview 同源存储） */
 export const WORKSPACE_ROOT_STORAGE_KEY = 'write_claw_workspace_root'
 
+/** 与 main.tsx boot 一致：桌面壳加载的打包页（含本机 HTTP + `?pywebview=1`） */
+export function isPywebviewDesktopBundle(): boolean {
+  if (typeof window === 'undefined') return false
+  const params = new URLSearchParams(window.location.search)
+  return window.location.protocol === 'file:' || params.get('pywebview') === '1'
+}
+
 export function getStoredWorkspaceRoot(): string | null {
   try {
     const v = localStorage.getItem(WORKSPACE_ROOT_STORAGE_KEY)
@@ -173,11 +180,27 @@ export function setStoredWorkspaceRoot(path: string | null): void {
 /**
  * 启动时解析工作文件夹：桌面端以 Python 持久化为准；若无则从 localStorage 读取并写回磁盘。
  * 纯浏览器开发仅使用 localStorage。
+ *
+ * 桌面壳下偶发首帧早于 `api` 注入：先让出 1～2 帧再取桥接；若 `get_workspace_root` 抛错则短重试（避免误显示「未选择」）。
+ * 不在「无 api」时循环调用 getBridgeApi，以免重复触发长时间解析。
  */
 export async function loadPersistedWorkspaceRoot(): Promise<string | null> {
   const fromLs = getStoredWorkspaceRoot()
+  const desktop = isPywebviewDesktopBundle()
+  if (desktop) {
+    await new Promise<void>((r) => requestAnimationFrame(() => r()))
+    await new Promise<void>((r) => requestAnimationFrame(() => r()))
+  }
+
   const api = await getBridgeApi()
-  if (api?.get_workspace_root && api?.set_workspace_root) {
+  if (!api?.get_workspace_root || !api?.set_workspace_root) {
+    return fromLs
+  }
+
+  const attempts = desktop ? 8 : 1
+  const delayMs = 100
+
+  for (let i = 0; i < attempts; i++) {
     try {
       const fromDisk = await api.get_workspace_root()
       if (typeof fromDisk === 'string' && fromDisk.trim()) {
@@ -191,6 +214,10 @@ export async function loadPersistedWorkspaceRoot(): Promise<string | null> {
       }
       return null
     } catch {
+      if (desktop && i < attempts - 1) {
+        await new Promise<void>((r) => setTimeout(r, delayMs))
+        continue
+      }
       return fromLs
     }
   }

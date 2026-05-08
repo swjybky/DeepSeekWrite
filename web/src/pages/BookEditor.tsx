@@ -88,6 +88,10 @@ export function BookEditor() {
   const [message, setMessage] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [aiPanelWidth, setAiPanelWidth] = useState(readStoredAiWidth)
+  /** 当前阶段 AI 侧栏「对话轮次」：递增后重建 Pi 会话并清空该阶段对话历史 */
+  const [aiChatEpochByStage, setAiChatEpochByStage] = useState<
+    Partial<Record<StageId, number>>
+  >({})
   const splitDragRef = useRef<{ startX: number; startWidth: number } | null>(
     null,
   )
@@ -396,7 +400,25 @@ export function BookEditor() {
         />
 
         <aside className="workspace-ai" aria-label="AI 对话">
-          <div className="workspace-ai-header">AI 助手</div>
+          <div className="workspace-ai-header workspace-ai-header-row">
+            <span className="workspace-ai-header-title">AI 助手</span>
+            {book ? (
+              <button
+                type="button"
+                className="workspace-ai-new-chat"
+                aria-label="清空当前阶段 AI 对话并开始新会话"
+                title="仅影响当前左侧阶段对应的助手会话，其他阶段各有一份独立历史"
+                onClick={() =>
+                  setAiChatEpochByStage((prev) => ({
+                    ...prev,
+                    [activeStage]: (prev[activeStage] ?? 0) + 1,
+                  }))
+                }
+              >
+                新建对话
+              </button>
+            ) : null}
+          </div>
           <div className="workspace-ai-hint muted">
             上下文：本书 ·{' '}
             {railStages.find((s) => s.id === activeStage)?.label}
@@ -407,28 +429,36 @@ export function BookEditor() {
           </div>
           {book ? (
             <div className="workspace-ai-chat-stack">
-              {railStages.map((s) => (
-                <div
-                  key={`${book.id}-${wk}-${s.id}`}
-                  className={
-                    activeStage === s.id
-                      ? 'workspace-ai-chat-layer workspace-ai-chat-layer--active'
-                      : 'workspace-ai-chat-layer'
-                  }
-                  aria-hidden={activeStage !== s.id}
-                >
-                  <WorkspaceAiChat
-                    sessionBookId={book.id}
-                    workspaceShortKind={wk}
-                    bookTitle={book.title}
-                    stageId={s.id}
-                    stageBody={stages[s.id] ?? ''}
-                    allStages={stages}
-                    includePiArtifacts={WORKSPACE_AI_INCLUDE_PI_ARTIFACTS}
-                    applyToStageEditor={applyToStageEditor}
-                  />
-                </div>
-              ))}
+              {railStages.map((s) => {
+                const epoch = aiChatEpochByStage[s.id] ?? 0
+                const layerKey =
+                  epoch > 0
+                    ? `${book.id}-${wk}-${s.id}-${epoch}`
+                    : `${book.id}-${wk}-${s.id}`
+                return (
+                  <div
+                    key={layerKey}
+                    className={
+                      activeStage === s.id
+                        ? 'workspace-ai-chat-layer workspace-ai-chat-layer--active'
+                        : 'workspace-ai-chat-layer'
+                    }
+                    aria-hidden={activeStage !== s.id}
+                  >
+                    <WorkspaceAiChat
+                      sessionBookId={book.id}
+                      sessionEpoch={epoch}
+                      workspaceShortKind={wk}
+                      bookTitle={book.title}
+                      stageId={s.id}
+                      stageBody={stages[s.id] ?? ''}
+                      allStages={stages}
+                      includePiArtifacts={WORKSPACE_AI_INCLUDE_PI_ARTIFACTS}
+                      applyToStageEditor={applyToStageEditor}
+                    />
+                  </div>
+                )
+              })}
             </div>
           ) : null}
         </aside>
