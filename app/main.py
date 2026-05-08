@@ -9,9 +9,10 @@ from pathlib import Path
 def _configure_linux_pywebview_env() -> None:
     """仅 Linux：配置 pywebview 后端与环境变量；Windows/macOS 不会调用此处逻辑。
 
-    若未设置 PYWEBVIEW_GUI：能 import gi（PyGObject）则默认 GTK/WebKit（便于系统输入法），否则回退 Qt。
-    可显式指定：`PYWEBVIEW_GUI=gtk` 或 `qt`。想用 GTK 时请安装系统库（README）并在当前 Python 环境中执行
-    `pip install PyGObject`。
+    若未设置 PYWEBVIEW_GUI：默认优先 Qt WebEngine。原因：内嵌 Pi Web UI（Lit 自定义元素）
+    在 GTK/WebKitGTK 下易出现右侧 AI 面板高度塌缩、输入区空白；而 Qt 端正常。
+    依赖见 requirements.txt（PySide6）。仍可显式指定：`PYWEBVIEW_GUI=gtk` 或 `PYWEBVIEW_GUI=qt`。
+    需用 GTK（如更习惯系统输入法）时自设 `PYWEBVIEW_GUI=gtk` 并安装系统 WebKit 与 PyGObject（README）。
 
     Conda 等前缀安装的 PyGObject 默认不会搜索 Debian/Ubuntu multiarch 下的 typelib（如
     /usr/lib/x86_64-linux-gnu/girepository-1.0），会导致 gi.require_version('Gtk','3.0') 报
@@ -38,7 +39,14 @@ def _configure_linux_pywebview_env() -> None:
     if merged:
         os.environ["GI_TYPELIB_PATH"] = os.pathsep.join(merged)
     if "PYWEBVIEW_GUI" not in os.environ:
-        if importlib.util.find_spec("gi") is not None:
+        _has_qt = (
+            importlib.util.find_spec("PySide6") is not None
+            or importlib.util.find_spec("PyQt6") is not None
+            or importlib.util.find_spec("PyQt5") is not None
+        )
+        if _has_qt:
+            os.environ["PYWEBVIEW_GUI"] = "qt"
+        elif importlib.util.find_spec("gi") is not None:
             os.environ["PYWEBVIEW_GUI"] = "gtk"
         else:
             os.environ["PYWEBVIEW_GUI"] = "qt"
@@ -48,6 +56,33 @@ def _configure_linux_pywebview_env() -> None:
             "DBUS_SYSTEM_BUS_ADDRESS",
             f"unix:path={system_bus}",
         )
+
+    _ensure_linux_qt_input_method()
+
+
+def _ensure_linux_qt_input_method() -> None:
+    """Qt WebEngine 走中文输入法需加载 Qt 平台输入法插件，依赖环境变量 QT_IM_MODULE。
+
+    从图形界面登录时桌面会话通常会注入；从终端直接 `python -m app.main` 时经常缺失，
+    表现为网页内输入框无法调出搜狗 / 微软拼音类输入法。此处在与 GTK_IM_MODULE / XMODIFIERS
+    一致时镜像到 Qt；若仍无则默认 ibus（Ubuntu 常见）。已手动设置 QT_IM_MODULE 时不覆盖。
+
+    Fcitx5 用户请安装发行版提供的 Qt6 前端（如 Debian/Ubuntu: ``fcitx5-frontend-qt6``）。
+    """
+    if not sys.platform.startswith("linux"):
+        return
+    if os.environ.get("PYWEBVIEW_GUI") != "qt":
+        return
+    if os.environ.get("QT_IM_MODULE"):
+        return
+    gtk_im = os.environ.get("GTK_IM_MODULE", "").lower()
+    xmod = os.environ.get("XMODIFIERS", "").lower()
+    if "fcitx" in gtk_im or "fcitx" in xmod:
+        os.environ["QT_IM_MODULE"] = "fcitx"
+    elif "ibus" in gtk_im or "ibus" in xmod:
+        os.environ["QT_IM_MODULE"] = "ibus"
+    else:
+        os.environ.setdefault("QT_IM_MODULE", "ibus")
 
 
 _configure_linux_pywebview_env()
