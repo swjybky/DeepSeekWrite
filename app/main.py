@@ -114,6 +114,35 @@ def _project_root() -> Path:
     return Path(__file__).resolve().parent.parent
 
 
+def _windows_webview2_runtime_hint() -> bool:
+    """检测本机是否已登记 WebView2 Runtime（与 pywebview 选用 Edge/Chromium 引擎的前提一致）。
+
+    若缺失，pywebview 在 Windows 上往往退回到 MSHTML（IE），无法执行 Vite 产出的 modern JS，
+    表现为窗口空白。"""
+    if not sys.platform.startswith("win"):
+        return True
+    try:
+        import winreg  # noqa: PLC0415
+    except ImportError:
+        return True
+
+    clsid = r"{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}"
+    rel_parts = (
+        rf"SOFTWARE\Microsoft\EdgeUpdate\Clients\{clsid}",
+        rf"SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{clsid}",
+    )
+    for hive in (winreg.HKEY_CURRENT_USER, winreg.HKEY_LOCAL_MACHINE):
+        for subkey in rel_parts:
+            try:
+                with winreg.OpenKey(hive, subkey) as key:
+                    pv, _ = winreg.QueryValueEx(key, "pv")
+                    if pv and str(pv).strip() not in {"", "0"}:
+                        return True
+            except OSError:
+                continue
+    return False
+
+
 def _dist_dir() -> Path:
     dist = _project_root() / "web" / "dist"
     index = dist / "index.html"
@@ -126,10 +155,34 @@ def _dist_dir() -> Path:
     return dist
 
 
+class DistHTTPRequestHandler(SimpleHTTPRequestHandler):
+    """修补 Windows 等平台下 mimetypes / 注册表将 .js 标为 text/plain 的问题。
+
+    Chromium 对 ``<script type=\"module\">`` 要求脚本为 JavaScript MIME，否则会拒绝执行（白屏）。
+    """
+
+    def guess_type(self, path: str) -> str:
+        """Python 3.12+ 的 ``SimpleHTTPRequestHandler.guess_type`` 只返回类型字符串（非元组）。"""
+        ext = Path(path).suffix.lower()
+        if ext in ('.js', '.mjs'):
+            return 'application/javascript'
+        if ext == '.json':
+            return 'application/json'
+        if ext == '.css':
+            return 'text/css'
+        if ext in ('.html', '.htm'):
+            return 'text/html'
+        if ext == '.svg':
+            return 'image/svg+xml'
+        if ext == '.wasm':
+            return 'application/wasm'
+        return super().guess_type(path)
+
+
 def _start_local_dist_server(dist_dir: Path) -> tuple[ThreadingHTTPServer, str]:
     """本机回环 HTTP 提供 dist，与 `npm run dev` 同为 http 源，避免 file:// 下 fetch 异常。"""
     handler = functools.partial(
-        SimpleHTTPRequestHandler,
+        DistHTTPRequestHandler,
         directory=str(dist_dir.resolve()),
     )
     httpd = ThreadingHTTPServer(("127.0.0.1", 0), handler)
@@ -215,7 +268,21 @@ def main() -> None:
         height=1048,
         min_size=(640, 480),
     )
-    webview.start(debug=False, icon=_app_icon_path())
+    if sys.platform.startswith("win") and not _windows_webview2_runtime_hint():
+        print(
+            "警告：未检测到 Microsoft Edge WebView2 Runtime 的常规安装登记。\n"
+            "在未安装或未正确注册时，pywebview 可能退回到旧版 MSHTML，无法运行本应用前端（窗口常为白屏）。\n"
+            "请安装 Evergreen WebView2 Runtime："
+            "https://developer.microsoft.com/microsoft-edge/webview2/\n"
+            "若安装后仍为白屏，可设置环境变量 WRITECLAW_DEBUG=1 后重新启动以打开开发者工具查看控制台错误。\n",
+            file=sys.stderr,
+        )
+    _debug = os.environ.get("WRITECLAW_DEBUG", "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+    )
+    webview.start(debug=_debug, icon=_app_icon_path())
 
 
 if __name__ == "__main__":

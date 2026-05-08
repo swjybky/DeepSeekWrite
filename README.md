@@ -32,6 +32,14 @@ python -m app.main
 
 Fcitx5 用户请安装 Qt6 前端插件，例如：`sudo apt install fcitx5-frontend-qt6`（包名因发行版而异）。
 
+### Windows：白屏与 WebView2
+
+桌面壳依赖 **Microsoft Edge WebView2 Runtime**（Chromium 内核）。若本机仅有旧版内核或未安装运行时，pywebview 可能退回 **MSHTML（IE）**，无法执行 Vite 构建的现代 JavaScript，**窗口会一片空白**。
+
+- 请先安装 Evergreen：**[WebView2 Runtime 下载页](https://developer.microsoft.com/microsoft-edge/webview2/)**（选择「Evergreen Bootstrapper」或独立安装包均可）。
+- 启动前未完成 `npm run build`、或 `web/dist` 不完整时，控制台会报错并退出（不会进入白窗口）。
+- 排查前端错误：PowerShell 中执行 `$env:WRITECLAW_DEBUG='1'; python -m app.main`（或 CMD：`set WRITECLAW_DEBUG=1` 后在同一会话运行），窗口内可打开开发者工具查看控制台。
+
 ## 构建前端
 
 ```bash
