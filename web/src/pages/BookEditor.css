@@ -324,25 +324,39 @@
   position: relative;
 }
 
+/*
+ * 不能用 display:none 隐藏非当前阶段：Pi ChatPanel / Lit 在 Ubuntu WebKitGTK 下若在
+ * display:none 容器内首次排版，常见测量高度为 0 且之后不再恢复，表现为整栏空白。
+ * 改为 visibility + 指针屏蔽：各层仍占位（与激活层同尺寸的 absolute 叠放），
+ * 初始化时即有非零包含块；仅激活层可交互。
+ */
 .workspace-ai-chat-layer {
-  flex: 1;
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
   min-height: 0;
   min-width: 0;
-  display: none;
-  flex-direction: column;
+  visibility: hidden;
+  pointer-events: none;
+  z-index: 0;
 }
 
 .workspace-ai-chat-layer--active {
-  display: flex;
+  visibility: visible;
+  pointer-events: auto;
+  z-index: 1;
 }
 
 /* Pi ChatPanel（pi-web-ui）宿主：填满侧栏剩余高度 */
 .workspace-ai-chat-host {
-  flex: 1;
+  flex: 1 1 0%;
   min-height: 0;
   min-width: 0;
   display: flex;
   flex-direction: column;
+  align-self: stretch;
+  height: 100%;
 }
 
 .workspace-ai-messages {

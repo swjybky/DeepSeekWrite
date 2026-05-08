@@ -66,6 +66,8 @@ export function WorkspaceAiChat({
     let unsubscribeMessagesRefresh: (() => void) | undefined
     let postAgentEndRaf = 0
 
+    let resizeObserver: ResizeObserver | undefined
+
     ;(async () => {
       await ensurePiAppStorage()
       const initialModel = await resolveWorkspaceChatModel()
@@ -77,6 +79,26 @@ export function WorkspaceAiChat({
       chatPanel.style.flex = '1'
       chatPanel.style.minHeight = '0'
       root.appendChild(chatPanel)
+
+      const nudgePiLayout = () => {
+        const panel = chatPanelRef.current
+        if (!panel || cancelled) return
+        const h = root.getBoundingClientRect().height
+        if (h > 0) {
+          panel.style.height = `${Math.round(h)}px`
+        }
+        panel.requestUpdate?.()
+        const iface = panel.querySelector(
+          'agent-interface',
+        ) as (HTMLElement & { requestUpdate?: () => void }) | null
+        iface?.requestUpdate?.()
+      }
+
+      resizeObserver = new ResizeObserver(() => {
+        if (cancelled) return
+        requestAnimationFrame(nudgePiLayout)
+      })
+      resizeObserver.observe(root)
 
       const ctx = {
         bookTitle: props.bookTitle,
@@ -137,12 +159,22 @@ export function WorkspaceAiChat({
         )
       }
 
-      if (!cancelled) setChatReady(true)
+      if (!cancelled) {
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => {
+            if (!cancelled) nudgePiLayout()
+            window.dispatchEvent(new Event('resize'))
+          })
+        })
+        setChatReady(true)
+      }
     })()
 
     return () => {
       cancelled = true
       cancelAnimationFrame(postAgentEndRaf)
+      resizeObserver?.disconnect()
+      resizeObserver = undefined
       setChatReady(false)
       unsubscribeMessagesRefresh?.()
       agentRef.current = null
