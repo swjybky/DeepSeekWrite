@@ -1,18 +1,19 @@
 from __future__ import annotations
 
-import importlib.util
+import functools
 import os
+import subprocess
 import sys
+import threading
+from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 
 def _configure_linux_pywebview_env() -> None:
     """仅 Linux：配置 pywebview 后端与环境变量；Windows/macOS 不会调用此处逻辑。
 
-    若未设置 PYWEBVIEW_GUI：默认优先 Qt WebEngine。原因：内嵌 Pi Web UI（Lit 自定义元素）
-    在 GTK/WebKitGTK 下易出现右侧 AI 面板高度塌缩、输入区空白；而 Qt 端正常。
-    依赖见 requirements.txt（PySide6）。仍可显式指定：`PYWEBVIEW_GUI=gtk` 或 `PYWEBVIEW_GUI=qt`。
-    需用 GTK（如更习惯系统输入法）时自设 `PYWEBVIEW_GUI=gtk` 并安装系统 WebKit 与 PyGObject（README）。
+    若未设置 PYWEBVIEW_GUI：一律默认 ``qt``（PySide6 见 requirements.txt）。GTK/WebKitGTK 不再作为默认回退。
+    需要 GTK 时须自行指定 ``PYWEBVIEW_GUI=gtk`` 并安装 WebKit 与 PyGObject（README）。
 
     Conda 等前缀安装的 PyGObject 默认不会搜索 Debian/Ubuntu multiarch 下的 typelib（如
     /usr/lib/x86_64-linux-gnu/girepository-1.0），会导致 gi.require_version('Gtk','3.0') 报
@@ -39,17 +40,7 @@ def _configure_linux_pywebview_env() -> None:
     if merged:
         os.environ["GI_TYPELIB_PATH"] = os.pathsep.join(merged)
     if "PYWEBVIEW_GUI" not in os.environ:
-        _has_qt = (
-            importlib.util.find_spec("PySide6") is not None
-            or importlib.util.find_spec("PyQt6") is not None
-            or importlib.util.find_spec("PyQt5") is not None
-        )
-        if _has_qt:
-            os.environ["PYWEBVIEW_GUI"] = "qt"
-        elif importlib.util.find_spec("gi") is not None:
-            os.environ["PYWEBVIEW_GUI"] = "gtk"
-        else:
-            os.environ["PYWEBVIEW_GUI"] = "qt"
+        os.environ["PYWEBVIEW_GUI"] = "qt"
     system_bus = Path("/var/run/dbus/system_bus_socket")
     if system_bus.exists():
         os.environ.setdefault(
@@ -60,14 +51,36 @@ def _configure_linux_pywebview_env() -> None:
     _ensure_linux_qt_input_method()
 
 
+def _guess_linux_im_module_from_running_processes() -> str | None:
+    """终端启动时常无会话里的 GTK_IM_MODULE，根据常见输入法守护进程推断 QT_IM_MODULE。"""
+    for exe, qt_module in (
+        ("fcitx5", "fcitx"),
+        ("fcitx", "fcitx"),
+        ("ibus-daemon", "ibus"),
+    ):
+        try:
+            r = subprocess.run(
+                ["pgrep", "-x", exe],
+                capture_output=True,
+                timeout=0.5,
+            )
+            if r.returncode == 0:
+                return qt_module
+        except (OSError, subprocess.TimeoutExpired):
+            continue
+    return None
+
+
 def _ensure_linux_qt_input_method() -> None:
     """Qt WebEngine 走中文输入法需加载 Qt 平台输入法插件，依赖环境变量 QT_IM_MODULE。
 
     从图形界面登录时桌面会话通常会注入；从终端直接 `python -m app.main` 时经常缺失，
     表现为网页内输入框无法调出搜狗 / 微软拼音类输入法。此处在与 GTK_IM_MODULE / XMODIFIERS
-    一致时镜像到 Qt；若仍无则默认 ibus（Ubuntu 常见）。已手动设置 QT_IM_MODULE 时不覆盖。
+    一致时镜像到 Qt；若无会话变量则用 pgrep 推断正在运行的 ibus / fcitx5；最后默认 ibus。
+    已手动设置 QT_IM_MODULE 时不覆盖。
 
     Fcitx5 用户请安装发行版提供的 Qt6 前端（如 Debian/Ubuntu: ``fcitx5-frontend-qt6``）。
+    Wayland 下若仍无法输入，可尝试启动前 ``QT_QPA_PLATFORM=xcb``（强制 XWayland）或改用系统输入法框架文档中的 Qt 插件路径。
     """
     if not sys.platform.startswith("linux"):
         return
@@ -82,7 +95,11 @@ def _ensure_linux_qt_input_method() -> None:
     elif "ibus" in gtk_im or "ibus" in xmod:
         os.environ["QT_IM_MODULE"] = "ibus"
     else:
-        os.environ.setdefault("QT_IM_MODULE", "ibus")
+        guessed = _guess_linux_im_module_from_running_processes()
+        if guessed:
+            os.environ["QT_IM_MODULE"] = guessed
+        else:
+            os.environ.setdefault("QT_IM_MODULE", "ibus")
 
 
 _configure_linux_pywebview_env()
@@ -97,15 +114,28 @@ def _project_root() -> Path:
     return Path(__file__).resolve().parent.parent
 
 
-def _dist_index_url() -> str:
-    index = _project_root() / "web" / "dist" / "index.html"
-    if not index.exists():
+def _dist_dir() -> Path:
+    dist = _project_root() / "web" / "dist"
+    index = dist / "index.html"
+    if not index.is_file():
         print(
             "前端未构建：请在 web 目录执行 npm install && npm run build",
             file=sys.stderr,
         )
         sys.exit(1)
-    return index.resolve().as_uri()
+    return dist
+
+
+def _start_local_dist_server(dist_dir: Path) -> tuple[ThreadingHTTPServer, str]:
+    """本机回环 HTTP 提供 dist，与 `npm run dev` 同为 http 源，避免 file:// 下 fetch 异常。"""
+    handler = functools.partial(
+        SimpleHTTPRequestHandler,
+        directory=str(dist_dir.resolve()),
+    )
+    httpd = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+    port = httpd.server_address[1]
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    return httpd, f"http://127.0.0.1:{port}/?pywebview=1"
 
 
 def _app_icon_path() -> str | None:
@@ -176,7 +206,7 @@ class Api:
 def main() -> None:
     store = BookStore()
     api = Api(store)
-    url = _dist_index_url()
+    _httpd, url = _start_local_dist_server(_dist_dir())
     webview.create_window(
         "涌泉写作",
         url,

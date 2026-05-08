@@ -17,15 +17,16 @@ function mount() {
 }
 
 /**
- * pywebview 桌面壳加载 `web/dist/index.html`（file://）时，首轮脚本执行时刻
- * `window.pywebview` 可能仍为 undefined（注入略晚于脚本）。若此时立即 mount，
- * 首屏 listBooks 会在 API 未就绪时超时并误走 localStorage mock，而不是 .data/books.json。
+ * pywebview 桌面壳加载页面时，首轮脚本执行时刻 `window.pywebview` 可能仍为 undefined。
+ * 若此时立即 mount，首屏 listBooks 会在 API 未就绪时超时并误走 localStorage mock。
  *
- * - file://：等到 `pywebview.api` 可用或收到 pywebviewready，最多等待一轮冷启动时间后再兜底挂载。
- * - http(s)（如 Vite dev）：立即挂载。
+ * - file:// 或带 `?pywebview=1`（本机 HTTP 提供 dist）：等到 pywebviewready / api 就绪。
+ * - 其它 http(s)（如 Vite dev、普通浏览器）：立即挂载。
  */
 function boot() {
-  const fromPywebviewBundle = window.location.protocol === 'file:'
+  const params = new URLSearchParams(window.location.search)
+  const fromPywebviewBundle =
+    window.location.protocol === 'file:' || params.get('pywebview') === '1'
 
   if (!fromPywebviewBundle) {
     mount()
