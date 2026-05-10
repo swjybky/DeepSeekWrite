@@ -12,6 +12,9 @@ import {
   type WorkspaceShortKind,
 } from './workspaces/resolveWorkspace'
 
+import { getEmbeddedPromptTemplate } from './prompt/embeddedDefaults'
+import { renderPromptFromTemplateRaw } from './prompt/renderTemplate'
+
 export type { QingganStageId, ShiqingStageId, WorkspaceShortKind }
 export {
   isQingganShortBook,
@@ -115,6 +118,12 @@ export interface AiModelDefaults {
   provider: string
   model_id: string
   api_key: string
+  /**
+   * 可选快速模型 ID（对应 app/.env 的 model_name_flash）；
+   * 鉴权始终与 `model_id` 相同，共用同一条 `api_key`（无单独 flash 密钥字段）。
+   * 未配置时前端旁路回退为与 `model_id` 相同。
+   */
+  model_id_flash?: string
 }
 
 declare global {
@@ -142,6 +151,27 @@ declare global {
         set_workspace_root(path: string | null): Promise<void>
         /** app/.env 中的默认模型与 Key；未配置完整时返回 null */
         get_ai_defaults(): Promise<AiModelDefaults | null>
+
+        /** 渲染工作台系统提示词（磁盘默认 + `.data/prompt_overrides`，占位符服务端替换）。 */
+        get_workspace_system_prompt(
+          workspace_kind: string,
+          stage_id: string,
+          context_json: string,
+        ): Promise<string>
+        /** 读取当前生效的模板原文（便于侧栏编辑器）。 */
+        read_workspace_prompt_template(
+          workspace_kind: string,
+          stage_id: string,
+        ): Promise<string>
+        save_workspace_prompt_override(
+          workspace_kind: string,
+          stage_id: string,
+          body: string,
+        ): Promise<void>
+        reset_workspace_prompt_override(
+          workspace_kind: string,
+          stage_id: string,
+        ): Promise<boolean>
       }
     }
   }
@@ -479,4 +509,105 @@ export async function deleteBook(book_id: string): Promise<boolean> {
   const api = await getBridgeApi()
   if (api?.delete_book) return api.delete_book(book_id)
   return mockDeleteBook(book_id)
+}
+
+const PROMPT_TEMPLATE_LS_PREFIX = 'write_claw_prompt_template_override:'
+
+function localPromptLsKey(workspace: string, stage: string): string {
+  return PROMPT_TEMPLATE_LS_PREFIX + `${workspace}:${stage}`
+}
+
+/** 磁盘 / 嵌入式默认 + （浏览器）localStorage 覆盖；用于编辑器与离线渲染。 */
+export async function readWorkspacePromptTemplate(
+  workspaceKind: WorkspaceShortKind,
+  stageId: StageId,
+): Promise<string> {
+  const api = await getBridgeApi()
+  if (api?.read_workspace_prompt_template) {
+    const t = await api.read_workspace_prompt_template(
+      workspaceKind,
+      stageId,
+    )
+    return t.endsWith('\n') ? t.slice(0, -1) : t
+  }
+  try {
+    const ls = localStorage.getItem(localPromptLsKey(workspaceKind, stageId))
+    if (ls != null && ls.trim() !== '')
+      return ls.endsWith('\n') ? ls.slice(0, -1) : ls
+  } catch {
+    /* ignore */
+  }
+  return getEmbeddedPromptTemplate(workspaceKind, stageId)
+}
+
+export async function saveWorkspacePromptOverride(
+  workspaceKind: WorkspaceShortKind,
+  stageId: StageId,
+  body: string,
+): Promise<void> {
+  const api = await getBridgeApi()
+  if (api?.save_workspace_prompt_override) {
+    await api.save_workspace_prompt_override(workspaceKind, stageId, body)
+    return
+  }
+  try {
+    localStorage.setItem(localPromptLsKey(workspaceKind, stageId), body)
+  } catch {
+    console.warn('[涌泉] 无法保存提示词覆盖：无桌面桥接且无可用 localStorage')
+  }
+}
+
+export async function resetWorkspacePromptOverride(
+  workspaceKind: WorkspaceShortKind,
+  stageId: StageId,
+): Promise<boolean> {
+  const api = await getBridgeApi()
+  if (api?.reset_workspace_prompt_override) {
+    return api.reset_workspace_prompt_override(workspaceKind, stageId)
+  }
+  try {
+    const k = localPromptLsKey(workspaceKind, stageId)
+    const had = localStorage.getItem(k) != null
+    localStorage.removeItem(k)
+    return had
+  } catch {
+    return false
+  }
+}
+
+export async function getWorkspaceSystemPrompt(
+  workspaceKind: WorkspaceShortKind,
+  stageId: StageId,
+  input: {
+    bookTitle: string
+    stageBody: string
+    allStages: Partial<Record<StageId, string>>
+  },
+): Promise<string> {
+  const stagesObj: Record<string, string> = {}
+  for (const [k, v] of Object.entries(input.allStages ?? {})) {
+    stagesObj[k] = String(v ?? '')
+  }
+
+  const api = await getBridgeApi()
+  if (api?.get_workspace_system_prompt) {
+    return api.get_workspace_system_prompt(
+      workspaceKind,
+      stageId,
+      JSON.stringify({
+        book_title: input.bookTitle,
+        stage_body: input.stageBody,
+        all_stages: stagesObj,
+      }),
+    )
+  }
+
+  const raw = await readWorkspacePromptTemplate(workspaceKind, stageId)
+  return renderPromptFromTemplateRaw(raw, {
+    bookTitle: input.bookTitle,
+    stageBody: input.stageBody,
+    allStages: input.allStages,
+    workspaceShortKind: workspaceKind,
+    stageId,
+  })
 }

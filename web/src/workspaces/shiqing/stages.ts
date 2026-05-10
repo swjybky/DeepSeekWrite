@@ -6,6 +6,7 @@ export const SHIQING_WORKSPACE_STAGES = [
   { id: 'outline', label: '大纲纲要' },
   { id: 'draft', label: '正文编写' },
   { id: 'review', label: '编辑审阅' },
+  { id: 'format_conversion', label: '格式转换' },
 ] as const
 
 export type ShiqingStageId = (typeof SHIQING_WORKSPACE_STAGES)[number]['id']

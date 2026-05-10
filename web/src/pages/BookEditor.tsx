@@ -1,6 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import type { CSSProperties } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import {
+  readWorkspacePromptTemplate,
+  resetWorkspacePromptOverride,
+  saveWorkspacePromptOverride,
   type Book,
   type StageId,
   mergeStagePatchIntoAll,
@@ -14,6 +18,9 @@ import {
 import { WorkspaceAiChat } from '../components/WorkspaceAiChat'
 import type { ApplyToStageEditorPayload } from '../pi/workspaceStageAgents'
 import './BookEditor.css'
+
+/** 空 stages 对象，用于非激活阶段的稳定引用，避免不必要的重渲染 */
+const EMPTY_STAGES: Record<StageId, string> = {} as Record<StageId, string>
 
 const AI_PANEL_WIDTH_KEY = 'write-claw:workspace-ai-width'
 const AI_PANEL_MIN = 240
@@ -62,6 +69,14 @@ function clampAiPanelWidth(width: number, viewportWidth: number): number {
   return Math.min(cap, Math.max(AI_PANEL_MIN, width))
 }
 
+/** 总字符长度与不含 Unicode 空白类字符的字数（换行不计入后者） */
+function stageTextCounts(text: string): { total: number; nonSpace: number } {
+  return {
+    total: text.length,
+    nonSpace: text.replace(/\p{White_Space}/gu, '').length,
+  }
+}
+
 function readStoredAiWidth(): number {
   const vw =
     typeof window !== 'undefined' ? window.innerWidth : 1280
@@ -76,6 +91,7 @@ function readStoredAiWidth(): number {
   }
 }
 
+
 export function BookEditor() {
   const { id } = useParams<{ id: string }>()
   const [book, setBook] = useState<Book | null>(null)
@@ -89,34 +105,156 @@ export function BookEditor() {
   const [error, setError] = useState<string | null>(null)
   const [aiPanelWidth, setAiPanelWidth] = useState(readStoredAiWidth)
   /** 当前阶段 AI 侧栏「对话轮次」：递增后重建 Pi 会话并清空该阶段对话历史 */
+  const [promptEditorOpen, setPromptEditorOpen] = useState(false)
+  const [promptDraft, setPromptDraft] = useState('')
+  const [promptEditorLoading, setPromptEditorLoading] = useState(false)
+  const [promptEditorSaving, setPromptEditorSaving] = useState(false)
+  /** 专家模式开关（仅世情文类型） */
+  const [expertMode, setExpertMode] = useState(false)
+  /** 传给当前阶段 WorkspaceAiChat，保存模板后递增以重拉后端 systemPrompt */
+  const [promptReloadNonce, setPromptReloadNonce] = useState(0)
   const [aiChatEpochByStage, setAiChatEpochByStage] = useState<
     Partial<Record<StageId, number>>
   >({})
   const splitDragRef = useRef<{ startX: number; startWidth: number } | null>(
     null,
   )
+  /** 防止连按保存或 Ctrl+S 与按钮并发触发两次提交 */
+  const saveInFlightRef = useRef(false)
   const activeStageRef = useRef<StageId>(activeStage)
+  /** 当前激活阶段的 textarea ref，用于自动滚动 */
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null)
+  /** 流式 token 缓冲区 */
+  const tokenBufferRef = useRef<string>('')
+  const tokenBufferRafRef = useRef<number | null>(null)
+  /** 最新 stages 的 ref，用于流式写入时读取当前值 */
+  const stagesRef = useRef<Record<StageId, string>>(EMPTY_STAGES)
+  /** 正在流式输出时禁用用户输入（设为只读） */
+  const [isStreaming, setIsStreaming] = useState(false)
 
   useEffect(() => {
     activeStageRef.current = activeStage
   }, [activeStage])
 
-  const applyToStageEditor = useCallback(
-    (payload: ApplyToStageEditorPayload) => {
+  // 保持 stagesRef 始终指向最新值
+  useEffect(() => {
+    stagesRef.current = stages
+  }, [stages])
+
+  // 清理 RAF
+  useEffect(() => {
+    return () => {
+      if (tokenBufferRafRef.current) {
+        cancelAnimationFrame(tokenBufferRafRef.current)
+      }
+    }
+  }, [])
+
+  // 细粒度的阶段更新函数（使用函数式更新避免不必要的重渲染）
+  const updateStage = useCallback(
+    (stageId: StageId, updater: (current: string) => string) => {
       setStages((prev) => {
-        const stage = activeStageRef.current
-        const cur = prev[stage] ?? ''
-        const piece = payload.text.trim()
-        if (!piece) return prev
-        if (payload.mode === 'replace') {
-          return { ...prev, [stage]: piece }
-        }
-        const sep =
-          cur.length === 0 ? '' : cur.endsWith('\n') ? '\n' : '\n\n'
-        return { ...prev, [stage]: cur + sep + piece }
+        const current = prev[stageId] ?? ''
+        const next = updater(current)
+        if (next === current) return prev
+        return { ...prev, [stageId]: next }
       })
     },
     [],
+  )
+
+  // 将缓冲区的 token 刷新到 state（使用 RAF 节流）
+  const flushTokenBuffer = useCallback(() => {
+    tokenBufferRafRef.current = null
+    const buffer = tokenBufferRef.current
+    if (!buffer) return
+    tokenBufferRef.current = ''
+
+    const stage = activeStageRef.current
+    updateStage(stage, (cur) => cur + buffer)
+  }, [updateStage])
+
+  // 调度缓冲区刷新
+  const scheduleFlush = useCallback(() => {
+    if (tokenBufferRafRef.current) return
+    tokenBufferRafRef.current = requestAnimationFrame(flushTokenBuffer)
+  }, [flushTokenBuffer])
+
+  // 自动滚动 textarea 到底部（如果用户正在底部）
+  const autoScrollTextarea = useCallback(() => {
+    const textarea = textareaRef.current
+    if (!textarea) return
+    const wasAtBottom =
+      textarea.scrollHeight - textarea.scrollTop <= textarea.clientHeight + 20
+    if (wasAtBottom) {
+      textarea.scrollTop = textarea.scrollHeight
+    }
+  }, [])
+
+  const applyToStageEditor = useCallback(
+    (payload: ApplyToStageEditorPayload) => {
+      const stage = activeStageRef.current
+
+      if (payload.mode === 'replace') {
+        // replace 模式立即执行，清空缓冲区
+        if (tokenBufferRafRef.current) {
+          cancelAnimationFrame(tokenBufferRafRef.current)
+          tokenBufferRafRef.current = null
+        }
+        tokenBufferRef.current = ''
+        setIsStreaming(false)
+        updateStage(stage, () => payload.text.trim())
+        // DOM 更新后尝试自动滚动
+        requestAnimationFrame(autoScrollTextarea)
+        return
+      }
+
+      if (payload.mode === 'append_token') {
+        if (!payload.text) return
+        setIsStreaming(true)
+        // 累积到缓冲区并立即刷新到 state（不再通过 RAF 延迟，避免重复）
+        tokenBufferRef.current += payload.text
+        // 立即刷新缓冲区，只追加新内容
+        const buffer = tokenBufferRef.current
+        tokenBufferRef.current = ''
+        if (tokenBufferRafRef.current) {
+          cancelAnimationFrame(tokenBufferRafRef.current)
+          tokenBufferRafRef.current = null
+        }
+        // 使用函数式更新确保追加到最新值
+        updateStage(stage, (cur) => cur + buffer)
+        // DOM 更新后尝试自动滚动
+        requestAnimationFrame(autoScrollTextarea)
+        return
+      }
+
+      // 流式结束标记
+      if (payload.mode === 'streaming_end') {
+        if (tokenBufferRafRef.current) {
+          cancelAnimationFrame(tokenBufferRafRef.current)
+          tokenBufferRafRef.current = null
+        }
+        tokenBufferRef.current = ''
+        setIsStreaming(false)
+        return
+      }
+
+      // 其他模式（append）立即执行
+      if (tokenBufferRafRef.current) {
+        cancelAnimationFrame(tokenBufferRafRef.current)
+        tokenBufferRafRef.current = null
+      }
+      tokenBufferRef.current = ''
+      setIsStreaming(false)
+      const trimmed = payload.text.trim()
+      if (!trimmed) return
+      updateStage(stage, (cur) => {
+        const sep = cur.length === 0 ? '' : cur.endsWith('\n') ? '\n' : '\n\n'
+        return cur + sep + trimmed
+      })
+      requestAnimationFrame(autoScrollTextarea)
+    },
+    [updateStage, scheduleFlush, autoScrollTextarea],
   )
 
   useEffect(() => {
@@ -134,6 +272,7 @@ export function BookEditor() {
     window.addEventListener('resize', onResize)
     return () => window.removeEventListener('resize', onResize)
   }, [])
+
   const load = useCallback(async () => {
     if (!id) return
     setLoading(true)
@@ -147,7 +286,8 @@ export function BookEditor() {
       }
       setBook(b)
       const rows = resolveWorkspaceStagesForBook(b)
-      setStages(normalizeStagesForWorkspaceBook(b, b.stages))
+      const normalized = normalizeStagesForWorkspaceBook(b, b.stages)
+      setStages(normalized)
       setActiveStage(rows[0]!.id)
     } catch (e) {
       setError(e instanceof Error ? e.message : '加载失败')
@@ -161,12 +301,23 @@ export function BookEditor() {
     void load()
   }, [load])
 
-  const handleSave = async () => {
-    if (!id || !book) return
+  const handleSave = useCallback(async () => {
+    if (!id || !book || saveInFlightRef.current) return
+    saveInFlightRef.current = true
     setSaving(true)
     setMessage(null)
     setError(null)
     try {
+      // 先刷新缓冲区确保数据完整
+      if (tokenBufferRef.current && !tokenBufferRafRef.current) {
+        flushTokenBuffer()
+      }
+      // 如果有正在进行的 RAF，等待它完成
+      if (tokenBufferRafRef.current) {
+        cancelAnimationFrame(tokenBufferRafRef.current)
+        tokenBufferRafRef.current = null
+        flushTokenBuffer()
+      }
       const merged = mergeStagePatchIntoAll(book.stages, stages)
       const next = await saveBook(id, { stages: merged })
       if (!next) {
@@ -180,12 +331,28 @@ export function BookEditor() {
     } catch (e) {
       setError(e instanceof Error ? e.message : '保存失败')
     } finally {
+      saveInFlightRef.current = false
       setSaving(false)
     }
-  }
+  }, [id, book, stages, flushTokenBuffer])
+
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (!(e.ctrlKey || e.metaKey) || e.key.toLowerCase() !== 's') return
+      if (!id || !book || !isWorkspaceShortBook(book)) return
+      e.preventDefault()
+      void handleSave()
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [id, book, handleSave])
 
   const handleStageBodyChange = (value: string) => {
-    setStages((prev) => ({ ...prev, [activeStage]: value }))
+    // 清理缓冲区，避免冲突
+    if (tokenBufferRef.current) {
+      tokenBufferRef.current = ''
+    }
+    updateStage(activeStage, () => value)
   }
 
   if (!id) {
@@ -259,6 +426,51 @@ export function BookEditor() {
 
   const railStages = resolveWorkspaceStagesForBook(book)
   const wk = resolveWorkspaceShortKind(book) ?? 'shiqing'
+  const stageBody = stages[activeStage] ?? ''
+
+  const openPromptEditor = async () => {
+    setPromptEditorLoading(true)
+    try {
+      const t = await readWorkspacePromptTemplate(wk, activeStage)
+      setPromptDraft(t)
+      setPromptEditorOpen(true)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : '无法加载提示词模板')
+    } finally {
+      setPromptEditorLoading(false)
+    }
+  }
+
+  const savePromptTemplateEdit = async () => {
+    setPromptEditorSaving(true)
+    setError(null)
+    try {
+      await saveWorkspacePromptOverride(wk, activeStage, promptDraft)
+      setPromptReloadNonce((n) => n + 1)
+      setPromptEditorOpen(false)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : '保存提示词失败')
+    } finally {
+      setPromptEditorSaving(false)
+    }
+  }
+
+  const resetPromptTemplateToBuiltin = async () => {
+    setPromptEditorSaving(true)
+    try {
+      await resetWorkspacePromptOverride(wk, activeStage)
+      const t = await readWorkspacePromptTemplate(wk, activeStage)
+      setPromptDraft(t)
+      setPromptReloadNonce((n) => n + 1)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : '重置提示词失败')
+    } finally {
+      setPromptEditorSaving(false)
+    }
+  }
+
+  const { total: stageCharTotal, nonSpace: stageCharNonSpace } =
+    stageTextCounts(stageBody)
 
   return (
     <div className="editor-page editor-page--workspace">
@@ -301,7 +513,7 @@ export function BookEditor() {
         style={
           {
             '--workspace-ai-width': `${aiPanelWidth}px`,
-          } as React.CSSProperties
+          } as CSSProperties
         }
       >
         <nav className="workspace-rail" aria-label="写作阶段">
@@ -325,16 +537,33 @@ export function BookEditor() {
         </nav>
 
         <div className="workspace-editor-pane">
-          <label className="workspace-stage-label" htmlFor="stage-body">
-            {railStages.find((s) => s.id === activeStage)?.label}
-          </label>
+          <div className="workspace-stage-heading">
+            <label className="workspace-stage-label" htmlFor="stage-body">
+              {railStages.find((s) => s.id === activeStage)?.label}
+            </label>
+            <span
+              className="workspace-char-count muted"
+              aria-live="polite"
+              title={`不含空白字数 ${stageCharNonSpace.toLocaleString('zh-CN')}；总字符（含空格与换行）${stageCharTotal.toLocaleString('zh-CN')}`}
+            >
+              {stageCharNonSpace.toLocaleString('zh-CN')} 字
+              <span className="workspace-char-count-sep" aria-hidden>
+                {' · '}
+              </span>
+              <span className="workspace-char-count-detail">
+                {stageCharTotal.toLocaleString('zh-CN')} 字符
+              </span>
+            </span>
+          </div>
           <textarea
             id="stage-body"
+            ref={textareaRef}
             className="editor-body workspace-textarea"
-            value={stages[activeStage]}
+            value={stageBody}
             onChange={(e) => handleStageBodyChange(e.target.value)}
             placeholder="在此编辑当前阶段内容…"
             spellCheck={false}
+            readOnly={isStreaming}
           />
         </div>
 
@@ -403,20 +632,43 @@ export function BookEditor() {
           <div className="workspace-ai-header workspace-ai-header-row">
             <span className="workspace-ai-header-title">AI 助手</span>
             {book ? (
-              <button
-                type="button"
-                className="workspace-ai-new-chat"
-                aria-label="清空当前阶段 AI 对话并开始新会话"
-                title="仅影响当前左侧阶段对应的助手会话，其他阶段各有一份独立历史"
-                onClick={() =>
-                  setAiChatEpochByStage((prev) => ({
-                    ...prev,
-                    [activeStage]: (prev[activeStage] ?? 0) + 1,
-                  }))
-                }
-              >
-                新建对话
-              </button>
+              <div className="workspace-ai-header-actions">
+                {wk === 'shiqing' ? (
+                  <button
+                    type="button"
+                    className={expertMode ? 'workspace-ai-expert-mode workspace-ai-expert-mode--active' : 'workspace-ai-expert-mode'}
+                    aria-label={expertMode ? '退出专家模式' : '进入专家模式'}
+                    title="切换专家模式"
+                    onClick={() => setExpertMode((v) => !v)}
+                  >
+                    专家模式
+                  </button>
+                ) : null}
+                <button
+                  type="button"
+                  className="workspace-ai-prompt-edit"
+                  aria-label={`编辑提示词模板：${railStages.find((s) => s.id === activeStage)?.label}`}
+                  title="编辑当前阶段工作台系统提示词模板（占位符在后端替换）"
+                  disabled={promptEditorLoading}
+                  onClick={() => void openPromptEditor()}
+                >
+                  {promptEditorLoading ? '加载…' : '编辑提示词'}
+                </button>
+                <button
+                  type="button"
+                  className="workspace-ai-new-chat"
+                  aria-label="清空当前阶段 AI 对话并开始新会话"
+                  title="仅影响当前左侧阶段对应的助手会话，其他阶段各有一份独立历史"
+                  onClick={() =>
+                    setAiChatEpochByStage((prev) => ({
+                      ...prev,
+                      [activeStage]: (prev[activeStage] ?? 0) + 1,
+                    }))
+                  }
+                >
+                  新建对话
+                </button>
+              </div>
             ) : null}
           </div>
           <div className="workspace-ai-hint muted">
@@ -435,15 +687,29 @@ export function BookEditor() {
                   epoch > 0
                     ? `${book.id}-${wk}-${s.id}-${epoch}`
                     : `${book.id}-${wk}-${s.id}`
+                const isActive = activeStage === s.id
                 return (
                   <div
                     key={layerKey}
                     className={
-                      activeStage === s.id
+                      isActive
                         ? 'workspace-ai-chat-layer workspace-ai-chat-layer--active'
                         : 'workspace-ai-chat-layer'
                     }
-                    aria-hidden={activeStage !== s.id}
+                    aria-hidden={!isActive}
+                    // 使用 CSS 隐藏非激活阶段，保留组件状态（对话记录）
+                    style={
+                      isActive
+                        ? undefined
+                        : {
+                            position: 'absolute',
+                            opacity: 0,
+                            pointerEvents: 'none',
+                            width: 0,
+                            height: 0,
+                            overflow: 'hidden',
+                          }
+                    }
                   >
                     <WorkspaceAiChat
                       sessionBookId={book.id}
@@ -452,9 +718,13 @@ export function BookEditor() {
                       bookTitle={book.title}
                       stageId={s.id}
                       stageBody={stages[s.id] ?? ''}
-                      allStages={stages}
+                      // 非激活阶段使用 stable 空对象引用，避免 allStages 变化触发重渲染
+                      allStages={isActive ? stages : EMPTY_STAGES}
                       includePiArtifacts={WORKSPACE_AI_INCLUDE_PI_ARTIFACTS}
+                      promptRevision={isActive ? promptReloadNonce : 0}
                       applyToStageEditor={applyToStageEditor}
+                      // 非激活阶段暂停实时更新，减少后台计算
+                      isPaused={!isActive}
                     />
                   </div>
                 )
@@ -462,6 +732,74 @@ export function BookEditor() {
             </div>
           ) : null}
         </aside>
+
+        {promptEditorOpen ? (
+          <div
+            className="workspace-prompt-editor-backdrop"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="wc-prompt-editor-title"
+          >
+            <div className="workspace-prompt-editor-panel">
+              <div className="workspace-prompt-editor-head">
+                <h2 id="wc-prompt-editor-title" className="workspace-prompt-editor-title">
+                  短篇 · {wk === 'qinggan' ? '情感' : '世情'} ·{' '}
+                  {railStages.find((s) => s.id === activeStage)?.label}
+                </h2>
+                <button
+                  type="button"
+                  className="workspace-prompt-editor-close"
+                  aria-label="关闭"
+                  disabled={promptEditorSaving}
+                  onClick={() => setPromptEditorOpen(false)}
+                >
+                  ×
+                </button>
+              </div>
+              <p className="workspace-prompt-editor-hint muted">
+                {'模板占位写法示例（各占一行）：'}
+                <span className="workspace-prompt-editor-code">
+                  {'{{BOOK_TITLE}} {{BOOK_LINE}} {{OTHER_STAGES_EXCERPT}} {{STAGE_BODY}}'}
+                </span>
+                {' 。保存后立即作用于当前工作台阶段。'}
+              </p>
+              <textarea
+                className="workspace-prompt-editor-area"
+                value={promptDraft}
+                spellCheck={false}
+                disabled={promptEditorSaving}
+                onChange={(e) => setPromptDraft(e.target.value)}
+              />
+              <div className="workspace-prompt-editor-foot">
+                <button
+                  type="button"
+                  className="btn-prompt-secondary"
+                  disabled={promptEditorSaving}
+                  onClick={() => void resetPromptTemplateToBuiltin()}
+                >
+                  恢复内置默认
+                </button>
+                <div className="workspace-prompt-editor-foot-gap" />
+                <button
+                  type="button"
+                  className="btn-prompt-cancel"
+                  disabled={promptEditorSaving}
+                  onClick={() => setPromptEditorOpen(false)}
+                >
+                  取消
+                </button>
+                <button
+                  type="button"
+                  className="btn-prompt-save"
+                  disabled={promptEditorSaving}
+                  onClick={() => void savePromptTemplateEdit()}
+                >
+                  {promptEditorSaving ? '保存中…' : '保存'}
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : null}
       </div>
     </div>
   )

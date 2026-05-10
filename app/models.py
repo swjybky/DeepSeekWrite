@@ -15,6 +15,7 @@ SHIQING_STAGE_KEYS: tuple[str, ...] = (
     "outline",
     "draft",
     "review",
+    "format_conversion",
 )
 
 # 情感短篇工作台（与 web workspaces/qinggan 一致；与世情不复用字段）

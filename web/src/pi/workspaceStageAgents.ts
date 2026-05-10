@@ -2,17 +2,18 @@ import type { AgentTool } from '@mariozechner/pi-agent-core'
 
 import type { StageId, WorkspaceShortKind } from '../bridge'
 import {
-  getQingganWorkspaceStageAgentDefinition,
+  buildQingganWorkspaceAdditionalTools,
   type QingganWorkspaceStageAgentContext,
 } from '../workspaces/qinggan/stageAgents'
 import {
-  getShiqingWorkspaceStageAgentDefinition,
+  buildShiqingWorkspaceAdditionalTools,
   type ShiqingWorkspaceStageAgentContext,
 } from '../workspaces/shiqing/stageAgents'
 
 export type ApplyToStageEditorPayload = {
   text: string
-  mode: 'replace' | 'append'
+  /** replace：整段替换；append：前空则整块，否则前加 \\n\\n；append_token：流式 delta，仅拼接不加分段；streaming_end：流式结束标记 */
+  mode: 'replace' | 'append' | 'append_token' | 'streaming_end'
 }
 
 export type WorkspaceStageAgentContext = {
@@ -24,9 +25,10 @@ export type WorkspaceStageAgentContext = {
   applyToStageEditor?: (payload: ApplyToStageEditorPayload) => void
 }
 
-export function getWorkspaceStageAgentDefinition(
+/** Pi 工作台工具集；systemPrompt 须由后端 `getWorkspaceSystemPrompt` 单独装配。 */
+export function getWorkspaceStageAdditionalTools(
   ctx: WorkspaceStageAgentContext,
-): { systemPrompt: string; additionalTools: AgentTool[] } {
+): AgentTool[] {
   if (ctx.workspaceShortKind === 'qinggan') {
     const narrow: QingganWorkspaceStageAgentContext = {
       bookTitle: ctx.bookTitle,
@@ -35,7 +37,7 @@ export function getWorkspaceStageAgentDefinition(
       allStages: ctx.allStages,
       applyToStageEditor: ctx.applyToStageEditor,
     }
-    return getQingganWorkspaceStageAgentDefinition(narrow)
+    return buildQingganWorkspaceAdditionalTools(narrow)
   }
   const narrow: ShiqingWorkspaceStageAgentContext = {
     bookTitle: ctx.bookTitle,
@@ -44,5 +46,5 @@ export function getWorkspaceStageAgentDefinition(
     allStages: ctx.allStages,
     applyToStageEditor: ctx.applyToStageEditor,
   }
-  return getShiqingWorkspaceStageAgentDefinition(narrow)
+  return buildShiqingWorkspaceAdditionalTools(narrow)
 }

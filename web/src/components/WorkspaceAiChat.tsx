@@ -1,16 +1,144 @@
-import type { AgentTool } from '@mariozechner/pi-agent-core'
+import type { AgentMessage, AgentTool } from '@mariozechner/pi-agent-core'
 import { Agent } from '@mariozechner/pi-agent-core'
+import type { AssistantMessage, Model } from '@mariozechner/pi-ai'
 import { ApiKeyPromptDialog, ChatPanel } from '@mariozechner/pi-web-ui'
-import { useEffect, useRef, useState } from 'react'
+import { memo, useEffect, useRef, useState } from 'react'
 import type { StageId, WorkspaceShortKind } from '../bridge'
+import { getWorkspaceSystemPrompt } from '../bridge'
 import { ensurePiAppStorage } from '../pi/setupPiWorkspace'
-import { resolveWorkspaceChatModel } from '../pi/resolveWorkspaceChatModel'
+import {
+  resolveWorkspaceChatModel,
+  resolveWorkspaceFlashModel,
+} from '../pi/resolveWorkspaceChatModel'
+import {
+  assistantAgentMessageToPlainText,
+  runStageAssistantExtractStream,
+} from '../pi/stageAssistantExtractStream'
 import {
   type ApplyToStageEditorPayload,
-  getWorkspaceStageAgentDefinition,
+  getWorkspaceStageAdditionalTools,
 } from '../pi/workspaceStageAgents'
 
 const ARTIFACTS_TOOL_NAME = 'artifacts'
+
+const TOOLBAR_CAPTION = '抽取相关内容到编辑器'
+
+/** 本条助手消息是否仍要求执行工具；若是，随后还有续写，不应挂「写入正文」。 */
+function assistantMessageHasToolCalls(m: AgentMessage): boolean {
+  if (m.role !== 'assistant') return false
+  return (m as AssistantMessage).content.some((c) => c.type === 'toolCall')
+}
+
+function assistantIndexInTranscript(
+  messages: AgentMessage[],
+  targetTs: number,
+): number {
+  let idx = -1
+  for (const m of messages) {
+    if (m.role === 'assistant') {
+      idx++
+      if (m.timestamp === targetTs) return idx
+    }
+  }
+  return -1
+}
+
+type MountToolbarOpts = {
+  cancelled: () => boolean
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- pi-ai Model 与 provider 绑定
+  loadFlashModel: () => Promise<Model<any>>
+  getApplyToStageEditor: () => ApplyToStageEditor | undefined
+  getStageId: () => StageId
+  getStageBody: () => string
+  getAgentStreaming: () => boolean
+  extractAbortRef: { current: AbortController | null }
+}
+
+type ApplyToStageEditor = (payload: ApplyToStageEditorPayload) => void
+
+function mountAssistExtractToolbar(
+  root: HTMLElement,
+  messages: AgentMessage[],
+  assistantMsg: AgentMessage,
+  opts: MountToolbarOpts,
+) {
+  if (opts.cancelled()) return
+  if (assistantMsg.role !== 'assistant') return
+  const plain = assistantAgentMessageToPlainText(assistantMsg)
+  if (!plain) return
+  const apply = opts.getApplyToStageEditor()
+  if (!apply) return
+
+  const ts = assistantMsg.timestamp
+  root
+    .querySelectorAll(`.wc-assist-toolbar[data-wc-ts="${ts}"]`)
+    .forEach((n) => n.remove())
+
+  const list = root.querySelector('message-list')
+  if (!list) return
+  const aIdx = assistantIndexInTranscript(messages, ts)
+  if (aIdx < 0) return
+  const nodes = list.querySelectorAll('assistant-message')
+  const anchor = nodes[aIdx] as HTMLElement | undefined
+  if (!anchor) return
+
+  const next = anchor.nextElementSibling
+  if (
+    next?.classList.contains('wc-assist-toolbar') &&
+    next.getAttribute('data-wc-ts') === String(ts)
+  ) {
+    return
+  }
+
+  const bar = document.createElement('div')
+  bar.className = 'wc-assist-toolbar'
+  bar.setAttribute('data-wc-ts', String(ts))
+
+  const inner = document.createElement('div')
+  inner.className = 'wc-assist-toolbar-inner'
+
+  const btn = document.createElement('button')
+  btn.type = 'button'
+  btn.className = 'wc-assist-extract-btn'
+  btn.title = TOOLBAR_CAPTION
+  btn.textContent = '写入正文'
+  btn.setAttribute('aria-label', `写入正文，${TOOLBAR_CAPTION}`)
+
+  const snapshot = plain
+
+  btn.addEventListener('click', async () => {
+    const applyNow = opts.getApplyToStageEditor()
+    if (!applyNow) return
+    if (opts.getAgentStreaming()) return
+    opts.extractAbortRef.current?.abort()
+    const ac = new AbortController()
+    opts.extractAbortRef.current = ac
+    btn.disabled = true
+    try {
+      const flash = await opts.loadFlashModel()
+      const stageId = opts.getStageId()
+      // 剧情细化阶段使用追加模式，不清空现有内容
+      const isPlotRefine = stageId === 'plot_refine'
+      await runStageAssistantExtractStream({
+        flashModel: flash,
+        stageId: String(stageId),
+        stageBody: opts.getStageBody(),
+        assistantPlainText: snapshot,
+        applyToStageEditor: applyNow,
+        signal: ac.signal,
+        onError: (msg) => console.warn('[涌泉·写入正文]', msg),
+        appendMode: isPlotRefine,
+      })
+    } finally {
+      if (opts.extractAbortRef.current === ac) opts.extractAbortRef.current = null
+      btn.disabled = false
+    }
+  })
+
+  bar.appendChild(inner)
+  inner.appendChild(btn)
+  anchor.insertAdjacentElement('afterend', bar)
+}
 
 function useDebounced<T>(value: T, ms: number): T {
   const [out, setOut] = useState(value)
@@ -52,19 +180,38 @@ type Props = {
    * @default true
    */
   includePiArtifacts?: boolean
+  /** 侧栏「编辑提示词」保存后递增，强制重新拉取 disk 模板并刷新 systemPrompt */
+  promptRevision?: number
   /** 供「写入编辑区」工具调用：写入中间栏当前阶段文本框 */
   applyToStageEditor?: (payload: ApplyToStageEditorPayload) => void
+  /**
+   * 是否暂停实时更新（非激活阶段使用）。为 true 时跳过提示词重新加载和工具更新，
+   * 减少后台计算开销，但保留对话状态。
+   * @default false
+   */
+  isPaused?: boolean
 }
 
-export function WorkspaceAiChat({
+function WorkspaceAiChatInner({
   includePiArtifacts = true,
   sessionEpoch = 0,
+  promptRevision = 0,
+  isPaused = false,
   ...props
 }: Props) {
   const hostRef = useRef<HTMLDivElement>(null)
   const agentRef = useRef<Agent | null>(null)
   const chatPanelRef = useRef<ChatPanel | null>(null)
   const [chatReady, setChatReady] = useState(false)
+  const propsLatestRef = useRef(props)
+  const extractAbortRef = useRef<AbortController | null>(null)
+  const promptPullSeqRef = useRef(0)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- pi-ai Model 与 provider 绑定
+  const flashModelPromiseRef = useRef<Promise<Model<any>> | null>(null)
+
+  useEffect(() => {
+    propsLatestRef.current = props
+  }, [props])
 
   const debouncedBody = useDebounced(props.stageBody, 600)
 
@@ -74,6 +221,10 @@ export function WorkspaceAiChat({
     let postAgentEndRaf = 0
 
     let resizeObserver: ResizeObserver | undefined
+
+    const loadFlashModel = () =>
+      (flashModelPromiseRef.current ??=
+        resolveWorkspaceFlashModel(agentRef.current?.state.model))
 
     ;(async () => {
       await ensurePiAppStorage()
@@ -107,15 +258,26 @@ export function WorkspaceAiChat({
       })
       resizeObserver.observe(root)
 
-      const ctx = {
-        bookTitle: props.bookTitle,
-        workspaceShortKind: props.workspaceShortKind,
-        stageId: props.stageId,
-        stageBody: props.stageBody,
-        allStages: props.allStages,
-        applyToStageEditor: props.applyToStageEditor,
-      }
-      const def = getWorkspaceStageAgentDefinition(ctx)
+      const ctxTools = (): AgentTool[] =>
+        getWorkspaceStageAdditionalTools({
+          bookTitle: propsLatestRef.current.bookTitle,
+          workspaceShortKind: propsLatestRef.current.workspaceShortKind,
+          stageId: propsLatestRef.current.stageId,
+          stageBody: propsLatestRef.current.stageBody,
+          allStages: propsLatestRef.current.allStages,
+          applyToStageEditor: propsLatestRef.current.applyToStageEditor,
+        })
+
+      const systemPromptInitial = await getWorkspaceSystemPrompt(
+        props.workspaceShortKind,
+        props.stageId,
+        {
+          bookTitle: props.bookTitle,
+          stageBody: props.stageBody,
+          allStages: props.allStages,
+        },
+      )
+      if (cancelled || !hostRef.current) return
 
       const baseSessionId = `write-claw:${props.sessionBookId}:${props.workspaceShortKind}:${props.stageId}`
       const sessionId =
@@ -124,7 +286,7 @@ export function WorkspaceAiChat({
       const agent = new Agent({
         sessionId,
         initialState: {
-          systemPrompt: def.systemPrompt,
+          systemPrompt: systemPromptInitial,
           model: initialModel,
           thinkingLevel: 'off',
           messages: [],
@@ -143,6 +305,35 @@ export function WorkspaceAiChat({
       unsubscribeMessagesRefresh = agent.subscribe(async (ev) => {
         if (ev.type === 'message_end') {
           agent.state.messages = agent.state.messages.slice()
+          const finished = ev.message
+          if (
+            finished.role === 'assistant' &&
+            !assistantMessageHasToolCalls(finished) &&
+            assistantAgentMessageToPlainText(finished)
+          ) {
+            requestAnimationFrame(() => {
+              requestAnimationFrame(() => {
+                if (cancelled) return
+                const shell = hostRef.current
+                if (!shell) return
+                mountAssistExtractToolbar(
+                  shell,
+                  agent.state.messages,
+                  finished,
+                  {
+                    cancelled: () => cancelled,
+                    loadFlashModel,
+                    getApplyToStageEditor: () =>
+                      propsLatestRef.current.applyToStageEditor,
+                    getStageId: () => propsLatestRef.current.stageId,
+                    getStageBody: () => propsLatestRef.current.stageBody,
+                    getAgentStreaming: () => agent.state.isStreaming,
+                    extractAbortRef,
+                  },
+                )
+              })
+            })
+          }
         }
         if (ev.type === 'agent_end') {
           cancelAnimationFrame(postAgentEndRaf)
@@ -161,7 +352,7 @@ export function WorkspaceAiChat({
       await chatPanel.setAgent(agent, {
         onApiKeyRequired: async (provider: string) =>
           ApiKeyPromptDialog.prompt(provider),
-        toolsFactory: () => def.additionalTools,
+        toolsFactory: ctxTools,
       })
 
       if (!includePiArtifacts) {
@@ -183,6 +374,9 @@ export function WorkspaceAiChat({
 
     return () => {
       cancelled = true
+      extractAbortRef.current?.abort()
+      extractAbortRef.current = null
+      flashModelPromiseRef.current = null
       cancelAnimationFrame(postAgentEndRaf)
       resizeObserver?.disconnect()
       resizeObserver = undefined
@@ -198,24 +392,35 @@ export function WorkspaceAiChat({
   }, [])
 
   useEffect(() => {
-    if (!chatReady || !agentRef.current) return
-    const ctx = {
-      bookTitle: props.bookTitle,
-      workspaceShortKind: props.workspaceShortKind,
-      stageId: props.stageId,
-      stageBody: debouncedBody,
-      allStages: props.allStages,
-      applyToStageEditor: props.applyToStageEditor,
-    }
-    const def = getWorkspaceStageAgentDefinition(ctx)
-    const agent = agentRef.current
-    agent.state.systemPrompt = def.systemPrompt
-    agent.state.tools = includePiArtifacts
-      ? mergeAgentToolsPreservingArtifacts(
-          agent.state.tools,
-          def.additionalTools,
-        )
-      : def.additionalTools
+    // 暂停状态下跳过提示词更新，减少后台计算
+    if (isPaused || !chatReady || !agentRef.current) return
+    const seq = ++promptPullSeqRef.current
+    ;(async () => {
+      const p = propsLatestRef.current
+      const nextPrompt = await getWorkspaceSystemPrompt(
+        p.workspaceShortKind,
+        p.stageId,
+        {
+          bookTitle: p.bookTitle,
+          stageBody: debouncedBody,
+          allStages: p.allStages,
+        },
+      )
+      if (!agentRef.current || seq !== promptPullSeqRef.current) return
+      const agent = agentRef.current
+      agent.state.systemPrompt = nextPrompt
+      const extras = getWorkspaceStageAdditionalTools({
+        bookTitle: p.bookTitle,
+        workspaceShortKind: p.workspaceShortKind,
+        stageId: p.stageId,
+        stageBody: debouncedBody,
+        allStages: p.allStages,
+        applyToStageEditor: p.applyToStageEditor,
+      })
+      agent.state.tools = includePiArtifacts
+        ? mergeAgentToolsPreservingArtifacts(agent.state.tools, extras)
+        : extras
+    })().catch((e: unknown) => console.warn('[涌泉·工作台提示词]', e))
   }, [
     chatReady,
     props.bookTitle,
@@ -225,7 +430,55 @@ export function WorkspaceAiChat({
     props.allStages,
     props.applyToStageEditor,
     includePiArtifacts,
+    promptRevision,
+    isPaused,
   ])
 
   return <div ref={hostRef} className="workspace-ai-chat-host" />
 }
+
+/**
+ * WorkspaceAiChat 使用 React.memo 包装，自定义比较逻辑：
+ * - sessionBookId、sessionEpoch、workspaceShortKind、stageId 变化时重建
+ * - stageBody 和 allStages 字符串内容变化时更新，但引用变化不触发（流式写入时）
+ * - isPaused 变化时更新
+ * - promptRevision 变化时更新
+ * - applyToStageEditor 函数引用不比较（总是使用最新）
+ */
+export const WorkspaceAiChat = memo(WorkspaceAiChatInner, (prev, next) => {
+  // 如果核心标识变化，必须更新
+  if (prev.sessionBookId !== next.sessionBookId) return false
+  if (prev.sessionEpoch !== next.sessionEpoch) return false
+  if (prev.workspaceShortKind !== next.workspaceShortKind) return false
+  if (prev.stageId !== next.stageId) return false
+
+  // 暂停状态变化需要更新
+  if (prev.isPaused !== next.isPaused) return false
+
+  // 提示词版本变化需要更新
+  if (prev.promptRevision !== next.promptRevision) return false
+
+  // includePiArtifacts 变化需要更新
+  if (prev.includePiArtifacts !== next.includePiArtifacts) return false
+
+  // stageBody 内容变化需要更新（比较字符串值而非引用）
+  if (prev.stageBody !== next.stageBody) return false
+
+  // allStages 内容浅比较（阶段数量或内容变化时更新）
+  const prevKeys = Object.keys(prev.allStages)
+  const nextKeys = Object.keys(next.allStages)
+  if (prevKeys.length !== nextKeys.length) return false
+  for (const key of prevKeys) {
+    if (prev.allStages[key as StageId] !== next.allStages[key as StageId]) {
+      return false
+    }
+  }
+
+  // bookTitle 变化需要更新
+  if (prev.bookTitle !== next.bookTitle) return false
+
+  // applyToStageEditor 函数引用不比较（总是使用最新）
+
+  // 默认不更新（返回 true 表示相同）
+  return true
+})

@@ -241,10 +241,40 @@
   overflow: hidden;
 }
 
+.workspace-stage-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.75rem;
+  min-width: 0;
+}
+
 .workspace-stage-label {
+  flex: 1 1 auto;
+  min-width: 0;
   font-size: 0.8125rem;
   font-weight: 600;
   color: var(--text-h);
+}
+
+.workspace-char-count {
+  flex-shrink: 0;
+  font-size: 0.75rem;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  text-align: right;
+}
+
+.workspace-char-count-detail {
+  font-weight: 400;
+}
+
+@media (max-width: 520px) {
+  .workspace-char-count-sep,
+  .workspace-char-count-detail {
+    display: none;
+  }
 }
 
 .workspace-textarea {
@@ -343,6 +373,76 @@
   outline-offset: 2px;
 }
 
+.workspace-ai-header-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.4rem;
+}
+
+.workspace-ai-prompt-edit {
+  flex-shrink: 0;
+  padding: 0.28rem 0.55rem;
+  font-size: 0.75rem;
+  font-weight: 500;
+  line-height: 1.2;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text-h);
+  cursor: pointer;
+}
+
+.workspace-ai-prompt-edit:hover:not(:disabled) {
+  border-color: color-mix(in oklab, var(--accent) 45%, var(--border));
+  background: color-mix(in oklab, var(--accent) 8%, var(--surface));
+}
+
+.workspace-ai-prompt-edit:disabled {
+  opacity: 0.55;
+  cursor: wait;
+}
+
+.workspace-ai-prompt-edit:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.workspace-ai-expert-mode {
+  flex-shrink: 0;
+  padding: 0.28rem 0.55rem;
+  font-size: 0.75rem;
+  font-weight: 500;
+  line-height: 1.2;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text-h);
+  cursor: pointer;
+}
+
+.workspace-ai-expert-mode:hover {
+  border-color: color-mix(in oklab, var(--accent) 45%, var(--border));
+  background: color-mix(in oklab, var(--accent) 8%, var(--surface));
+}
+
+.workspace-ai-expert-mode:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.workspace-ai-expert-mode--active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+.workspace-ai-expert-mode--active:hover {
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
+}
+
 .workspace-ai-hint {
   padding: 0.45rem 1rem;
   font-size: 0.75rem;
@@ -391,6 +491,64 @@
   flex-direction: column;
   align-self: stretch;
   height: 100%;
+}
+
+/* 每条助手气泡下的「写入正文」（旁路快速模型，与主对话模型独立） */
+.workspace-ai-chat-host .wc-assist-toolbar,
+.workspace-ai-chat-host .wc-assist-toolbar * {
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.wc-assist-toolbar {
+  display: flex;
+  justify-content: flex-start;
+  padding: 0 1rem 0.5rem;
+  margin-top: -0.15rem;
+}
+
+.wc-assist-toolbar-inner {
+  display: flex;
+  align-items: center;
+  max-width: 100%;
+}
+
+.wc-assist-extract-btn {
+  flex-shrink: 0;
+  padding: 0.2rem 0.45rem;
+  font-size: 0.6875rem;
+  font-weight: 500;
+  line-height: 1.2;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text-h);
+  cursor: pointer;
+}
+
+.wc-assist-extract-btn:hover:not(:disabled) {
+  border-color: color-mix(in oklab, var(--accent) 45%, var(--border));
+  background: color-mix(in oklab, var(--accent) 8%, var(--surface));
+}
+
+.wc-assist-extract-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.wc-assist-extract-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/*
+ * pi-web-ui 的 app.css（Tailwind）含 .select-none → user-select: none。
+ * 该属性会继承到 message-list 等子树，导致侧栏对话无法划选与 Ctrl+C 复制。
+ */
+.workspace-ai .workspace-ai-chat-host,
+.workspace-ai .workspace-ai-chat-host * {
+  -webkit-user-select: text;
+  user-select: text;
 }
 
 .workspace-ai-messages {
@@ -448,6 +606,161 @@
 
 .workspace-ai-send {
   align-self: flex-end;
+}
+
+/* —— AI 工作台：提示词模板编辑器 —— */
+.workspace-prompt-editor-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 2000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+  background: rgb(15 23 42 / 0.42);
+}
+
+.workspace-prompt-editor-panel {
+  width: min(840px, 100%);
+  max-height: calc(100vh - 2rem);
+  display: flex;
+  flex-direction: column;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-h);
+  box-shadow: 0 12px 40px rgb(0 0 0 / 0.18);
+}
+
+.workspace-prompt-editor-head {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.65rem 0.85rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.workspace-prompt-editor-title {
+  margin: 0;
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 0.9375rem;
+  font-weight: 600;
+}
+
+.workspace-prompt-editor-close {
+  flex-shrink: 0;
+  width: 2rem;
+  height: 2rem;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-h);
+  font-size: 1.15rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.workspace-prompt-editor-close:hover:not(:disabled) {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+.workspace-prompt-editor-close:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.workspace-prompt-editor-hint {
+  margin: 0;
+  padding: 0.45rem 0.85rem 0;
+  font-size: 0.75rem;
+}
+
+.workspace-prompt-editor-code {
+  display: inline-block;
+  margin: 0 0.2rem;
+  font-family: ui-monospace, monospace;
+  font-size: 0.7rem;
+  word-break: break-all;
+}
+
+.workspace-prompt-editor-area {
+  margin: 0.5rem 0.85rem 0.85rem;
+  flex: 1 1 auto;
+  min-height: 660px;
+  max-height: 80vh;
+  padding: 0.55rem 0.65rem;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text-h);
+  font-family: ui-monospace, monospace;
+  font-size: 0.8rem;
+  line-height: 1.45;
+  resize: vertical;
+}
+
+.workspace-prompt-editor-area:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.workspace-prompt-editor-area:disabled {
+  opacity: 0.65;
+}
+
+.workspace-prompt-editor-foot {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  padding: 0 0.85rem 0.85rem;
+}
+
+.workspace-prompt-editor-foot-gap {
+  flex: 1 1 6rem;
+  min-height: 0;
+}
+
+.btn-prompt-secondary {
+  padding: 0.32rem 0.55rem;
+  font-size: 0.8125rem;
+  border-radius: 8px;
+  border: 1px dashed var(--border);
+  background: transparent;
+  color: var(--text-h);
+  cursor: pointer;
+}
+
+.btn-prompt-secondary:hover:not(:disabled) {
+  border-color: color-mix(in oklab, var(--accent) 40%, var(--border));
+}
+
+.btn-prompt-cancel {
+  padding: 0.32rem 0.65rem;
+  font-size: 0.8125rem;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-h);
+  cursor: pointer;
+}
+
+.btn-prompt-save {
+  padding: 0.32rem 0.85rem;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  border-radius: 8px;
+  border: none;
+  background: var(--accent);
+  color: #fff;
+  cursor: pointer;
+}
+
+.btn-prompt-save:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 
 @media (max-width: 880px) {

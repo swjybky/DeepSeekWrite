@@ -11,8 +11,39 @@ function coerceDefaults(raw: unknown): AiModelDefaults | null {
   const provider = typeof o.provider === 'string' ? o.provider.trim() : ''
   const model_id = typeof o.model_id === 'string' ? o.model_id.trim() : ''
   const api_key = typeof o.api_key === 'string' ? o.api_key.trim() : ''
+  const flashRaw = o.model_id_flash ?? o.model_idFlash
+  const model_id_flash =
+    typeof flashRaw === 'string' ? flashRaw.trim() : undefined
   if (!provider || !model_id || !api_key) return null
-  return { provider, model_id, api_key }
+  const out: AiModelDefaults = { provider, model_id, api_key }
+  if (model_id_flash) out.model_id_flash = model_id_flash
+  return out
+}
+
+/**
+ * 与会话侧边栏一致的密钥：`ProviderKeysStore`（Pi IndexedDB）；缺省时再接 `app/.env`。
+ * pi-ai `stream(...)` 不会走 AgentLoop 里的 `getApiKey`，需在调用旁路时必须显式传入 `apiKey`。
+ */
+export async function resolveWorkspaceProviderApiKey(provider: string): Promise<string | undefined> {
+  const p = provider.trim()
+  const fromStore = await getAppStorage().providerKeys.get(p)
+  if (fromStore?.trim()) return fromStore.trim()
+  try {
+    const api = await getBridgeApi()
+    if (!api?.get_ai_defaults) return undefined
+    const raw = await api.get_ai_defaults()
+    const d = coerceDefaults(raw)
+    if (
+      !d?.api_key?.trim() ||
+      d.provider.trim().toLowerCase() !== p.toLowerCase()
+    ) {
+      return undefined
+    }
+    await getAppStorage().providerKeys.set(d.provider, d.api_key.trim())
+    return d.api_key.trim()
+  } catch {
+    return undefined
+  }
 }
 
 /**
@@ -33,5 +64,29 @@ export async function resolveWorkspaceChatModel(): Promise<Model<any>> {
     return m ?? fallback
   } catch {
     return fallback
+  }
+}
+
+/**
+ * 旁路「抽取 / 流式写入编辑区」使用的快速模型；与主模型共用 provider 与同一条 api_key。
+ * 未配置 model_id_flash 时与主模型相同。
+ *
+ * `app/.env` 不完整时传入侧栏 `Agent.state.model`，避免用到无 IndexedDB 密钥的回退厂商。
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- pi-ai Model 与 provider 绑定
+export async function resolveWorkspaceFlashModel(reuseAuthFromModel?: Model<any>): Promise<Model<any>> {
+  const fallback = getModel('openai', 'gpt-4o-mini')
+  const api = await getBridgeApi()
+  if (!api?.get_ai_defaults) return reuseAuthFromModel ?? fallback
+  try {
+    const raw = await api.get_ai_defaults()
+    const d = coerceDefaults(raw)
+    if (!d) return reuseAuthFromModel ?? fallback
+    await getAppStorage().providerKeys.set(d.provider, d.api_key)
+    const flashId = (d.model_id_flash?.trim() || d.model_id) as never
+    const m = getModel(d.provider as KnownProvider, flashId)
+    return m ?? (reuseAuthFromModel ?? fallback)
+  } catch {
+    return reuseAuthFromModel ?? fallback
   }
 }

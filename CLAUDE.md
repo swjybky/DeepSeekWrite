@@ -42,7 +42,7 @@ npm run lint
 - `main.py` — pywebview 窗口设置及暴露给 JS 的 `Api` 类（`list_books`、`create_book`、`get_book`、`save_book`、`pick_folder`、`get_workspace_root`、`set_workspace_root`、`get_ai_defaults`）。
 - `storage.py` — `BookStore` 负责向 `.data/books.json` 和 `.data/preferences.json` 执行原子化 JSON 写入，同时会将各阶段的 `.txt` 文件写入每本书的 `output_dir` 目录。
 - `models.py` — `Book` 数据类，包含 `id`、`title`、`book_type`（`short`|`long`）、`categories`、`content`、`output_dir`、`stages` 和时间戳。
-- `ai_env.py` — 从 `app/.env` 加载可选的 AI 默认配置（`model_name`、`model_api_key`、`model_source`）。
+- `ai_env.py` — 从 `app/.env` 加载可选的 AI 默认配置（主模型 `model_name_main` 或 `model_name`、可选快速模型 `model_name_flash`、`model_api_key`、`model_source`）；`get_ai_defaults` 返回 `model_id` 与可选 `model_id_flash`。
 
 ### 前端（`web/src/`）
 - `main.tsx` — 入口文件；等待 `pywebviewready` 事件后再启动 React 应用。

@@ -107,6 +107,12 @@ _configure_linux_pywebview_env()
 import webview
 
 from app.ai_env import load_ai_model_defaults
+from app.prompt_store import (
+    read_raw_prompt_for_editor,
+    render_from_api_context,
+    reset_prompt_override,
+    save_prompt_override,
+)
 from app.storage import BookStore, read_saved_workspace_root, write_saved_workspace_root
 
 
@@ -254,6 +260,29 @@ class Api:
     def get_ai_defaults(self) -> dict[str, str] | None:
         """与 app/.env 同步的默认模型与 Key，供前端注入 Pi 存储并跳过首次选模型/填 Key。"""
         return load_ai_model_defaults()
+
+    def get_workspace_system_prompt(
+        self,
+        workspace_kind: str,
+        stage_id: str,
+        context_json: str,
+    ) -> str:
+        return render_from_api_context(workspace_kind, stage_id, context_json)
+
+    def read_workspace_prompt_template(
+        self, workspace_kind: str, stage_id: str
+    ) -> str:
+        return read_raw_prompt_for_editor(workspace_kind, stage_id)
+
+    def save_workspace_prompt_override(
+        self, workspace_kind: str, stage_id: str, body: str
+    ) -> None:
+        save_prompt_override(workspace_kind, stage_id, body)
+
+    def reset_workspace_prompt_override(
+        self, workspace_kind: str, stage_id: str
+    ) -> bool:
+        return reset_prompt_override(workspace_kind, stage_id)
 
 
 def main() -> None:

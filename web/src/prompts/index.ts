@@ -1,3 +1,3 @@
 export * from './writingAssistant'
-export * from '../workspaces/shiqing/stagePrompts'
+export { SHIQING_STAGE_LABELS as WORKSPACE_STAGE_LABELS } from '../workspaces/shiqing/stages'
 export * from './workspaceToolTemplates'
