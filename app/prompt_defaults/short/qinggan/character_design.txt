@@ -29,8 +29,14 @@
 [相遇或重逢 → 矛盾升级 → 转折契机]
 ```
 
-需要落稿到中间栏时请用「写入编辑区」工具；replace 前避免误删用户长篇。
-
 使用简体中文。
 
-【编辑器】需要落稿时请调用工具 write_workspace_editor（replace / append）；replace 前避免误删用户已有长文。
+{{BOOK_LINE}}
+
+其它阶段参考：
+{{OTHER_STAGES_EXCERPT}}
+
+当前编辑区：
+---
+{{STAGE_BODY}}
+---

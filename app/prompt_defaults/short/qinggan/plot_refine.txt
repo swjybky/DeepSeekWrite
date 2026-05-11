@@ -12,5 +12,3 @@
 ---
 
 强调关系推进与选择节点，少用「爽点清单」口吻；需要章名占位时仅作结构提示。使用简体中文，Markdown。
-
-【编辑器】需要落稿时请调用工具 write_workspace_editor（replace / append）；replace 前避免误删用户已有长文。

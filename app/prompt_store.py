@@ -12,64 +12,49 @@ from app.runtime_paths import bundle_root, writable_root
 
 SHORT_PREFIX = Path("short")
 
-SHIQING_STAGES_ORDER: tuple[str, ...] = (
-    "intro_design",
+# 统一阶段顺序（世情和情感共用）
+# 对应 web/src/workspaces/short/stages.ts 中的 SHORT_WORKSPACE_STAGES
+SHORT_STAGES_ORDER: tuple[str, ...] = (
     "character_design",
+    "intro_design",
     "plot_design",
     "plot_refine",
     "outline",
     "draft",
-    "review",
+    "draft_review",
     "format_conversion",
 )
 
-QINGGAN_STAGES_ORDER: tuple[str, ...] = (
-    "qinggan_character",
-    "qinggan_intro",
-    "qinggan_plot_refine",
-    "qinggan_outline",
-    "qinggan_outline_review",
-    "qinggan_draft",
-    "qinggan_draft_review",
-)
-
-SHIQING_LABELS: dict[str, str] = {
+# 统一阶段标签
+SHORT_STAGE_LABELS: dict[str, str] = {
+    "character_design": "人物设计",
     "intro_design": "导语设计",
-    "character_design": "人设设计",
     "plot_design": "剧情设计",
     "plot_refine": "剧情细化",
     "outline": "大纲纲要",
     "draft": "正文编写",
-    "review": "编辑审阅",
+    "draft_review": "正文审阅",
     "format_conversion": "格式转换",
 }
 
-QINGGAN_LABELS: dict[str, str] = {
-    "qinggan_character": "人物设计",
-    "qinggan_intro": "导语设计",
-    "qinggan_plot_refine": "剧情细化",
-    "qinggan_outline": "大纲纲要",
-    "qinggan_outline_review": "大纲审阅",
-    "qinggan_draft": "正文编写",
-    "qinggan_draft_review": "正文审阅",
-}
+# 有效的提示词目录（用于区分世情和情感风格）
+VALID_PROMPT_KINDS: frozenset[str] = frozenset({"shiqing", "qinggan"})
 
-VALID_WORKSPACE: frozenset[str] = frozenset({"shiqing", "qinggan"})
-
+# 阶段顺序映射（按提示词目录）
 STAGED_ORDER: dict[str, tuple[str, ...]] = {
-    "shiqing": SHIQING_STAGES_ORDER,
-    "qinggan": QINGGAN_STAGES_ORDER,
+    "shiqing": SHORT_STAGES_ORDER,
+    "qinggan": SHORT_STAGES_ORDER,
 }
 
+# 阶段标签映射（按提示词目录）
 STAGED_LABELS: dict[str, dict[str, str]] = {
-    "shiqing": SHIQING_LABELS,
-    "qinggan": QINGGAN_LABELS,
+    "shiqing": SHORT_STAGE_LABELS,
+    "qinggan": SHORT_STAGE_LABELS,
 }
 
 PEEK_EMPTY_MESSAGE = "（其它阶段暂无内容）"
 
-OTHER_STAGES_PEER_MAX_DEFAULT = 2000
-OTHER_STAGES_PEER_MAX_QINGGAN = 2000
+OTHER_STAGES_PEER_MAX = 2000
 STAGE_BODY_EXCERPT_CAP = 12000
 
 _PLACEHOLDER_RE = re.compile(
@@ -86,17 +71,17 @@ def excerpt(text: str, max_len: int = STAGE_BODY_EXCERPT_CAP) -> str:
 
 
 def _peek_other_stages(
-    workspace_kind: str,
+    prompt_kind: str,
     exclude_stage_id: str,
     all_stages: dict[str, str],
     *,
     peer_max: int | None,
 ) -> str:
-    order = STAGED_ORDER.get(workspace_kind)
-    labels = STAGED_LABELS.get(workspace_kind, {})
+    order = STAGED_ORDER.get(prompt_kind)
+    labels = STAGED_LABELS.get(prompt_kind, {})
     if not order:
         return PEEK_EMPTY_MESSAGE
-    cap = peer_max if peer_max is not None else OTHER_STAGES_PEER_MAX_DEFAULT
+    cap = peer_max if peer_max is not None else OTHER_STAGES_PEER_MAX
     lines: list[str] = []
     for sid in order:
         if sid == exclude_stage_id:
@@ -111,52 +96,51 @@ def _peek_other_stages(
 
 
 def peek_other_for_render(
-    workspace_kind: str,
+    prompt_kind: str,
     exclude_stage_id: str,
     all_stages: dict[str, str],
 ) -> str:
-    """与其它阶段摘录：情感工作台沿用每条 2000 字截取（与前端一致）。"""
-    peer = OTHER_STAGES_PEER_MAX_QINGGAN if workspace_kind == "qinggan" else 2000
+    """与其它阶段摘录"""
     return _peek_other_stages(
-        workspace_kind, exclude_stage_id, all_stages, peer_max=peer
+        prompt_kind, exclude_stage_id, all_stages, peer_max=OTHER_STAGES_PEER_MAX
     )
 
 
-def default_prompt_relative_path(workspace_kind: str, stage_id: str) -> Path:
-    return SHORT_PREFIX / workspace_kind / f"{stage_id}.txt"
+def default_prompt_relative_path(prompt_kind: str, stage_id: str) -> Path:
+    return SHORT_PREFIX / prompt_kind / f"{stage_id}.txt"
 
 
-def override_prompt_absolute_path(workspace_kind: str, stage_id: str) -> Path:
+def override_prompt_absolute_path(prompt_kind: str, stage_id: str) -> Path:
     root = writable_root() / ".data" / "prompt_overrides" / SHORT_PREFIX
-    return (root / workspace_kind / f"{stage_id}.txt").resolve()
+    return (root / prompt_kind / f"{stage_id}.txt").resolve()
 
 
-def builtin_default_prompt_path(workspace_kind: str, stage_id: str) -> Path:
+def builtin_default_prompt_path(prompt_kind: str, stage_id: str) -> Path:
     return (
         (bundle_root() / "app" / "prompt_defaults" / SHORT_PREFIX)
-        / workspace_kind
+        / prompt_kind
         / f"{stage_id}.txt"
     )
 
 
-def validate_slot(workspace_kind: str, stage_id: str) -> None:
-    if workspace_kind not in VALID_WORKSPACE:
-        raise ValueError(f"未知的 workspace_kind: {workspace_kind!r}")
-    if stage_id not in STAGED_ORDER[workspace_kind]:
-        raise ValueError(f"工作台 {workspace_kind} 无阶段键: {stage_id!r}")
+def validate_slot(prompt_kind: str, stage_id: str) -> None:
+    if prompt_kind not in VALID_PROMPT_KINDS:
+        raise ValueError(f"未知的 prompt_kind: {prompt_kind!r}")
+    if stage_id not in SHORT_STAGES_ORDER:
+        raise ValueError(f"未知的 stage_id: {stage_id!r}")
 
 
-def resolve_read_path(workspace_kind: str, stage_id: str) -> Path:
+def resolve_read_path(prompt_kind: str, stage_id: str) -> Path:
     """覆盖优先。"""
-    validate_slot(workspace_kind, stage_id)
-    over = override_prompt_absolute_path(workspace_kind, stage_id)
+    validate_slot(prompt_kind, stage_id)
+    over = override_prompt_absolute_path(prompt_kind, stage_id)
     if over.is_file():
         return over
-    return builtin_default_prompt_path(workspace_kind, stage_id)
+    return builtin_default_prompt_path(prompt_kind, stage_id)
 
 
-def read_prompt_template(workspace_kind: str, stage_id: str) -> str:
-    path = resolve_read_path(workspace_kind, stage_id)
+def read_prompt_template(prompt_kind: str, stage_id: str) -> str:
+    path = resolve_read_path(prompt_kind, stage_id)
     if not path.is_file():
         return (
             f"[缺少默认提示模板文件]\n路径: {path}\n\n"
@@ -168,16 +152,16 @@ def read_prompt_template(workspace_kind: str, stage_id: str) -> str:
     return text
 
 
-def save_prompt_override(workspace_kind: str, stage_id: str, body: str) -> None:
-    validate_slot(workspace_kind, stage_id)
-    path = override_prompt_absolute_path(workspace_kind, stage_id)
+def save_prompt_override(prompt_kind: str, stage_id: str, body: str) -> None:
+    validate_slot(prompt_kind, stage_id)
+    path = override_prompt_absolute_path(prompt_kind, stage_id)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(body if body.endswith("\n") else body + "\n", encoding="utf-8")
 
 
-def reset_prompt_override(workspace_kind: str, stage_id: str) -> bool:
-    validate_slot(workspace_kind, stage_id)
-    path = override_prompt_absolute_path(workspace_kind, stage_id)
+def reset_prompt_override(prompt_kind: str, stage_id: str) -> bool:
+    validate_slot(prompt_kind, stage_id)
+    path = override_prompt_absolute_path(prompt_kind, stage_id)
     if path.is_file():
         path.unlink()
         return True
@@ -185,7 +169,7 @@ def reset_prompt_override(workspace_kind: str, stage_id: str) -> bool:
 
 
 def render_workspace_system_prompt(
-    workspace_kind: str,
+    prompt_kind: str,
     stage_id: str,
     *,
     book_title: str,
@@ -193,8 +177,8 @@ def render_workspace_system_prompt(
     other_stages_excerpt: str | None = None,
     all_stages_for_peek: dict[str, str] | None = None,
 ) -> str:
-    validate_slot(workspace_kind, stage_id)
-    raw = read_prompt_template(workspace_kind, stage_id)
+    validate_slot(prompt_kind, stage_id)
+    raw = read_prompt_template(prompt_kind, stage_id)
 
     staged_body = excerpt(stage_body, STAGE_BODY_EXCERPT_CAP)
     if other_stages_excerpt is None:
@@ -202,7 +186,7 @@ def render_workspace_system_prompt(
             other = ""
         else:
             other = peek_other_for_render(
-                workspace_kind, stage_id, all_stages_for_peek
+                prompt_kind, stage_id, all_stages_for_peek
             )
     else:
         other = other_stages_excerpt
@@ -235,7 +219,7 @@ def parse_context_payload(context_raw: object) -> dict[str, object]:
 
 
 def render_from_api_context(
-    workspace_kind: str, stage_id: str, context_raw: object
+    prompt_kind: str, stage_id: str, context_raw: object
 ) -> str:
     ctx = parse_context_payload(context_raw)
     title = str(ctx.get("book_title") or "")
@@ -248,14 +232,14 @@ def render_from_api_context(
     other_override = ctx.get("other_stages_excerpt_override")
     if other_override is not None:
         return render_workspace_system_prompt(
-            workspace_kind,
+            prompt_kind,
             stage_id,
             book_title=title,
             stage_body=body,
             other_stages_excerpt=str(other_override),
         )
     return render_workspace_system_prompt(
-        workspace_kind,
+        prompt_kind,
         stage_id,
         book_title=title,
         stage_body=body,
@@ -263,9 +247,9 @@ def render_from_api_context(
     )
 
 
-def read_raw_prompt_for_editor(workspace_kind: str, stage_id: str) -> str:
+def read_raw_prompt_for_editor(prompt_kind: str, stage_id: str) -> str:
     """编辑框：读写当前生效来源（优先覆盖）原始模板正文。"""
-    path = resolve_read_path(workspace_kind, stage_id)
+    path = resolve_read_path(prompt_kind, stage_id)
     if not path.is_file():
         return ""
     text = path.read_text(encoding="utf-8")

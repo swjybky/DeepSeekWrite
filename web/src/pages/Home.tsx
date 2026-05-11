@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   SHORT_GENRE_OPTIONS,
   type BookSummary,
   type BookType,
+  type MaterialSummary,
+  type MaterialType,
   createBook,
   deleteBook,
   getStoredWorkspaceRoot,
@@ -12,7 +13,12 @@ import {
   loadPersistedWorkspaceRoot,
   persistWorkspaceRoot,
   pickFolder,
+  listMaterials,
+  createMaterial,
+  deleteMaterial,
+  SHORT_MATERIAL_GENRES,
 } from '../bridge'
+import { CardGrid, bookToCardItem, materialToCardItem } from '../components/CardGrid'
 import './Home.css'
 
 function truncatePath(path: string, max = 42): string {
@@ -23,38 +29,49 @@ function truncatePath(path: string, max = 42): string {
 }
 
 export function Home() {
+  // ==================== 书架状态 ====================
   const [books, setBooks] = useState<BookSummary[]>([])
-  const [loading, setLoading] = useState(true)
-  const [showForm, setShowForm] = useState(false)
-  const [title, setTitle] = useState('')
+  const [loadingBooks, setLoadingBooks] = useState(true)
+  const [showBookForm, setShowBookForm] = useState(false)
+  const [bookTitle, setBookTitle] = useState('')
   const [bookType, setBookType] = useState<BookType>('short')
-  /** 短篇分类单选，默认取可选列表首项 */
   const [shortGenre, setShortGenre] = useState<string>(SHORT_GENRE_OPTIONS[0])
   const [workspaceRoot, setWorkspaceRoot] = useState<string | null>(() => getStoredWorkspaceRoot())
-  const [submitting, setSubmitting] = useState(false)
-  const [deletingId, setDeletingId] = useState<string | null>(null)
-  const [shelfError, setShelfError] = useState<string | null>(null)
-  const [error, setError] = useState<string | null>(null)
+  const [submittingBook, setSubmittingBook] = useState(false)
+  const [deletingBookId, setDeletingBookId] = useState<string | null>(null)
+  const [bookError, setBookError] = useState<string | null>(null)
 
-  const refresh = useCallback(async () => {
-    setLoading(true)
-    setError(null)
+  // ==================== 素材库状态 ====================
+  const [materials, setMaterials] = useState<MaterialSummary[]>([])
+  const [loadingMaterials, setLoadingMaterials] = useState(true)
+  const [showMaterialForm, setShowMaterialForm] = useState(false)
+  const [materialTitle, setMaterialTitle] = useState('')
+  const [materialType, setMaterialType] = useState<MaterialType>('short')
+  const [materialParentGenre, setMaterialParentGenre] = useState<string>(Object.keys(SHORT_MATERIAL_GENRES)[0])
+  const [materialSubGenre, setMaterialSubGenre] = useState<string>(SHORT_MATERIAL_GENRES['世情'][0])
+  const [submittingMaterial, setSubmittingMaterial] = useState(false)
+  const [deletingMaterialId, setDeletingMaterialId] = useState<string | null>(null)
+  const [materialError, setMaterialError] = useState<string | null>(null)
+
+  // ==================== 书架数据加载 ====================
+  const refreshBooks = useCallback(async () => {
+    setLoadingBooks(true)
+    setBookError(null)
     try {
       const list = await listBooks()
       setBooks(list)
     } catch (e) {
-      setError(e instanceof Error ? e.message : '加载失败')
+      setBookError(e instanceof Error ? e.message : '加载书架失败')
     } finally {
-      setLoading(false)
+      setLoadingBooks(false)
     }
   }, [])
 
-  /** 与桥接串行：先等工作目录从磁盘恢复，再拉书架，避免与 listBooks 并发抢跑误走 mock */
   useEffect(() => {
     let cancelled = false
     void (async () => {
-      setLoading(true)
-      setError(null)
+      setLoadingBooks(true)
+      setBookError(null)
       const w = await loadPersistedWorkspaceRoot()
       if (cancelled) return
       setWorkspaceRoot(w)
@@ -62,13 +79,12 @@ export function Home() {
         const list = await listBooks()
         if (!cancelled) setBooks(list)
       } catch (e) {
-        if (!cancelled) setError(e instanceof Error ? e.message : '加载失败')
+        if (!cancelled) setBookError(e instanceof Error ? e.message : '加载书架失败')
       } finally {
-        if (!cancelled) setLoading(false)
+        if (!cancelled) setLoadingBooks(false)
       }
     })()
 
-    /** 浏览器中为 number；与 Node Timer 类型分离，避免 TS 报错 */
     let lateTimer: number | undefined
     if (isPywebviewDesktopBundle()) {
       lateTimer = window.setTimeout(() => {
@@ -88,84 +104,165 @@ export function Home() {
     }
   }, [])
 
+  // ==================== 素材库数据加载 ====================
+  const refreshMaterials = useCallback(async () => {
+    setLoadingMaterials(true)
+    setMaterialError(null)
+    try {
+      const list = await listMaterials()
+      setMaterials(list)
+    } catch (e) {
+      setMaterialError(e instanceof Error ? e.message : '加载素材库失败')
+    } finally {
+      setLoadingMaterials(false)
+    }
+  }, [])
+
+  // 初始加载素材
+  const hasLoadedMaterials = useRef(false)
+  useEffect(() => {
+    if (!hasLoadedMaterials.current) {
+      hasLoadedMaterials.current = true
+      void refreshMaterials()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // ==================== 工作目录操作 ====================
   const handlePickWorkspace = async () => {
-    setError(null)
+    setBookError(null)
     try {
       const p = await pickFolder()
       if (p) {
         setWorkspaceRoot(p)
         await persistWorkspaceRoot(p)
-        await refresh()
+        await refreshBooks()
+        await refreshMaterials()
       }
     } catch (e) {
-      setError(e instanceof Error ? e.message : '选择文件夹失败')
+      setBookError(e instanceof Error ? e.message : '选择文件夹失败')
     }
   }
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  // ==================== 书籍操作 ====================
+  const handleCreateBook = async (e: React.FormEvent) => {
     e.preventDefault()
     const ws = workspaceRoot?.trim()
     if (!ws) {
-      setError('请先在上方选择工作文件夹')
+      setBookError('请先在上方选择工作文件夹')
       return
     }
-    setSubmitting(true)
-    setError(null)
+    setSubmittingBook(true)
+    setBookError(null)
     try {
       const cats = bookType === 'short' ? [shortGenre] : []
-      await createBook(title, bookType, cats, ws)
-      setTitle('')
+      await createBook(bookTitle, bookType, cats, ws)
+      setBookTitle('')
       setBookType('short')
       setShortGenre(SHORT_GENRE_OPTIONS[0])
-      setShowForm(false)
-      await refresh()
+      setShowBookForm(false)
+      await refreshBooks()
     } catch (err) {
-      setError(err instanceof Error ? err.message : '创建失败')
+      setBookError(err instanceof Error ? err.message : '创建书籍失败')
     } finally {
-      setSubmitting(false)
+      setSubmittingBook(false)
     }
   }
 
-  const handleDeleteBook = async (b: BookSummary, e: React.MouseEvent) => {
-    e.preventDefault()
-    e.stopPropagation()
+  const handleDeleteBook = async (bookId: string) => {
+    const b = books.find((book) => book.id === bookId)
+    if (!b) return
     const ok = window.confirm(`确定从书架移除「${b.title}」？\n书本文件夹仍会保留在工作目录中。`)
     if (!ok) return
-    setDeletingId(b.id)
-    setShelfError(null)
+    setDeletingBookId(bookId)
     try {
-      const removed = await deleteBook(b.id)
-      if (!removed) {
-        setShelfError('该书已不存在或删除失败')
-        return
-      }
-      await refresh()
+      await deleteBook(bookId)
+      await refreshBooks()
     } catch (err) {
-      setShelfError(err instanceof Error ? err.message : '删除失败')
+      setBookError(err instanceof Error ? err.message : '删除书籍失败')
     } finally {
-      setDeletingId(null)
+      setDeletingBookId(null)
     }
   }
+
+  // ==================== 素材操作 ====================
+  const handleCreateMaterial = async (e: React.FormEvent) => {
+    e.preventDefault()
+    const ws = workspaceRoot?.trim()
+    if (!ws) {
+      setMaterialError('请先在上方选择工作文件夹')
+      return
+    }
+    setSubmittingMaterial(true)
+    setMaterialError(null)
+    try {
+      const parentGenre = materialType === 'short' ? materialParentGenre : undefined
+      const subGenre = materialType === 'short' ? materialSubGenre : undefined
+      await createMaterial(materialTitle, materialType, parentGenre, subGenre, ws)
+      setMaterialTitle('')
+      setMaterialType('short')
+      setMaterialParentGenre(Object.keys(SHORT_MATERIAL_GENRES)[0])
+      setMaterialSubGenre(SHORT_MATERIAL_GENRES['世情'][0])
+      setShowMaterialForm(false)
+      await refreshMaterials()
+    } catch (err) {
+      setMaterialError(err instanceof Error ? err.message : '创建素材失败')
+    } finally {
+      setSubmittingMaterial(false)
+    }
+  }
+
+  const handleDeleteMaterial = async (materialId: string) => {
+    const m = materials.find((mat) => mat.id === materialId)
+    if (!m) return
+    const ok = window.confirm(`确定删除素材「${m.title}」？\n素材文件夹仍会保留在工作目录中。`)
+    if (!ok) return
+    setDeletingMaterialId(materialId)
+    try {
+      await deleteMaterial(materialId)
+      await refreshMaterials()
+    } catch (err) {
+      setMaterialError(err instanceof Error ? err.message : '删除素材失败')
+    } finally {
+      setDeletingMaterialId(null)
+    }
+  }
+
+  // ==================== 素材类型/分类改变处理 ====================
+  const handleMaterialParentGenreChange = useCallback((genre: string) => {
+    setMaterialParentGenre(genre)
+    const subGenres = SHORT_MATERIAL_GENRES[genre] || []
+    setMaterialSubGenre(subGenres[0] || '')
+  }, [])
+
+  const handleMaterialTypeChange = useCallback((type: MaterialType) => {
+    setMaterialType(type)
+    if (type === 'short') {
+      const currentSubGenres = SHORT_MATERIAL_GENRES[materialParentGenre] || []
+      setMaterialSubGenre(currentSubGenres[0] || '')
+    }
+  }, [materialParentGenre])
+
+  // ==================== 渲染 ====================
+  const bookCardItems = useMemo(() => books.map(bookToCardItem), [books])
+  const materialCardItems = useMemo(() => materials.map(materialToCardItem), [materials])
 
   return (
     <div className="home">
-      <header className="home-header">
-        <h1 className="home-title">书架</h1>
-        <button
-          type="button"
-          className="btn-primary"
-          onClick={() => setShowForm((v) => !v)}
-        >
-          {showForm ? '收起' : '创建书籍'}
-        </button>
-      </header>
-
-      <section className="workspace-bar card" aria-label="工作文件夹">
-        <span className="field-label">工作文件夹</span>
-        <div className="folder-row">
-          <span className="folder-path" title={workspaceRoot ?? undefined}>
-            {workspaceRoot ? truncatePath(workspaceRoot) : '未选择'}
-          </span>
+      {/* 顶部工作目录栏 */}
+      <section className="workspace-bar" aria-label="工作文件夹">
+        <div className="workspace-card">
+          <div className="workspace-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+              <path d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
+            </svg>
+          </div>
+          <div className="workspace-info">
+            <span className="workspace-label">工作文件夹</span>
+            <span className="workspace-path" title={workspaceRoot ?? undefined}>
+              {workspaceRoot ? truncatePath(workspaceRoot, 50) : '未选择工作目录'}
+            </span>
+          </div>
           <button
             type="button"
             className="btn-secondary"
@@ -174,121 +271,255 @@ export function Home() {
             {workspaceRoot ? '更改' : '选择文件夹'}
           </button>
         </div>
-        <p className="workspace-hint muted">
-          新建书籍会在该目录下创建以书名为名的文件夹，正文与各阶段内容保存至其中。
-        </p>
       </section>
 
-      {showForm && (
-        <form className="home-form card" onSubmit={handleSubmit}>
-          <label className="field">
-            <span className="field-label">书名</span>
-            <input
-              type="text"
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-              placeholder="请输入书名"
-              required
-              autoFocus
-            />
-          </label>
-
-          <fieldset className="field">
-            <legend className="field-label">类型</legend>
-            <div className="radio-row">
-              <label className="radio">
-                <input
-                  type="radio"
-                  name="bookType"
-                  checked={bookType === 'short'}
-                  onChange={() => setBookType('short')}
-                />
-                短篇
-              </label>
-              <label className="radio">
-                <input
-                  type="radio"
-                  name="bookType"
-                  checked={bookType === 'long'}
-                  onChange={() => setBookType('long')}
-                />
-                长篇
-              </label>
+      {/* 双栏卡片布局 */}
+      <div className="home-cards-layout">
+        {/* 书籍卡片 */}
+        <section className="main-card books-card" aria-label="书架">
+          <header className="card-header">
+            <div className="card-header-icon book-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+                <path d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
+              </svg>
             </div>
-          </fieldset>
+            <div className="card-header-content">
+              <h2 className="card-header-title">书架</h2>
+              <span className="card-header-count">{books.length} 本书</span>
+            </div>
+            <button
+              type="button"
+              className="btn-primary btn-small"
+              onClick={() => setShowBookForm((v) => !v)}
+            >
+              {showBookForm ? '收起' : '+ 创建书籍'}
+            </button>
+          </header>
 
-          {bookType === 'short' && (
-            <fieldset className="field">
-              <legend className="field-label">短篇分类</legend>
-              <div className="genre-grid">
-                {SHORT_GENRE_OPTIONS.map((g) => (
-                  <label key={g} className="radio">
+          {showBookForm && (
+            <form className="create-form" onSubmit={handleCreateBook}>
+              <label className="field">
+                <span className="field-label">书名</span>
+                <input
+                  type="text"
+                  value={bookTitle}
+                  onChange={(e) => setBookTitle(e.target.value)}
+                  placeholder="请输入书名"
+                  required
+                  autoFocus
+                />
+              </label>
+
+              <fieldset className="field">
+                <legend className="field-label">类型</legend>
+                <div className="radio-row">
+                  <label className="radio">
                     <input
                       type="radio"
-                      name="shortGenre"
-                      checked={shortGenre === g}
-                      onChange={() => setShortGenre(g)}
+                      name="bookType"
+                      checked={bookType === 'short'}
+                      onChange={() => setBookType('short')}
                     />
-                    {g}
+                    短篇
                   </label>
-                ))}
-              </div>
-            </fieldset>
+                  <label className="radio">
+                    <input
+                      type="radio"
+                      name="bookType"
+                      checked={bookType === 'long'}
+                      onChange={() => setBookType('long')}
+                    />
+                    长篇
+                  </label>
+                </div>
+              </fieldset>
+
+              {bookType === 'short' && (
+                <fieldset className="field">
+                  <legend className="field-label">短篇分类</legend>
+                  <div className="genre-grid">
+                    {SHORT_GENRE_OPTIONS.map((g) => (
+                      <label key={g} className="radio">
+                        <input
+                          type="radio"
+                          name="shortGenre"
+                          checked={shortGenre === g}
+                          onChange={() => setShortGenre(g)}
+                        />
+                        {g}
+                      </label>
+                    ))}
+                  </div>
+                </fieldset>
+              )}
+
+              {bookError && <p className="form-error">{bookError}</p>}
+
+              <button type="submit" className="btn-primary" disabled={submittingBook}>
+                {submittingBook ? '创建中…' : '创建'}
+              </button>
+            </form>
           )}
 
-          {error && <p className="form-error">{error}</p>}
+          <div className="card-content-area">
+            {loadingBooks ? (
+              <div className="loading-state">
+                <div className="spinner" />
+                <span>加载中…</span>
+              </div>
+            ) : books.length === 0 ? (
+              <div className="empty-state">
+                <div className="empty-icon">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+                    <path d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
+                  </svg>
+                </div>
+                <p>暂无书籍</p>
+                <span className="empty-hint">点击「创建书籍」开始写作</span>
+              </div>
+            ) : (
+              <CardGrid
+                items={bookCardItems}
+                emptyText="暂无书籍"
+                onDelete={handleDeleteBook}
+                deletingId={deletingBookId}
+              />
+            )}
+          </div>
+        </section>
 
-          <button type="submit" className="btn-primary" disabled={submitting}>
-            {submitting ? '创建中…' : '创建'}
-          </button>
-        </form>
-      )}
+        {/* 素材卡片 */}
+        <section className="main-card materials-card" aria-label="素材库">
+          <header className="card-header">
+            <div className="card-header-icon material-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+                <path d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
+              </svg>
+            </div>
+            <div className="card-header-content">
+              <h2 className="card-header-title">素材库</h2>
+              <span className="card-header-count">{materials.length} 个素材</span>
+            </div>
+            <button
+              type="button"
+              className="btn-primary btn-small"
+              onClick={() => setShowMaterialForm((v) => !v)}
+            >
+              {showMaterialForm ? '收起' : '+ 创建素材'}
+            </button>
+          </header>
 
-      <main className="home-main">
-        {shelfError && (
-          <p className="form-error home-shelf-error" role="alert">
-            {shelfError}
-          </p>
-        )}
-        {loading ? (
-          <p className="muted">加载中…</p>
-        ) : books.length === 0 ? (
-          <p className="muted empty-hint">暂无书籍，点击「创建书籍」开始</p>
-        ) : (
-          <ul className="book-list">
-            {books.map((b) => (
-              <li key={b.id} className="book-row card">
-                <Link className="book-link" to={`/book/${b.id}`}>
-                  <span className="book-name">{b.title}</span>
-                  <span className="book-meta">
-                    {b.book_type === 'short' ? '短篇' : '长篇'}
-                    {b.book_type === 'short' && b.categories.length > 0
-                      ? ` · ${b.categories.join('、')}`
-                      : ''}
-                  </span>
-                  <span
-                    className="book-path muted"
-                    title={b.output_dir || undefined}
-                  >
-                    {b.output_dir
-                      ? truncatePath(b.output_dir, 48)
-                      : '未指定书本目录'}
-                  </span>
-                </Link>
-                <button
-                  type="button"
-                  className="btn-delete"
-                  aria-label={`从书架移除《${b.title}》`}
-                  disabled={deletingId === b.id}
-                  onClick={(e) => void handleDeleteBook(b, e)}
-                >
-                  {deletingId === b.id ? '移除中…' : '移除'}
-                </button>
-              </li>
-            ))}
-          </ul>
-        )}
-      </main>
+          {showMaterialForm && (
+            <form className="create-form" onSubmit={handleCreateMaterial}>
+              <label className="field">
+                <span className="field-label">素材标题</span>
+                <input
+                  type="text"
+                  value={materialTitle}
+                  onChange={(e) => setMaterialTitle(e.target.value)}
+                  placeholder="请输入素材标题"
+                  required
+                  autoFocus
+                />
+              </label>
+
+              <fieldset className="field">
+                <legend className="field-label">素材类型</legend>
+                <div className="radio-row">
+                  <label className="radio">
+                    <input
+                      type="radio"
+                      name="materialType"
+                      checked={materialType === 'long'}
+                      onChange={() => handleMaterialTypeChange('long')}
+                    />
+                    长篇
+                  </label>
+                  <label className="radio">
+                    <input
+                      type="radio"
+                      name="materialType"
+                      checked={materialType === 'short'}
+                      onChange={() => handleMaterialTypeChange('short')}
+                    />
+                    短篇
+                  </label>
+                </div>
+              </fieldset>
+
+              {materialType === 'short' && (
+                <>
+                  <fieldset className="field">
+                    <legend className="field-label">大分类</legend>
+                    <div className="genre-grid">
+                      {Object.keys(SHORT_MATERIAL_GENRES).map((g) => (
+                        <label key={g} className="radio">
+                          <input
+                            type="radio"
+                            name="materialParentGenre"
+                            checked={materialParentGenre === g}
+                            onChange={() => handleMaterialParentGenreChange(g)}
+                          />
+                          {g}
+                        </label>
+                      ))}
+                    </div>
+                  </fieldset>
+
+                  <fieldset className="field">
+                    <legend className="field-label">子分类</legend>
+                    <div className="genre-grid">
+                      {(SHORT_MATERIAL_GENRES[materialParentGenre] || []).map((g) => (
+                        <label key={g} className="radio">
+                          <input
+                            type="radio"
+                            name="materialSubGenre"
+                            checked={materialSubGenre === g}
+                            onChange={() => setMaterialSubGenre(g)}
+                          />
+                          {g}
+                        </label>
+                      ))}
+                    </div>
+                  </fieldset>
+                </>
+              )}
+
+              {materialError && <p className="form-error">{materialError}</p>}
+
+              <button type="submit" className="btn-primary" disabled={submittingMaterial}>
+                {submittingMaterial ? '创建中…' : '创建'}
+              </button>
+            </form>
+          )}
+
+          <div className="card-content-area">
+            {loadingMaterials ? (
+              <div className="loading-state">
+                <div className="spinner" />
+                <span>加载中…</span>
+              </div>
+            ) : materials.length === 0 ? (
+              <div className="empty-state">
+                <div className="empty-icon">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+                    <path d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
+                  </svg>
+                </div>
+                <p>暂无素材</p>
+                <span className="empty-hint">点击「创建素材」添加素材</span>
+              </div>
+            ) : (
+              <CardGrid
+                items={materialCardItems}
+                emptyText="暂无素材"
+                onDelete={handleDeleteMaterial}
+                deletingId={deletingMaterialId}
+              />
+            )}
+          </div>
+        </section>
+      </div>
     </div>
   )
 }

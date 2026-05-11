@@ -3,7 +3,7 @@ import { Agent } from '@mariozechner/pi-agent-core'
 import type { AssistantMessage, Model } from '@mariozechner/pi-ai'
 import { ApiKeyPromptDialog, ChatPanel } from '@mariozechner/pi-web-ui'
 import { memo, useEffect, useRef, useState } from 'react'
-import type { StageId, WorkspaceShortKind } from '../bridge'
+import type { StageId, PromptKind } from '../bridge'
 import { getWorkspaceSystemPrompt } from '../bridge'
 import { ensurePiAppStorage } from '../pi/setupPiWorkspace'
 import {
@@ -167,8 +167,8 @@ type Props = {
    * @default 0
    */
   sessionEpoch?: number
-  /** 短篇工作台种类：与世情 / 情感智能体拆分一致 */
-  workspaceShortKind: WorkspaceShortKind
+  /** 提示词目录：shiqing 或 qinggan，决定加载哪种风格的提示词 */
+  promptKind: PromptKind
   bookTitle: string
   stageId: StageId
   stageBody: string
@@ -261,7 +261,7 @@ function WorkspaceAiChatInner({
       const ctxTools = (): AgentTool[] =>
         getWorkspaceStageAdditionalTools({
           bookTitle: propsLatestRef.current.bookTitle,
-          workspaceShortKind: propsLatestRef.current.workspaceShortKind,
+          promptKind: propsLatestRef.current.promptKind,
           stageId: propsLatestRef.current.stageId,
           stageBody: propsLatestRef.current.stageBody,
           allStages: propsLatestRef.current.allStages,
@@ -269,7 +269,7 @@ function WorkspaceAiChatInner({
         })
 
       const systemPromptInitial = await getWorkspaceSystemPrompt(
-        props.workspaceShortKind,
+        props.promptKind,
         props.stageId,
         {
           bookTitle: props.bookTitle,
@@ -279,7 +279,7 @@ function WorkspaceAiChatInner({
       )
       if (cancelled || !hostRef.current) return
 
-      const baseSessionId = `write-claw:${props.sessionBookId}:${props.workspaceShortKind}:${props.stageId}`
+      const baseSessionId = `write-claw:${props.sessionBookId}:${props.promptKind}:${props.stageId}`
       const sessionId =
         sessionEpoch > 0 ? `${baseSessionId}:${sessionEpoch}` : baseSessionId
 
@@ -288,7 +288,7 @@ function WorkspaceAiChatInner({
         initialState: {
           systemPrompt: systemPromptInitial,
           model: initialModel,
-          thinkingLevel: 'off',
+          thinkingLevel: 'high',
           messages: [],
           tools: [],
         },
@@ -398,7 +398,7 @@ function WorkspaceAiChatInner({
     ;(async () => {
       const p = propsLatestRef.current
       const nextPrompt = await getWorkspaceSystemPrompt(
-        p.workspaceShortKind,
+        p.promptKind,
         p.stageId,
         {
           bookTitle: p.bookTitle,
@@ -411,7 +411,7 @@ function WorkspaceAiChatInner({
       agent.state.systemPrompt = nextPrompt
       const extras = getWorkspaceStageAdditionalTools({
         bookTitle: p.bookTitle,
-        workspaceShortKind: p.workspaceShortKind,
+        promptKind: p.promptKind,
         stageId: p.stageId,
         stageBody: debouncedBody,
         allStages: p.allStages,
@@ -424,7 +424,7 @@ function WorkspaceAiChatInner({
   }, [
     chatReady,
     props.bookTitle,
-    props.workspaceShortKind,
+    props.promptKind,
     props.stageId,
     debouncedBody,
     props.allStages,
@@ -439,7 +439,7 @@ function WorkspaceAiChatInner({
 
 /**
  * WorkspaceAiChat 使用 React.memo 包装，自定义比较逻辑：
- * - sessionBookId、sessionEpoch、workspaceShortKind、stageId 变化时重建
+ * - sessionBookId、sessionEpoch、promptKind、stageId 变化时重建
  * - stageBody 和 allStages 字符串内容变化时更新，但引用变化不触发（流式写入时）
  * - isPaused 变化时更新
  * - promptRevision 变化时更新
@@ -449,7 +449,7 @@ export const WorkspaceAiChat = memo(WorkspaceAiChatInner, (prev, next) => {
   // 如果核心标识变化，必须更新
   if (prev.sessionBookId !== next.sessionBookId) return false
   if (prev.sessionEpoch !== next.sessionEpoch) return false
-  if (prev.workspaceShortKind !== next.workspaceShortKind) return false
+  if (prev.promptKind !== next.promptKind) return false
   if (prev.stageId !== next.stageId) return false
 
   // 暂停状态变化需要更新

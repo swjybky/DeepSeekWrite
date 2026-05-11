@@ -248,6 +248,59 @@ class Api:
     def delete_book(self, book_id: str) -> bool:
         return self._store.delete_book(book_id)
 
+    # ==================== 素材库 API ====================
+
+    def list_materials(self) -> list[dict]:
+        """列出所有素材"""
+        return self._store.list_materials()
+
+    def get_material(self, material_id: str) -> dict | None:
+        """获取单个素材详情"""
+        return self._store.get_material(material_id)
+
+    def create_material(
+        self,
+        title: str,
+        material_type: str,
+        parent_genre: str | None = None,
+        sub_genre: str | None = None,
+        workspace_root: str | None = None,
+    ) -> dict:
+        """创建新素材
+
+        Args:
+            title: 素材标题
+            material_type: 素材类型，'long' 或 'short'
+            parent_genre: 父分类，短篇时为 '世情' 或 '情感'
+            sub_genre: 子分类，如 '家庭'、'甜宠' 等
+            workspace_root: 工作区根目录
+        """
+        return self._store.create_material(
+            title, material_type, parent_genre, sub_genre, workspace_root
+        )
+
+    def save_material(
+        self,
+        material_id: str,
+        stages: dict | None = None,
+    ) -> dict | None:
+        """保存素材阶段内容
+
+        Args:
+            material_id: 素材ID
+            stages: 阶段内容字典，键为 'character'/'gimmick'/'pacing'
+        """
+        return self._store.save_material(material_id, stages)
+
+    def delete_material(self, material_id: str) -> bool:
+        """删除素材"""
+        return self._store.delete_material(material_id)
+
+    def get_material_genres(self) -> dict[str, list[str]]:
+        """获取素材分类结构"""
+        from app.models import SHORT_MATERIAL_GENRES
+        return SHORT_MATERIAL_GENRES
+
     def get_workspace_root(self) -> str | None:
         return read_saved_workspace_root()
 

@@ -10,7 +10,8 @@ import {
   mergeStagePatchIntoAll,
   normalizeStagesForWorkspaceBook,
   resolveWorkspaceStagesForBook,
-  resolveWorkspaceShortKind,
+  resolvePromptKind,
+  type PromptKind,
   getBook,
   isWorkspaceShortBook,
   saveBook,
@@ -425,13 +426,13 @@ export function BookEditor() {
   }
 
   const railStages = resolveWorkspaceStagesForBook(book)
-  const wk = resolveWorkspaceShortKind(book) ?? 'shiqing'
+  const promptKind: PromptKind = resolvePromptKind(book) ?? 'shiqing'
   const stageBody = stages[activeStage] ?? ''
 
   const openPromptEditor = async () => {
     setPromptEditorLoading(true)
     try {
-      const t = await readWorkspacePromptTemplate(wk, activeStage)
+      const t = await readWorkspacePromptTemplate(promptKind, activeStage)
       setPromptDraft(t)
       setPromptEditorOpen(true)
     } catch (e) {
@@ -445,7 +446,7 @@ export function BookEditor() {
     setPromptEditorSaving(true)
     setError(null)
     try {
-      await saveWorkspacePromptOverride(wk, activeStage, promptDraft)
+      await saveWorkspacePromptOverride(promptKind, activeStage, promptDraft)
       setPromptReloadNonce((n) => n + 1)
       setPromptEditorOpen(false)
     } catch (e) {
@@ -458,8 +459,8 @@ export function BookEditor() {
   const resetPromptTemplateToBuiltin = async () => {
     setPromptEditorSaving(true)
     try {
-      await resetWorkspacePromptOverride(wk, activeStage)
-      const t = await readWorkspacePromptTemplate(wk, activeStage)
+      await resetWorkspacePromptOverride(promptKind, activeStage)
+      const t = await readWorkspacePromptTemplate(promptKind, activeStage)
       setPromptDraft(t)
       setPromptReloadNonce((n) => n + 1)
     } catch (e) {
@@ -633,17 +634,15 @@ export function BookEditor() {
             <span className="workspace-ai-header-title">AI 助手</span>
             {book ? (
               <div className="workspace-ai-header-actions">
-                {wk === 'shiqing' ? (
-                  <button
-                    type="button"
-                    className={expertMode ? 'workspace-ai-expert-mode workspace-ai-expert-mode--active' : 'workspace-ai-expert-mode'}
-                    aria-label={expertMode ? '退出专家模式' : '进入专家模式'}
-                    title="切换专家模式"
-                    onClick={() => setExpertMode((v) => !v)}
-                  >
-                    专家模式
-                  </button>
-                ) : null}
+                <button
+                  type="button"
+                  className={expertMode ? 'workspace-ai-expert-mode workspace-ai-expert-mode--active' : 'workspace-ai-expert-mode'}
+                  aria-label={expertMode ? '退出专家模式' : '进入专家模式'}
+                  title="切换专家模式"
+                  onClick={() => setExpertMode((v) => !v)}
+                >
+                  专家模式
+                </button>
                 <button
                   type="button"
                   className="workspace-ai-prompt-edit"
@@ -675,7 +674,7 @@ export function BookEditor() {
             上下文：本书 ·{' '}
             {railStages.find((s) => s.id === activeStage)?.label}
             {' · '}
-            工作台：{wk === 'qinggan' ? '情感' : '世情'}
+            类型：{book?.categories.join('、') || '未分类'}
             {' · '}
             使用 Pi（pi-ai / pi-web-ui）连接真实模型；首次可在对话内配置 API Key 与模型。
           </div>
@@ -685,8 +684,8 @@ export function BookEditor() {
                 const epoch = aiChatEpochByStage[s.id] ?? 0
                 const layerKey =
                   epoch > 0
-                    ? `${book.id}-${wk}-${s.id}-${epoch}`
-                    : `${book.id}-${wk}-${s.id}`
+                    ? `${book.id}-${promptKind}-${s.id}-${epoch}`
+                    : `${book.id}-${promptKind}-${s.id}`
                 const isActive = activeStage === s.id
                 return (
                   <div
@@ -714,7 +713,7 @@ export function BookEditor() {
                     <WorkspaceAiChat
                       sessionBookId={book.id}
                       sessionEpoch={epoch}
-                      workspaceShortKind={wk}
+                      promptKind={promptKind}
                       bookTitle={book.title}
                       stageId={s.id}
                       stageBody={stages[s.id] ?? ''}
@@ -743,7 +742,7 @@ export function BookEditor() {
             <div className="workspace-prompt-editor-panel">
               <div className="workspace-prompt-editor-head">
                 <h2 id="wc-prompt-editor-title" className="workspace-prompt-editor-title">
-                  短篇 · {wk === 'qinggan' ? '情感' : '世情'} ·{' '}
+                  短篇 · {book?.categories.join('、') || '未分类'} ·{' '}
                   {railStages.find((s) => s.id === activeStage)?.label}
                 </h2>
                 <button

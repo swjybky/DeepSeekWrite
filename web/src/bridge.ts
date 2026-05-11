@@ -1,73 +1,69 @@
 export type BookType = 'short' | 'long'
 
-import { QINGGAN_WORKSPACE_STAGES } from './workspaces/qinggan/stages'
-import type { QingganStageId } from './workspaces/qinggan/stages'
-import { SHIQING_WORKSPACE_STAGES } from './workspaces/shiqing/stages'
-import type { ShiqingStageId } from './workspaces/shiqing/stages'
+// 统一短篇阶段定义
 import {
+  SHORT_WORKSPACE_STAGES,
+  type ShortStageId,
+  normalizeShortStages,
+  migrateLegacyStages,
+} from './workspaces/short/stages'
+
+// 提示词目录映射
+import {
+  type PromptKind,
   isQingganShortBook,
   isShiqingShortBook,
   isWorkspaceShortBook,
-  resolveWorkspaceShortKind,
-  type WorkspaceShortKind,
-} from './workspaces/resolveWorkspace'
+  resolvePromptKind,
+} from './workspaces/resolvePromptKind'
 
 import { getEmbeddedPromptTemplate } from './prompt/embeddedDefaults'
 import { renderPromptFromTemplateRaw } from './prompt/renderTemplate'
 
-export type { QingganStageId, ShiqingStageId, WorkspaceShortKind }
+export type { ShortStageId, PromptKind }
 export {
   isQingganShortBook,
   isShiqingShortBook,
   isWorkspaceShortBook,
-  resolveWorkspaceShortKind,
+  resolvePromptKind,
 }
 
-export type StageId = ShiqingStageId | QingganStageId
+// 统一阶段ID类型
+export type StageId = ShortStageId
 
-/** 世情工作台左栏；历史引用名保持不变 */
-export const WORKSPACE_STAGES = SHIQING_WORKSPACE_STAGES
+// 导出统一阶段定义
+export const WORKSPACE_STAGES = SHORT_WORKSPACE_STAGES
 
 /** 短篇可选分类（可扩展） */
 export const SHORT_GENRE_OPTIONS = ['世情', '现实情感'] as const
 
-/** 依据书籍分类解析当前应使用的左侧阶段列表（世情 vs 情感） */
+/** 获取统一阶段列表（所有短篇书籍使用同一套阶段） */
 export function resolveWorkspaceStagesForBook(
-  book: Pick<Book, 'book_type' | 'categories'>,
-): typeof SHIQING_WORKSPACE_STAGES | typeof QINGGAN_WORKSPACE_STAGES {
-  if (resolveWorkspaceShortKind(book) === 'qinggan') {
-    return QINGGAN_WORKSPACE_STAGES
-  }
-  return SHIQING_WORKSPACE_STAGES
+  _book?: Pick<Book, 'book_type' | 'categories'>,
+): typeof SHORT_WORKSPACE_STAGES {
+  // 不再区分世情和情感，统一返回 SHORT_WORKSPACE_STAGES
+  void _book
+  return SHORT_WORKSPACE_STAGES
 }
 
-/** 两端存储中的「全字段」工作台 stages（与世情键 + 情感键并集对齐 Python STAGE_KEYS） */
+/** 两端存储中的「全字段」工作台 stages（统一阶段键） */
 export function normalizeAllBookStages(
   raw?: Partial<Record<StageId, string>> | null,
 ): Record<StageId, string> {
-  const r = raw ?? {}
-  const o = {} as Record<StageId, string>
-  for (const s of SHIQING_WORKSPACE_STAGES) {
-    o[s.id] = r[s.id] ?? ''
-  }
-  for (const s of QINGGAN_WORKSPACE_STAGES) {
-    o[s.id] = r[s.id] ?? ''
-  }
-  return o
+  return normalizeShortStages(raw)
 }
 
 /** 仅当前工作台在用的阶段子集（用于编辑区 state） */
 export function normalizeStagesForWorkspaceBook(
-  book: Pick<Book, 'book_type' | 'categories'>,
+  _book?: Pick<Book, 'book_type' | 'categories'>,
   raw?: Partial<Record<StageId, string>> | null,
 ): Record<StageId, string> {
-  const full = normalizeAllBookStages(raw)
-  const rows = resolveWorkspaceStagesForBook(book)
-  const out = {} as Record<StageId, string>
-  for (const s of rows) {
-    out[s.id] = full[s.id] ?? ''
-  }
-  return out
+  // _book 参数保留用于向后兼容，已不再需要
+  void _book
+  // 迁移旧数据
+  const migrated = migrateLegacyStages(raw)
+  // 归一化到统一阶段
+  return normalizeShortStages(migrated)
 }
 
 /** 把部分阶段更新合并进完整存储，未出现的键保持原样 */
@@ -76,7 +72,9 @@ export function mergeStagePatchIntoAll(
   patch: Partial<Record<StageId, string>>,
 ): Record<StageId, string> {
   const next = normalizeAllBookStages(previous)
-  for (const [k, v] of Object.entries(patch)) {
+  // 对patch也进行迁移
+  const migratedPatch = migrateLegacyStages(patch)
+  for (const [k, v] of Object.entries(migratedPatch)) {
     if (k in next) {
       next[k as StageId] = String(v ?? '')
     }
@@ -85,9 +83,11 @@ export function mergeStagePatchIntoAll(
 }
 
 function primaryDraftStageId(
-  book: Pick<Book, 'book_type' | 'categories'>,
+  _book?: Pick<Book, 'book_type' | 'categories'>,
 ): StageId {
-  return resolveWorkspaceShortKind(book) === 'qinggan' ? 'qinggan_draft' : 'draft'
+  // 统一使用 "draft"
+  void _book
+  return 'draft'
 }
 
 /** @deprecated 请用 normalizeAllBookStages */
@@ -111,6 +111,53 @@ export interface Book extends BookSummary {
   stages?: Partial<Record<StageId, string>>
   created_at?: string
   updated_at?: string
+}
+
+// ==================== 素材类型定义 ====================
+
+export type MaterialType = 'long' | 'short'
+
+export type MaterialStageId = 'character' | 'gimmick' | 'pacing'
+
+export const MATERIAL_STAGE_LABELS: Record<MaterialStageId, string> = {
+  character: '人设素材',
+  gimmick: '梗素材',
+  pacing: '节奏素材',
+}
+
+export const SHORT_MATERIAL_GENRES: Record<string, string[]> = {
+  '世情': ['家庭', '职场', '婚恋', '邻里', '亲子', '继承', '养老'],
+  '情感': ['甜宠', '虐恋', '重生', '穿越', '暗恋', '破镜重圆', '先婚后爱'],
+}
+
+export interface MaterialSummary {
+  id: string
+  title: string
+  material_type: MaterialType
+  parent_genre?: string  // 世情/情感（仅short时有效）
+  sub_genre?: string     // 子分类
+  output_dir?: string
+}
+
+export interface Material extends MaterialSummary {
+  stages?: Partial<Record<MaterialStageId, string>>
+  created_at?: string
+  updated_at?: string
+}
+
+export function normalizeMaterialStages(
+  raw?: Partial<Record<MaterialStageId, string>> | null,
+): Record<MaterialStageId, string> {
+  const out: Record<MaterialStageId, string> = {
+    character: '',
+    gimmick: '',
+    pacing: '',
+  }
+  if (!raw) return out
+  for (const k of Object.keys(out) as MaterialStageId[]) {
+    if (k in raw) out[k] = String(raw[k] ?? '')
+  }
+  return out
 }
 
 /** 与 app/.env 对应，由桌面壳 get_ai_defaults 注入 */
@@ -154,24 +201,41 @@ declare global {
 
         /** 渲染工作台系统提示词（磁盘默认 + `.data/prompt_overrides`，占位符服务端替换）。 */
         get_workspace_system_prompt(
-          workspace_kind: string,
+          prompt_kind: string,
           stage_id: string,
           context_json: string,
         ): Promise<string>
         /** 读取当前生效的模板原文（便于侧栏编辑器）。 */
         read_workspace_prompt_template(
-          workspace_kind: string,
+          prompt_kind: string,
           stage_id: string,
         ): Promise<string>
         save_workspace_prompt_override(
-          workspace_kind: string,
+          prompt_kind: string,
           stage_id: string,
           body: string,
         ): Promise<void>
         reset_workspace_prompt_override(
-          workspace_kind: string,
+          prompt_kind: string,
           stage_id: string,
         ): Promise<boolean>
+
+        // ==================== 素材库 API ====================
+        list_materials(): Promise<MaterialSummary[]>
+        get_material(material_id: string): Promise<Material | null>
+        create_material(
+          title: string,
+          material_type: string,
+          parent_genre?: string | null,
+          sub_genre?: string | null,
+          workspace_root?: string | null,
+        ): Promise<Material>
+        save_material(
+          material_id: string,
+          stages?: Record<string, string> | null,
+        ): Promise<Material | null>
+        delete_material(material_id: string): Promise<boolean>
+        get_material_genres(): Promise<Record<string, string[]>>
       }
     }
   }
@@ -211,7 +275,7 @@ export function setStoredWorkspaceRoot(path: string | null): void {
  * 启动时解析工作文件夹：桌面端以 Python 持久化为准；若无则从 localStorage 读取并写回磁盘。
  * 纯浏览器开发仅使用 localStorage。
  *
- * 桌面壳下偶发首帧早于 `api` 注入：先让出 1～2 帧再取桥接；若 `get_workspace_root` 抛错则短重试（避免误显示「未选择」）。
+ * 桌面壳里偶发首帧早于 `api` 注入：先让出 1～2 帧再取桥接；若 `get_workspace_root` 抛错则短重试（避免误显示「未选择」）。
  * 不在「无 api」时循环调用 getBridgeApi，以免重复触发长时间解析。
  */
 export async function loadPersistedWorkspaceRoot(): Promise<string | null> {
@@ -355,6 +419,96 @@ async function mockDeleteBook(book_id: string): Promise<boolean> {
   const ok = map.delete(book_id)
   if (ok) saveMock(map)
   return ok
+}
+
+// ==================== 素材 Mock 数据 ====================
+
+const MOCK_MATERIALS_KEY = 'write_claw_dev_materials'
+
+function loadMockMaterials(): Map<string, Material> {
+  try {
+    const raw = localStorage.getItem(MOCK_MATERIALS_KEY)
+    if (!raw) return new Map()
+    const arr = JSON.parse(raw) as Material[]
+    return new Map(arr.map((m) => [m.id, m]))
+  } catch {
+    return new Map()
+  }
+}
+
+function saveMockMaterials(map: Map<string, Material>) {
+  localStorage.setItem(MOCK_MATERIALS_KEY, JSON.stringify([...map.values()]))
+}
+
+async function mockListMaterials(): Promise<MaterialSummary[]> {
+  const map = loadMockMaterials()
+  return [...map.values()]
+    .sort((a, b) => (b.updated_at || '').localeCompare(a.updated_at || ''))
+    .map(({ id, title, material_type, parent_genre, sub_genre, output_dir }) => ({
+      id,
+      title,
+      material_type,
+      parent_genre,
+      sub_genre,
+      output_dir,
+    }))
+}
+
+async function mockGetMaterial(material_id: string): Promise<Material | null> {
+  return loadMockMaterials().get(material_id) ?? null
+}
+
+async function mockCreateMaterial(
+  title: string,
+  material_type: string,
+  parent_genre?: string | null,
+  sub_genre?: string | null,
+): Promise<Material> {
+  const map = loadMockMaterials()
+  const now = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z')
+  const mt: MaterialType = material_type === 'long' ? 'long' : 'short'
+  const material: Material = {
+    id: randomId(),
+    title: title.trim() || '未命名素材',
+    material_type: mt,
+    parent_genre: mt === 'short' ? (parent_genre || '') : '',
+    sub_genre: mt === 'short' ? (sub_genre || '') : '',
+    stages: normalizeMaterialStages({}),
+    created_at: now,
+    updated_at: now,
+  }
+  map.set(material.id, material)
+  saveMockMaterials(map)
+  return material
+}
+
+async function mockSaveMaterial(
+  material_id: string,
+  stages?: Record<string, string> | null,
+): Promise<Material | null> {
+  const map = loadMockMaterials()
+  const m = map.get(material_id)
+  if (!m) return null
+  const now = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z')
+  let next: Material = { ...m, updated_at: now }
+  if (stages != null) {
+    const normalized = normalizeMaterialStages(stages as Partial<Record<MaterialStageId, string>>)
+    next = { ...next, stages: normalized }
+  }
+  map.set(material_id, next)
+  saveMockMaterials(map)
+  return next
+}
+
+async function mockDeleteMaterial(material_id: string): Promise<boolean> {
+  const map = loadMockMaterials()
+  const ok = map.delete(material_id)
+  if (ok) saveMockMaterials(map)
+  return ok
+}
+
+async function mockGetMaterialGenres(): Promise<Record<string, string[]>> {
+  return { ...SHORT_MATERIAL_GENRES }
 }
 
 type BridgeApi = NonNullable<typeof window.pywebview>['api']
@@ -511,62 +665,118 @@ export async function deleteBook(book_id: string): Promise<boolean> {
   return mockDeleteBook(book_id)
 }
 
+// ==================== 素材 Bridge 函数 ====================
+
+export async function listMaterials(): Promise<MaterialSummary[]> {
+  const api = await getBridgeApi()
+  if (api?.list_materials) return api.list_materials()
+  return mockListMaterials()
+}
+
+export async function getMaterial(material_id: string): Promise<Material | null> {
+  const api = await getBridgeApi()
+  if (api?.get_material) return api.get_material(material_id)
+  return mockGetMaterial(material_id)
+}
+
+export async function createMaterial(
+  title: string,
+  material_type: MaterialType,
+  parent_genre?: string | null,
+  sub_genre?: string | null,
+  workspace_root?: string | null,
+): Promise<Material> {
+  const api = await getBridgeApi()
+  if (api?.create_material) {
+    return api.create_material(title, material_type, parent_genre ?? null, sub_genre ?? null, workspace_root ?? null)
+  }
+  return mockCreateMaterial(title, material_type, parent_genre, sub_genre)
+}
+
+export type SaveMaterialOptions = {
+  stages?: Record<string, string> | null
+}
+
+export async function saveMaterial(
+  material_id: string,
+  options?: SaveMaterialOptions,
+): Promise<Material | null> {
+  const api = await getBridgeApi()
+  const opts = options ?? {}
+  if (api?.save_material) {
+    return api.save_material(material_id, opts.stages ?? null)
+  }
+  return mockSaveMaterial(material_id, opts.stages)
+}
+
+export async function deleteMaterial(material_id: string): Promise<boolean> {
+  const api = await getBridgeApi()
+  if (api?.delete_material) return api.delete_material(material_id)
+  return mockDeleteMaterial(material_id)
+}
+
+export async function getMaterialGenres(): Promise<Record<string, string[]>> {
+  const api = await getBridgeApi()
+  if (api?.get_material_genres) return api.get_material_genres()
+  return mockGetMaterialGenres()
+}
+
 const PROMPT_TEMPLATE_LS_PREFIX = 'write_claw_prompt_template_override:'
 
-function localPromptLsKey(workspace: string, stage: string): string {
-  return PROMPT_TEMPLATE_LS_PREFIX + `${workspace}:${stage}`
+function localPromptLsKey(promptKind: string, stage: string): string {
+  return PROMPT_TEMPLATE_LS_PREFIX + `${promptKind}:${stage}`
 }
 
 /** 磁盘 / 嵌入式默认 + （浏览器）localStorage 覆盖；用于编辑器与离线渲染。 */
 export async function readWorkspacePromptTemplate(
-  workspaceKind: WorkspaceShortKind,
+  promptKind: PromptKind,
   stageId: StageId,
 ): Promise<string> {
   const api = await getBridgeApi()
   if (api?.read_workspace_prompt_template) {
     const t = await api.read_workspace_prompt_template(
-      workspaceKind,
+      promptKind,
       stageId,
     )
     return t.endsWith('\n') ? t.slice(0, -1) : t
   }
   try {
-    const ls = localStorage.getItem(localPromptLsKey(workspaceKind, stageId))
+    const ls = localStorage.getItem(localPromptLsKey(promptKind, stageId))
     if (ls != null && ls.trim() !== '')
       return ls.endsWith('\n') ? ls.slice(0, -1) : ls
   } catch {
     /* ignore */
   }
-  return getEmbeddedPromptTemplate(workspaceKind, stageId)
+  return getEmbeddedPromptTemplate(promptKind, stageId)
 }
 
 export async function saveWorkspacePromptOverride(
-  workspaceKind: WorkspaceShortKind,
+  promptKind: PromptKind,
   stageId: StageId,
   body: string,
 ): Promise<void> {
   const api = await getBridgeApi()
   if (api?.save_workspace_prompt_override) {
-    await api.save_workspace_prompt_override(workspaceKind, stageId, body)
+    await api.save_workspace_prompt_override(promptKind, stageId, body)
     return
   }
   try {
-    localStorage.setItem(localPromptLsKey(workspaceKind, stageId), body)
+    localStorage.setItem(localPromptLsKey(promptKind, stageId), body)
   } catch {
     console.warn('[涌泉] 无法保存提示词覆盖：无桌面桥接且无可用 localStorage')
   }
 }
 
 export async function resetWorkspacePromptOverride(
-  workspaceKind: WorkspaceShortKind,
+  promptKind: PromptKind,
   stageId: StageId,
 ): Promise<boolean> {
   const api = await getBridgeApi()
   if (api?.reset_workspace_prompt_override) {
-    return api.reset_workspace_prompt_override(workspaceKind, stageId)
+    return api.reset_workspace_prompt_override(promptKind, stageId)
   }
   try {
-    const k = localPromptLsKey(workspaceKind, stageId)
+    const k = localPromptLsKey(promptKind, stageId)
     const had = localStorage.getItem(k) != null
     localStorage.removeItem(k)
     return had
@@ -576,7 +786,7 @@ export async function resetWorkspacePromptOverride(
 }
 
 export async function getWorkspaceSystemPrompt(
-  workspaceKind: WorkspaceShortKind,
+  promptKind: PromptKind,
   stageId: StageId,
   input: {
     bookTitle: string
@@ -592,7 +802,7 @@ export async function getWorkspaceSystemPrompt(
   const api = await getBridgeApi()
   if (api?.get_workspace_system_prompt) {
     return api.get_workspace_system_prompt(
-      workspaceKind,
+      promptKind,
       stageId,
       JSON.stringify({
         book_title: input.bookTitle,
@@ -602,12 +812,12 @@ export async function getWorkspaceSystemPrompt(
     )
   }
 
-  const raw = await readWorkspacePromptTemplate(workspaceKind, stageId)
+  const raw = await readWorkspacePromptTemplate(promptKind, stageId)
   return renderPromptFromTemplateRaw(raw, {
     bookTitle: input.bookTitle,
     stageBody: input.stageBody,
     allStages: input.allStages,
-    workspaceShortKind: workspaceKind,
+    promptKind,
     stageId,
   })
 }

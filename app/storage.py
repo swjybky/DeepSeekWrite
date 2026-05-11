@@ -11,12 +11,16 @@ from app.runtime_paths import writable_root
 
 from app.models import (
     Book,
-    QINGGAN_STAGE_KEYS,
-    SHIQING_STAGE_KEYS,
+    Material,
+    SHORT_STAGE_KEYS,
+    MATERIAL_STAGE_KEYS,
     apply_stage_patch,
     default_stages,
+    default_material_stages,
     new_book_id,
+    new_material_id,
     primary_draft_stage_key,
+    normalize_material_stages_from_storage,
 )
 
 ISO_FMT = "%Y-%m-%dT%H:%M:%SZ"
@@ -45,6 +49,10 @@ def _unique_child_dir(parent: Path, base_name: str) -> Path:
 
 
 def _write_stages_to_disk(book: Book) -> None:
+    """
+    将各阶段内容写入书籍输出目录
+    使用统一阶段键，不再区分世情和情感
+    """
     od = (book.output_dir or "").strip()
     if not od:
         return
@@ -53,22 +61,12 @@ def _write_stages_to_disk(book: Book) -> None:
         root.mkdir(parents=True, exist_ok=True)
     except OSError:
         return
-    # 世情：沿用书籍根目录下的 key.txt；情感：单独子目录，与世情文件不混放
-    for key in SHIQING_STAGE_KEYS:
+
+    # 统一使用 SHORT_STAGE_KEYS 写入所有阶段
+    for key in SHORT_STAGE_KEYS:
         text = str(book.stages.get(key, "") or "")
         try:
             (root / f"{key}.txt").write_text(text, encoding="utf-8")
-        except OSError:
-            pass
-    qg_root = root / "qinggan_workspace"
-    try:
-        qg_root.mkdir(parents=True, exist_ok=True)
-    except OSError:
-        qg_root = root
-    for key in QINGGAN_STAGE_KEYS:
-        text = str(book.stages.get(key, "") or "")
-        try:
-            (qg_root / f"{key}.txt").write_text(text, encoding="utf-8")
         except OSError:
             pass
 
@@ -81,6 +79,13 @@ def default_data_path() -> Path:
     data_dir = writable_root() / ".data"
     data_dir.mkdir(parents=True, exist_ok=True)
     return data_dir / "books.json"
+
+
+def default_materials_path() -> Path:
+    """素材数据文件路径"""
+    data_dir = writable_root() / ".data"
+    data_dir.mkdir(parents=True, exist_ok=True)
+    return data_dir / "materials.json"
 
 
 def load_books(path: Path) -> dict[str, Book]:
@@ -175,10 +180,80 @@ def write_saved_workspace_root(path: str | None) -> None:
     save_preferences_atomic(prefs)
 
 
+def _sanitize_material_folder_name(title: str) -> str:
+    """清理素材文件夹名称"""
+    t = (title or "").strip() or "未命名素材"
+    for ch in _WIN_INVALID:
+        t = t.replace(ch, "_")
+    t = t.strip(" .")
+    return t or "未命名素材"
+
+
+def _write_material_stages_to_disk(material: Material) -> None:
+    """将素材各阶段内容写入输出目录"""
+    od = (material.output_dir or "").strip()
+    if not od:
+        return
+    root = Path(od)
+    try:
+        root.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        return
+
+    for key in MATERIAL_STAGE_KEYS:
+        text = str(material.stages.get(key, "") or "")
+        try:
+            (root / f"{key}.txt").write_text(text, encoding="utf-8")
+        except OSError:
+            pass
+
+
+def load_materials(path: Path) -> dict[str, Material]:
+    """从JSON文件加载素材数据"""
+    if not path.exists():
+        return {}
+    raw = path.read_text(encoding="utf-8")
+    if not raw.strip():
+        return {}
+    payload = json.loads(raw)
+    materials: dict[str, Material] = {}
+    for item in payload.get("materials", []):
+        m = Material.from_dict(item)
+        materials[m.id] = m
+    return materials
+
+
+def save_materials_atomic(path: Path, materials: dict[str, Material]) -> None:
+    """原子化保存素材数据到JSON文件"""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload: dict[str, Any] = {
+        "materials": [m.to_dict() for m in materials.values()],
+    }
+    text = json.dumps(payload, ensure_ascii=False, indent=2)
+    fd, tmp = tempfile.mkstemp(
+        dir=str(path.parent),
+        prefix=".materials_",
+        suffix=".json.tmp",
+    )
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(text)
+        os.replace(tmp, path)
+    except Exception:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+
 class BookStore:
     def __init__(self, path: Path | None = None) -> None:
         self._path = path or default_data_path()
         self._books = load_books(self._path)
+        # 素材数据存储
+        self._materials_path = default_materials_path()
+        self._materials = load_materials(self._materials_path)
 
     @property
     def path(self) -> Path:
@@ -277,4 +352,105 @@ class BookStore:
             return False
         del self._books[bid]
         save_books_atomic(self._path, self._books)
+        return True
+
+    # ==================== 素材管理方法 ====================
+
+    def list_materials(self) -> list[dict[str, Any]]:
+        """列出所有素材，按更新时间倒序"""
+        return [
+            {
+                "id": m.id,
+                "title": m.title,
+                "material_type": m.material_type,
+                "parent_genre": m.parent_genre,
+                "sub_genre": m.sub_genre,
+                "output_dir": m.output_dir,
+            }
+            for m in sorted(
+                self._materials.values(),
+                key=lambda x: (x.updated_at or "", x.title),
+                reverse=True,
+            )
+        ]
+
+    def get_material(self, material_id: str) -> dict[str, Any] | None:
+        """获取单个素材详情"""
+        m = self._materials.get(material_id)
+        if m is None:
+            return None
+        return m.to_dict()
+
+    def create_material(
+        self,
+        title: str,
+        material_type: str,
+        parent_genre: str | None = None,
+        sub_genre: str | None = None,
+        workspace_root: str | None = None,
+    ) -> dict[str, Any]:
+        """创建新素材"""
+        now = _utc_now_iso()
+        mt: str = material_type if material_type in ("long", "short") else "short"
+        wr = (workspace_root or "").strip()
+        od = ""
+        if wr:
+            try:
+                parent = Path(wr).expanduser()
+                parent.mkdir(parents=True, exist_ok=True)
+                parent = parent.resolve()
+                folder_name = _sanitize_material_folder_name(title.strip() or "未命名素材")
+                # 使用 materials 子目录存放素材
+                materials_parent = _unique_child_dir(parent, "素材库")
+                materials_parent.mkdir(parents=True, exist_ok=True)
+                material_dir = _unique_child_dir(materials_parent, folder_name)
+                material_dir.mkdir(parents=True, exist_ok=False)
+                od = str(material_dir)
+            except (OSError, ValueError):
+                od = ""
+            if not od:
+                raise RuntimeError(
+                    "无法在选定工作文件夹下创建素材目录，请检查路径是否有效、磁盘空间与写入权限。",
+                )
+        mid = new_material_id()
+        m = Material(
+            id=mid,
+            title=title.strip() or "未命名素材",
+            material_type=mt,  # type: ignore[arg-type]
+            parent_genre=str(parent_genre or ""),
+            sub_genre=str(sub_genre or ""),
+            stages=default_material_stages(),
+            output_dir=od,
+            created_at=now,
+            updated_at=now,
+        )
+        self._materials[mid] = m
+        save_materials_atomic(self._materials_path, self._materials)
+        _write_material_stages_to_disk(m)
+        return m.to_dict()
+
+    def save_material(
+        self,
+        material_id: str,
+        stages: dict[str, str] | None = None,
+    ) -> dict[str, Any] | None:
+        """保存素材阶段内容"""
+        m = self._materials.get(material_id)
+        if m is None:
+            return None
+        if stages is not None:
+            # 归一化阶段数据
+            m.stages = normalize_material_stages_from_storage(stages)
+        m.updated_at = _utc_now_iso()
+        save_materials_atomic(self._materials_path, self._materials)
+        _write_material_stages_to_disk(m)
+        return m.to_dict()
+
+    def delete_material(self, material_id: str) -> bool:
+        """删除素材"""
+        mid = (material_id or "").strip()
+        if not mid or mid not in self._materials:
+            return False
+        del self._materials[mid]
+        save_materials_atomic(self._materials_path, self._materials)
         return True
