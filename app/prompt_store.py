@@ -6,6 +6,8 @@ import json
 import re
 from pathlib import Path
 
+from app.runtime_paths import bundle_root, writable_root
+
 # --- 与工作台 TS 对齐 ---
 
 SHORT_PREFIX = Path("short")
@@ -75,10 +77,6 @@ _PLACEHOLDER_RE = re.compile(
 )
 
 
-def _project_root() -> Path:
-    return Path(__file__).resolve().parent.parent
-
-
 def excerpt(text: str, max_len: int = STAGE_BODY_EXCERPT_CAP) -> str:
     stripped = text.strip()
     if len(stripped) <= max_len:
@@ -129,13 +127,13 @@ def default_prompt_relative_path(workspace_kind: str, stage_id: str) -> Path:
 
 
 def override_prompt_absolute_path(workspace_kind: str, stage_id: str) -> Path:
-    root = _project_root() / ".data" / "prompt_overrides" / SHORT_PREFIX
+    root = writable_root() / ".data" / "prompt_overrides" / SHORT_PREFIX
     return (root / workspace_kind / f"{stage_id}.txt").resolve()
 
 
 def builtin_default_prompt_path(workspace_kind: str, stage_id: str) -> Path:
     return (
-        (_project_root() / "app" / "prompt_defaults" / SHORT_PREFIX)
+        (bundle_root() / "app" / "prompt_defaults" / SHORT_PREFIX)
         / workspace_kind
         / f"{stage_id}.txt"
     )

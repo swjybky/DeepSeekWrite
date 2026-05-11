@@ -7,6 +7,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from app.runtime_paths import writable_root
+
 from app.models import (
     Book,
     QINGGAN_STAGE_KEYS,
@@ -76,8 +78,7 @@ def _utc_now_iso() -> str:
 
 
 def default_data_path() -> Path:
-    root = Path(__file__).resolve().parent.parent
-    data_dir = root / ".data"
+    data_dir = writable_root() / ".data"
     data_dir.mkdir(parents=True, exist_ok=True)
     return data_dir / "books.json"
 

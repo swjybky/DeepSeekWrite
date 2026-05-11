@@ -9,5 +9,8 @@ venv/
 
 .data/
 
+build/
+dist/
+
 web/node_modules/
 web/dist/

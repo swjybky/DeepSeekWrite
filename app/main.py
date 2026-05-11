@@ -107,6 +107,7 @@ _configure_linux_pywebview_env()
 import webview
 
 from app.ai_env import load_ai_model_defaults
+from app.runtime_paths import bundle_root
 from app.prompt_store import (
     read_raw_prompt_for_editor,
     render_from_api_context,
@@ -114,10 +115,6 @@ from app.prompt_store import (
     save_prompt_override,
 )
 from app.storage import BookStore, read_saved_workspace_root, write_saved_workspace_root
-
-
-def _project_root() -> Path:
-    return Path(__file__).resolve().parent.parent
 
 
 def _windows_webview2_runtime_hint() -> bool:
@@ -150,7 +147,7 @@ def _windows_webview2_runtime_hint() -> bool:
 
 
 def _dist_dir() -> Path:
-    dist = _project_root() / "web" / "dist"
+    dist = bundle_root() / "web" / "dist"
     index = dist / "index.html"
     if not index.is_file():
         print(
@@ -198,7 +195,7 @@ def _start_local_dist_server(dist_dir: Path) -> tuple[ThreadingHTTPServer, str]:
 
 
 def _app_icon_path() -> str | None:
-    assets = _project_root() / "app" / "assets"
+    assets = bundle_root() / "app" / "assets"
     # Linux GTK：GdkPixbuf 无法载入「PNG 压缩帧」的 .ico，窗口图标需使用 PNG。
     if sys.platform.startswith("linux"):
         png = assets / "app-icon.png"
