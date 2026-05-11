@@ -290,7 +290,7 @@ def main() -> None:
         "涌泉写作",
         url,
         js_api=api,
-        width=2000,
+        width=1500,
         height=1048,
         min_size=(640, 480),
     )
