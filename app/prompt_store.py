@@ -256,3 +256,197 @@ def read_raw_prompt_for_editor(prompt_kind: str, stage_id: str) -> str:
     if text.endswith("\n"):
         return text[:-1]
     return text
+
+
+# ==================== 素材库提示词管线 ====================
+
+MATERIAL_PREFIX = Path("material")
+
+# 素材阶段顺序（人设/梗/节奏），对齐 app/models.py MATERIAL_STAGE_KEYS
+MATERIAL_STAGES_ORDER: tuple[str, ...] = (
+    "character",
+    "gimmick",
+    "pacing",
+)
+
+MATERIAL_STAGE_LABELS: dict[str, str] = {
+    "character": "人设素材",
+    "gimmick": "梗素材",
+    "pacing": "节奏素材",
+}
+
+# 素材提示词目录：long(长篇) / short_shiqing(短篇·世情) / short_qinggan(短篇·情感)
+VALID_MATERIAL_PROMPT_KINDS: frozenset[str] = frozenset(
+    {"material_long", "material_short_shiqing", "material_short_qinggan"}
+)
+
+
+def _material_kind_to_subdir(prompt_kind: str) -> str:
+    """material_long → long、material_short_shiqing → short_shiqing。"""
+    if not prompt_kind.startswith("material_"):
+        return prompt_kind
+    return prompt_kind[len("material_"):]
+
+
+def _peek_material_other_stages(
+    exclude_stage_id: str,
+    all_stages: dict[str, str],
+    *,
+    peer_max: int | None,
+) -> str:
+    cap = peer_max if peer_max is not None else OTHER_STAGES_PEER_MAX
+    lines: list[str] = []
+    for sid in MATERIAL_STAGES_ORDER:
+        if sid == exclude_stage_id:
+            continue
+        raw = str(all_stages.get(sid) or "").strip()
+        if not raw:
+            continue
+        lbl = MATERIAL_STAGE_LABELS.get(sid, sid)
+        excerpted = excerpt(raw, cap)
+        lines.append(f"【{lbl}】\n{excerpted}")
+    return "\n\n".join(lines) if lines else PEEK_EMPTY_MESSAGE
+
+
+def peek_material_other_for_render(
+    exclude_stage_id: str,
+    all_stages: dict[str, str],
+) -> str:
+    return _peek_material_other_stages(
+        exclude_stage_id, all_stages, peer_max=OTHER_STAGES_PEER_MAX
+    )
+
+
+def validate_material_slot(prompt_kind: str, stage_id: str) -> None:
+    if prompt_kind not in VALID_MATERIAL_PROMPT_KINDS:
+        raise ValueError(f"未知的 material prompt_kind: {prompt_kind!r}")
+    if stage_id not in MATERIAL_STAGES_ORDER:
+        raise ValueError(f"未知的 material stage_id: {stage_id!r}")
+
+
+def material_override_absolute_path(prompt_kind: str, stage_id: str) -> Path:
+    subdir = _material_kind_to_subdir(prompt_kind)
+    root = writable_root() / ".data" / "prompt_overrides" / MATERIAL_PREFIX
+    return (root / subdir / f"{stage_id}.txt").resolve()
+
+
+def material_builtin_default_path(prompt_kind: str, stage_id: str) -> Path:
+    subdir = _material_kind_to_subdir(prompt_kind)
+    return (
+        (bundle_root() / "app" / "prompt_defaults" / MATERIAL_PREFIX)
+        / subdir
+        / f"{stage_id}.txt"
+    )
+
+
+def resolve_material_read_path(prompt_kind: str, stage_id: str) -> Path:
+    """覆盖优先。"""
+    validate_material_slot(prompt_kind, stage_id)
+    over = material_override_absolute_path(prompt_kind, stage_id)
+    if over.is_file():
+        return over
+    return material_builtin_default_path(prompt_kind, stage_id)
+
+
+def read_material_prompt_template(prompt_kind: str, stage_id: str) -> str:
+    path = resolve_material_read_path(prompt_kind, stage_id)
+    if not path.is_file():
+        return (
+            f"[缺少素材默认提示模板文件]\n路径: {path}\n\n"
+            "请补齐 app/prompt_defaults/material 下的同名 .txt。\n"
+        )
+    text = path.read_text(encoding="utf-8")
+    if text.endswith("\n"):
+        return text[:-1]
+    return text
+
+
+def save_material_prompt_override(prompt_kind: str, stage_id: str, body: str) -> None:
+    validate_material_slot(prompt_kind, stage_id)
+    path = material_override_absolute_path(prompt_kind, stage_id)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(body if body.endswith("\n") else body + "\n", encoding="utf-8")
+
+
+def reset_material_prompt_override(prompt_kind: str, stage_id: str) -> bool:
+    validate_material_slot(prompt_kind, stage_id)
+    path = material_override_absolute_path(prompt_kind, stage_id)
+    if path.is_file():
+        path.unlink()
+        return True
+    return False
+
+
+def render_material_system_prompt(
+    prompt_kind: str,
+    stage_id: str,
+    *,
+    book_title: str,
+    stage_body: str,
+    other_stages_excerpt: str | None = None,
+    all_stages_for_peek: dict[str, str] | None = None,
+) -> str:
+    validate_material_slot(prompt_kind, stage_id)
+    raw = read_material_prompt_template(prompt_kind, stage_id)
+
+    staged_body = excerpt(stage_body, STAGE_BODY_EXCERPT_CAP)
+    if other_stages_excerpt is None:
+        if all_stages_for_peek is None:
+            other = ""
+        else:
+            other = peek_material_other_for_render(stage_id, all_stages_for_peek)
+    else:
+        other = other_stages_excerpt
+
+    replacements = {
+        "BOOK_TITLE": (book_title or "").strip(),
+        "BOOK_LINE": f"素材：《{(book_title or '').strip()}》",
+        "STAGE_BODY": staged_body,
+        "OTHER_STAGES_EXCERPT": other,
+    }
+
+    def repl(m: re.Match[str]) -> str:
+        key = m.group(1)
+        return replacements[key]
+
+    return _PLACEHOLDER_RE.sub(repl, raw)
+
+
+def render_material_from_api_context(
+    prompt_kind: str, stage_id: str, context_raw: object
+) -> str:
+    ctx = parse_context_payload(context_raw)
+    title = str(ctx.get("book_title") or "")
+    body = str(ctx.get("stage_body") or "")
+    all_stages: dict[str, str] | None = None
+    stages_val = ctx.get("all_stages")
+    if isinstance(stages_val, dict):
+        all_stages = {str(k): str(v if v is not None else "") for k, v in stages_val.items()}
+
+    other_override = ctx.get("other_stages_excerpt_override")
+    if other_override is not None:
+        return render_material_system_prompt(
+            prompt_kind,
+            stage_id,
+            book_title=title,
+            stage_body=body,
+            other_stages_excerpt=str(other_override),
+        )
+    return render_material_system_prompt(
+        prompt_kind,
+        stage_id,
+        book_title=title,
+        stage_body=body,
+        all_stages_for_peek=all_stages if all_stages is not None else {},
+    )
+
+
+def read_raw_material_prompt_for_editor(prompt_kind: str, stage_id: str) -> str:
+    """素材编辑框：读写当前生效来源（优先覆盖）原始模板正文。"""
+    path = resolve_material_read_path(prompt_kind, stage_id)
+    if not path.is_file():
+        return ""
+    text = path.read_text(encoding="utf-8")
+    if text.endswith("\n"):
+        return text[:-1]
+    return text

@@ -109,9 +109,13 @@ import webview
 from app.ai_env import load_ai_model_defaults
 from app.runtime_paths import bundle_root
 from app.prompt_store import (
+    read_raw_material_prompt_for_editor,
     read_raw_prompt_for_editor,
     render_from_api_context,
+    render_material_from_api_context,
+    reset_material_prompt_override as _reset_material_prompt_override,
     reset_prompt_override,
+    save_material_prompt_override as _save_material_prompt_override,
     save_prompt_override,
 )
 from app.storage import BookStore, read_saved_workspace_root, write_saved_workspace_root
@@ -333,6 +337,31 @@ class Api:
         self, workspace_kind: str, stage_id: str
     ) -> bool:
         return reset_prompt_override(workspace_kind, stage_id)
+
+    # ==================== 素材库提示词 API ====================
+
+    def get_material_system_prompt(
+        self,
+        material_kind: str,
+        stage_id: str,
+        context_json: str,
+    ) -> str:
+        return render_material_from_api_context(material_kind, stage_id, context_json)
+
+    def read_material_prompt_template(
+        self, material_kind: str, stage_id: str
+    ) -> str:
+        return read_raw_material_prompt_for_editor(material_kind, stage_id)
+
+    def save_material_prompt_override(
+        self, material_kind: str, stage_id: str, body: str
+    ) -> None:
+        _save_material_prompt_override(material_kind, stage_id, body)
+
+    def reset_material_prompt_override(
+        self, material_kind: str, stage_id: str
+    ) -> bool:
+        return _reset_material_prompt_override(material_kind, stage_id)
 
 
 def main() -> None:
