@@ -267,6 +267,7 @@ class BookStore:
                 "book_type": b.book_type,
                 "categories": b.categories,
                 "output_dir": b.output_dir,
+                "linked_material_id": b.linked_material_id,
             }
             for b in sorted(
                 self._books.values(),
@@ -316,6 +317,7 @@ class BookStore:
             categories=cats,
             content="",
             output_dir=od,
+            linked_material_id="",
             stages=default_stages(),
             created_at=now,
             updated_at=now,
@@ -330,10 +332,14 @@ class BookStore:
         book_id: str,
         content: str | None = None,
         stages: dict[str, str] | None = None,
+        linked_material_id: str | None = None,
     ) -> dict[str, Any] | None:
         b = self._books.get(book_id)
         if b is None:
             return None
+        if linked_material_id is not None:
+            mid = linked_material_id.strip()
+            b.linked_material_id = mid if mid in self._materials else ""
         if stages is not None:
             b.stages = apply_stage_patch(b.stages, stages)
             dk = primary_draft_stage_key(b)

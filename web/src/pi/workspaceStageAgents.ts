@@ -1,6 +1,6 @@
 import type { AgentTool } from '@mariozechner/pi-agent-core'
 
-import type { StageId, PromptKind } from '../bridge'
+import type { Material, StageId, PromptKind } from '../bridge'
 import {
   buildShortWorkspaceAdditionalTools,
   type ShortWorkspaceStageAgentContext,
@@ -18,6 +18,7 @@ export type WorkspaceStageAgentContext = {
   stageId: StageId
   stageBody: string
   allStages: Partial<Record<StageId, string>>
+  linkedMaterial?: Material | null
   applyToStageEditor?: (payload: ApplyToStageEditorPayload) => void
 }
 
@@ -34,6 +35,7 @@ export function getWorkspaceStageAdditionalTools(
     stageId: ctx.stageId as ShortWorkspaceStageAgentContext['stageId'],
     stageBody: ctx.stageBody,
     allStages: ctx.allStages,
+    linkedMaterial: ctx.linkedMaterial,
     applyToStageEditor: ctx.applyToStageEditor,
   }
   return buildShortWorkspaceAdditionalTools(narrow)

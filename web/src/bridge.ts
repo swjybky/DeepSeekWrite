@@ -104,6 +104,8 @@ export interface BookSummary {
   categories: string[]
   /** 本机落地目录，空表示未指定 */
   output_dir?: string
+  /** 写书工作台关联的素材库 id，空表示未关联 */
+  linked_material_id?: string
 }
 
 export interface Book extends BookSummary {
@@ -191,6 +193,7 @@ declare global {
           book_id: string,
           content?: string | null,
           stages?: Record<string, string> | null,
+          linked_material_id?: string | null,
         ): Promise<Book | null>
         delete_book(book_id: string): Promise<boolean>
         /** 上次选定的工作文件夹（持久化在应用 .data/preferences.json） */
@@ -350,12 +353,13 @@ async function mockListBooks(): Promise<BookSummary[]> {
   const map = loadMock()
   return [...map.values()]
     .sort((a, b) => (b.updated_at || '').localeCompare(a.updated_at || ''))
-    .map(({ id, title, book_type, categories, output_dir }) => ({
+    .map(({ id, title, book_type, categories, output_dir, linked_material_id }) => ({
       id,
       title,
       book_type,
       categories,
       output_dir,
+      linked_material_id,
     }))
 }
 
@@ -381,6 +385,7 @@ async function mockCreateBook(
     categories: bt === 'short' ? [...categories] : [],
     content: '',
     output_dir,
+    linked_material_id: '',
     stages: normalizeAllBookStages({}),
     created_at: now,
     updated_at: now,
@@ -396,7 +401,11 @@ async function mockGetBook(book_id: string): Promise<Book | null> {
 
 async function mockSaveBook(
   book_id: string,
-  options: { content?: string | null; stages?: Record<string, string> | null },
+  options: {
+    content?: string | null
+    stages?: Record<string, string> | null
+    linked_material_id?: string | null
+  },
 ): Promise<Book | null> {
   const map = loadMock()
   const b = map.get(book_id)
@@ -408,6 +417,10 @@ async function mockSaveBook(
     next = { ...next, stages: merged, content: merged[primaryDraftStageId(next)] ?? '' }
   } else if (options.content != null) {
     next = { ...next, content: options.content }
+  }
+  if (options.linked_material_id !== undefined) {
+    const mid = options.linked_material_id?.trim() ?? ''
+    next = { ...next, linked_material_id: mid && loadMockMaterials().has(mid) ? mid : '' }
   }
   map.set(book_id, next)
   saveMock(map)
@@ -641,6 +654,7 @@ export async function getBook(book_id: string): Promise<Book | null> {
 export type SaveBookOptions = {
   content?: string | null
   stages?: Record<string, string> | null
+  linked_material_id?: string | null
 }
 
 export async function saveBook(
@@ -654,7 +668,12 @@ export async function saveBook(
   }
   const opts = contentOrOptions ?? {}
   if (api) {
-    return api.save_book(book_id, opts.content ?? null, opts.stages ?? null)
+    return api.save_book(
+      book_id,
+      opts.content ?? null,
+      opts.stages ?? null,
+      opts.linked_material_id ?? undefined,
+    )
   }
   return mockSaveBook(book_id, opts)
 }

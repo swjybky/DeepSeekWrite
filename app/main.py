@@ -270,8 +270,14 @@ class Api:
         book_id: str,
         content: str | None = None,
         stages: dict | None = None,
+        linked_material_id: str | None = None,
     ) -> dict | None:
-        return self._store.save_book(book_id, content=content, stages=stages)
+        return self._store.save_book(
+            book_id,
+            content=content,
+            stages=stages,
+            linked_material_id=linked_material_id,
+        )
 
     def delete_book(self, book_id: str) -> bool:
         return self._store.delete_book(book_id)

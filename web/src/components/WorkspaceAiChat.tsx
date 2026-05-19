@@ -3,7 +3,7 @@ import { Agent } from '@mariozechner/pi-agent-core'
 import type { AssistantMessage, Model } from '@mariozechner/pi-ai'
 import { ApiKeyPromptDialog, ChatPanel } from '@mariozechner/pi-web-ui'
 import { memo, useEffect, useRef, useState } from 'react'
-import type { StageId, PromptKind } from '../bridge'
+import type { Material, StageId, PromptKind } from '../bridge'
 import { getWorkspaceSystemPrompt } from '../bridge'
 import { ensurePiAppStorage } from '../pi/setupPiWorkspace'
 import {
@@ -174,6 +174,8 @@ type Props = {
   stageBody: string
   /** 各阶段全文，用于提示词中的交叉参考 */
   allStages: Partial<Record<StageId, string>>
+  /** 当前书籍关联的素材库；前期设计阶段会将其暴露为 AI 工具可读取内容 */
+  linkedMaterial?: Material | null
   /**
    * Pi `ChatPanel` 无法在内部关闭，仍会把 `artifacts` 塞进 `agent.state.tools`。
    * 为 `false` 时在 `setAgent` 之后从状态中移除该工具，阶段更新时也仅同步业务工具。
@@ -265,6 +267,7 @@ function WorkspaceAiChatInner({
           stageId: propsLatestRef.current.stageId,
           stageBody: propsLatestRef.current.stageBody,
           allStages: propsLatestRef.current.allStages,
+          linkedMaterial: propsLatestRef.current.linkedMaterial,
           applyToStageEditor: propsLatestRef.current.applyToStageEditor,
         })
 
@@ -415,6 +418,7 @@ function WorkspaceAiChatInner({
         stageId: p.stageId,
         stageBody: debouncedBody,
         allStages: p.allStages,
+        linkedMaterial: p.linkedMaterial,
         applyToStageEditor: p.applyToStageEditor,
       })
       agent.state.tools = includePiArtifacts
@@ -428,6 +432,7 @@ function WorkspaceAiChatInner({
     props.stageId,
     debouncedBody,
     props.allStages,
+    props.linkedMaterial,
     props.applyToStageEditor,
     includePiArtifacts,
     promptRevision,
@@ -460,6 +465,10 @@ export const WorkspaceAiChat = memo(WorkspaceAiChatInner, (prev, next) => {
 
   // includePiArtifacts 变化需要更新
   if (prev.includePiArtifacts !== next.includePiArtifacts) return false
+
+  if (prev.linkedMaterial?.id !== next.linkedMaterial?.id) return false
+  if (prev.linkedMaterial?.updated_at !== next.linkedMaterial?.updated_at) return false
+  if (prev.linkedMaterial?.stages !== next.linkedMaterial?.stages) return false
 
   // stageBody 内容变化需要更新（比较字符串值而非引用）
   if (prev.stageBody !== next.stageBody) return false

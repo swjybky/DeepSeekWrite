@@ -15,6 +15,11 @@ import {
   getBook,
   isWorkspaceShortBook,
   saveBook,
+  listMaterials,
+  getMaterial,
+  MATERIAL_STAGE_LABELS,
+  type Material,
+  type MaterialSummary,
 } from '../bridge'
 import { WorkspaceAiChat } from '../components/WorkspaceAiChat'
 import type { ApplyToStageEditorPayload } from '../pi/workspaceStageAgents'
@@ -112,6 +117,11 @@ export function BookEditor() {
   const [promptEditorSaving, setPromptEditorSaving] = useState(false)
   /** 专家模式开关（仅世情文类型） */
   const [expertMode, setExpertMode] = useState(false)
+  const [linkedMaterial, setLinkedMaterial] = useState<Material | null>(null)
+  const [materialSelectorOpen, setMaterialSelectorOpen] = useState(false)
+  const [materialSummaries, setMaterialSummaries] = useState<MaterialSummary[]>([])
+  const [materialSelectorLoading, setMaterialSelectorLoading] = useState(false)
+  const [materialSelectorSaving, setMaterialSelectorSaving] = useState(false)
   /** 传给当前阶段 WorkspaceAiChat，保存模板后递增以重拉后端 systemPrompt */
   const [promptReloadNonce, setPromptReloadNonce] = useState(0)
   const [aiChatEpochByStage, setAiChatEpochByStage] = useState<
@@ -286,6 +296,12 @@ export function BookEditor() {
         return
       }
       setBook(b)
+      if (b.linked_material_id) {
+        const material = await getMaterial(b.linked_material_id)
+        setLinkedMaterial(material)
+      } else {
+        setLinkedMaterial(null)
+      }
       const rows = resolveWorkspaceStagesForBook(b)
       const normalized = normalizeStagesForWorkspaceBook(b, b.stages)
       setStages(normalized)
@@ -459,6 +475,42 @@ export function BookEditor() {
       setError(e instanceof Error ? e.message : '保存提示词失败')
     } finally {
       setPromptEditorSaving(false)
+    }
+  }
+
+  const openMaterialSelector = async () => {
+    setMaterialSelectorOpen(true)
+    setMaterialSelectorLoading(true)
+    setError(null)
+    try {
+      setMaterialSummaries(await listMaterials())
+    } catch (e) {
+      setError(e instanceof Error ? e.message : '无法加载素材库列表')
+    } finally {
+      setMaterialSelectorLoading(false)
+    }
+  }
+
+  const saveLinkedMaterial = async (materialId: string | null) => {
+    if (!id || !book) return
+    setMaterialSelectorSaving(true)
+    setError(null)
+    try {
+      const next = await saveBook(id, { linked_material_id: materialId ?? '' })
+      if (!next) {
+        setError('关联素材库失败：书籍不存在')
+        return
+      }
+      const material = next.linked_material_id
+        ? await getMaterial(next.linked_material_id)
+        : null
+      setBook(next)
+      setLinkedMaterial(material)
+      setMaterialSelectorOpen(false)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : '关联素材库失败')
+    } finally {
+      setMaterialSelectorSaving(false)
     }
   }
 
@@ -642,6 +694,19 @@ export function BookEditor() {
               <div className="workspace-ai-header-actions">
                 <button
                   type="button"
+                  className={
+                    linkedMaterial
+                      ? 'workspace-ai-material-select workspace-ai-material-select--active'
+                      : 'workspace-ai-material-select'
+                  }
+                  aria-label="选择关联素材库"
+                  title={linkedMaterial ? `已关联：${linkedMaterial.title}` : '选择关联素材库'}
+                  onClick={() => void openMaterialSelector()}
+                >
+                  素材库选择
+                </button>
+                <button
+                  type="button"
                   className={expertMode ? 'workspace-ai-expert-mode workspace-ai-expert-mode--active' : 'workspace-ai-expert-mode'}
                   aria-label={expertMode ? '退出专家模式' : '进入专家模式'}
                   title="切换专家模式"
@@ -681,6 +746,7 @@ export function BookEditor() {
             {railStages.find((s) => s.id === activeStage)?.label}
             {' · '}
             类型：{book?.categories.join('、') || '未分类'}
+            {linkedMaterial ? ` · 素材：${linkedMaterial.title}` : ' · 未关联素材'}
             {' · '}
             使用 Pi（pi-ai / pi-web-ui）连接真实模型；首次可在对话内配置 API Key 与模型。
           </div>
@@ -725,6 +791,7 @@ export function BookEditor() {
                       stageBody={stages[s.id] ?? ''}
                       // 非激活阶段使用 stable 空对象引用，避免 allStages 变化触发重渲染
                       allStages={isActive ? stages : EMPTY_STAGES}
+                      linkedMaterial={isActive ? linkedMaterial : null}
                       includePiArtifacts={WORKSPACE_AI_INCLUDE_PI_ARTIFACTS}
                       promptRevision={isActive ? promptReloadNonce : 0}
                       applyToStageEditor={applyToStageEditor}
@@ -800,6 +867,101 @@ export function BookEditor() {
                   onClick={() => void savePromptTemplateEdit()}
                 >
                   {promptEditorSaving ? '保存中…' : '保存'}
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : null}
+
+        {materialSelectorOpen ? (
+          <div
+            className="workspace-material-selector-backdrop"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="wc-material-selector-title"
+          >
+            <div className="workspace-material-selector-panel">
+              <div className="workspace-material-selector-head">
+                <h2 id="wc-material-selector-title" className="workspace-material-selector-title">
+                  选择关联素材库
+                </h2>
+                <button
+                  type="button"
+                  className="workspace-material-selector-close"
+                  aria-label="关闭"
+                  disabled={materialSelectorSaving}
+                  onClick={() => setMaterialSelectorOpen(false)}
+                >
+                  ×
+                </button>
+              </div>
+              <div className="workspace-material-current">
+                当前关联：
+                <strong>{linkedMaterial ? linkedMaterial.title : '未关联'}</strong>
+                {linkedMaterial?.output_dir ? (
+                  <span title={linkedMaterial.output_dir}>
+                    {` · ${linkedMaterial.output_dir.length > 42
+                      ? `${linkedMaterial.output_dir.slice(0, 22)}…${linkedMaterial.output_dir.slice(-16)}`
+                      : linkedMaterial.output_dir}`}
+                  </span>
+                ) : null}
+              </div>
+              <div className="workspace-material-stage-note">
+                可供 AI 读取的阶段：{Object.values(MATERIAL_STAGE_LABELS).join('、')}
+              </div>
+              <div className="workspace-material-list">
+                {materialSelectorLoading ? (
+                  <p className="muted workspace-material-empty">加载中…</p>
+                ) : materialSummaries.length === 0 ? (
+                  <p className="muted workspace-material-empty">暂无素材库</p>
+                ) : (
+                  materialSummaries.map((material) => {
+                    const selected = material.id === book.linked_material_id
+                    const genre = [
+                      material.material_type === 'short' ? '短篇素材' : '长篇素材',
+                      material.parent_genre,
+                      material.sub_genre,
+                    ].filter(Boolean).join(' · ')
+                    return (
+                      <button
+                        key={material.id}
+                        type="button"
+                        className={
+                          selected
+                            ? 'workspace-material-item workspace-material-item--selected'
+                            : 'workspace-material-item'
+                        }
+                        disabled={materialSelectorSaving}
+                        onClick={() => void saveLinkedMaterial(material.id)}
+                      >
+                        <span className="workspace-material-item-main">
+                          <span className="workspace-material-item-title">{material.title}</span>
+                          <span className="workspace-material-item-meta">{genre || '素材'}</span>
+                        </span>
+                        <span className="workspace-material-item-state">
+                          {selected ? '已关联' : '关联'}
+                        </span>
+                      </button>
+                    )
+                  })
+                )}
+              </div>
+              <div className="workspace-material-selector-foot">
+                <button
+                  type="button"
+                  className="btn-material-clear"
+                  disabled={materialSelectorSaving || !book.linked_material_id}
+                  onClick={() => void saveLinkedMaterial(null)}
+                >
+                  取消关联
+                </button>
+                <button
+                  type="button"
+                  className="btn-material-close"
+                  disabled={materialSelectorSaving}
+                  onClick={() => setMaterialSelectorOpen(false)}
+                >
+                  关闭
                 </button>
               </div>
             </div>

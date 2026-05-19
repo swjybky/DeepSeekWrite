@@ -1,6 +1,8 @@
 import type { AgentTool } from '@mariozechner/pi-agent-core'
 import { Type } from 'typebox'
 
+import type { Material, MaterialStageId } from '../../bridge'
+import { MATERIAL_STAGE_LABELS, normalizeMaterialStages } from '../../bridge'
 import type { ShortStageId } from './stages'
 import { SHORT_STAGE_LABELS } from './stages'
 import {
@@ -21,6 +23,7 @@ export type ShortWorkspaceStageAgentContext = {
   stageId: ShortStageId
   stageBody: string
   allStages: Partial<Record<ShortStageId, string>>
+  linkedMaterial?: Material | null
   applyToStageEditor?: (payload: { mode: 'replace' | 'append'; text: string }) => void
 }
 
@@ -63,6 +66,59 @@ export function buildReadWorkspaceContentTool(
   })
 }
 
+export function buildReadLinkedMaterialContentTool(
+  ctx: ShortWorkspaceStageAgentContext,
+): AgentTool {
+  return defineTool({
+    name: 'read_linked_material_content',
+    label: '读取关联素材库内容',
+    description:
+      '读取当前书籍在 AI 助手上方关联的素材库内容。每次调用只返回一个素材阶段：character、gimmick 或 pacing。',
+    parameters: Type.Object({
+      stage_id: Type.Union(
+        [
+          Type.Literal('character'),
+          Type.Literal('gimmick'),
+          Type.Literal('pacing'),
+        ],
+        {
+          description:
+            '素材库阶段键名：character=人设素材，gimmick=梗素材，pacing=节奏素材；单次只读取该阶段',
+        },
+      ),
+    }),
+    execute: async (_toolCallId, params) => {
+      const stageId = params.stage_id as MaterialStageId
+      const material = ctx.linkedMaterial
+      if (!material) {
+        return textBlock('当前书籍尚未关联素材库。请先在 AI 助手上方点击「素材库选择」并选择素材。')
+      }
+
+      const stages = normalizeMaterialStages(material.stages)
+      const raw = stages[stageId].trim()
+      const label = MATERIAL_STAGE_LABELS[stageId]
+      const genre = [
+        material.material_type === 'short' ? '短篇素材' : '长篇素材',
+        material.parent_genre,
+        material.sub_genre,
+      ].filter(Boolean).join(' · ')
+      const location = material.output_dir?.trim()
+        ? `\n素材库地址：${material.output_dir}`
+        : ''
+      const header = [
+        `关联素材：《${material.title}》`,
+        genre ? `类型：${genre}` : '',
+        `【${label}】（${stageId}）`,
+      ].filter(Boolean).join('\n')
+
+      if (!raw) {
+        return textBlock(`${header}${location}\n\n该素材阶段暂无内容。`)
+      }
+      return textBlock(`${header}${location}\n\n${excerpt(raw)}`)
+    },
+  })
+}
+
 /**
  * 工作台系统提示词由后端磁盘模板提供；此处仅附加 Pi 工具。
  * 统一工具配置，世情和情感共用同一套工具集
@@ -71,13 +127,14 @@ export function buildShortWorkspaceAdditionalTools(
   ctx: ShortWorkspaceStageAgentContext,
 ): AgentTool[] {
   const readSaved = buildReadWorkspaceContentTool(ctx)
+  const readMaterial = buildReadLinkedMaterialContentTool(ctx)
 
   switch (ctx.stageId) {
     case 'character_design':
     case 'intro_design':
     case 'plot_design':
-      // 前期构思阶段：基础读取工具
-      return [readSaved]
+      // 前期构思阶段：基础读取工具 + 关联素材读取工具
+      return [readSaved, readMaterial]
 
     case 'plot_refine':
       // 剧情细化阶段：增加场景节拍和因果工具

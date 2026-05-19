@@ -170,6 +170,7 @@ class Book:
     categories: list[str] = field(default_factory=list)
     content: str = ""
     output_dir: str = ""
+    linked_material_id: str = ""
     stages: dict[str, str] = field(default_factory=default_stages)
     created_at: str = ""
     updated_at: str = ""
@@ -191,6 +192,7 @@ class Book:
             categories=list(data.get("categories") or []),
             content=str(data.get("content") or ""),
             output_dir=str(data.get("output_dir") or ""),
+            linked_material_id=str(data.get("linked_material_id") or ""),
             stages=migrated_stages,
             created_at=str(data.get("created_at") or ""),
             updated_at=str(data.get("updated_at") or ""),
