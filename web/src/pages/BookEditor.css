@@ -626,6 +626,7 @@
   max-height: calc(100vh - 2rem);
   display: flex;
   flex-direction: column;
+  overflow: hidden;
   border-radius: 12px;
   border: 1px solid var(--border);
   background: var(--surface);
@@ -689,8 +690,7 @@
 .workspace-prompt-editor-area {
   margin: 0.5rem 0.85rem 0.85rem;
   flex: 1 1 auto;
-  min-height: 660px;
-  max-height: 80vh;
+  min-height: 120px;
   padding: 0.55rem 0.65rem;
   border-radius: 10px;
   border: 1px solid var(--border);
@@ -699,7 +699,8 @@
   font-family: ui-monospace, monospace;
   font-size: 0.8rem;
   line-height: 1.45;
-  resize: vertical;
+  resize: none;
+  overflow: auto;
 }
 
 .workspace-prompt-editor-area:focus-visible {
