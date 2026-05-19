@@ -430,9 +430,15 @@ export function BookEditor() {
   const stageBody = stages[activeStage] ?? ''
 
   const openPromptEditor = async () => {
+    const start = Date.now()
+    const minDelay = 150
     setPromptEditorLoading(true)
     try {
       const t = await readWorkspacePromptTemplate(promptKind, activeStage)
+      const elapsed = Date.now() - start
+      if (elapsed < minDelay) {
+        await new Promise((r) => setTimeout(r, minDelay - elapsed))
+      }
       setPromptDraft(t)
       setPromptEditorOpen(true)
     } catch (e) {

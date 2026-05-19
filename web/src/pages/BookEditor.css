@@ -383,6 +383,7 @@
 
 .workspace-ai-prompt-edit {
   flex-shrink: 0;
+  min-width: 5.5rem;
   padding: 0.28rem 0.55rem;
   font-size: 0.75rem;
   font-weight: 500;
