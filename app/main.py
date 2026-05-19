@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import functools
+import importlib.util
 import os
 import subprocess
 import sys
@@ -49,6 +50,28 @@ def _configure_linux_pywebview_env() -> None:
         )
 
     _ensure_linux_qt_input_method()
+
+
+def _configure_macos_pywebview_env() -> None:
+    """macOS：优先使用 pywebview 原生 Cocoa/WKWebView 后端。
+
+    本项目依赖列表里曾全平台安装 PySide6；mac 开发机如果缺少 PyObjC，pywebview 会回退到 Qt，
+    容易表现为窗口已打开但前端脚本或 JS bridge 异常（白屏）。默认固定 Cocoa，让缺失依赖尽早
+    变成明确的安装错误。需要手动排查 Qt 后端时，仍可显式设置 ``PYWEBVIEW_GUI=qt`` 覆盖。
+    """
+    if sys.platform != "darwin":
+        return
+    os.environ.setdefault("PYWEBVIEW_GUI", "cocoa")
+
+
+def _macos_pyobjc_runtime_hint() -> bool:
+    """检查 Cocoa 后端所需的 PyObjC 模块是否可导入。"""
+    if sys.platform != "darwin":
+        return True
+    return all(
+        importlib.util.find_spec(name) is not None
+        for name in ("AppKit", "Foundation", "WebKit", "objc", "PyObjCTools")
+    )
 
 
 def _guess_linux_im_module_from_running_processes() -> str | None:
@@ -103,6 +126,7 @@ def _ensure_linux_qt_input_method() -> None:
 
 
 _configure_linux_pywebview_env()
+_configure_macos_pywebview_env()
 
 import webview
 
@@ -383,6 +407,19 @@ def main() -> None:
             "请安装 Evergreen WebView2 Runtime："
             "https://developer.microsoft.com/microsoft-edge/webview2/\n"
             "若安装后仍为白屏，可设置环境变量 WRITECLAW_DEBUG=1 后重新启动以打开开发者工具查看控制台错误。\n",
+            file=sys.stderr,
+        )
+    if (
+        sys.platform == "darwin"
+        and os.environ.get("PYWEBVIEW_GUI", "").lower() == "cocoa"
+        and not _macos_pyobjc_runtime_hint()
+    ):
+        print(
+            "警告：macOS Cocoa 后端依赖 PyObjC，但当前 Python 环境未检测到完整的 "
+            "AppKit/Foundation/WebKit/objc 模块。\n"
+            "请在虚拟环境中执行 pip install -r requirements.txt，或单独执行 "
+            "pip install pyobjc。若曾设置 PYWEBVIEW_GUI=qt，请先 unset PYWEBVIEW_GUI "
+            "后再启动。\n",
             file=sys.stderr,
         )
     _debug = os.environ.get("WRITECLAW_DEBUG", "").strip().lower() in (

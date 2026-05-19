@@ -6,6 +6,9 @@
 
 - Python 3.10+
 - Node.js 18+（仅用于构建前端，运行桌面应用不需要常驻 Node）
+- **macOS 桌面壳默认使用系统 WKWebView（pywebview Cocoa 后端）**。首次安装请执行
+  `pip install -r requirements.txt`，其中会通过平台条件安装 `pyobjc`。不要在 macOS 上
+  强制 `PYWEBVIEW_GUI=qt`，除非你正在专门排查 Qt 后端问题。
 - **Linux 桌面壳默认使用 Qt（PySide6，见 `requirements.txt`）**，与内嵌 AI 界面（Pi / Lit）兼容性更好。
 - 若坚持使用 **GTK + WebKitGTK** 后端，需额外安装系统库（示例 Debian/Ubuntu）：
 
@@ -31,6 +34,30 @@ python -m app.main
 ```
 
 Fcitx5 用户请安装 Qt6 前端插件，例如：`sudo apt install fcitx5-frontend-qt6`（包名因发行版而异）。
+
+### macOS：白屏排查
+
+macOS 使用系统自带的 WKWebView 渲染前端，并通过 PyObjC 暴露给 pywebview。如果窗口打开后白屏，优先检查以下几项：
+
+```bash
+# 建议在项目根目录使用虚拟环境
+python3 -m venv .venv
+source .venv/bin/activate
+
+pip install -r requirements.txt
+cd web
+npm install
+npm run build
+cd ..
+
+unset PYWEBVIEW_GUI
+python -m app.main
+```
+
+- 若控制台提示缺少 `AppKit` / `WebKit` / `objc`，说明 PyObjC 没装进当前虚拟环境，重新执行 `pip install -r requirements.txt`。
+- 若曾在 shell 配置里设置 `PYWEBVIEW_GUI=qt`，请先 `unset PYWEBVIEW_GUI`，本项目在 macOS 默认使用 `cocoa`。
+- 排查前端控制台错误：`WRITECLAW_DEBUG=1 python -m app.main`。
+- 当前构建已将 Vite 目标设置为较保守的 Safari/WebKit 版本，以兼容较旧 macOS 的系统 WKWebView。
 
 ### Windows：白屏与 WebView2
 

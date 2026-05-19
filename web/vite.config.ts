@@ -10,6 +10,10 @@ const workspaceRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)),
 export default defineConfig({
   plugins: [react()],
   base: './',
+  build: {
+    target: ['es2020', 'safari14'],
+    cssTarget: 'safari14',
+  },
   server: {
     fs: { allow: [workspaceRoot] },
   },
