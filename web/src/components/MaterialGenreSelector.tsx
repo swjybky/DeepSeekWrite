@@ -1,10 +1,10 @@
 import { useState, useEffect, useMemo } from 'react'
-import { SHORT_MATERIAL_GENRES, type MaterialType } from '../bridge'
+import { SHORT_MATERIAL_GENRES, getMaterialSubGenres, resolveMaterialParentGenre, type MaterialType } from '../bridge'
 import './MaterialGenreSelector.css'
 
 export interface MaterialGenreValue {
   materialType: MaterialType
-  parentGenre: string  // 世情/情感
+  parentGenre: string  // 世情/追妻
   subGenre: string     // 子分类
 }
 
@@ -20,10 +20,19 @@ export function MaterialGenreSelector({ value, onChange, disabled }: MaterialGen
   // 获取可用的大分类列表
   const parentGenres = useMemo(() => Object.keys(SHORT_MATERIAL_GENRES), [])
 
-  // 获取当前大分类下的子分类
+  // 自动将旧分类名称映射为新名称
+  useEffect(() => {
+    const resolved = resolveMaterialParentGenre(value.parentGenre)
+    if (resolved !== value.parentGenre) {
+      onChange({ ...value, parentGenre: resolved, subGenre: getMaterialSubGenres(resolved)[0] || '' })
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [value.parentGenre])
+
+  // 获取当前大分类下的子分类（兼容旧名称）
   const subGenres = useMemo(() => {
     if (!value.parentGenre) return []
-    return SHORT_MATERIAL_GENRES[value.parentGenre] || []
+    return getMaterialSubGenres(value.parentGenre)
   }, [value.parentGenre])
 
   // 当大分类改变时，如果当前子分类不在新列表中，重置子分类
@@ -39,11 +48,12 @@ export function MaterialGenreSelector({ value, onChange, disabled }: MaterialGen
     if (value.materialType === 'long') {
       return '长篇素材'
     }
-    if (value.parentGenre && value.subGenre) {
-      return `${value.parentGenre} · ${value.subGenre}`
+    const parent = resolveMaterialParentGenre(value.parentGenre)
+    if (parent && value.subGenre) {
+      return `${parent} · ${value.subGenre}`
     }
-    if (value.parentGenre) {
-      return value.parentGenre
+    if (parent) {
+      return parent
     }
     return '短篇素材'
   }, [value])
@@ -53,7 +63,7 @@ export function MaterialGenreSelector({ value, onChange, disabled }: MaterialGen
     onChange({
       materialType: type,
       parentGenre: type === 'short' ? parentGenres[0] || '' : '',
-      subGenre: type === 'short' ? (SHORT_MATERIAL_GENRES[parentGenres[0]]?.[0] || '') : '',
+      subGenre: type === 'short' ? (getMaterialSubGenres(parentGenres[0])?.[0] || '') : '',
     })
     if (type === 'long') {
       setIsExpanded(false)
@@ -62,7 +72,7 @@ export function MaterialGenreSelector({ value, onChange, disabled }: MaterialGen
 
   // 选择大分类
   const handleParentGenreChange = (genre: string) => {
-    const newSubGenres = SHORT_MATERIAL_GENRES[genre] || []
+    const newSubGenres = getMaterialSubGenres(genre)
     onChange({
       ...value,
       materialType: 'short',
@@ -194,7 +204,7 @@ export function MaterialFilter({ value, onChange }: MaterialFilterProps) {
     if (value.parentGenre === 'all') {
       return Object.values(SHORT_MATERIAL_GENRES).flat()
     }
-    return SHORT_MATERIAL_GENRES[value.parentGenre] || []
+    return getMaterialSubGenres(value.parentGenre)
   }, [value.parentGenre])
 
   return (

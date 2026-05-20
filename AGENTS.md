@@ -16,8 +16,8 @@ Write Claw（涌泉写作）是一款**本地桌面写作应用**，面向网文
 ### 核心功能
 
 1. **书架管理**：创建/删除短篇或长篇书籍，选择本机工作文件夹（`output_dir`）。
-2. **短篇工作台**：针对「世情」与「现实情感」两类短篇，提供统一的 8 阶段三栏工作台（左阶段导航、中编辑区、右 AI 聊天面板）。
-3. **素材库**：独立管理「人设素材」「梗素材」「节奏素材」，按世情/情感大分类与子分类组织。
+2. **短篇工作台**：针对「世情」与「追妻」两类短篇，提供统一的 8 阶段三栏工作台（左阶段导航、中编辑区、右 AI 聊天面板）。
+3. **素材库**：独立管理「人设素材」「梗素材」「节奏素材」，按世情/追妻大分类与子分类组织。
 4. **提示词系统**：每个阶段对应一份系统提示词模板（`app/prompt_defaults/` 下的 `.txt` 文件），支持运行时覆盖。
 
 ---
@@ -102,7 +102,7 @@ write-claw/
 │   ├── runtime_paths.py          # bundle_root() / writable_root()：区分源码与 PyInstaller 冻结环境
 │   ├── prompt_defaults/          # 默认提示词模板（.txt）
 │   │   ├── short/shiqing/        # 短篇·世情各阶段提示词
-│   │   ├── short/qinggan/        # 短篇·情感各阶段提示词
+│   │   ├── short/qinggan/        # 短篇·追妻各阶段提示词
 │   │   └── material/             # 素材库提示词（long / short_shiqing / short_qinggan）
 │   └── assets/                   # 应用图标（.ico / .png）
 ├── web/                          # 前端（Vite + React + TypeScript）
@@ -165,8 +165,8 @@ write-claw/
 - **`models.py`**：
   - `Book` dataclass：包含 `id`、`title`、`book_type`（`short` | `long`）、`categories`、`content`、`output_dir`、`stages`、时间戳。
   - `Material` dataclass：包含 `id`、`title`、`material_type`、`parent_genre`、`sub_genre`、`stages`、时间戳。
-  - **统一短篇阶段键**（8 个）：`character_design`、`intro_design`、`plot_design`、`plot_refine`、`outline`、`draft`、`draft_review`、`format_conversion`。世情和情感共用同一套阶段键，仅在提示词内容上区分。
-  - **数据迁移**：自动将旧版情感阶段键（如 `qinggan_character`）迁移到统一键，见 `migrate_legacy_stages`。
+  - **统一短篇阶段键**（8 个）：`character_design`、`intro_design`、`plot_design`、`plot_refine`、`outline`、`draft`、`draft_review`、`format_conversion`。世情和追妻共用同一套阶段键，仅在提示词内容上区分。
+  - **数据迁移**：自动将旧版追妻阶段键（如 `qinggan_character`）迁移到统一键，见 `migrate_legacy_stages`。
   - 素材阶段键（3 个）：`character`、`gimmick`、`pacing`。
 
 - **`ai_env.py`**：
@@ -212,7 +212,7 @@ write-claw/
 | `id` | string | UUID |
 | `title` | string | 书名 |
 | `book_type` | `"short" \| "long"` | 短篇 / 长篇 |
-| `categories` | `string[]` | 短篇分类（如 `["世情"]`、`["现实情感"]`） |
+| `categories` | `string[]` | 短篇分类（如 `["世情"]`、`["追妻"]`） |
 | `content` | string | 顶层正文（与 `stages.draft` 同步） |
 | `output_dir` | string | 本机落地目录（空表示未指定） |
 | `stages` | `Record<StageId, string>` | 8 个阶段内容 |
@@ -231,7 +231,7 @@ write-claw/
 7. `draft_review` — 正文审阅
 8. `format_conversion` — 格式转换
 
-**注意**：世情和情感共用上述阶段定义，仅在加载提示词时根据 `resolvePromptKind()` 选择 `shiqing/` 或 `qinggan/` 目录。
+**注意**：世情和追妻共用上述阶段定义，仅在加载提示词时根据 `resolvePromptKind()` 选择 `shiqing/` 或 `qinggan/` 目录。
 
 ### 素材（Material）
 
@@ -240,7 +240,7 @@ write-claw/
 | `id` | string | UUID |
 | `title` | string | 素材标题 |
 | `material_type` | `"short" \| "long"` | 短篇 / 长篇素材 |
-| `parent_genre` | string | 世情 / 情感（仅 short） |
+| `parent_genre` | string | 世情 / 追妻（仅 short） |
 | `sub_genre` | string | 子分类（如家庭、甜宠） |
 | `stages` | `Record<MaterialStageId, string>` | `character`、`gimmick`、`pacing` |
 
@@ -276,7 +276,7 @@ write-claw/
 
 1. **前端界面**：`cd web && npm run dev`，在浏览器中操作书架/工作台/素材库全流程。
 2. **桌面端到端**：`npm run build` 后执行 `python -m app.main`，测试 pywebview 桥接、文件夹选择、保存/导出 `.txt`、AI 面板。
-3. **数据迁移验证**：若修改 `models.py` 中的阶段键或迁移逻辑，需用包含旧版情感键（`qinggan_*`）的 `books.json` 测试加载是否正确迁移。
+3. **数据迁移验证**：若修改 `models.py` 中的阶段键或迁移逻辑，需用包含旧版追妻键（`qinggan_*`）的 `books.json` 测试加载是否正确迁移。
 
 ---
 

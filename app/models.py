@@ -10,7 +10,7 @@ MaterialType = Literal["long", "short"]
 # 素材分类定义
 SHORT_MATERIAL_GENRES: dict[str, list[str]] = {
     "世情": ["家庭", "职场", "婚恋", "邻里", "亲子", "继承", "养老"],
-    "情感": ["甜宠", "虐恋", "重生", "穿越", "暗恋", "破镜重圆", "先婚后爱"],
+    "追妻": ["甜宠", "虐恋", "重生", "穿越", "暗恋", "破镜重圆", "先婚后爱"],
 }
 
 # 素材阶段键（人设、梗、节奏）
@@ -230,11 +230,11 @@ def normalize_expert_draft_from_storage(raw: Any | None) -> dict[str, Any]:
 
 
 def is_workspace_short_book(categories: list[str], book_type: str) -> bool:
-    """判断是否为支持工作台的短篇书籍（世情或情感）"""
+    """判断是否为支持工作台的短篇书籍（世情或追妻）"""
     if book_type != "short":
         return False
     cats = set(categories)
-    return bool(cats & {"世情", "现实情感", "情感"})
+    return bool(cats & {"世情", "追妻", "现实情感", "情感"})
 
 
 def is_shiqing_short_book(categories: list[str], book_type: str) -> bool:
@@ -246,14 +246,14 @@ def is_shiqing_short_book(categories: list[str], book_type: str) -> bool:
 
 def is_qinggan_short_book(categories: list[str], book_type: str) -> bool:
     """
-    判断是否为情感短篇（用于提示词选择）
-    现实情感或「情感」分类；与世情并存时以世情为准
+    判断是否为追妻短篇（用于提示词选择）
+    追妻或旧名称「现实情感」「情感」分类；与世情并存时以世情为准
     """
     if book_type != "short":
         return False
     if "世情" in categories:
         return False
-    return ("现实情感" in categories) or ("情感" in categories)
+    return ("追妻" in categories) or ("现实情感" in categories) or ("情感" in categories)
 
 
 def primary_draft_stage_key(book: "Book") -> str:

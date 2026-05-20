@@ -307,7 +307,7 @@ class Api:
         Args:
             title: 素材标题
             material_type: 素材类型，'long' 或 'short'
-            parent_genre: 父分类，短篇时为 '世情' 或 '情感'
+            parent_genre: 父分类，短篇时为 '世情' 或 '追妻'
             sub_genre: 子分类，如 '家庭'、'甜宠' 等
             workspace_root: 工作区根目录
         """

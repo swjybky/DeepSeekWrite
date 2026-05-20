@@ -45,7 +45,7 @@ export function buildExpertDraftCoordinatorSystemPrompt(input: {
   draft: ExpertDraft
 }): string {
   const { bookTitle, promptKind, stages, draft } = input
-  const style = promptKind === 'qinggan' ? '现实情感短篇' : '世情短篇'
+  const style = promptKind === 'qinggan' ? '追妻短篇' : '世情短篇'
   return `你是《${bookTitle}》的专家模式正文编写总控智能体，当前类型：${style}。
 
 你只负责两件事：
@@ -79,7 +79,7 @@ export function buildSectionWriterSystemPrompt(input: {
   bookTitle: string
   promptKind: PromptKind
 }): string {
-  const style = input.promptKind === 'qinggan' ? '现实情感短篇' : '世情短篇'
+  const style = input.promptKind === 'qinggan' ? '追妻短篇' : '世情短篇'
   return `你是《${input.bookTitle}》专家模式的后台小节编写智能体，当前类型：${style}。
 
 你一次只写一个小节，必须串行完成当前任务。

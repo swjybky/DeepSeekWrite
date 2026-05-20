@@ -152,7 +152,7 @@ export function normalizeExpertDraft(
 }
 
 /** 短篇可选分类（可扩展） */
-export const SHORT_GENRE_OPTIONS = ['世情', '现实情感'] as const
+export const SHORT_GENRE_OPTIONS = ['世情', '追妻'] as const
 
 /** 获取统一阶段列表（所有短篇书籍使用同一套阶段） */
 export function resolveWorkspaceStagesForBook(
@@ -247,14 +247,30 @@ export const MATERIAL_STAGE_LABELS: Record<MaterialStageId, string> = {
 
 export const SHORT_MATERIAL_GENRES: Record<string, string[]> = {
   '世情': ['家庭', '职场', '婚恋', '邻里', '亲子', '继承', '养老'],
-  '情感': ['甜宠', '虐恋', '重生', '穿越', '暗恋', '破镜重圆', '先婚后爱'],
+  '追妻': ['甜宠', '虐恋', '重生', '穿越', '暗恋', '破镜重圆', '先婚后爱'],
+}
+
+/** 素材大分类兼容映射（旧名称 → 新名称） */
+const MATERIAL_GENRE_COMPAT: Record<string, string> = {
+  '现实情感': '追妻',
+  '情感': '追妻',
+}
+
+/** 将旧素材大分类名称映射为新名称 */
+export function resolveMaterialParentGenre(genre: string): string {
+  return MATERIAL_GENRE_COMPAT[genre] || genre
+}
+
+/** 获取指定大分类下的子分类（兼容旧名称） */
+export function getMaterialSubGenres(genre: string): string[] {
+  return SHORT_MATERIAL_GENRES[resolveMaterialParentGenre(genre)] || []
 }
 
 export interface MaterialSummary {
   id: string
   title: string
   material_type: MaterialType
-  parent_genre?: string  // 世情/情感（仅short时有效）
+  parent_genre?: string  // 世情/追妻（仅short时有效）
   sub_genre?: string     // 子分类
   output_dir?: string
 }

@@ -536,7 +536,7 @@ export function BookEditor() {
         <div className="editor-pending-main">
           <p className="editor-pending-title">该类型工作台开发中</p>
           <p className="muted editor-pending-desc">
-            当前仅「短篇 · 世情」或「短篇 · 情感 / 现实情感」可使用完整写作台与 AI
+            当前仅「短篇 · 世情」或「短篇 · 追妻」可使用完整写作台与 AI
             协作；其余组合仍在扩展中。
           </p>
           <Link className="btn-pending-home" to="/">
