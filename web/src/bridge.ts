@@ -28,6 +28,12 @@ export {
   resolvePromptKind,
 }
 
+// ==================== 素材提示词类型 ====================
+export type MaterialPromptKind =
+  | 'material_long'
+  | 'material_short_shiqing'
+  | 'material_short_qinggan'
+
 // 统一阶段ID类型
 export type StageId = ShortStageId
 
@@ -239,6 +245,26 @@ declare global {
         ): Promise<Material | null>
         delete_material(material_id: string): Promise<boolean>
         get_material_genres(): Promise<Record<string, string[]>>
+
+        // ==================== 素材库提示词 API ====================
+        get_material_system_prompt(
+          material_kind: string,
+          stage_id: string,
+          context_json: string,
+        ): Promise<string>
+        read_material_prompt_template(
+          material_kind: string,
+          stage_id: string,
+        ): Promise<string>
+        save_material_prompt_override(
+          material_kind: string,
+          stage_id: string,
+          body: string,
+        ): Promise<void>
+        reset_material_prompt_override(
+          material_kind: string,
+          stage_id: string,
+        ): Promise<boolean>
       }
     }
   }
@@ -738,6 +764,99 @@ export async function getMaterialGenres(): Promise<Record<string, string[]>> {
   const api = await getBridgeApi()
   if (api?.get_material_genres) return api.get_material_genres()
   return mockGetMaterialGenres()
+}
+
+// ==================== 素材提示词 Bridge 函数 ====================
+
+export async function getMaterialSystemPrompt(
+  promptKind: MaterialPromptKind,
+  stageId: MaterialStageId,
+  input: {
+    materialTitle: string
+    stageBody: string
+    allStages: Partial<Record<MaterialStageId, string>>
+  },
+): Promise<string> {
+  const stagesObj: Record<string, string> = {}
+  for (const [k, v] of Object.entries(input.allStages ?? {})) {
+    stagesObj[k] = String(v ?? '')
+  }
+
+  const api = await getBridgeApi()
+  if (api?.get_material_system_prompt) {
+    return api.get_material_system_prompt(
+      promptKind,
+      stageId,
+      JSON.stringify({
+        book_title: input.materialTitle,
+        stage_body: input.stageBody,
+        all_stages: stagesObj,
+      }),
+    )
+  }
+
+  const raw = await readMaterialPromptTemplate(promptKind, stageId)
+  return renderPromptFromTemplateRaw(raw, {
+    bookTitle: input.materialTitle,
+    stageBody: input.stageBody,
+    allStages: input.allStages as Partial<Record<StageId, string>>,
+    promptKind: promptKind as unknown as PromptKind,
+    stageId: stageId as unknown as StageId,
+  })
+}
+
+export async function readMaterialPromptTemplate(
+  promptKind: MaterialPromptKind,
+  stageId: MaterialStageId,
+): Promise<string> {
+  const api = await getBridgeApi()
+  if (api?.read_material_prompt_template) {
+    const t = await api.read_material_prompt_template(promptKind, stageId)
+    return t.endsWith('\n') ? t.slice(0, -1) : t
+  }
+  try {
+    const ls = localStorage.getItem(localPromptLsKey(promptKind, stageId))
+    if (ls != null && ls.trim() !== '')
+      return ls.endsWith('\n') ? ls.slice(0, -1) : ls
+  } catch {
+    /* ignore */
+  }
+  return getEmbeddedPromptTemplate(promptKind, stageId)
+}
+
+export async function saveMaterialPromptOverride(
+  promptKind: MaterialPromptKind,
+  stageId: MaterialStageId,
+  body: string,
+): Promise<void> {
+  const api = await getBridgeApi()
+  if (api?.save_material_prompt_override) {
+    await api.save_material_prompt_override(promptKind, stageId, body)
+    return
+  }
+  try {
+    localStorage.setItem(localPromptLsKey(promptKind, stageId), body)
+  } catch {
+    console.warn('[涌泉] 无法保存素材提示词覆盖：无桌面桥接且无可用 localStorage')
+  }
+}
+
+export async function resetMaterialPromptOverride(
+  promptKind: MaterialPromptKind,
+  stageId: MaterialStageId,
+): Promise<boolean> {
+  const api = await getBridgeApi()
+  if (api?.reset_material_prompt_override) {
+    return api.reset_material_prompt_override(promptKind, stageId)
+  }
+  try {
+    const k = localPromptLsKey(promptKind, stageId)
+    const had = localStorage.getItem(k) != null
+    localStorage.removeItem(k)
+    return had
+  } catch {
+    return false
+  }
 }
 
 const PROMPT_TEMPLATE_LS_PREFIX = 'write_claw_prompt_template_override:'

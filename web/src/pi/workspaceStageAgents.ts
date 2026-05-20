@@ -1,10 +1,14 @@
 import type { AgentTool } from '@mariozechner/pi-agent-core'
 
-import type { Material, StageId, PromptKind } from '../bridge'
+import type { Material, StageId, PromptKind, MaterialPromptKind, MaterialStageId } from '../bridge'
 import {
   buildShortWorkspaceAdditionalTools,
   type ShortWorkspaceStageAgentContext,
 } from '../workspaces/short/stageAgents'
+import {
+  buildMaterialWorkspaceAdditionalTools,
+  type MaterialWorkspaceStageAgentContext,
+} from '../workspaces/material/materialStageAgents'
 
 export type ApplyToStageEditorPayload = {
   text: string
@@ -14,27 +18,37 @@ export type ApplyToStageEditorPayload = {
 
 export type WorkspaceStageAgentContext = {
   bookTitle: string
-  promptKind: PromptKind
-  stageId: StageId
+  promptKind: PromptKind | MaterialPromptKind
+  stageId: StageId | MaterialStageId
   stageBody: string
-  allStages: Partial<Record<StageId, string>>
+  allStages: Partial<Record<StageId | MaterialStageId, string>>
   linkedMaterial?: Material | null
   applyToStageEditor?: (payload: ApplyToStageEditorPayload) => void
 }
 
-/** Pi 工作台工具集；systemPrompt 须由后端 `getWorkspaceSystemPrompt` 单独装配。
- * 统一使用 short/stageAgents 中的工具配置，世情和情感共用同一套工具集，
- * 仅提示词内容区分风格差异。
- */
+/** Pi 工作台工具集；systemPrompt 须由后端单独装配。 */
 export function getWorkspaceStageAdditionalTools(
   ctx: WorkspaceStageAgentContext,
 ): AgentTool[] {
-  // 统一使用新的短篇工作台工具配置
+  // 素材库模式
+  if (ctx.promptKind.startsWith('material_')) {
+    const materialCtx: MaterialWorkspaceStageAgentContext = {
+      materialTitle: ctx.bookTitle,
+      promptKind: ctx.promptKind as MaterialPromptKind,
+      stageId: ctx.stageId as MaterialStageId,
+      stageBody: ctx.stageBody,
+      allStages: ctx.allStages as Partial<Record<MaterialStageId, string>>,
+      applyToStageEditor: ctx.applyToStageEditor,
+    }
+    return buildMaterialWorkspaceAdditionalTools(materialCtx)
+  }
+
+  // 书籍短篇工作台模式
   const narrow: ShortWorkspaceStageAgentContext = {
     bookTitle: ctx.bookTitle,
     stageId: ctx.stageId as ShortWorkspaceStageAgentContext['stageId'],
     stageBody: ctx.stageBody,
-    allStages: ctx.allStages,
+    allStages: ctx.allStages as Partial<Record<ShortWorkspaceStageAgentContext['stageId'], string>>,
     linkedMaterial: ctx.linkedMaterial,
     applyToStageEditor: ctx.applyToStageEditor,
   }

@@ -1,4 +1,4 @@
-import type { StageId, PromptKind } from '../bridge'
+import type { StageId, PromptKind, MaterialStageId, MaterialPromptKind } from '../bridge'
 import { SHORT_WORKSPACE_STAGES } from '../workspaces/short/stages'
 
 const PEEK_EMPTY = '（其它阶段暂无内容）'
@@ -17,21 +17,45 @@ export function excerptText(body: string, maxLen = BODY_CAP): string {
  * 统一使用 SHORT_WORKSPACE_STAGES 作为阶段顺序
  * 世情和情感共用同一套阶段定义
  */
-const ORDER: Record<string, readonly { id: string; label: string }[]> = {
+const BOOK_ORDER: Record<string, readonly { id: string; label: string }[]> = {
   shiqing: SHORT_WORKSPACE_STAGES,
   qinggan: SHORT_WORKSPACE_STAGES,
 }
 
+const MATERIAL_ORDER: Record<string, readonly { id: string; label: string }[]> = {
+  material_long: [
+    { id: 'character', label: '人设素材' },
+    { id: 'gimmick', label: '梗素材' },
+    { id: 'pacing', label: '节奏素材' },
+  ],
+  material_short_shiqing: [
+    { id: 'character', label: '人设素材' },
+    { id: 'gimmick', label: '梗素材' },
+    { id: 'pacing', label: '节奏素材' },
+  ],
+  material_short_qinggan: [
+    { id: 'character', label: '人设素材' },
+    { id: 'gimmick', label: '梗素材' },
+    { id: 'pacing', label: '节奏素材' },
+  ],
+}
+
+function isMaterialPromptKind(kind: string): kind is MaterialPromptKind {
+  return kind.startsWith('material_')
+}
+
 export function peekOtherStagesExcerpt(
-  _promptKind: PromptKind,
-  excludeStageId: StageId,
-  allStages: Partial<Record<StageId, string>>,
+  promptKind: PromptKind | MaterialPromptKind,
+  excludeStageId: StageId | MaterialStageId,
+  allStages: Partial<Record<StageId | MaterialStageId, string>>,
 ): string {
-  const rows = ORDER['shiqing'] // 统一使用同一套阶段
+  const rows = isMaterialPromptKind(promptKind)
+    ? MATERIAL_ORDER[promptKind]
+    : BOOK_ORDER[promptKind]
   if (!rows) return PEEK_EMPTY
   const parts: string[] = []
   for (const row of rows) {
-    const sid = row.id as StageId
+    const sid = row.id as StageId | MaterialStageId
     if (sid === excludeStageId) continue
     const raw = (allStages[sid] ?? '').trim()
     if (!raw.length) continue
@@ -52,9 +76,9 @@ export type PromptRenderPayload = {
   bookTitle: string
   stageBody: string
   otherStagesExcerpt?: string | null
-  promptKind: PromptKind
-  stageId: StageId
-  allStages: Partial<Record<StageId, string>>
+  promptKind: PromptKind | MaterialPromptKind
+  stageId: StageId | MaterialStageId
+  allStages: Partial<Record<StageId | MaterialStageId, string>>
 }
 
 export function substitutePromptPlaceholders(

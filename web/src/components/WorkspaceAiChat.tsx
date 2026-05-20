@@ -3,8 +3,8 @@ import { Agent } from '@mariozechner/pi-agent-core'
 import type { AssistantMessage, Model } from '@mariozechner/pi-ai'
 import { ApiKeyPromptDialog, ChatPanel } from '@mariozechner/pi-web-ui'
 import { memo, useEffect, useRef, useState } from 'react'
-import type { Material, StageId, PromptKind } from '../bridge'
-import { getWorkspaceSystemPrompt } from '../bridge'
+import type { Material, StageId, PromptKind, MaterialStageId, MaterialPromptKind } from '../bridge'
+import { getWorkspaceSystemPrompt, getMaterialSystemPrompt } from '../bridge'
 import { ensurePiAppStorage } from '../pi/setupPiWorkspace'
 import {
   resolveWorkspaceChatModel,
@@ -48,7 +48,7 @@ type MountToolbarOpts = {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any -- pi-ai Model 与 provider 绑定
   loadFlashModel: () => Promise<Model<any>>
   getApplyToStageEditor: () => ApplyToStageEditor | undefined
-  getStageId: () => StageId
+  getStageId: () => StageId | MaterialStageId
   getStageBody: () => string
   getAgentStreaming: () => boolean
   extractAbortRef: { current: AbortController | null }
@@ -159,7 +159,7 @@ function mergeAgentToolsPreservingArtifacts(
 }
 
 type Props = {
-  /** 书籍 id；与 workstation、stageId 一起构成会话 id */
+  /** 书籍/素材 id；与 workstation、stageId 一起构成会话 id */
   sessionBookId: string
   /**
    * 同一阶段内「新建对话」时递增；与 sessionBookId 等一并写入 `sessionId`，并应由上层
@@ -167,13 +167,13 @@ type Props = {
    * @default 0
    */
   sessionEpoch?: number
-  /** 提示词目录：shiqing 或 qinggan，决定加载哪种风格的提示词 */
-  promptKind: PromptKind
+  /** 提示词目录：shiqing / qinggan / material_*，决定加载哪种风格的提示词 */
+  promptKind: PromptKind | MaterialPromptKind
   bookTitle: string
-  stageId: StageId
+  stageId: StageId | MaterialStageId
   stageBody: string
   /** 各阶段全文，用于提示词中的交叉参考 */
-  allStages: Partial<Record<StageId, string>>
+  allStages: Partial<Record<StageId | MaterialStageId, string>>
   /** 当前书籍关联的素材库；前期设计阶段会将其暴露为 AI 工具可读取内容 */
   linkedMaterial?: Material | null
   /**
@@ -192,6 +192,12 @@ type Props = {
    * @default false
    */
   isPaused?: boolean
+  /**
+   * 工作台类型：书籍工作台或素材库工作台。
+   * 素材模式下使用素材提示词管线，且不挂载「写入正文」提取按钮。
+   * @default 'book'
+   */
+  workspaceType?: 'book' | 'material'
 }
 
 function WorkspaceAiChatInner({
@@ -199,6 +205,7 @@ function WorkspaceAiChatInner({
   sessionEpoch = 0,
   promptRevision = 0,
   isPaused = false,
+  workspaceType = 'book',
   ...props
 }: Props) {
   const hostRef = useRef<HTMLDivElement>(null)
@@ -271,15 +278,26 @@ function WorkspaceAiChatInner({
           applyToStageEditor: propsLatestRef.current.applyToStageEditor,
         })
 
-      const systemPromptInitial = await getWorkspaceSystemPrompt(
-        props.promptKind,
-        props.stageId,
-        {
-          bookTitle: props.bookTitle,
-          stageBody: props.stageBody,
-          allStages: props.allStages,
-        },
-      )
+      const systemPromptInitial =
+        workspaceType === 'material'
+          ? await getMaterialSystemPrompt(
+              props.promptKind as MaterialPromptKind,
+              props.stageId as MaterialStageId,
+              {
+                materialTitle: props.bookTitle,
+                stageBody: props.stageBody,
+                allStages: props.allStages as Partial<Record<MaterialStageId, string>>,
+              },
+            )
+          : await getWorkspaceSystemPrompt(
+              props.promptKind as PromptKind,
+              props.stageId as StageId,
+              {
+                bookTitle: props.bookTitle,
+                stageBody: props.stageBody,
+                allStages: props.allStages as Partial<Record<StageId, string>>,
+              },
+            )
       if (cancelled || !hostRef.current) return
 
       const baseSessionId = `write-claw:${props.sessionBookId}:${props.promptKind}:${props.stageId}`
@@ -310,6 +328,7 @@ function WorkspaceAiChatInner({
           agent.state.messages = agent.state.messages.slice()
           const finished = ev.message
           if (
+            workspaceType !== 'material' &&
             finished.role === 'assistant' &&
             !assistantMessageHasToolCalls(finished) &&
             assistantAgentMessageToPlainText(finished)
@@ -400,15 +419,26 @@ function WorkspaceAiChatInner({
     const seq = ++promptPullSeqRef.current
     ;(async () => {
       const p = propsLatestRef.current
-      const nextPrompt = await getWorkspaceSystemPrompt(
-        p.promptKind,
-        p.stageId,
-        {
-          bookTitle: p.bookTitle,
-          stageBody: debouncedBody,
-          allStages: p.allStages,
-        },
-      )
+      const nextPrompt =
+        workspaceType === 'material'
+          ? await getMaterialSystemPrompt(
+              p.promptKind as MaterialPromptKind,
+              p.stageId as MaterialStageId,
+              {
+                materialTitle: p.bookTitle,
+                stageBody: debouncedBody,
+                allStages: p.allStages as Partial<Record<MaterialStageId, string>>,
+              },
+            )
+          : await getWorkspaceSystemPrompt(
+              p.promptKind as PromptKind,
+              p.stageId as StageId,
+              {
+                bookTitle: p.bookTitle,
+                stageBody: debouncedBody,
+                allStages: p.allStages as Partial<Record<StageId, string>>,
+              },
+            )
       if (!agentRef.current || seq !== promptPullSeqRef.current) return
       const agent = agentRef.current
       agent.state.systemPrompt = nextPrompt
@@ -465,6 +495,9 @@ export const WorkspaceAiChat = memo(WorkspaceAiChatInner, (prev, next) => {
 
   // includePiArtifacts 变化需要更新
   if (prev.includePiArtifacts !== next.includePiArtifacts) return false
+
+  // workspaceType 变化需要更新
+  if (prev.workspaceType !== next.workspaceType) return false
 
   if (prev.linkedMaterial?.id !== next.linkedMaterial?.id) return false
   if (prev.linkedMaterial?.updated_at !== next.linkedMaterial?.updated_at) return false

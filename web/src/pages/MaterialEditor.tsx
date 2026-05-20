@@ -4,10 +4,14 @@ import { Link, useParams } from 'react-router-dom'
 import {
   type Material,
   type MaterialStageId,
+  type MaterialPromptKind,
   MATERIAL_STAGE_LABELS,
   normalizeMaterialStages,
   getMaterial,
   saveMaterial,
+  readMaterialPromptTemplate,
+  saveMaterialPromptOverride,
+  resetMaterialPromptOverride,
 } from '../bridge'
 import { WorkspaceAiChat } from '../components/WorkspaceAiChat'
 import type { ApplyToStageEditorPayload } from '../pi/workspaceStageAgents'
@@ -24,6 +28,12 @@ const WORKSPACE_COL_L = 18
 const WORKSPACE_COL_R = 36
 const WORKSPACE_COL_SUM = 18 + 36 + 36
 const EDITOR_MIN_FOR_LAYOUT = 160
+
+function resolveMaterialPromptKind(material: Material): MaterialPromptKind {
+  if (material.material_type === 'long') return 'material_long'
+  if (material.parent_genre === '世情') return 'material_short_shiqing'
+  return 'material_short_qinggan'
+}
 
 function usableWidthLessSplitter(viewportWidth: number): number {
   return Math.max(0, viewportWidth - WORKSPACE_SPLITTER_W)
@@ -92,6 +102,11 @@ export function MaterialEditor() {
   const tokenBufferRafRef = useRef<number | null>(null)
   const stagesRef = useRef<Record<MaterialStageId, string>>(stages)
   const [isStreaming, setIsStreaming] = useState(false)
+  const [promptEditorOpen, setPromptEditorOpen] = useState(false)
+  const [promptDraft, setPromptDraft] = useState('')
+  const [promptEditorLoading, setPromptEditorLoading] = useState(false)
+  const [promptEditorSaving, setPromptEditorSaving] = useState(false)
+  const [promptReloadNonce, setPromptReloadNonce] = useState(0)
 
   useEffect(() => {
     activeStageRef.current = activeStage
@@ -294,6 +309,58 @@ export function MaterialEditor() {
     updateStage(activeStage, () => value)
   }
 
+  const openPromptEditor = async () => {
+    const start = Date.now()
+    const minDelay = 150
+    setPromptEditorLoading(true)
+    try {
+      const promptKind = material ? resolveMaterialPromptKind(material) : 'material_long'
+      const t = await readMaterialPromptTemplate(promptKind, activeStage)
+      const elapsed = Date.now() - start
+      if (elapsed < minDelay) {
+        await new Promise((r) => setTimeout(r, minDelay - elapsed))
+      }
+      setPromptDraft(t)
+      setPromptEditorOpen(true)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : '无法加载提示词模板')
+    } finally {
+      setPromptEditorLoading(false)
+    }
+  }
+
+  const savePromptTemplateEdit = async () => {
+    if (!material) return
+    setPromptEditorSaving(true)
+    setError(null)
+    try {
+      const promptKind = resolveMaterialPromptKind(material)
+      await saveMaterialPromptOverride(promptKind, activeStage, promptDraft)
+      setPromptReloadNonce((n) => n + 1)
+      setPromptEditorOpen(false)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : '保存提示词失败')
+    } finally {
+      setPromptEditorSaving(false)
+    }
+  }
+
+  const resetPromptTemplateToBuiltin = async () => {
+    if (!material) return
+    setPromptEditorSaving(true)
+    try {
+      const promptKind = resolveMaterialPromptKind(material)
+      await resetMaterialPromptOverride(promptKind, activeStage)
+      const t = await readMaterialPromptTemplate(promptKind, activeStage)
+      setPromptDraft(t)
+      setPromptReloadNonce((n) => n + 1)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : '重置提示词失败')
+    } finally {
+      setPromptEditorSaving(false)
+    }
+  }
+
   if (!id) {
     return (
       <div className="editor-wrap">
@@ -482,6 +549,16 @@ export function MaterialEditor() {
               <div className="workspace-ai-header-actions">
                 <button
                   type="button"
+                  className="workspace-ai-prompt-edit"
+                  aria-label={`编辑提示词模板：${MATERIAL_STAGE_LABELS[activeStage]}`}
+                  title="编辑当前阶段素材库系统提示词模板（占位符在后端替换）"
+                  disabled={promptEditorLoading}
+                  onClick={() => void openPromptEditor()}
+                >
+                  {promptEditorLoading ? '加载…' : '编辑提示词'}
+                </button>
+                <button
+                  type="button"
                   className="workspace-ai-new-chat"
                   aria-label="清空当前阶段 AI 对话并开始新会话"
                   title="仅影响当前阶段对应的助手会话"
@@ -534,15 +611,16 @@ export function MaterialEditor() {
                     <WorkspaceAiChat
                       sessionBookId={material.id}
                       sessionEpoch={epoch}
-                      promptKind={material.material_type === 'short' && material.parent_genre === '世情' ? 'shiqing' : 'qinggan'}
+                      promptKind={resolveMaterialPromptKind(material)}
                       bookTitle={material.title}
-                      stageId={stageId as unknown as import('../bridge').StageId}
+                      stageId={stageId}
                       stageBody={stages[stageId] ?? ''}
-                      allStages={(isActive ? stages : {}) as unknown as Partial<Record<import('../bridge').StageId, string>>}
+                      allStages={isActive ? stages : {}}
                       includePiArtifacts={WORKSPACE_AI_INCLUDE_PI_ARTIFACTS}
-                      promptRevision={0}
+                      promptRevision={isActive ? promptReloadNonce : 0}
                       applyToStageEditor={applyToStageEditor}
                       isPaused={!isActive}
+                      workspaceType="material"
                     />
                   </div>
                 )
@@ -550,6 +628,77 @@ export function MaterialEditor() {
             </div>
           ) : null}
         </aside>
+
+        {promptEditorOpen ? (
+          <div
+            className="workspace-prompt-editor-backdrop"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="wc-prompt-editor-title"
+          >
+            <div className="workspace-prompt-editor-panel">
+              <div className="workspace-prompt-editor-head">
+                <h2 id="wc-prompt-editor-title" className="workspace-prompt-editor-title">
+                  {material?.material_type === 'short'
+                    ? `短篇素材 · ${material?.parent_genre || ''}`
+                    : '长篇素材'}
+                  {' · '}
+                  {MATERIAL_STAGE_LABELS[activeStage]}
+                </h2>
+                <button
+                  type="button"
+                  className="workspace-prompt-editor-close"
+                  aria-label="关闭"
+                  disabled={promptEditorSaving}
+                  onClick={() => setPromptEditorOpen(false)}
+                >
+                  ×
+                </button>
+              </div>
+              <p className="workspace-prompt-editor-hint muted">
+                {'模板占位写法示例（各占一行）：'}
+                <span className="workspace-prompt-editor-code">
+                  {'{{BOOK_TITLE}} {{BOOK_LINE}} {{OTHER_STAGES_EXCERPT}} {{STAGE_BODY}}'}
+                </span>
+                {' 。保存后立即作用于当前工作台阶段。'}
+              </p>
+              <textarea
+                className="workspace-prompt-editor-area"
+                value={promptDraft}
+                spellCheck={false}
+                disabled={promptEditorSaving}
+                onChange={(e) => setPromptDraft(e.target.value)}
+              />
+              <div className="workspace-prompt-editor-foot">
+                <button
+                  type="button"
+                  className="btn-prompt-secondary"
+                  disabled={promptEditorSaving}
+                  onClick={() => void resetPromptTemplateToBuiltin()}
+                >
+                  恢复内置默认
+                </button>
+                <div className="workspace-prompt-editor-foot-gap" />
+                <button
+                  type="button"
+                  className="btn-prompt-cancel"
+                  disabled={promptEditorSaving}
+                  onClick={() => setPromptEditorOpen(false)}
+                >
+                  取消
+                </button>
+                <button
+                  type="button"
+                  className="btn-prompt-save"
+                  disabled={promptEditorSaving}
+                  onClick={() => void savePromptTemplateEdit()}
+                >
+                  {promptEditorSaving ? '保存中…' : '保存'}
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : null}
       </div>
     </div>
   )

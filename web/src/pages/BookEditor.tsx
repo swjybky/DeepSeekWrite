@@ -692,6 +692,12 @@ export function BookEditor() {
             <span className="workspace-ai-header-title">AI 助手</span>
             {book ? (
               <div className="workspace-ai-header-actions">
+                <span
+                  className="workspace-ai-material-name"
+                  title={linkedMaterial ? `已关联：${linkedMaterial.title}` : '未关联素材库'}
+                >
+                  {linkedMaterial ? linkedMaterial.title : '未关联素材'}
+                </span>
                 <button
                   type="button"
                   className={

@@ -67,7 +67,7 @@ def load_ai_model_defaults() -> dict[str, str] | None:
     main_raw = (data.get("model_name_main") or data.get("model_name") or "").strip()
     flash_raw = (data.get("model_name_flash") or "").strip()
     api_key = (data.get("model_api_key") or "").strip()
-    source = (data.get("model_source") or data.get("mdoel_source") or "").strip().lower()
+    source = (data.get("model_source") or "").strip().lower()
     if not main_raw or not api_key or not source:
         return None
     model_name = _normalize_xiaomi_model_id(source, main_raw)
