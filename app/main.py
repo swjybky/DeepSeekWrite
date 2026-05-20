@@ -271,12 +271,14 @@ class Api:
         content: str | None = None,
         stages: dict | None = None,
         linked_material_id: str | None = None,
+        expert_draft: dict | None = None,
     ) -> dict | None:
         return self._store.save_book(
             book_id,
             content=content,
             stages=stages,
             linked_material_id=linked_material_id,
+            expert_draft=expert_draft,
         )
 
     def delete_book(self, book_id: str) -> bool:

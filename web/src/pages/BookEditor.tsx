@@ -6,8 +6,10 @@ import {
   resetWorkspacePromptOverride,
   saveWorkspacePromptOverride,
   type Book,
+  type ExpertDraft,
   type StageId,
   mergeStagePatchIntoAll,
+  normalizeExpertDraft,
   normalizeStagesForWorkspaceBook,
   resolveWorkspaceStagesForBook,
   resolvePromptKind,
@@ -23,6 +25,12 @@ import {
 } from '../bridge'
 import { WorkspaceAiChat } from '../components/WorkspaceAiChat'
 import type { ApplyToStageEditorPayload } from '../pi/workspaceStageAgents'
+import { ExpertDraftAiChat } from '../workspaces/short/expertDraft/ExpertDraftAiChat'
+import { ExpertDraftEditor } from '../workspaces/short/expertDraft/ExpertDraftEditor'
+import {
+  runExpertDraftSectionWriter,
+  type RunExpertDraftSectionWriterOptions,
+} from '../workspaces/short/expertDraft/sectionWriter'
 import './BookEditor.css'
 
 /** 空 stages 对象，用于非激活阶段的稳定引用，避免不必要的重渲染 */
@@ -104,6 +112,9 @@ export function BookEditor() {
   const [stages, setStages] = useState<Record<StageId, string>>(() =>
     normalizeStagesForWorkspaceBook({ book_type: 'short', categories: ['世情'] }, {}),
   )
+  const [expertDraft, setExpertDraftState] = useState<ExpertDraft>(() =>
+    normalizeExpertDraft(null),
+  )
   const [activeStage, setActiveStage] = useState<StageId>('intro_design')
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -127,6 +138,7 @@ export function BookEditor() {
   const [aiChatEpochByStage, setAiChatEpochByStage] = useState<
     Partial<Record<StageId, number>>
   >({})
+  const [expertAiChatEpoch, setExpertAiChatEpoch] = useState(0)
   const splitDragRef = useRef<{ startX: number; startWidth: number } | null>(
     null,
   )
@@ -140,8 +152,15 @@ export function BookEditor() {
   const tokenBufferRafRef = useRef<number | null>(null)
   /** 最新 stages 的 ref，用于流式写入时读取当前值 */
   const stagesRef = useRef<Record<StageId, string>>(EMPTY_STAGES)
+  /** 最新专家模式正文结构，用于后台小节智能体读取和写入 */
+  const expertDraftRef = useRef<ExpertDraft>(normalizeExpertDraft(null))
+  const expertRunAbortRef = useRef<AbortController | null>(null)
+  const expertRunPromiseRef = useRef<Promise<void> | null>(null)
   /** 正在流式输出时禁用用户输入（设为只读） */
   const [isStreaming, setIsStreaming] = useState(false)
+  const currentPromptKind: PromptKind = book
+    ? resolvePromptKind(book) ?? 'shiqing'
+    : 'shiqing'
 
   useEffect(() => {
     activeStageRef.current = activeStage
@@ -152,14 +171,30 @@ export function BookEditor() {
     stagesRef.current = stages
   }, [stages])
 
+  useEffect(() => {
+    expertDraftRef.current = expertDraft
+  }, [expertDraft])
+
   // 清理 RAF
   useEffect(() => {
     return () => {
       if (tokenBufferRafRef.current) {
         cancelAnimationFrame(tokenBufferRafRef.current)
       }
+      expertRunAbortRef.current?.abort()
     }
   }, [])
+
+  const updateExpertDraft = useCallback(
+    (updater: (current: ExpertDraft) => ExpertDraft) => {
+      setExpertDraftState((prev) => {
+        const next = normalizeExpertDraft(updater(prev))
+        expertDraftRef.current = next
+        return next
+      })
+    },
+    [],
+  )
 
   // 细粒度的阶段更新函数（使用函数式更新避免不必要的重渲染）
   const updateStage = useCallback(
@@ -304,7 +339,12 @@ export function BookEditor() {
       }
       const rows = resolveWorkspaceStagesForBook(b)
       const normalized = normalizeStagesForWorkspaceBook(b, b.stages)
+      const normalizedExpertDraft = normalizeExpertDraft(b.expert_draft, true)
       setStages(normalized)
+      expertDraftRef.current = normalizedExpertDraft
+      setExpertDraftState(normalizedExpertDraft)
+      setExpertMode(false)
+      setExpertAiChatEpoch(0)
       setActiveStage(rows[0]!.id)
     } catch (e) {
       setError(e instanceof Error ? e.message : '加载失败')
@@ -336,13 +376,16 @@ export function BookEditor() {
         flushTokenBuffer()
       }
       const merged = mergeStagePatchIntoAll(book.stages, stages)
-      const next = await saveBook(id, { stages: merged })
+      const next = await saveBook(id, { stages: merged, expert_draft: expertDraft })
       if (!next) {
         setError('保存失败：书籍不存在')
         return
       }
       setBook(next)
       setStages(normalizeStagesForWorkspaceBook(next, next.stages))
+      const normalizedExpertDraft = normalizeExpertDraft(next.expert_draft)
+      expertDraftRef.current = normalizedExpertDraft
+      setExpertDraftState(normalizedExpertDraft)
       setMessage('已保存')
       window.setTimeout(() => setMessage(null), 2000)
     } catch (e) {
@@ -351,7 +394,79 @@ export function BookEditor() {
       saveInFlightRef.current = false
       setSaving(false)
     }
-  }, [id, book, stages, flushTokenBuffer])
+  }, [id, book, stages, expertDraft, flushTokenBuffer])
+
+  const startExpertWriting = useCallback(
+    (
+      sectionIds: string[],
+      callbacks?: Pick<
+        RunExpertDraftSectionWriterOptions,
+        'onSectionAgentStart' | 'onRunFinish'
+      >,
+    ) => {
+      if (!book || expertRunPromiseRef.current || expertDraftRef.current.running) {
+        return false
+      }
+      const available = new Set(expertDraftRef.current.sections.map((s) => s.id))
+      const ids = sectionIds
+        .map((sid) => sid.trim())
+        .filter((sid) => sid && available.has(sid))
+      if (ids.length === 0) return false
+
+      const ac = new AbortController()
+      expertRunAbortRef.current = ac
+      updateExpertDraft((draft) => ({
+        ...draft,
+        running: true,
+        active_section_id: ids[0] ?? '',
+      }))
+
+      const run = runExpertDraftSectionWriter({
+        bookId: book.id,
+        bookTitle: book.title,
+        promptKind: currentPromptKind,
+        sectionIds: ids,
+        getDraft: () => expertDraftRef.current,
+        getWorkspaceStages: () => stagesRef.current,
+        updateDraft: updateExpertDraft,
+        signal: ac.signal,
+        onError: setError,
+        onSectionAgentStart: callbacks?.onSectionAgentStart,
+        onRunFinish: callbacks?.onRunFinish,
+      })
+        .catch((e: unknown) => {
+          if (ac.signal.aborted) return
+          setError(e instanceof Error ? e.message : '专家模式后台写作失败')
+        })
+        .finally(() => {
+          if (expertRunPromiseRef.current === run) {
+            expertRunPromiseRef.current = null
+            expertRunAbortRef.current = null
+            updateExpertDraft((draft) => ({
+              ...draft,
+              running: false,
+              active_section_id: '',
+            }))
+          }
+        })
+
+      expertRunPromiseRef.current = run
+      void run
+      return true
+    },
+    [book, currentPromptKind, updateExpertDraft],
+  )
+
+  const stopExpertWriting = useCallback(() => {
+    const controller = expertRunAbortRef.current
+    if (!controller || controller.signal.aborted) return
+    controller.abort()
+    updateExpertDraft((draft) => ({
+      ...draft,
+      running: false,
+      active_section_id: '',
+    }))
+  }, [updateExpertDraft])
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
@@ -442,8 +557,9 @@ export function BookEditor() {
   }
 
   const railStages = resolveWorkspaceStagesForBook(book)
-  const promptKind: PromptKind = resolvePromptKind(book) ?? 'shiqing'
+  const promptKind: PromptKind = currentPromptKind
   const stageBody = stages[activeStage] ?? ''
+  const expertDraftActive = expertMode && activeStage === 'draft'
 
   const openPromptEditor = async () => {
     const start = Date.now()
@@ -596,34 +712,44 @@ export function BookEditor() {
         </nav>
 
         <div className="workspace-editor-pane">
-          <div className="workspace-stage-heading">
-            <label className="workspace-stage-label" htmlFor="stage-body">
-              {railStages.find((s) => s.id === activeStage)?.label}
-            </label>
-            <span
-              className="workspace-char-count muted"
-              aria-live="polite"
-              title={`不含空白字数 ${stageCharNonSpace.toLocaleString('zh-CN')}；总字符（含空格与换行）${stageCharTotal.toLocaleString('zh-CN')}`}
-            >
-              {stageCharNonSpace.toLocaleString('zh-CN')} 字
-              <span className="workspace-char-count-sep" aria-hidden>
-                {' · '}
-              </span>
-              <span className="workspace-char-count-detail">
-                {stageCharTotal.toLocaleString('zh-CN')} 字符
-              </span>
-            </span>
-          </div>
-          <textarea
-            id="stage-body"
-            ref={textareaRef}
-            className="editor-body workspace-textarea"
-            value={stageBody}
-            onChange={(e) => handleStageBodyChange(e.target.value)}
-            placeholder="在此编辑当前阶段内容…"
-            spellCheck={false}
-            readOnly={isStreaming}
-          />
+          {expertDraftActive ? (
+            <ExpertDraftEditor
+              draft={expertDraft}
+              updateDraft={updateExpertDraft}
+              stopWriting={stopExpertWriting}
+            />
+          ) : (
+            <>
+              <div className="workspace-stage-heading">
+                <label className="workspace-stage-label" htmlFor="stage-body">
+                  {railStages.find((s) => s.id === activeStage)?.label}
+                </label>
+                <span
+                  className="workspace-char-count muted"
+                  aria-live="polite"
+                  title={`不含空白字数 ${stageCharNonSpace.toLocaleString('zh-CN')}；总字符（含空格与换行）${stageCharTotal.toLocaleString('zh-CN')}`}
+                >
+                  {stageCharNonSpace.toLocaleString('zh-CN')} 字
+                  <span className="workspace-char-count-sep" aria-hidden>
+                    {' · '}
+                  </span>
+                  <span className="workspace-char-count-detail">
+                    {stageCharTotal.toLocaleString('zh-CN')} 字符
+                  </span>
+                </span>
+              </div>
+              <textarea
+                id="stage-body"
+                ref={textareaRef}
+                className="editor-body workspace-textarea"
+                value={stageBody}
+                onChange={(e) => handleStageBodyChange(e.target.value)}
+                placeholder="在此编辑当前阶段内容…"
+                spellCheck={false}
+                readOnly={isStreaming}
+              />
+            </>
+          )}
         </div>
 
         <div
@@ -711,45 +837,63 @@ export function BookEditor() {
                 >
                   素材库选择
                 </button>
-                <button
-                  type="button"
-                  className={expertMode ? 'workspace-ai-expert-mode workspace-ai-expert-mode--active' : 'workspace-ai-expert-mode'}
-                  aria-label={expertMode ? '退出专家模式' : '进入专家模式'}
-                  title="切换专家模式"
-                  onClick={() => setExpertMode((v) => !v)}
-                >
-                  专家模式
-                </button>
-                <button
-                  type="button"
-                  className="workspace-ai-prompt-edit"
-                  aria-label={`编辑提示词模板：${railStages.find((s) => s.id === activeStage)?.label}`}
-                  title="编辑当前阶段工作台系统提示词模板（占位符在后端替换）"
-                  disabled={promptEditorLoading}
-                  onClick={() => void openPromptEditor()}
-                >
-                  {promptEditorLoading ? '加载…' : '编辑提示词'}
-                </button>
-                <button
-                  type="button"
-                  className="workspace-ai-new-chat"
-                  aria-label="清空当前阶段 AI 对话并开始新会话"
-                  title="仅影响当前左侧阶段对应的助手会话，其他阶段各有一份独立历史"
-                  onClick={() =>
-                    setAiChatEpochByStage((prev) => ({
-                      ...prev,
-                      [activeStage]: (prev[activeStage] ?? 0) + 1,
-                    }))
-                  }
-                >
-                  新建对话
-                </button>
+                {activeStage === 'draft' ? (
+                  <button
+                    type="button"
+                    className={expertMode ? 'workspace-ai-expert-mode workspace-ai-expert-mode--active' : 'workspace-ai-expert-mode'}
+                    aria-label={expertMode ? '退出专家模式' : '进入专家模式'}
+                    title="切换专家模式"
+                    onClick={() => setExpertMode((v) => !v)}
+                  >
+                    专家模式
+                  </button>
+                ) : null}
+                {expertDraftActive ? (
+                  <button
+                    type="button"
+                    className="workspace-ai-new-chat"
+                    aria-label="清空专家模式主智能体对话并开始新会话"
+                    title="仅清空专家模式右侧主智能体上下文，不影响后台小节编写任务"
+                    disabled={expertDraft.running}
+                    onClick={() => setExpertAiChatEpoch((epoch) => epoch + 1)}
+                  >
+                    新建对话
+                  </button>
+                ) : (
+                  <>
+                    <button
+                      type="button"
+                      className="workspace-ai-prompt-edit"
+                      aria-label={`编辑提示词模板：${railStages.find((s) => s.id === activeStage)?.label}`}
+                      title="编辑当前阶段工作台系统提示词模板（占位符在后端替换）"
+                      disabled={promptEditorLoading}
+                      onClick={() => void openPromptEditor()}
+                    >
+                      {promptEditorLoading ? '加载…' : '编辑提示词'}
+                    </button>
+                    <button
+                      type="button"
+                      className="workspace-ai-new-chat"
+                      aria-label="清空当前阶段 AI 对话并开始新会话"
+                      title="仅影响当前左侧阶段对应的助手会话，其他阶段各有一份独立历史"
+                      onClick={() =>
+                        setAiChatEpochByStage((prev) => ({
+                          ...prev,
+                          [activeStage]: (prev[activeStage] ?? 0) + 1,
+                        }))
+                      }
+                    >
+                      新建对话
+                    </button>
+                  </>
+                )}
               </div>
             ) : null}
           </div>
           <div className="workspace-ai-hint muted">
             上下文：本书 ·{' '}
             {railStages.find((s) => s.id === activeStage)?.label}
+            {expertDraftActive ? ' · 专家模式' : ''}
             {' · '}
             类型：{book?.categories.join('、') || '未分类'}
             {linkedMaterial ? ` · 素材：${linkedMaterial.title}` : ' · 未关联素材'}
@@ -764,7 +908,7 @@ export function BookEditor() {
                   epoch > 0
                     ? `${book.id}-${promptKind}-${s.id}-${epoch}`
                     : `${book.id}-${promptKind}-${s.id}`
-                const isActive = activeStage === s.id
+                const isActive = activeStage === s.id && !expertDraftActive
                 return (
                   <div
                     key={layerKey}
@@ -807,6 +951,39 @@ export function BookEditor() {
                   </div>
                 )
               })}
+              <div
+                key={`${book.id}-expert-draft`}
+                className={
+                  expertDraftActive
+                    ? 'workspace-ai-chat-layer workspace-ai-chat-layer--active'
+                    : 'workspace-ai-chat-layer'
+                }
+                aria-hidden={!expertDraftActive}
+                style={
+                  expertDraftActive
+                    ? undefined
+                    : {
+                        position: 'absolute',
+                        opacity: 0,
+                        pointerEvents: 'none',
+                        width: 0,
+                        height: 0,
+                        overflow: 'hidden',
+                      }
+                }
+              >
+                <ExpertDraftAiChat
+                  key={`${book.id}-${promptKind}-expert-draft-${expertAiChatEpoch}`}
+                  bookId={book.id}
+                  bookTitle={book.title}
+                  promptKind={promptKind}
+                  sessionEpoch={expertAiChatEpoch}
+                  stages={stages}
+                  expertDraft={expertDraft}
+                  updateDraft={updateExpertDraft}
+                  startWriting={startExpertWriting}
+                />
+              </div>
             </div>
           ) : null}
         </aside>

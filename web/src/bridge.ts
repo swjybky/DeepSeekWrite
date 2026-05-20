@@ -40,6 +40,117 @@ export type StageId = ShortStageId
 // 导出统一阶段定义
 export const WORKSPACE_STAGES = SHORT_WORKSPACE_STAGES
 
+export interface ExpertDraftSection {
+  id: string
+  title: string
+  body: string
+}
+
+export interface ExpertDraftCharacterState {
+  section_id: string
+  title: string
+  body: string
+}
+
+export interface ExpertDraft {
+  sections: ExpertDraftSection[]
+  character_states: ExpertDraftCharacterState[]
+  running: boolean
+  active_section_id?: string
+}
+
+export function defaultExpertDraft(): ExpertDraft {
+  return {
+    sections: [
+      { id: 'intro', title: '导语', body: '' },
+      { id: 'section-1', title: '第一节', body: '' },
+    ],
+    character_states: [
+      { section_id: 'intro', title: '导语人物状态', body: '' },
+      { section_id: 'section-1', title: '第一节人物状态', body: '' },
+    ],
+    running: false,
+    active_section_id: '',
+  }
+}
+
+function defaultExpertCharacterStateTitle(sectionTitle: string): string {
+  return `${sectionTitle.trim() || '小节'}人物状态`
+}
+
+export function normalizeExpertDraft(
+  raw?: Partial<ExpertDraft> | null,
+  resetRuntime = false,
+): ExpertDraft {
+  const base = defaultExpertDraft()
+  if (!raw || typeof raw !== 'object') return base
+
+  const sections: ExpertDraftSection[] = []
+  const seenSectionIds = new Set<string>()
+  if (Array.isArray(raw.sections)) {
+    raw.sections.forEach((item, index) => {
+      if (!item || typeof item !== 'object') return
+      const maybe = item as Partial<ExpertDraftSection>
+      let id = String(maybe.id ?? '').trim()
+      if (!id) id = index === 0 ? 'intro' : `section-${index}`
+      if (seenSectionIds.has(id)) return
+      seenSectionIds.add(id)
+      const title =
+        String(maybe.title ?? '').trim() ||
+        (id === 'intro' ? '导语' : `第${sections.length}节`)
+      sections.push({
+        id,
+        title,
+        body: String(maybe.body ?? ''),
+      })
+    })
+  }
+
+  const normalizedSections = sections.length > 0 ? sections : base.sections
+  const titleById = new Map(normalizedSections.map((s) => [s.id, s.title]))
+  const states: ExpertDraftCharacterState[] = []
+  const seenStateIds = new Set<string>()
+
+  if (Array.isArray(raw.character_states)) {
+    raw.character_states.forEach((item) => {
+      if (!item || typeof item !== 'object') return
+      const maybe = item as Partial<ExpertDraftCharacterState> & { id?: string }
+      const sectionId = String(maybe.section_id ?? maybe.id ?? '').trim()
+      if (!sectionId || seenStateIds.has(sectionId) || !titleById.has(sectionId)) {
+        return
+      }
+      seenStateIds.add(sectionId)
+      const sectionTitle = titleById.get(sectionId) ?? '小节'
+      states.push({
+        section_id: sectionId,
+        title:
+          String(maybe.title ?? '').trim() ||
+          defaultExpertCharacterStateTitle(sectionTitle),
+        body: String(maybe.body ?? ''),
+      })
+    })
+  }
+
+  for (const section of normalizedSections) {
+    if (seenStateIds.has(section.id)) continue
+    states.push({
+      section_id: section.id,
+      title: defaultExpertCharacterStateTitle(section.title),
+      body: '',
+    })
+  }
+
+  const sectionIds = new Set(normalizedSections.map((s) => s.id))
+  const active = String(raw.active_section_id ?? '').trim()
+
+  return {
+    sections: normalizedSections,
+    character_states: states,
+    running: resetRuntime ? false : Boolean(raw.running),
+    active_section_id: active && sectionIds.has(active) ? active : '',
+  }
+}
+
 /** 短篇可选分类（可扩展） */
 export const SHORT_GENRE_OPTIONS = ['世情', '现实情感'] as const
 
@@ -117,6 +228,7 @@ export interface BookSummary {
 export interface Book extends BookSummary {
   content: string
   stages?: Partial<Record<StageId, string>>
+  expert_draft?: ExpertDraft
   created_at?: string
   updated_at?: string
 }
@@ -200,6 +312,7 @@ declare global {
           content?: string | null,
           stages?: Record<string, string> | null,
           linked_material_id?: string | null,
+          expert_draft?: ExpertDraft | null,
         ): Promise<Book | null>
         delete_book(book_id: string): Promise<boolean>
         /** 上次选定的工作文件夹（持久化在应用 .data/preferences.json） */
@@ -413,6 +526,7 @@ async function mockCreateBook(
     output_dir,
     linked_material_id: '',
     stages: normalizeAllBookStages({}),
+    expert_draft: defaultExpertDraft(),
     created_at: now,
     updated_at: now,
   }
@@ -422,7 +536,9 @@ async function mockCreateBook(
 }
 
 async function mockGetBook(book_id: string): Promise<Book | null> {
-  return loadMock().get(book_id) ?? null
+  const book = loadMock().get(book_id) ?? null
+  if (!book) return null
+  return { ...book, expert_draft: normalizeExpertDraft(book.expert_draft) }
 }
 
 async function mockSaveBook(
@@ -431,6 +547,7 @@ async function mockSaveBook(
     content?: string | null
     stages?: Record<string, string> | null
     linked_material_id?: string | null
+    expert_draft?: ExpertDraft | null
   },
 ): Promise<Book | null> {
   const map = loadMock()
@@ -447,6 +564,9 @@ async function mockSaveBook(
   if (options.linked_material_id !== undefined) {
     const mid = options.linked_material_id?.trim() ?? ''
     next = { ...next, linked_material_id: mid && loadMockMaterials().has(mid) ? mid : '' }
+  }
+  if (options.expert_draft != null) {
+    next = { ...next, expert_draft: normalizeExpertDraft(options.expert_draft) }
   }
   map.set(book_id, next)
   saveMock(map)
@@ -681,6 +801,7 @@ export type SaveBookOptions = {
   content?: string | null
   stages?: Record<string, string> | null
   linked_material_id?: string | null
+  expert_draft?: ExpertDraft | null
 }
 
 export async function saveBook(
@@ -699,6 +820,7 @@ export async function saveBook(
       opts.content ?? null,
       opts.stages ?? null,
       opts.linked_material_id ?? undefined,
+      opts.expert_draft ?? undefined,
     )
   }
   return mockSaveBook(book_id, opts)

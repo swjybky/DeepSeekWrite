@@ -368,6 +368,11 @@
   background: color-mix(in oklab, var(--accent) 8%, var(--surface));
 }
 
+.workspace-ai-new-chat:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
 .workspace-ai-new-chat:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
@@ -454,6 +459,191 @@
 .workspace-ai-expert-mode--active:hover {
   background: var(--accent-hover);
   border-color: var(--accent-hover);
+}
+
+.expert-draft-editor {
+  min-height: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.expert-draft-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.expert-draft-heading-main {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.expert-draft-status {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.14rem 0.45rem;
+  border: 1px solid color-mix(in oklab, var(--accent) 34%, var(--border));
+  border-radius: 999px;
+  color: var(--text);
+  background: color-mix(in oklab, var(--accent) 8%, var(--surface));
+  font-size: 0.72rem;
+  font-weight: 500;
+}
+
+.expert-draft-stop {
+  flex-shrink: 0;
+  padding: 0.2rem 0.5rem;
+  border: 1px solid color-mix(in oklab, var(--danger) 48%, var(--border));
+  border-radius: 6px;
+  background: color-mix(in oklab, var(--danger) 8%, var(--surface));
+  color: var(--danger);
+  font-size: 0.72rem;
+  font-weight: 600;
+  line-height: 1.2;
+  cursor: pointer;
+}
+
+.expert-draft-stop:hover {
+  background: color-mix(in oklab, var(--danger) 14%, var(--surface));
+  border-color: var(--danger);
+}
+
+.expert-draft-stop:focus-visible {
+  outline: 2px solid var(--danger);
+  outline-offset: 2px;
+}
+
+.expert-draft-scroll {
+  min-height: 0;
+  flex: 1;
+  display: grid;
+  grid-template-columns: minmax(0, 1.25fr) minmax(220px, 0.85fr);
+  gap: 0.75rem;
+  overflow: auto;
+  padding-right: 0.15rem;
+}
+
+.expert-draft-list {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+}
+
+.expert-draft-list-head {
+  min-height: 2rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.65rem;
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  padding-bottom: 0.25rem;
+  background: var(--bg);
+}
+
+.expert-draft-list-title {
+  margin: 0;
+  color: var(--text-h);
+  font-size: 0.88rem;
+  line-height: 1.2;
+}
+
+.expert-draft-add {
+  flex-shrink: 0;
+  padding: 0.28rem 0.55rem;
+  font-size: 0.75rem;
+  font-weight: 500;
+  line-height: 1.2;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text-h);
+  cursor: pointer;
+}
+
+.expert-draft-add:hover:not(:disabled) {
+  border-color: color-mix(in oklab, var(--accent) 45%, var(--border));
+  background: color-mix(in oklab, var(--accent) 8%, var(--surface));
+}
+
+.expert-draft-add:disabled {
+  opacity: 0.55;
+  cursor: wait;
+}
+
+.expert-draft-card {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  padding: 0.65rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+.expert-draft-card--active {
+  border-color: color-mix(in oklab, var(--accent) 65%, var(--border));
+  box-shadow: 0 0 0 1px color-mix(in oklab, var(--accent) 24%, transparent);
+}
+
+.expert-draft-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+.expert-draft-title-input {
+  min-width: 0;
+  flex: 1;
+  border: 0;
+  border-bottom: 1px solid transparent;
+  background: transparent;
+  color: var(--text-h);
+  font: inherit;
+  font-size: 0.92rem;
+  font-weight: 600;
+  line-height: 1.25;
+  padding: 0.12rem 0;
+}
+
+.expert-draft-title-input:focus {
+  outline: 0;
+  border-bottom-color: var(--accent);
+}
+
+.expert-draft-title-input:disabled {
+  opacity: 0.75;
+}
+
+.expert-draft-count {
+  flex-shrink: 0;
+  font-size: 0.75rem;
+}
+
+.expert-draft-textarea,
+.expert-draft-state-textarea {
+  width: 100%;
+  min-height: 180px;
+  resize: vertical;
+  line-height: 1.72;
+}
+
+@media (max-width: 980px) {
+  .expert-draft-scroll {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 .workspace-ai-material-select {

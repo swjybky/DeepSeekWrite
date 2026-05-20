@@ -38,6 +38,7 @@ export function defineTool<T extends ReturnType<typeof Type.Object>>(def: {
     params: Static<T>,
     signal?: AbortSignal,
   ) => Promise<AgentToolResultShape>
+  executionMode?: AgentTool['executionMode']
 }): AgentTool<T> {
   return {
     name: def.name,
@@ -45,6 +46,7 @@ export function defineTool<T extends ReturnType<typeof Type.Object>>(def: {
     description: def.description,
     parameters: def.parameters,
     execute: def.execute,
+    executionMode: def.executionMode,
   }
 }
 

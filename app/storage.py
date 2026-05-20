@@ -17,6 +17,7 @@ from app.models import (
     apply_stage_patch,
     default_stages,
     default_material_stages,
+    normalize_expert_draft_from_storage,
     new_book_id,
     new_material_id,
     primary_draft_stage_key,
@@ -319,6 +320,7 @@ class BookStore:
             output_dir=od,
             linked_material_id="",
             stages=default_stages(),
+            expert_draft=normalize_expert_draft_from_storage(None),
             created_at=now,
             updated_at=now,
         )
@@ -333,6 +335,7 @@ class BookStore:
         content: str | None = None,
         stages: dict[str, str] | None = None,
         linked_material_id: str | None = None,
+        expert_draft: dict[str, Any] | None = None,
     ) -> dict[str, Any] | None:
         b = self._books.get(book_id)
         if b is None:
@@ -346,6 +349,8 @@ class BookStore:
             b.content = str(b.stages.get(dk, "") or "")
         elif content is not None:
             b.content = content
+        if expert_draft is not None:
+            b.expert_draft = normalize_expert_draft_from_storage(expert_draft)
         b.updated_at = _utc_now_iso()
         save_books_atomic(self._path, self._books)
         _write_stages_to_disk(b)

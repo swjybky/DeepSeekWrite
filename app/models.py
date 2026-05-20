@@ -127,6 +127,108 @@ def apply_stage_patch(base: dict[str, str], patch: dict[str, Any] | None) -> dic
     return out
 
 
+def default_expert_draft() -> dict[str, Any]:
+    """创建专家模式正文编写的默认空结构。"""
+    return {
+        "sections": [
+            {"id": "intro", "title": "导语", "body": ""},
+            {"id": "section-1", "title": "第一节", "body": ""},
+        ],
+        "character_states": [
+            {"section_id": "intro", "title": "导语人物状态", "body": ""},
+            {"section_id": "section-1", "title": "第一节人物状态", "body": ""},
+        ],
+        "running": False,
+        "active_section_id": "",
+    }
+
+
+def _default_character_state_title(section_title: str) -> str:
+    title = section_title.strip() or "小节"
+    return f"{title}人物状态"
+
+
+def normalize_expert_draft_from_storage(raw: Any | None) -> dict[str, Any]:
+    """从 JSON 载入专家模式正文结构，补齐导语/第一节和对应人物状态。"""
+    base = default_expert_draft()
+    if not isinstance(raw, dict):
+        return base
+
+    sections: list[dict[str, str]] = []
+    seen_section_ids: set[str] = set()
+    raw_sections = raw.get("sections")
+    if isinstance(raw_sections, list):
+        for idx, item in enumerate(raw_sections):
+            if not isinstance(item, dict):
+                continue
+            sid = str(item.get("id") or "").strip()
+            if not sid:
+                sid = "intro" if idx == 0 else f"section-{idx}"
+            if sid in seen_section_ids:
+                continue
+            seen_section_ids.add(sid)
+            title = str(item.get("title") or "").strip()
+            if not title:
+                title = "导语" if sid == "intro" else f"第{len(sections)}节"
+            sections.append(
+                {
+                    "id": sid,
+                    "title": title,
+                    "body": str(item.get("body") or ""),
+                }
+            )
+    if not sections:
+        sections = list(base["sections"])
+        seen_section_ids = {str(s["id"]) for s in sections}
+
+    title_by_id = {str(s["id"]): str(s["title"]) for s in sections}
+    states: list[dict[str, str]] = []
+    seen_state_ids: set[str] = set()
+    raw_states = raw.get("character_states")
+    if isinstance(raw_states, list):
+        for item in raw_states:
+            if not isinstance(item, dict):
+                continue
+            sid = str(item.get("section_id") or item.get("id") or "").strip()
+            if not sid or sid in seen_state_ids:
+                continue
+            if sid not in title_by_id:
+                continue
+            seen_state_ids.add(sid)
+            title = str(item.get("title") or "").strip()
+            states.append(
+                {
+                    "section_id": sid,
+                    "title": title or _default_character_state_title(title_by_id[sid]),
+                    "body": str(item.get("body") or ""),
+                }
+            )
+
+    for section in sections:
+        sid = str(section["id"])
+        if sid in seen_state_ids:
+            continue
+        states.append(
+            {
+                "section_id": sid,
+                "title": _default_character_state_title(str(section["title"])),
+                "body": "",
+            }
+        )
+
+    section_ids = {str(s["id"]) for s in sections}
+    active = str(raw.get("active_section_id") or "").strip()
+    if active not in section_ids:
+        active = ""
+
+    return {
+        "sections": sections,
+        "character_states": states,
+        "running": bool(raw.get("running")),
+        "active_section_id": active,
+    }
+
+
 def is_workspace_short_book(categories: list[str], book_type: str) -> bool:
     """判断是否为支持工作台的短篇书籍（世情或情感）"""
     if book_type != "short":
@@ -172,6 +274,7 @@ class Book:
     output_dir: str = ""
     linked_material_id: str = ""
     stages: dict[str, str] = field(default_factory=default_stages)
+    expert_draft: dict[str, Any] = field(default_factory=default_expert_draft)
     created_at: str = ""
     updated_at: str = ""
 
@@ -194,6 +297,7 @@ class Book:
             output_dir=str(data.get("output_dir") or ""),
             linked_material_id=str(data.get("linked_material_id") or ""),
             stages=migrated_stages,
+            expert_draft=normalize_expert_draft_from_storage(data.get("expert_draft")),
             created_at=str(data.get("created_at") or ""),
             updated_at=str(data.get("updated_at") or ""),
         )
