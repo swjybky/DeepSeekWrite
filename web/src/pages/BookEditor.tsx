@@ -837,17 +837,6 @@ export function BookEditor() {
                 >
                   素材库选择
                 </button>
-                {activeStage === 'draft' ? (
-                  <button
-                    type="button"
-                    className={expertMode ? 'workspace-ai-expert-mode workspace-ai-expert-mode--active' : 'workspace-ai-expert-mode'}
-                    aria-label={expertMode ? '退出专家模式' : '进入专家模式'}
-                    title="切换专家模式"
-                    onClick={() => setExpertMode((v) => !v)}
-                  >
-                    专家模式
-                  </button>
-                ) : null}
                 {expertDraftActive ? (
                   <button
                     type="button"
@@ -871,6 +860,17 @@ export function BookEditor() {
                     >
                       {promptEditorLoading ? '加载…' : '编辑提示词'}
                     </button>
+                    {activeStage === 'draft' ? (
+                      <button
+                        type="button"
+                        className={expertMode ? 'workspace-ai-expert-mode workspace-ai-expert-mode--active' : 'workspace-ai-expert-mode'}
+                        aria-label={expertMode ? '退出专家模式' : '进入专家模式'}
+                        title="切换专家模式"
+                        onClick={() => setExpertMode((v) => !v)}
+                      >
+                        专家模式
+                      </button>
+                    ) : null}
                     <button
                       type="button"
                       className="workspace-ai-new-chat"
