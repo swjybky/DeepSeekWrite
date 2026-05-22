@@ -343,7 +343,7 @@ class Api:
     def set_workspace_root(self, path: str | None) -> None:
         write_saved_workspace_root(path)
 
-    def get_ai_defaults(self) -> dict[str, str] | None:
+    def get_ai_defaults(self) -> dict[str, object] | None:
         """与 app/.env 同步的默认模型与 Key，供前端注入 Pi 存储并跳过首次选模型/填 Key。"""
         return load_ai_model_defaults()
 

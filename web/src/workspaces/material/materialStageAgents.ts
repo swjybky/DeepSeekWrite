@@ -24,6 +24,7 @@ export type MaterialWorkspaceStageAgentContext = {
   stageBody: string
   allStages: Partial<Record<MaterialStageId, string>>
   applyToStageEditor?: (payload: ApplyToStageEditorPayload) => void
+  isToolCallStreamed?: (toolCallId: string) => boolean
 }
 
 export function buildReadMaterialContentTool(
@@ -78,10 +79,19 @@ export function buildWriteMaterialEditorTool(
       }),
       mode: modeSchema,
     }),
-    execute: async (_id, { text, mode }) => {
+    execute: async (toolCallId, { text, mode }) => {
       const apply = ctx.applyToStageEditor
       if (!apply) {
         return textBlock('（当前环境无法写入编辑区：未连接界面）')
+      }
+      // 若该 tool call 已在流式生成阶段同步到编辑器，避免重复写入
+      if (ctx.isToolCallStreamed?.(toolCallId)) {
+        const label = MATERIAL_STAGE_LABELS[ctx.stageId]
+        return textBlock(
+          mode === 'replace'
+            ? `已用新内容覆盖「${label}」编辑区。`
+            : `已将内容追加到「${label}」编辑区文末。`,
+        )
       }
       const t = text.trim()
       if (!t) {

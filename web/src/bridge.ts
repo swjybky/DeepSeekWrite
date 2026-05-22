@@ -297,16 +297,27 @@ export function normalizeMaterialStages(
 }
 
 /** 与 app/.env 对应，由桌面壳 get_ai_defaults 注入 */
+export interface AiModelConfig {
+  /** 配置项 ID，如 deepseekflash / kimi */
+  id: string
+  /** 显示名称，未配置时等于 id */
+  label: string
+  /** pi-ai provider，如 deepseek / moonshotai-cn */
+  provider: string
+  /** pi-ai model id，如 deepseek-v4-flash */
+  model_id: string
+  /** 该模型配置对应的 API Key */
+  api_key: string
+}
+
 export interface AiModelDefaults {
   provider: string
   model_id: string
   api_key: string
-  /**
-   * 可选快速模型 ID（对应 app/.env 的 model_name_flash）；
-   * 鉴权始终与 `model_id` 相同，共用同一条 `api_key`（无单独 flash 密钥字段）。
-   * 未配置时前端旁路回退为与 `model_id` 相同。
-   */
-  model_id_flash?: string
+  /** 固定模型配置列表；存在时 AI 侧栏模型选择器只展示这些模型 */
+  models?: AiModelConfig[]
+  /** 默认选中的配置项 ID；未设置时使用 models[0] */
+  default_model_id?: string
 }
 
 declare global {

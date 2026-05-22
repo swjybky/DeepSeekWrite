@@ -220,12 +220,6 @@ export function BookEditor() {
     updateStage(stage, (cur) => cur + buffer)
   }, [updateStage])
 
-  // 调度缓冲区刷新
-  const scheduleFlush = useCallback(() => {
-    if (tokenBufferRafRef.current) return
-    tokenBufferRafRef.current = requestAnimationFrame(flushTokenBuffer)
-  }, [flushTokenBuffer])
-
   // 自动滚动 textarea 到底部（如果用户正在底部）
   const autoScrollTextarea = useCallback(() => {
     const textarea = textareaRef.current
@@ -300,7 +294,7 @@ export function BookEditor() {
       })
       requestAnimationFrame(autoScrollTextarea)
     },
-    [updateStage, scheduleFlush, autoScrollTextarea],
+    [updateStage, autoScrollTextarea],
   )
 
   useEffect(() => {
@@ -838,16 +832,29 @@ export function BookEditor() {
                   素材库选择
                 </button>
                 {expertDraftActive ? (
-                  <button
-                    type="button"
-                    className="workspace-ai-new-chat"
-                    aria-label="清空专家模式主智能体对话并开始新会话"
-                    title="仅清空专家模式右侧主智能体上下文，不影响后台小节编写任务"
-                    disabled={expertDraft.running}
-                    onClick={() => setExpertAiChatEpoch((epoch) => epoch + 1)}
-                  >
-                    新建对话
-                  </button>
+                  <>
+                    {activeStage === 'draft' ? (
+                      <button
+                        type="button"
+                        className={expertMode ? 'workspace-ai-expert-mode workspace-ai-expert-mode--active' : 'workspace-ai-expert-mode'}
+                        aria-label={expertMode ? '退出专家模式' : '进入专家模式'}
+                        title="切换专家模式"
+                        onClick={() => setExpertMode((v) => !v)}
+                      >
+                        专家模式
+                      </button>
+                    ) : null}
+                    <button
+                      type="button"
+                      className="workspace-ai-new-chat"
+                      aria-label="清空专家模式主智能体对话并开始新会话"
+                      title="仅清空专家模式右侧主智能体上下文，不影响后台小节编写任务"
+                      disabled={expertDraft.running}
+                      onClick={() => setExpertAiChatEpoch((epoch) => epoch + 1)}
+                    >
+                      新建对话
+                    </button>
+                  </>
                 ) : (
                   <>
                     <button

@@ -71,3 +71,126 @@ a {
 a:hover {
   text-decoration: underline;
 }
+
+.wc-model-dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  display: grid;
+  place-items: center;
+  padding: 1.25rem;
+  background: rgb(15 13 20 / 42%);
+  backdrop-filter: blur(8px);
+}
+
+.wc-model-dialog {
+  width: min(420px, 100%);
+  max-height: min(560px, calc(100vh - 2.5rem));
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: 0 24px 70px rgb(15 13 20 / 24%);
+}
+
+.wc-model-dialog-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1rem 1rem 0.75rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.wc-model-dialog-header h2 {
+  font-size: 1rem;
+}
+
+.wc-model-dialog-close {
+  width: 2rem;
+  height: 2rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text);
+  font-size: 1.25rem;
+  line-height: 1;
+}
+
+.wc-model-dialog-close:hover,
+.wc-model-dialog-close:focus-visible {
+  border-color: var(--border);
+  background: color-mix(in oklab, var(--accent) 8%, transparent);
+  color: var(--text-h);
+  outline: none;
+}
+
+.wc-model-dialog-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  overflow: auto;
+  padding: 0.75rem;
+}
+
+.wc-model-dialog-item {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.2rem 0.75rem;
+  width: 100%;
+  padding: 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--text);
+  text-align: left;
+}
+
+.wc-model-dialog-item:hover,
+.wc-model-dialog-item:focus-visible {
+  border-color: color-mix(in oklab, var(--accent) 55%, var(--border));
+  background: color-mix(in oklab, var(--accent) 7%, var(--surface));
+  outline: none;
+}
+
+.wc-model-dialog-item--active {
+  border-color: color-mix(in oklab, var(--accent) 72%, var(--border));
+  background: color-mix(in oklab, var(--accent) 10%, var(--surface));
+}
+
+.wc-model-dialog-item-name {
+  min-width: 0;
+  color: var(--text-h);
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.wc-model-dialog-item-meta {
+  min-width: 0;
+  grid-column: 1 / -1;
+  font-size: 0.8125rem;
+  overflow-wrap: anywhere;
+}
+
+.wc-model-dialog-item-badge {
+  grid-column: 2;
+  grid-row: 1;
+  align-self: start;
+  padding: 0.12rem 0.45rem;
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 0.75rem;
+  line-height: 1.35;
+}
+
+.wc-model-dialog-item--active .wc-model-dialog-item-badge {
+  background: var(--accent);
+  color: #ffffff;
+}

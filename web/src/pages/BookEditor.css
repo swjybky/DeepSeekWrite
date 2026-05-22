@@ -724,54 +724,6 @@
   height: 100%;
 }
 
-/* 每条助手气泡下的「写入正文」（旁路快速模型，与主对话模型独立） */
-.workspace-ai-chat-host .wc-assist-toolbar,
-.workspace-ai-chat-host .wc-assist-toolbar * {
-  -webkit-user-select: none;
-  user-select: none;
-}
-
-.wc-assist-toolbar {
-  display: flex;
-  justify-content: flex-start;
-  padding: 0 1rem 0.5rem;
-  margin-top: -0.15rem;
-}
-
-.wc-assist-toolbar-inner {
-  display: flex;
-  align-items: center;
-  max-width: 100%;
-}
-
-.wc-assist-extract-btn {
-  flex-shrink: 0;
-  padding: 0.2rem 0.45rem;
-  font-size: 0.6875rem;
-  font-weight: 500;
-  line-height: 1.2;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: var(--surface);
-  color: var(--text-h);
-  cursor: pointer;
-}
-
-.wc-assist-extract-btn:hover:not(:disabled) {
-  border-color: color-mix(in oklab, var(--accent) 45%, var(--border));
-  background: color-mix(in oklab, var(--accent) 8%, var(--surface));
-}
-
-.wc-assist-extract-btn:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
-}
-
-.wc-assist-extract-btn:disabled {
-  opacity: 0.45;
-  cursor: not-allowed;
-}
-
 /*
  * pi-web-ui 的 app.css（Tailwind）含 .select-none → user-select: none。
  * 该属性会继承到 message-list 等子树，导致侧栏对话无法划选与 Ctrl+C 复制。

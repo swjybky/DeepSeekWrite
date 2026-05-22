@@ -24,6 +24,8 @@ export type WorkspaceStageAgentContext = {
   allStages: Partial<Record<StageId | MaterialStageId, string>>
   linkedMaterial?: Material | null
   applyToStageEditor?: (payload: ApplyToStageEditorPayload) => void
+  /** 查询某 toolCallId 是否已在流式生成阶段同步到编辑器 */
+  isToolCallStreamed?: (toolCallId: string) => boolean
 }
 
 /** Pi 工作台工具集；systemPrompt 须由后端单独装配。 */
@@ -39,6 +41,7 @@ export function getWorkspaceStageAdditionalTools(
       stageBody: ctx.stageBody,
       allStages: ctx.allStages as Partial<Record<MaterialStageId, string>>,
       applyToStageEditor: ctx.applyToStageEditor,
+      isToolCallStreamed: ctx.isToolCallStreamed,
     }
     return buildMaterialWorkspaceAdditionalTools(materialCtx)
   }

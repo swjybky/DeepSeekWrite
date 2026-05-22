@@ -1,144 +1,20 @@
-import type { AgentMessage, AgentTool } from '@mariozechner/pi-agent-core'
+import type { AgentTool } from '@mariozechner/pi-agent-core'
 import { Agent } from '@mariozechner/pi-agent-core'
-import type { AssistantMessage, Model } from '@mariozechner/pi-ai'
-import { ApiKeyPromptDialog, ChatPanel } from '@mariozechner/pi-web-ui'
+import { ApiKeyPromptDialog, ChatPanel, ModelSelector } from '@mariozechner/pi-web-ui'
 import { memo, useEffect, useRef, useState } from 'react'
 import type { Material, StageId, PromptKind, MaterialStageId, MaterialPromptKind } from '../bridge'
 import { getWorkspaceSystemPrompt, getMaterialSystemPrompt } from '../bridge'
 import { ensurePiAppStorage } from '../pi/setupPiWorkspace'
 import {
+  openWorkspaceConfiguredModelSelector,
   resolveWorkspaceChatModel,
-  resolveWorkspaceFlashModel,
 } from '../pi/resolveWorkspaceChatModel'
-import {
-  assistantAgentMessageToPlainText,
-  runStageAssistantExtractStream,
-} from '../pi/stageAssistantExtractStream'
 import {
   type ApplyToStageEditorPayload,
   getWorkspaceStageAdditionalTools,
 } from '../pi/workspaceStageAgents'
 
 const ARTIFACTS_TOOL_NAME = 'artifacts'
-
-const TOOLBAR_CAPTION = '抽取相关内容到编辑器'
-
-/** 本条助手消息是否仍要求执行工具；若是，随后还有续写，不应挂「写入正文」。 */
-function assistantMessageHasToolCalls(m: AgentMessage): boolean {
-  if (m.role !== 'assistant') return false
-  return (m as AssistantMessage).content.some((c) => c.type === 'toolCall')
-}
-
-function assistantIndexInTranscript(
-  messages: AgentMessage[],
-  targetTs: number,
-): number {
-  let idx = -1
-  for (const m of messages) {
-    if (m.role === 'assistant') {
-      idx++
-      if (m.timestamp === targetTs) return idx
-    }
-  }
-  return -1
-}
-
-type MountToolbarOpts = {
-  cancelled: () => boolean
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- pi-ai Model 与 provider 绑定
-  loadFlashModel: () => Promise<Model<any>>
-  getApplyToStageEditor: () => ApplyToStageEditor | undefined
-  getStageId: () => StageId | MaterialStageId
-  getStageBody: () => string
-  getAgentStreaming: () => boolean
-  extractAbortRef: { current: AbortController | null }
-}
-
-type ApplyToStageEditor = (payload: ApplyToStageEditorPayload) => void
-
-function mountAssistExtractToolbar(
-  root: HTMLElement,
-  messages: AgentMessage[],
-  assistantMsg: AgentMessage,
-  opts: MountToolbarOpts,
-) {
-  if (opts.cancelled()) return
-  if (assistantMsg.role !== 'assistant') return
-  const plain = assistantAgentMessageToPlainText(assistantMsg)
-  if (!plain) return
-  const apply = opts.getApplyToStageEditor()
-  if (!apply) return
-
-  const ts = assistantMsg.timestamp
-  root
-    .querySelectorAll(`.wc-assist-toolbar[data-wc-ts="${ts}"]`)
-    .forEach((n) => n.remove())
-
-  const list = root.querySelector('message-list')
-  if (!list) return
-  const aIdx = assistantIndexInTranscript(messages, ts)
-  if (aIdx < 0) return
-  const nodes = list.querySelectorAll('assistant-message')
-  const anchor = nodes[aIdx] as HTMLElement | undefined
-  if (!anchor) return
-
-  const next = anchor.nextElementSibling
-  if (
-    next?.classList.contains('wc-assist-toolbar') &&
-    next.getAttribute('data-wc-ts') === String(ts)
-  ) {
-    return
-  }
-
-  const bar = document.createElement('div')
-  bar.className = 'wc-assist-toolbar'
-  bar.setAttribute('data-wc-ts', String(ts))
-
-  const inner = document.createElement('div')
-  inner.className = 'wc-assist-toolbar-inner'
-
-  const btn = document.createElement('button')
-  btn.type = 'button'
-  btn.className = 'wc-assist-extract-btn'
-  btn.title = TOOLBAR_CAPTION
-  btn.textContent = '写入正文'
-  btn.setAttribute('aria-label', `写入正文，${TOOLBAR_CAPTION}`)
-
-  const snapshot = plain
-
-  btn.addEventListener('click', async () => {
-    const applyNow = opts.getApplyToStageEditor()
-    if (!applyNow) return
-    if (opts.getAgentStreaming()) return
-    opts.extractAbortRef.current?.abort()
-    const ac = new AbortController()
-    opts.extractAbortRef.current = ac
-    btn.disabled = true
-    try {
-      const flash = await opts.loadFlashModel()
-      const stageId = opts.getStageId()
-      // 剧情细化阶段使用追加模式，不清空现有内容
-      const isPlotRefine = stageId === 'plot_refine'
-      await runStageAssistantExtractStream({
-        flashModel: flash,
-        stageId: String(stageId),
-        stageBody: opts.getStageBody(),
-        assistantPlainText: snapshot,
-        applyToStageEditor: applyNow,
-        signal: ac.signal,
-        onError: (msg) => console.warn('[涌泉·写入正文]', msg),
-        appendMode: isPlotRefine,
-      })
-    } finally {
-      if (opts.extractAbortRef.current === ac) opts.extractAbortRef.current = null
-      btn.disabled = false
-    }
-  })
-
-  bar.appendChild(inner)
-  inner.appendChild(btn)
-  anchor.insertAdjacentElement('afterend', bar)
-}
 
 function useDebounced<T>(value: T, ms: number): T {
   const [out, setOut] = useState(value)
@@ -194,7 +70,7 @@ type Props = {
   isPaused?: boolean
   /**
    * 工作台类型：书籍工作台或素材库工作台。
-   * 素材模式下使用素材提示词管线，且不挂载「写入正文」提取按钮。
+   * 素材模式下使用素材提示词管线。
    * @default 'book'
    */
   workspaceType?: 'book' | 'material'
@@ -213,10 +89,16 @@ function WorkspaceAiChatInner({
   const chatPanelRef = useRef<ChatPanel | null>(null)
   const [chatReady, setChatReady] = useState(false)
   const propsLatestRef = useRef(props)
-  const extractAbortRef = useRef<AbortController | null>(null)
   const promptPullSeqRef = useRef(0)
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- pi-ai Model 与 provider 绑定
-  const flashModelPromiseRef = useRef<Promise<Model<any>> | null>(null)
+
+  /** 已流式同步到编辑器的 tool call id 集合 */
+  const streamedToolCallIdsRef = useRef<Set<string>>(new Set())
+  /** 当前正在流式写入编辑器的 tool call 状态 */
+  const streamingWriteRef = useRef<{
+    toolCallId: string
+    accumulatedText: string
+    hasCleared: boolean
+  } | null>(null)
 
   useEffect(() => {
     propsLatestRef.current = props
@@ -230,10 +112,6 @@ function WorkspaceAiChatInner({
     let postAgentEndRaf = 0
 
     let resizeObserver: ResizeObserver | undefined
-
-    const loadFlashModel = () =>
-      (flashModelPromiseRef.current ??=
-        resolveWorkspaceFlashModel(agentRef.current?.state.model))
 
     ;(async () => {
       await ensurePiAppStorage()
@@ -276,6 +154,7 @@ function WorkspaceAiChatInner({
           allStages: propsLatestRef.current.allStages,
           linkedMaterial: propsLatestRef.current.linkedMaterial,
           applyToStageEditor: propsLatestRef.current.applyToStageEditor,
+          isToolCallStreamed: (id) => streamedToolCallIdsRef.current.has(id),
         })
 
       const systemPromptInitial =
@@ -324,38 +203,88 @@ function WorkspaceAiChatInner({
       // AgentInterface may render once with isStreaming still true and never refresh,
       // so the stop button stays visible — reflow after the next frame when idle.
       unsubscribeMessagesRefresh = agent.subscribe(async (ev) => {
+        if (ev.type === 'message_start') {
+          if (ev.message.role === 'assistant') {
+            streamedToolCallIdsRef.current.clear()
+            streamingWriteRef.current = null
+          }
+        }
+
+        if (ev.type === 'message_update') {
+          const ame = ev.assistantMessageEvent
+          const apply = propsLatestRef.current.applyToStageEditor
+          if (!apply) return
+
+          if (ame.type === 'toolcall_start') {
+            const block = ame.partial.content[ame.contentIndex]
+            if (block?.type === 'toolCall') {
+              const isWriteTool =
+                block.name === 'write_workspace_editor' ||
+                block.name === 'write_material_editor'
+              if (isWriteTool) {
+                streamingWriteRef.current = {
+                  toolCallId: block.id,
+                  accumulatedText: '',
+                  hasCleared: false,
+                }
+              }
+            }
+          }
+
+          if (ame.type === 'toolcall_delta') {
+            const block = ame.partial.content[ame.contentIndex]
+            if (
+              block?.type === 'toolCall' &&
+              streamingWriteRef.current &&
+              block.id === streamingWriteRef.current.toolCallId
+            ) {
+              const args = (block.arguments || {}) as Record<string, unknown>
+              const text = String(args.text ?? '')
+              const mode = (args.mode as 'replace' | 'append') || 'replace'
+
+              if (mode === 'replace' && !streamingWriteRef.current.hasCleared) {
+                streamingWriteRef.current.hasCleared = true
+                streamingWriteRef.current.accumulatedText = ''
+                apply({ text: '', mode: 'replace' })
+              }
+
+              const prev = streamingWriteRef.current.accumulatedText
+              if (text.length > prev.length && text.startsWith(prev)) {
+                const delta = text.slice(prev.length)
+                streamingWriteRef.current.accumulatedText = text
+                apply({ text: delta, mode: 'append_token' })
+              } else if (text !== prev) {
+                streamingWriteRef.current.accumulatedText = text
+                apply({ text: text, mode: 'replace' })
+              }
+            }
+          }
+
+          if (ame.type === 'toolcall_end') {
+            const tc = ame.toolCall
+            if (
+              tc &&
+              streamingWriteRef.current &&
+              tc.id === streamingWriteRef.current.toolCallId
+            ) {
+              streamedToolCallIdsRef.current.add(tc.id)
+              streamingWriteRef.current = null
+              apply({ text: '', mode: 'streaming_end' })
+            }
+          }
+        }
+
         if (ev.type === 'message_end') {
-          agent.state.messages = agent.state.messages.slice()
-          const finished = ev.message
-          if (
-            workspaceType !== 'material' &&
-            finished.role === 'assistant' &&
-            !assistantMessageHasToolCalls(finished) &&
-            assistantAgentMessageToPlainText(finished)
-          ) {
-            requestAnimationFrame(() => {
-              requestAnimationFrame(() => {
-                if (cancelled) return
-                const shell = hostRef.current
-                if (!shell) return
-                mountAssistExtractToolbar(
-                  shell,
-                  agent.state.messages,
-                  finished,
-                  {
-                    cancelled: () => cancelled,
-                    loadFlashModel,
-                    getApplyToStageEditor: () =>
-                      propsLatestRef.current.applyToStageEditor,
-                    getStageId: () => propsLatestRef.current.stageId,
-                    getStageBody: () => propsLatestRef.current.stageBody,
-                    getAgentStreaming: () => agent.state.isStreaming,
-                    extractAbortRef,
-                  },
-                )
-              })
+          // 清理未完成的流式写入
+          if (streamingWriteRef.current) {
+            streamedToolCallIdsRef.current.add(streamingWriteRef.current.toolCallId)
+            streamingWriteRef.current = null
+            propsLatestRef.current.applyToStageEditor?.({
+              text: '',
+              mode: 'streaming_end',
             })
           }
+          agent.state.messages = agent.state.messages.slice()
         }
         if (ev.type === 'agent_end') {
           cancelAnimationFrame(postAgentEndRaf)
@@ -374,6 +303,20 @@ function WorkspaceAiChatInner({
       await chatPanel.setAgent(agent, {
         onApiKeyRequired: async (provider: string) =>
           ApiKeyPromptDialog.prompt(provider),
+        onModelSelect: async () => {
+          const selectModel = (model: typeof agent.state.model) => {
+            agent.state.model = model
+            nudgePiLayout()
+            requestAnimationFrame(nudgePiLayout)
+          }
+          const handled = await openWorkspaceConfiguredModelSelector(
+            agent.state.model,
+            selectModel,
+          )
+          if (!handled) {
+            ModelSelector.open(agent.state.model, selectModel)
+          }
+        },
         toolsFactory: ctxTools,
       })
 
@@ -394,11 +337,10 @@ function WorkspaceAiChatInner({
       }
     })()
 
+    const streamedIdsSnapshot = streamedToolCallIdsRef.current
+
     return () => {
       cancelled = true
-      extractAbortRef.current?.abort()
-      extractAbortRef.current = null
-      flashModelPromiseRef.current = null
       cancelAnimationFrame(postAgentEndRaf)
       resizeObserver?.disconnect()
       resizeObserver = undefined
@@ -407,6 +349,14 @@ function WorkspaceAiChatInner({
       agentRef.current = null
       chatPanelRef.current?.remove()
       chatPanelRef.current = null
+      if (streamingWriteRef.current) {
+        propsLatestRef.current.applyToStageEditor?.({
+          text: '',
+          mode: 'streaming_end',
+        })
+        streamingWriteRef.current = null
+      }
+      streamedIdsSnapshot.clear()
     }
 
     // 仅挂载时初始化；换书由上层 key 重建
@@ -450,6 +400,7 @@ function WorkspaceAiChatInner({
         allStages: p.allStages,
         linkedMaterial: p.linkedMaterial,
         applyToStageEditor: p.applyToStageEditor,
+        isToolCallStreamed: (id) => streamedToolCallIdsRef.current.has(id),
       })
       agent.state.tools = includePiArtifacts
         ? mergeAgentToolsPreservingArtifacts(agent.state.tools, extras)
@@ -467,6 +418,7 @@ function WorkspaceAiChatInner({
     includePiArtifacts,
     promptRevision,
     isPaused,
+    workspaceType,
   ])
 
   return <div ref={hostRef} className="workspace-ai-chat-host" />

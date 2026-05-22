@@ -1,38 +1,122 @@
 import { getModel } from '@mariozechner/pi-ai'
-import type { KnownProvider, Model } from '@mariozechner/pi-ai'
+import type { Api, KnownProvider, Model } from '@mariozechner/pi-ai'
 import { getAppStorage } from '@mariozechner/pi-web-ui'
 
-import type { AiModelDefaults } from '../bridge'
+import type { AiModelConfig, AiModelDefaults } from '../bridge'
 import { getBridgeApi } from '../bridge'
+
+type ResolvedModelConfig = AiModelConfig & {
+  model: Model<Api>
+}
+
+function trimString(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : ''
+}
+
+function coerceModelConfig(raw: unknown): AiModelConfig | null {
+  if (!raw || typeof raw !== 'object') return null
+  const o = raw as Record<string, unknown>
+  const id = trimString(o.id)
+  const provider = trimString(o.provider)
+  const model_id = trimString(o.model_id ?? o.modelId)
+  const api_key = trimString(o.api_key ?? o.apiKey)
+  const label = trimString(o.label) || id
+  if (!id || !provider || !model_id || !api_key) return null
+  return { id, label, provider, model_id, api_key }
+}
 
 function coerceDefaults(raw: unknown): AiModelDefaults | null {
   if (!raw || typeof raw !== 'object') return null
   const o = raw as Record<string, unknown>
-  const provider = typeof o.provider === 'string' ? o.provider.trim() : ''
-  const model_id = typeof o.model_id === 'string' ? o.model_id.trim() : ''
-  const api_key = typeof o.api_key === 'string' ? o.api_key.trim() : ''
-  const flashRaw = o.model_id_flash ?? o.model_idFlash
-  const model_id_flash =
-    typeof flashRaw === 'string' ? flashRaw.trim() : undefined
+  const provider = trimString(o.provider)
+  const model_id = trimString(o.model_id ?? o.modelId)
+  const api_key = trimString(o.api_key ?? o.apiKey)
+  const default_model_id = trimString(o.default_model_id ?? o.defaultModelId)
+  const modelsRaw = Array.isArray(o.models) ? o.models : []
+  const models = modelsRaw
+    .map((item) => coerceModelConfig(item))
+    .filter((item): item is AiModelConfig => Boolean(item))
+
+  if (models.length > 0) {
+    const first = models[0]
+    const out: AiModelDefaults = {
+      provider: first.provider,
+      model_id: first.model_id,
+      api_key: first.api_key,
+      models,
+    }
+    if (default_model_id) out.default_model_id = default_model_id
+    return out
+  }
+
   if (!provider || !model_id || !api_key) return null
-  const out: AiModelDefaults = { provider, model_id, api_key }
-  if (model_id_flash) out.model_id_flash = model_id_flash
-  return out
+  return { provider, model_id, api_key }
+}
+
+async function loadDefaults(): Promise<AiModelDefaults | null> {
+  const api = await getBridgeApi()
+  if (!api?.get_ai_defaults) return null
+  return coerceDefaults(await api.get_ai_defaults())
+}
+
+function resolveModel(provider: string, modelId: string): Model<Api> | null {
+  return getModel(provider as KnownProvider, modelId as never) ?? null
+}
+
+async function writeConfiguredKeys(configs: AiModelConfig[]): Promise<void> {
+  for (const config of configs) {
+    await getAppStorage().providerKeys.set(config.provider, config.api_key)
+  }
+}
+
+async function loadConfiguredModels(): Promise<{
+  defaults: AiModelDefaults
+  configs: ResolvedModelConfig[]
+} | null> {
+  const defaults = await loadDefaults()
+  if (!defaults?.models?.length) return null
+
+  const configs: ResolvedModelConfig[] = []
+  for (const config of defaults.models) {
+    const model = resolveModel(config.provider, config.model_id)
+    if (!model) continue
+    configs.push({ ...config, model })
+  }
+  if (!configs.length) return null
+  await writeConfiguredKeys(configs)
+  return { defaults, configs }
+}
+
+function pickDefaultConfig(
+  configs: ResolvedModelConfig[],
+  defaultModelId?: string,
+): ResolvedModelConfig {
+  if (!defaultModelId) return configs[0]
+  return configs.find((config) => config.id === defaultModelId) ?? configs[0]
 }
 
 /**
- * 与会话侧边栏一致的密钥：`ProviderKeysStore`（Pi IndexedDB）；缺省时再接 `app/.env`。
- * pi-ai `stream(...)` 不会走 AgentLoop 里的 `getApiKey`，需在调用旁路时必须显式传入 `apiKey`。
+ * 获取 provider API Key。固定模型列表存在时只从 `.env` 配置注入；
+ * 旧格式或浏览器开发模式下仍兼容 Pi IndexedDB 中的 provider key。
  */
-export async function resolveWorkspaceProviderApiKey(provider: string): Promise<string | undefined> {
+export async function resolveWorkspaceProviderApiKey(
+  provider: string,
+): Promise<string | undefined> {
   const p = provider.trim()
+  try {
+    const configured = await loadConfiguredModels()
+    const match = configured?.configs.find(
+      (config) => config.provider.toLowerCase() === p.toLowerCase(),
+    )
+    if (match?.api_key.trim()) return match.api_key.trim()
+  } catch {
+    // fall through to the legacy store lookup
+  }
+
   const fromStore = await getAppStorage().providerKeys.get(p)
   if (fromStore?.trim()) return fromStore.trim()
   try {
-    const api = await getBridgeApi()
-    if (!api?.get_ai_defaults) return undefined
-    const raw = await api.get_ai_defaults()
-    const d = coerceDefaults(raw)
+    const d = await loadDefaults()
     if (
       !d?.api_key?.trim() ||
       d.provider.trim().toLowerCase() !== p.toLowerCase()
@@ -47,46 +131,132 @@ export async function resolveWorkspaceProviderApiKey(provider: string): Promise<
 }
 
 /**
- * 桌面端：从 Python 读取 app/.env，写入 Pi 的 provider API Key，并解析初始 Model。
- * 浏览器开发或未配置时回退 openai / gpt-4o-mini。
+ * 桌面端：从 Python 读取 `.env` 固定模型配置，写入 Pi 的 provider API Key，
+ * 并解析默认 Model。浏览器开发或未配置时回退 openai / gpt-4o-mini。
  */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any -- pi-ai Model 泛型与各 provider Api 绑定
-export async function resolveWorkspaceChatModel(): Promise<Model<any>> {
+export async function resolveWorkspaceChatModel(): Promise<Model<Api>> {
   const fallback = getModel('openai', 'gpt-4o-mini')
-  const api = await getBridgeApi()
-  if (!api?.get_ai_defaults) return fallback
   try {
-    const raw = await api.get_ai_defaults()
-    const d = coerceDefaults(raw)
+    const configured = await loadConfiguredModels()
+    if (configured) {
+      return pickDefaultConfig(
+        configured.configs,
+        configured.defaults.default_model_id,
+      ).model
+    }
+
+    const d = await loadDefaults()
     if (!d) return fallback
     await getAppStorage().providerKeys.set(d.provider, d.api_key)
-    const m = getModel(d.provider as KnownProvider, d.model_id as never)
-    return m ?? fallback
+    return resolveModel(d.provider, d.model_id) ?? fallback
   } catch {
     return fallback
   }
 }
 
 /**
- * 旁路「抽取 / 流式写入编辑区」使用的快速模型；与主模型共用 provider 与同一条 api_key。
- * 未配置 model_id_flash 时与主模型相同。
- *
- * `app/.env` 不完整时传入侧栏 `Agent.state.model`，避免用到无 IndexedDB 密钥的回退厂商。
+ * 仅展示 `.env` 中声明的固定模型配置。未配置固定列表时返回 false，
+ * 调用方可继续使用 Pi 默认模型选择器。
  */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any -- pi-ai Model 与 provider 绑定
-export async function resolveWorkspaceFlashModel(reuseAuthFromModel?: Model<any>): Promise<Model<any>> {
-  const fallback = getModel('openai', 'gpt-4o-mini')
-  const api = await getBridgeApi()
-  if (!api?.get_ai_defaults) return reuseAuthFromModel ?? fallback
-  try {
-    const raw = await api.get_ai_defaults()
-    const d = coerceDefaults(raw)
-    if (!d) return reuseAuthFromModel ?? fallback
-    await getAppStorage().providerKeys.set(d.provider, d.api_key)
-    const flashId = (d.model_id_flash?.trim() || d.model_id) as never
-    const m = getModel(d.provider as KnownProvider, flashId)
-    return m ?? (reuseAuthFromModel ?? fallback)
-  } catch {
-    return reuseAuthFromModel ?? fallback
-  }
+export async function openWorkspaceConfiguredModelSelector(
+  currentModel: Model<Api> | null,
+  onSelect: (model: Model<Api>) => void,
+): Promise<boolean> {
+  const configured = await loadConfiguredModels()
+  if (!configured) return false
+
+  const currentIndex = configured.configs.findIndex(
+    (config) =>
+      config.model.provider === currentModel?.provider &&
+      config.model.id === currentModel?.id,
+  )
+  return new Promise<boolean>((resolve) => {
+    const overlay = document.createElement('div')
+    overlay.className = 'wc-model-dialog-backdrop'
+    overlay.setAttribute('role', 'presentation')
+
+    const dialog = document.createElement('section')
+    dialog.className = 'wc-model-dialog'
+    dialog.setAttribute('role', 'dialog')
+    dialog.setAttribute('aria-modal', 'true')
+    dialog.setAttribute('aria-labelledby', 'wc-model-dialog-title')
+
+    const header = document.createElement('header')
+    header.className = 'wc-model-dialog-header'
+
+    const title = document.createElement('h2')
+    title.id = 'wc-model-dialog-title'
+    title.textContent = '选择 AI 模型'
+
+    const close = document.createElement('button')
+    close.type = 'button'
+    close.className = 'wc-model-dialog-close'
+    close.setAttribute('aria-label', '关闭模型选择')
+    close.textContent = '×'
+
+    const list = document.createElement('div')
+    list.className = 'wc-model-dialog-list'
+
+    const cleanup = () => {
+      document.removeEventListener('keydown', onKeyDown)
+      overlay.remove()
+      resolve(true)
+    }
+
+    const selectModel = (config: ResolvedModelConfig) => {
+      onSelect(config.model)
+      cleanup()
+    }
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        cleanup()
+      }
+    }
+
+    configured.configs.forEach((config, index) => {
+      const item = document.createElement('button')
+      item.type = 'button'
+      item.className = 'wc-model-dialog-item'
+      if (index === currentIndex) {
+        item.classList.add('wc-model-dialog-item--active')
+        item.setAttribute('aria-current', 'true')
+      }
+
+      const name = document.createElement('span')
+      name.className = 'wc-model-dialog-item-name'
+      name.textContent = config.label
+
+      const meta = document.createElement('span')
+      meta.className = 'wc-model-dialog-item-meta'
+      meta.textContent = `${config.provider} / ${config.model_id}`
+
+      const badge = document.createElement('span')
+      badge.className = 'wc-model-dialog-item-badge'
+      badge.textContent = index === currentIndex ? '当前' : '切换'
+
+      item.append(name, meta, badge)
+      item.addEventListener('click', () => selectModel(config))
+      list.appendChild(item)
+    })
+
+    close.addEventListener('click', cleanup)
+    overlay.addEventListener('click', (event) => {
+      if (event.target === overlay) cleanup()
+    })
+    document.addEventListener('keydown', onKeyDown)
+
+    header.append(title, close)
+    dialog.append(header, list)
+    overlay.appendChild(dialog)
+    document.body.appendChild(overlay)
+
+    requestAnimationFrame(() => {
+      const active =
+        list.querySelector<HTMLElement>('.wc-model-dialog-item--active') ??
+        list.querySelector<HTMLElement>('.wc-model-dialog-item')
+      active?.focus()
+    })
+  })
 }

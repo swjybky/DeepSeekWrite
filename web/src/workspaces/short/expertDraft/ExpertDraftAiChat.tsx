@@ -1,10 +1,11 @@
 import { Agent } from '@mariozechner/pi-agent-core'
 import type { AgentTool } from '@mariozechner/pi-agent-core'
-import { ApiKeyPromptDialog, ChatPanel } from '@mariozechner/pi-web-ui'
+import { ApiKeyPromptDialog, ChatPanel, ModelSelector } from '@mariozechner/pi-web-ui'
 import { useEffect, useRef, useState } from 'react'
 
 import type { ExpertDraft, PromptKind, StageId } from '../../../bridge'
 import {
+  openWorkspaceConfiguredModelSelector,
   resolveWorkspaceChatModel,
   resolveWorkspaceProviderApiKey,
 } from '../../../pi/resolveWorkspaceChatModel'
@@ -162,6 +163,20 @@ export function ExpertDraftAiChat(props: Props) {
         await chatPanel.setAgent(nextAgent, {
           onApiKeyRequired: async (provider: string) =>
             ApiKeyPromptDialog.prompt(provider),
+          onModelSelect: async () => {
+            const selectModel = (model: typeof nextAgent.state.model) => {
+              nextAgent.state.model = model
+              nudgePiLayout()
+              requestAnimationFrame(nudgePiLayout)
+            }
+            const handled = await openWorkspaceConfiguredModelSelector(
+              nextAgent.state.model,
+              selectModel,
+            )
+            if (!handled) {
+              ModelSelector.open(nextAgent.state.model, selectModel)
+            }
+          },
           toolsFactory,
         })
         nextAgent.state.tools = stripArtifacts(nextAgent.state.tools)
