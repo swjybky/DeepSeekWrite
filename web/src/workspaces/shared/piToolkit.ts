@@ -13,12 +13,64 @@ import {
   NARRATIVE_TEMPLATE_BLOCKS,
 } from '../../prompts/workspaceToolTemplates'
 
-export const excerptFn = (body: string, max = 12000) =>
-  body.length > max ? `${body.slice(0, max)}\n\n…（内容过长已截断）` : body
+export const excerptFn = (body: string, max = 12000) => {
+  void max
+  return body
+}
 
 type AgentToolResultShape = {
   content: { type: 'text'; text: string }[]
   details: undefined
+}
+
+function primitiveTypeOf(value: unknown): string | undefined {
+  if (typeof value === 'string') return 'string'
+  if (typeof value === 'number') return Number.isInteger(value) ? 'integer' : 'number'
+  if (typeof value === 'boolean') return 'boolean'
+  return undefined
+}
+
+function sanitizeToolSchemaForGemini(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map((item) => sanitizeToolSchemaForGemini(item))
+  }
+  if (!value || typeof value !== 'object') return value
+
+  const input = value as Record<string, unknown>
+  const out: Record<string, unknown> = {}
+  for (const [key, child] of Object.entries(input)) {
+    out[key] = sanitizeToolSchemaForGemini(child)
+  }
+
+  for (const unionKey of ['anyOf', 'oneOf']) {
+    const union = out[unionKey]
+    if (!Array.isArray(union) || union.length === 0) continue
+    const branches = union as Array<Record<string, unknown>>
+    if (
+      branches.every(
+        (branch) =>
+          branch &&
+          typeof branch === 'object' &&
+          Object.prototype.hasOwnProperty.call(branch, 'const'),
+      )
+    ) {
+      const values = branches.map((branch) => branch.const)
+      delete out[unionKey]
+      out.enum = values
+      if (!out.type) {
+        const types = [...new Set(values.map(primitiveTypeOf).filter(Boolean))]
+        if (types.length === 1) out.type = types[0]
+      }
+    }
+  }
+
+  if (Object.prototype.hasOwnProperty.call(out, 'const')) {
+    out.enum = [out.const]
+    if (!out.type) out.type = primitiveTypeOf(out.const)
+    delete out.const
+  }
+
+  return out
 }
 
 export function textBlock(text: string): AgentToolResultShape {
@@ -44,7 +96,7 @@ export function defineTool<T extends ReturnType<typeof Type.Object>>(def: {
     name: def.name,
     label: def.label,
     description: def.description,
-    parameters: def.parameters,
+    parameters: sanitizeToolSchemaForGemini(def.parameters) as T,
     execute: def.execute,
     executionMode: def.executionMode,
   }

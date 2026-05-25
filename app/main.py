@@ -1,11 +1,16 @@
 from __future__ import annotations
 
+import base64
 import functools
+import http.client
 import importlib.util
+import json
 import os
 import subprocess
 import sys
+import tempfile
 import threading
+import uuid
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -130,15 +135,18 @@ _configure_macos_pywebview_env()
 
 import webview
 
-from app.ai_env import load_ai_model_defaults
+from app.ai_env import load_ai_model_defaults, load_image_model_defaults
 from app.runtime_paths import bundle_root
 from app.prompt_store import (
+    read_raw_expert_prompt_for_editor,
     read_raw_material_prompt_for_editor,
     read_raw_prompt_for_editor,
     render_from_api_context,
     render_material_from_api_context,
+    reset_expert_prompt_override,
     reset_material_prompt_override as _reset_material_prompt_override,
     reset_prompt_override,
+    save_expert_prompt_override,
     save_material_prompt_override as _save_material_prompt_override,
     save_prompt_override,
 )
@@ -272,6 +280,7 @@ class Api:
         stages: dict | None = None,
         linked_material_id: str | None = None,
         expert_draft: dict | None = None,
+        title: str | None = None,
     ) -> dict | None:
         return self._store.save_book(
             book_id,
@@ -279,6 +288,7 @@ class Api:
             stages=stages,
             linked_material_id=linked_material_id,
             expert_draft=expert_draft,
+            title=title,
         )
 
     def delete_book(self, book_id: str) -> bool:
@@ -319,14 +329,16 @@ class Api:
         self,
         material_id: str,
         stages: dict | None = None,
+        title: str | None = None,
     ) -> dict | None:
         """保存素材阶段内容
 
         Args:
             material_id: 素材ID
-            stages: 阶段内容字典，键为 'character'/'gimmick'/'pacing'
+            stages: 阶段内容字典，键为 'character'/'intro'/'gimmick'/'pacing'
+            title: 素材标题
         """
-        return self._store.save_material(material_id, stages)
+        return self._store.save_material(material_id, stages, title)
 
     def delete_material(self, material_id: str) -> bool:
         """删除素材"""
@@ -370,6 +382,23 @@ class Api:
     ) -> bool:
         return reset_prompt_override(workspace_kind, stage_id)
 
+    # ==================== 专家模式提示词 API ====================
+
+    def read_expert_prompt_template(
+        self, workspace_kind: str, prompt_id: str
+    ) -> str:
+        return read_raw_expert_prompt_for_editor(workspace_kind, prompt_id)
+
+    def save_expert_prompt_override(
+        self, workspace_kind: str, prompt_id: str, body: str
+    ) -> None:
+        save_expert_prompt_override(workspace_kind, prompt_id, body)
+
+    def reset_expert_prompt_override(
+        self, workspace_kind: str, prompt_id: str
+    ) -> bool:
+        return reset_expert_prompt_override(workspace_kind, prompt_id)
+
     # ==================== 素材库提示词 API ====================
 
     def get_material_system_prompt(
@@ -394,6 +423,156 @@ class Api:
         self, material_kind: str, stage_id: str
     ) -> bool:
         return _reset_material_prompt_override(material_kind, stage_id)
+
+    def get_book_cover(self, book_id: str) -> dict:
+        """获取书籍封面图片（base64）。
+
+        Returns:
+            {"cover_data": str | None}  base64 编码的 PNG 图片，不含 data URI 前缀
+        """
+        book = self._store.get_book(book_id)
+        if not book:
+            return {"cover_data": None}
+        output_dir = book.get("output_dir", "")
+        if not output_dir:
+            return {"cover_data": None}
+        cover = Path(output_dir) / "cover.png"
+        if cover.is_file():
+            try:
+                data = cover.read_bytes()
+                return {"cover_data": base64.b64encode(data).decode("utf-8")}
+            except Exception:
+                return {"cover_data": None}
+        return {"cover_data": None}
+
+    def generate_book_cover(self, book_id: str, prompt: str) -> dict:
+        """调用图像生成 API 为书籍生成封面，保存到 output_dir/cover.png。
+
+        Args:
+            book_id: 书籍 ID
+            prompt: 图像生成提示词
+
+        Returns:
+            {"cover_path": str | None, "success": bool, "error": str | None}
+        """
+        book = self._store.get_book(book_id)
+        if not book:
+            return {"cover_path": None, "success": False, "error": "书籍不存在"}
+        output_dir = book.get("output_dir", "")
+        if not output_dir:
+            return {"cover_path": None, "success": False, "error": "书籍未设置工作目录"}
+        cover_path = generate_image(prompt, output_dir)
+        if not cover_path:
+            return {"cover_path": None, "success": False, "error": "图片生成失败"}
+        return {"cover_path": str(cover_path), "success": True, "error": None}
+
+    def export_docx(
+        self,
+        book_id: str,
+        stage_id: str,
+        folder_path: str,
+        content: str,
+        cover_data: str | None = None,
+    ) -> dict:
+        """将指定阶段内容导出为 docx，文件名使用小说名，第一页插入封面（如有）。
+
+        Args:
+            book_id: 书籍 ID
+            stage_id: 阶段 ID
+            folder_path: 用户选择的保存文件夹
+            content: 阶段文本内容
+            cover_data: 封面图片 base64（不含 data URI 前缀），可选
+
+        Returns:
+            {"success": bool, "error": str | None, "path": str | None}
+        """
+        try:
+            book = self._store.get_book(book_id)
+            if not book:
+                return {"success": False, "error": "书籍不存在", "path": None}
+
+            from docx import Document
+            from docx.enum.text import WD_ALIGN_PARAGRAPH
+            from docx.shared import Inches
+
+            title = book.get("title", "未命名").strip() or "未命名"
+            safe_title = "".join(c for c in title if c not in r'\/:*?"<>|').strip() or "未命名"
+            filename = f"{safe_title}.docx"
+            output_path = Path(folder_path) / filename
+
+            doc = Document()
+
+            if cover_data:
+                try:
+                    image_bytes = base64.b64decode(cover_data)
+                    with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
+                        tmp.write(image_bytes)
+                        tmp_path = tmp.name
+                    paragraph = doc.add_paragraph()
+                    paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                    run = paragraph.add_run()
+                    run.add_picture(tmp_path, width=Inches(4.5))
+                    os.unlink(tmp_path)
+                    doc.add_page_break()
+                except Exception as e:
+                    print(f"插入封面失败: {e}")
+
+            if content:
+                for line in content.split("\n"):
+                    if line.strip():
+                        doc.add_paragraph(line)
+            else:
+                doc.add_paragraph("")
+
+            doc.save(str(output_path))
+            return {"success": True, "error": None, "path": str(output_path)}
+        except Exception as e:
+            return {"success": False, "error": str(e), "path": None}
+
+
+def generate_image(prompt: str, output_dir: str | Path = ".data/image") -> Path | None:
+    """调用图像生成 API，将返回的 base64 图片保存为 PNG。"""
+    try:
+        image_defaults = load_image_model_defaults()
+        if not image_defaults:
+            print("未配置图片生成模型，请在 .env 中设置 image_model 和 image_model_key")
+            return None
+        conn = http.client.HTTPSConnection("sucloud.vip")
+        payload = json.dumps({
+            "size": "1024x1536",
+            "prompt": prompt,
+            "model": image_defaults["model"],
+            "n": 1,
+        })
+        headers = {
+            "Accept": "application/json",
+            "Authorization": f"Bearer {image_defaults['api_key']}",
+            "Content-Type": "application/json",
+        }
+        conn.request("POST", "/v1/images/generations", payload, headers)
+        res = conn.getresponse()
+        data = res.read()
+        body = json.loads(data)
+
+        b64_str = body.get("data", [{}])[0].get("b64_json")
+        if not b64_str:
+            print("API 未返回图片数据")
+            return None
+
+        image_bytes = base64.b64decode(b64_str)
+
+        dest = Path(output_dir)
+        dest.mkdir(parents=True, exist_ok=True)
+
+        filename = "cover.png"
+        filepath = dest / filename
+        filepath.write_bytes(image_bytes)
+
+        print(f"图片已保存: {filepath}")
+        return filepath
+    except Exception as e:
+        print(f"生成图片失败: {e}")
+        return None
 
 
 def main() -> None:

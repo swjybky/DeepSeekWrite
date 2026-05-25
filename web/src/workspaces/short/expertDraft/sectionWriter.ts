@@ -1,19 +1,29 @@
 import { Agent } from '@mariozechner/pi-agent-core'
-import type { AgentTool } from '@mariozechner/pi-agent-core'
+import type { AgentMessage, AgentTool } from '@mariozechner/pi-agent-core'
 import { ApiKeyPromptDialog } from '@mariozechner/pi-web-ui'
 import { Type } from 'typebox'
 
-import type { ExpertDraft, PromptKind, StageId } from '../../../bridge'
 import {
-  resolveWorkspaceChatModel,
+  readExpertSectionWriterPromptTemplate,
+  type ExpertDraft,
+  type PromptKind,
+  type StageId,
+} from '../../../bridge'
+import {
   resolveWorkspaceProviderApiKey,
 } from '../../../pi/resolveWorkspaceChatModel'
+import { createPiSessionId } from '../../../pi/sessionId'
 import { ensurePiAppStorage } from '../../../pi/setupPiWorkspace'
+import {
+  getPreferredWorkspaceThinkingLevel,
+  resolvePreferredWorkspaceChatModel,
+} from '../../../pi/workspaceChatPreferences'
 import { defineTool, textBlock } from '../../shared/piToolkit'
 import {
   buildSectionWriterSystemPrompt,
   buildSectionWriterUserPrompt,
 } from './prompts'
+import { buildReadWorkspaceContentTool } from '../stageAgents'
 
 type ExpertDraftUpdater = (updater: (draft: ExpertDraft) => ExpertDraft) => void
 
@@ -33,6 +43,7 @@ export type RunExpertDraftSectionWriterOptions = {
     sectionTitle: string
     sectionIndex: number
     sectionCount: number
+    userPrompt: string
   }) => void | Promise<void>
   onRunFinish?: (info: { aborted: boolean }) => void | Promise<void>
 }
@@ -69,13 +80,90 @@ function replaceCharacterState(
   }
 }
 
+function messageText(message: AgentMessage): string {
+  if (
+    !message ||
+    typeof message !== 'object' ||
+    !('role' in message) ||
+    message.role !== 'assistant'
+  ) {
+    return ''
+  }
+  const content = (message as { content?: unknown }).content
+  if (typeof content === 'string') return content
+  if (!Array.isArray(content)) return ''
+  return content
+    .map((block) => {
+      if (
+        block &&
+        typeof block === 'object' &&
+        'type' in block &&
+        block.type === 'text' &&
+        'text' in block
+      ) {
+        return String(block.text ?? '')
+      }
+      return ''
+    })
+    .filter(Boolean)
+    .join('\n\n')
+}
+
+function cleanFallbackBody(raw: string): string {
+  let text = raw.trim()
+  const fence = text.match(/```(?:text|markdown|md)?\s*([\s\S]*?)```/i)
+  if (fence?.[1]?.trim()) text = fence[1].trim()
+  const marker = text.match(/(?:正文|小说正文)[:：]\s*([\s\S]+)/)
+  if (marker?.[1]?.trim() && marker[1].trim().length > 80) {
+    text = marker[1].trim()
+  }
+  return text
+    .replace(/^\s*#+\s*.*$/gm, '')
+    .replace(/^\s*(?:以下是|下面是).*$/gm, '')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim()
+}
+
+function extractFallbackSectionBody(messages: AgentMessage[]): string {
+  for (const message of [...messages].reverse()) {
+    const text = cleanFallbackBody(messageText(message))
+    if (
+      text.length >= 120 &&
+      !text.includes('write_section_body') &&
+      !text.includes('write_character_state')
+    ) {
+      return text
+    }
+  }
+  return ''
+}
+
 function buildSectionWriterTools(input: {
+  bookTitle: string
   sectionId: string
   sectionTitle: string
+  allStages: Partial<Record<StageId, string>>
   updateDraft: ExpertDraftUpdater
+  onSectionBodyWritten?: (text: string) => void
+  onCharacterStateWritten?: (text: string) => void
 }): AgentTool[] {
-  const { sectionId, sectionTitle, updateDraft } = input
+  const {
+    bookTitle,
+    sectionId,
+    sectionTitle,
+    allStages,
+    updateDraft,
+    onSectionBodyWritten,
+    onCharacterStateWritten,
+  } = input
+  const readWorkspaceContent = buildReadWorkspaceContentTool({
+    bookTitle,
+    stageId: 'draft',
+    stageBody: allStages.draft ?? '',
+    allStages,
+  })
   return [
+    readWorkspaceContent,
     defineTool({
       name: 'write_section_body',
       label: '写入正文',
@@ -91,6 +179,7 @@ function buildSectionWriterTools(input: {
         }
         const text = params.text.trim()
         if (!text) return textBlock('未写入：正文为空。')
+        onSectionBodyWritten?.(text)
         updateDraft((draft) => replaceSectionBody(draft, sectionId, text))
         return textBlock(`已覆盖写入「${sectionTitle}」正文。`)
       },
@@ -113,6 +202,7 @@ function buildSectionWriterTools(input: {
         }
         const text = params.text.trim()
         if (!text) return textBlock('未写入：人物状态为空。')
+        onCharacterStateWritten?.(text)
         updateDraft((draft) => replaceCharacterState(draft, sectionId, text))
         return textBlock(`已覆盖写入「${sectionTitle}」人物状态。`)
       },
@@ -134,7 +224,7 @@ export async function runExpertDraftSectionWriter(
 ): Promise<void> {
   try {
     await ensurePiAppStorage()
-    const model = await resolveWorkspaceChatModel()
+    const model = await resolvePreferredWorkspaceChatModel()
     const hasKey = await ensureModelApiKey(model.provider)
     if (!hasKey) {
       opts.onError?.('专家模式后台写作未启动：缺少当前模型 API Key。')
@@ -150,43 +240,64 @@ export async function runExpertDraftSectionWriter(
       const draftBefore = opts.getDraft()
       const section = draftBefore.sections.find((s) => s.id === sectionId)
       if (!section) continue
+      const systemPromptTemplate = await readExpertSectionWriterPromptTemplate(
+        opts.promptKind,
+      )
 
       opts.updateDraft((draft) => ({
-        ...replaceSectionBody(draft, sectionId, ''),
+        ...draft,
         running: true,
         active_section_id: sectionId,
       }))
 
+      let sectionBodyWritten = ''
+      let characterStateWritten = ''
+
       const agent = new Agent({
-        sessionId: `write-claw:${opts.bookId}:expert-draft:writer:${sectionId}:${Date.now()}`,
+        sessionId: createPiSessionId(
+          'expert-draft-writer',
+          opts.bookId,
+          sectionId,
+          Date.now(),
+        ),
         getApiKey: resolveWorkspaceProviderApiKey,
         toolExecution: 'sequential',
         initialState: {
           systemPrompt: buildSectionWriterSystemPrompt({
             bookTitle: opts.bookTitle,
             promptKind: opts.promptKind,
+            template: systemPromptTemplate,
           }),
           model,
-          thinkingLevel: 'high',
+          thinkingLevel: getPreferredWorkspaceThinkingLevel(),
           messages: [],
           tools: buildSectionWriterTools({
+            bookTitle: opts.bookTitle,
             sectionId,
             sectionTitle: section.title,
+            allStages: opts.getWorkspaceStages(),
             updateDraft: opts.updateDraft,
+            onSectionBodyWritten: (text) => {
+              sectionBodyWritten = text
+            },
+            onCharacterStateWritten: (text) => {
+              characterStateWritten = text
+            },
           }),
         },
-      })
-
-      agent.subscribe((event) => {
-        if (event.type === 'message_end' || event.type === 'agent_end') {
-          agent.state.messages = agent.state.messages.slice()
-        }
       })
 
       const abortCurrentAgent = () => agent.abort()
       opts.signal?.addEventListener('abort', abortCurrentAgent, { once: true })
 
       try {
+        const userPrompt = buildSectionWriterUserPrompt({
+          sectionId,
+          sectionTitle: section.title,
+          sectionIndex,
+          sectionCount: ids.length,
+          draft: draftBefore,
+        })
         try {
           await opts.onSectionAgentStart?.({
             agent,
@@ -194,6 +305,7 @@ export async function runExpertDraftSectionWriter(
             sectionTitle: section.title,
             sectionIndex,
             sectionCount: ids.length,
+            userPrompt,
           })
         } catch (e) {
           opts.onError?.(
@@ -203,16 +315,38 @@ export async function runExpertDraftSectionWriter(
           )
         }
         if (opts.signal?.aborted) return
-        await agent.prompt(
-          buildSectionWriterUserPrompt({
-            sectionId,
-            sectionTitle: section.title,
-            sectionIndex,
-            sectionCount: ids.length,
-            stages: opts.getWorkspaceStages(),
-            draft: draftBefore,
-          }),
-        )
+        await agent.prompt(userPrompt)
+        if (opts.signal?.aborted) return
+
+        if (!sectionBodyWritten || !characterStateWritten) {
+          await agent.prompt(
+            `上一轮没有完整写回编辑器。请不要解释，立即补齐缺失的工具调用：
+- 当前小节 id：${sectionId}
+- 当前小节标题：${section.title}
+- ${sectionBodyWritten ? '正文已经写回，不要再次调用 write_section_body。' : '必须调用 write_section_body，text 填入当前小节完整干净正文。'}
+- ${characterStateWritten ? '人物状态已经写回，不要再次调用 write_character_state。' : '必须调用 write_character_state，text 填入当前小节结束时的人物状态。'}`,
+          )
+        }
+        if (opts.signal?.aborted) return
+
+        if (!sectionBodyWritten) {
+          const fallback = extractFallbackSectionBody(agent.state.messages)
+          if (fallback) {
+            sectionBodyWritten = fallback
+            opts.updateDraft((draft) =>
+              replaceSectionBody(draft, sectionId, fallback),
+            )
+          }
+        }
+
+        if (!sectionBodyWritten) {
+          opts.onError?.(`专家模式后台写作未写入「${section.title}」正文，已停止。`)
+          return
+        }
+
+        if (!characterStateWritten) {
+          opts.onError?.(`「${section.title}」人物状态未写入，可稍后手动补充。`)
+        }
       } catch (e) {
         if (opts.signal?.aborted) return
         opts.onError?.(

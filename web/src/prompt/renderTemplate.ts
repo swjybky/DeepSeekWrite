@@ -7,10 +7,10 @@ const PEER_CAP = 2000
 
 /** 与 piToolkit excerptFn(body,12000) 一致 */
 export function excerptText(body: string, maxLen = BODY_CAP): string {
+  void maxLen
   const t = body.trim()
   if (!t.length) return '（暂无）'
-  if (t.length <= maxLen) return t
-  return `${t.slice(0, maxLen)}\n\n…（内容过长已截断）`
+  return t
 }
 
 /**
@@ -20,21 +20,38 @@ export function excerptText(body: string, maxLen = BODY_CAP): string {
 const BOOK_ORDER: Record<string, readonly { id: string; label: string }[]> = {
   shiqing: SHORT_WORKSPACE_STAGES,
   qinggan: SHORT_WORKSPACE_STAGES,
+  kehuan: SHORT_WORKSPACE_STAGES,
+  xuanyi: SHORT_WORKSPACE_STAGES,
 }
 
 const MATERIAL_ORDER: Record<string, readonly { id: string; label: string }[]> = {
   material_long: [
     { id: 'character', label: '人设素材' },
+    { id: 'intro', label: '导语素材' },
     { id: 'gimmick', label: '梗素材' },
     { id: 'pacing', label: '节奏素材' },
   ],
   material_short_shiqing: [
     { id: 'character', label: '人设素材' },
+    { id: 'intro', label: '导语素材' },
     { id: 'gimmick', label: '梗素材' },
     { id: 'pacing', label: '节奏素材' },
   ],
   material_short_qinggan: [
     { id: 'character', label: '人设素材' },
+    { id: 'intro', label: '导语素材' },
+    { id: 'gimmick', label: '梗素材' },
+    { id: 'pacing', label: '节奏素材' },
+  ],
+  material_short_kehuan: [
+    { id: 'character', label: '人设素材' },
+    { id: 'intro', label: '导语素材' },
+    { id: 'gimmick', label: '梗素材' },
+    { id: 'pacing', label: '节奏素材' },
+  ],
+  material_short_xuanyi: [
+    { id: 'character', label: '人设素材' },
+    { id: 'intro', label: '导语素材' },
     { id: 'gimmick', label: '梗素材' },
     { id: 'pacing', label: '节奏素材' },
   ],

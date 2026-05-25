@@ -16,6 +16,10 @@ function defaultStateTitle(sectionTitle: string): string {
   return `${sectionTitle.trim() || '小节'}人物状态`
 }
 
+function normalizeWordCountRequirement(raw: unknown): string {
+  return String(raw ?? '').trim()
+}
+
 function sectionIdForIndex(index: number): string {
   return index === 0 ? 'intro' : `section-${index}`
 }
@@ -65,6 +69,12 @@ export function buildExpertDraftCoordinatorTools(
               }),
             ),
             title: Type.String({ description: '小节标题，如 导语、第一节' }),
+            word_count_requirement: Type.Optional(
+              Type.String({
+                description:
+                  '本小节字数要求，优先从大纲「预估字数」「字数规划」读取；可填 800、800-1000、约1000字等。',
+              }),
+            ),
             body: Type.Optional(
               Type.String({ description: '可选：该小节正文；未知时留空' }),
             ),
@@ -83,6 +93,9 @@ export function buildExpertDraftCoordinatorTools(
             return {
               id,
               title: item.title.trim() || previous?.title || (index === 0 ? '导语' : `第${index}节`),
+              word_count_requirement: normalizeWordCountRequirement(
+                item.word_count_requirement ?? previous?.word_count_requirement,
+              ),
               body:
                 typeof item.body === 'string'
                   ? item.body
@@ -195,7 +208,9 @@ export function buildExpertDraftCoordinatorTools(
         const draft = ctx.getDraft()
         const ids = (params.section_ids?.length
           ? params.section_ids
-          : draft.sections.map((s) => s.id)
+          : draft.sections
+              .filter((s) => s.id !== 'intro')
+              .map((s) => s.id)
         )
           .map((id) => String(id).trim())
           .filter(Boolean)

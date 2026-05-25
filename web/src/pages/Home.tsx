@@ -7,6 +7,8 @@ import {
   type MaterialType,
   createBook,
   deleteBook,
+  getBookCover,
+  getBridgeApi,
   getStoredWorkspaceRoot,
   isPywebviewDesktopBundle,
   listBooks,
@@ -40,6 +42,7 @@ export function Home() {
   const [submittingBook, setSubmittingBook] = useState(false)
   const [deletingBookId, setDeletingBookId] = useState<string | null>(null)
   const [bookError, setBookError] = useState<string | null>(null)
+  const [bookCovers, setBookCovers] = useState<Record<string, string>>({})
 
   // ==================== 素材库状态 ====================
   const [materials, setMaterials] = useState<MaterialSummary[]>([])
@@ -53,6 +56,27 @@ export function Home() {
   const [deletingMaterialId, setDeletingMaterialId] = useState<string | null>(null)
   const [materialError, setMaterialError] = useState<string | null>(null)
 
+  // ==================== 书架封面加载 ====================
+  const loadBookCovers = useCallback(async (bookList: BookSummary[]) => {
+    const api = await getBridgeApi()
+    if (!api?.get_book_cover) return
+    const results = await Promise.all(
+      bookList.map(async (b) => {
+        try {
+          const res = await getBookCover(b.id)
+          return { id: b.id, data: res.cover_data }
+        } catch {
+          return { id: b.id, data: null as string | null }
+        }
+      }),
+    )
+    const map: Record<string, string> = {}
+    for (const r of results) {
+      if (r.data) map[r.id] = r.data
+    }
+    setBookCovers(map)
+  }, [])
+
   // ==================== 书架数据加载 ====================
   const refreshBooks = useCallback(async () => {
     setLoadingBooks(true)
@@ -60,12 +84,13 @@ export function Home() {
     try {
       const list = await listBooks()
       setBooks(list)
+      void loadBookCovers(list)
     } catch (e) {
       setBookError(e instanceof Error ? e.message : '加载书架失败')
     } finally {
       setLoadingBooks(false)
     }
-  }, [])
+  }, [loadBookCovers])
 
   useEffect(() => {
     let cancelled = false
@@ -78,6 +103,7 @@ export function Home() {
       try {
         const list = await listBooks()
         if (!cancelled) setBooks(list)
+        if (!cancelled) void loadBookCovers(list)
       } catch (e) {
         if (!cancelled) setBookError(e instanceof Error ? e.message : '加载书架失败')
       } finally {
@@ -102,7 +128,7 @@ export function Home() {
       cancelled = true
       if (lateTimer != null) window.clearTimeout(lateTimer)
     }
-  }, [])
+  }, [loadBookCovers])
 
   // ==================== 素材库数据加载 ====================
   const refreshMaterials = useCallback(async () => {
@@ -244,7 +270,10 @@ export function Home() {
   }, [materialParentGenre])
 
   // ==================== 渲染 ====================
-  const bookCardItems = useMemo(() => books.map(bookToCardItem), [books])
+  const bookCardItems = useMemo(
+    () => books.map((b) => bookToCardItem(b, bookCovers[b.id])),
+    [books, bookCovers],
+  )
   const materialCardItems = useMemo(() => materials.map(materialToCardItem), [materials])
 
   return (

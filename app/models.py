@@ -11,11 +11,14 @@ MaterialType = Literal["long", "short"]
 SHORT_MATERIAL_GENRES: dict[str, list[str]] = {
     "世情": ["家庭", "职场", "婚恋", "邻里", "亲子", "继承", "养老"],
     "追妻": ["甜宠", "虐恋", "重生", "穿越", "暗恋", "破镜重圆", "先婚后爱"],
+    "科幻": ["未来都市", "星际", "人工智能", "赛博朋克", "末日", "时间旅行", "异星文明"],
+    "悬疑": ["刑侦", "推理", "惊悚", "密室", "民俗", "心理", "反转"],
 }
 
-# 素材阶段键（人设、梗、节奏）
+# 素材阶段键（人设、导语、梗、节奏）
 MATERIAL_STAGE_KEYS: tuple[str, ...] = (
     "character",  # 人设素材
+    "intro",      # 导语素材
     "gimmick",    # 梗素材
     "pacing",     # 节奏素材
 )
@@ -131,8 +134,13 @@ def default_expert_draft() -> dict[str, Any]:
     """创建专家模式正文编写的默认空结构。"""
     return {
         "sections": [
-            {"id": "intro", "title": "导语", "body": ""},
-            {"id": "section-1", "title": "第一节", "body": ""},
+            {"id": "intro", "title": "导语", "word_count_requirement": "", "body": ""},
+            {
+                "id": "section-1",
+                "title": "第一节",
+                "word_count_requirement": "",
+                "body": "",
+            },
         ],
         "character_states": [
             {"section_id": "intro", "title": "导语人物状态", "body": ""},
@@ -174,6 +182,9 @@ def normalize_expert_draft_from_storage(raw: Any | None) -> dict[str, Any]:
                 {
                     "id": sid,
                     "title": title,
+                    "word_count_requirement": str(
+                        item.get("word_count_requirement") or ""
+                    ).strip(),
                     "body": str(item.get("body") or ""),
                 }
             )
@@ -230,11 +241,11 @@ def normalize_expert_draft_from_storage(raw: Any | None) -> dict[str, Any]:
 
 
 def is_workspace_short_book(categories: list[str], book_type: str) -> bool:
-    """判断是否为支持工作台的短篇书籍（世情或追妻）"""
+    """判断是否为支持工作台的短篇书籍。"""
     if book_type != "short":
         return False
     cats = set(categories)
-    return bool(cats & {"世情", "追妻", "现实情感", "情感"})
+    return bool(cats & {"世情", "追妻", "科幻", "悬疑", "现实情感", "情感"})
 
 
 def is_shiqing_short_book(categories: list[str], book_type: str) -> bool:
@@ -254,6 +265,20 @@ def is_qinggan_short_book(categories: list[str], book_type: str) -> bool:
     if "世情" in categories:
         return False
     return ("追妻" in categories) or ("现实情感" in categories) or ("情感" in categories)
+
+
+def is_kehuan_short_book(categories: list[str], book_type: str) -> bool:
+    """判断是否为科幻短篇（用于提示词选择）。"""
+    if book_type != "short":
+        return False
+    return "科幻" in categories
+
+
+def is_xuanyi_short_book(categories: list[str], book_type: str) -> bool:
+    """判断是否为悬疑短篇（用于提示词选择）。"""
+    if book_type != "short":
+        return False
+    return "悬疑" in categories
 
 
 def primary_draft_stage_key(book: "Book") -> str:
@@ -329,7 +354,7 @@ def normalize_material_stages_from_storage(raw: dict[str, Any] | None) -> dict[s
 
 @dataclass
 class Material:
-    """素材数据模型，用于存储人设、梗、节奏等素材"""
+    """素材数据模型，用于存储人设、导语、梗、节奏等素材"""
 
     id: str
     title: str

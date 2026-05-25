@@ -21,11 +21,14 @@ export type WorkspaceStageAgentContext = {
   promptKind: PromptKind | MaterialPromptKind
   stageId: StageId | MaterialStageId
   stageBody: string
+  getCurrentStageBody?: () => string
   allStages: Partial<Record<StageId | MaterialStageId, string>>
   linkedMaterial?: Material | null
   applyToStageEditor?: (payload: ApplyToStageEditorPayload) => void
   /** 查询某 toolCallId 是否已在流式生成阶段同步到编辑器 */
   isToolCallStreamed?: (toolCallId: string) => boolean
+  /** 请求上层保存当前书籍/素材；用于复制工具写入后自动落盘 */
+  onRequestSave?: () => void | Promise<void>
 }
 
 /** Pi 工作台工具集；systemPrompt 须由后端单独装配。 */
@@ -51,9 +54,11 @@ export function getWorkspaceStageAdditionalTools(
     bookTitle: ctx.bookTitle,
     stageId: ctx.stageId as ShortWorkspaceStageAgentContext['stageId'],
     stageBody: ctx.stageBody,
+    getCurrentStageBody: ctx.getCurrentStageBody,
     allStages: ctx.allStages as Partial<Record<ShortWorkspaceStageAgentContext['stageId'], string>>,
     linkedMaterial: ctx.linkedMaterial,
     applyToStageEditor: ctx.applyToStageEditor,
+    onRequestSave: ctx.onRequestSave,
   }
   return buildShortWorkspaceAdditionalTools(narrow)
 }

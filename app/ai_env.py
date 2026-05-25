@@ -15,10 +15,10 @@ def _parse_env_file(path: Path) -> dict[str, str]:
         line = raw.strip()
         if not line or line.startswith("#"):
             continue
-        if ":" in line:
-            key, rest = line.split(":", 1)
-        elif "=" in line:
+        if "=" in line:
             key, rest = line.split("=", 1)
+        elif ":" in line:
+            key, rest = line.split(":", 1)
         else:
             continue
         k = key.strip().lower()
@@ -37,6 +37,15 @@ def _normalize_xiaomi_model_id(source: str, model_id: str) -> str:
 
 def _normalize_config_id(raw: str) -> str:
     return "".join(ch if ch.isalnum() else "_" for ch in raw.strip().lower()).strip("_")
+
+
+def _parse_bool(value: str) -> bool | None:
+    normalized = value.strip().lower()
+    if normalized in ("1", "true", "yes", "y", "on", "支持", "开启"):
+        return True
+    if normalized in ("0", "false", "no", "n", "off", "不支持", "关闭"):
+        return False
+    return None
 
 
 def _ai_env_file_candidates() -> list[Path]:
@@ -126,17 +135,45 @@ def _load_configured_models(data: dict[str, str]) -> list[dict[str, str]]:
             config_id,
             ("label", "display_name", "title"),
         )
+        base_url = _first_config_value(
+            data,
+            config_id,
+            ("model_url", "url", "endpoint", "base_url"),
+        )
+        model_like = _first_config_value(
+            data,
+            config_id,
+            ("model_like", "like", "api_type", "api", "format"),
+        ).lower()
+        reasoning_raw = _first_config_value(
+            data,
+            config_id,
+            ("model_reasoning", "reasoning", "thinking", "supports_reasoning"),
+        )
         if not model_name or not api_key or not source:
             continue
-        models.append(
-            {
-                "id": _normalize_config_id(config_id) or config_id,
-                "label": label or config_id,
-                "provider": source,
-                "model_id": _normalize_xiaomi_model_id(source, model_name),
-                "api_key": api_key,
-            }
-        )
+        api = ""
+        if model_like in ("openai", "openai-completions"):
+            api = "openai-completions"
+        elif model_like in ("openai-response", "openai-responses"):
+            api = "openai-responses"
+        elif model_like in ("claude", "anthropic", "anthropic-messages"):
+            api = "anthropic-messages"
+        entry: dict[str, str] = {
+            "id": _normalize_config_id(config_id) or config_id,
+            "label": label or config_id,
+            "provider": source,
+            "model_id": _normalize_xiaomi_model_id(source, model_name),
+            "api_key": api_key,
+        }
+        if base_url:
+            entry["base_url"] = base_url
+        if api:
+            entry["api"] = api
+        reasoning = _parse_bool(reasoning_raw)
+        if reasoning is not None:
+            entry["reasoning"] = "true" if reasoning else "false"
+        models.append(entry)
     return models
 
 
@@ -195,3 +232,16 @@ def load_ai_model_defaults() -> dict[str, Any] | None:
         "api_key": api_key,
     }
     return out
+
+
+def load_image_model_defaults() -> dict[str, str] | None:
+    """读取图片生成模型配置。"""
+    data = _load_ai_env_data()
+    model = (data.get("image_model") or "").strip()
+    api_key = (data.get("image_model_key") or "").strip()
+    if not model or not api_key:
+        return None
+    return {
+        "model": model,
+        "api_key": api_key,
+    }

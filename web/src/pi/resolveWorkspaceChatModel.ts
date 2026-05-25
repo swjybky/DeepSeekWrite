@@ -13,6 +13,25 @@ function trimString(value: unknown): string {
   return typeof value === 'string' ? value.trim() : ''
 }
 
+function coerceBoolean(value: unknown): boolean | undefined {
+  if (typeof value === 'boolean') return value
+  if (typeof value !== 'string') return undefined
+  const normalized = value.trim().toLowerCase()
+  if (['1', 'true', 'yes', 'y', 'on', '支持', '开启'].includes(normalized)) {
+    return true
+  }
+  if (['0', 'false', 'no', 'n', 'off', '不支持', '关闭'].includes(normalized)) {
+    return false
+  }
+  return undefined
+}
+
+function inferReasoningSupport(modelId: string, api: string): boolean {
+  if (api !== 'openai-responses') return false
+  const normalized = modelId.trim().toLowerCase()
+  return /^(gpt-5|o[134]|gpt-oss|codex)/.test(normalized)
+}
+
 function coerceModelConfig(raw: unknown): AiModelConfig | null {
   if (!raw || typeof raw !== 'object') return null
   const o = raw as Record<string, unknown>
@@ -21,8 +40,15 @@ function coerceModelConfig(raw: unknown): AiModelConfig | null {
   const model_id = trimString(o.model_id ?? o.modelId)
   const api_key = trimString(o.api_key ?? o.apiKey)
   const label = trimString(o.label) || id
+  const base_url = trimString(o.base_url ?? o.baseUrl)
+  const api = trimString(o.api ?? o.model_like ?? o.modelLike)
+  const reasoning = coerceBoolean(o.reasoning ?? o.model_reasoning ?? o.modelReasoning)
   if (!id || !provider || !model_id || !api_key) return null
-  return { id, label, provider, model_id, api_key }
+  const out: AiModelConfig = { id, label, provider, model_id, api_key }
+  if (base_url) out.base_url = base_url
+  if (api) out.api = api
+  if (reasoning !== undefined) out.reasoning = reasoning
+  return out
 }
 
 function coerceDefaults(raw: unknown): AiModelDefaults | null {
@@ -63,9 +89,60 @@ function resolveModel(provider: string, modelId: string): Model<Api> | null {
   return getModel(provider as KnownProvider, modelId as never) ?? null
 }
 
+function createOwnerModel(config: AiModelConfig): Model<Api> {
+  const api = (config.api || 'openai-completions') as Api
+  return {
+    id: config.model_id,
+    name: config.label || config.model_id,
+    api,
+    provider: config.id,
+    baseUrl: config.base_url!,
+    reasoning: config.reasoning ?? inferReasoningSupport(config.model_id, api),
+    input: ['text'],
+    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+    contextWindow: 128000,
+    maxTokens: 8192,
+  }
+}
+
+async function syncOwnerModelsToCustomProvidersStore(
+  configs: AiModelConfig[],
+): Promise<void> {
+  const storage = getAppStorage()
+  try {
+    const existing = await storage.customProviders.getAll()
+    for (const p of existing) {
+      if (p.id.startsWith('writeclaw-owner-')) {
+        await storage.customProviders.delete(p.id)
+      }
+    }
+  } catch {
+    // ignore cleanup errors
+  }
+  for (const config of configs) {
+    if (!config.base_url) continue
+    const api = (config.api || 'openai-completions') as Api
+    const providerType = api as
+      | 'openai-completions'
+      | 'openai-responses'
+      | 'anthropic-messages'
+    const providerId = `writeclaw-owner-${config.id}`
+    const model = createOwnerModel(config)
+    await storage.customProviders.set({
+      id: providerId,
+      name: config.id,
+      type: providerType,
+      baseUrl: config.base_url,
+      apiKey: config.api_key,
+      models: [model],
+    })
+  }
+}
+
 async function writeConfiguredKeys(configs: AiModelConfig[]): Promise<void> {
   for (const config of configs) {
-    await getAppStorage().providerKeys.set(config.provider, config.api_key)
+    const keyProvider = config.base_url ? config.id : config.provider
+    await getAppStorage().providerKeys.set(keyProvider, config.api_key)
   }
 }
 
@@ -76,11 +153,20 @@ async function loadConfiguredModels(): Promise<{
   const defaults = await loadDefaults()
   if (!defaults?.models?.length) return null
 
+  const ownerConfigs = defaults.models.filter((c) => c.base_url)
+  if (ownerConfigs.length) {
+    await syncOwnerModelsToCustomProvidersStore(ownerConfigs)
+  }
+
   const configs: ResolvedModelConfig[] = []
   for (const config of defaults.models) {
-    const model = resolveModel(config.provider, config.model_id)
-    if (!model) continue
-    configs.push({ ...config, model })
+    if (config.base_url) {
+      configs.push({ ...config, model: createOwnerModel(config) })
+    } else {
+      const model = resolveModel(config.provider, config.model_id)
+      if (!model) continue
+      configs.push({ ...config, model })
+    }
   }
   if (!configs.length) return null
   await writeConfiguredKeys(configs)
@@ -106,7 +192,9 @@ export async function resolveWorkspaceProviderApiKey(
   try {
     const configured = await loadConfiguredModels()
     const match = configured?.configs.find(
-      (config) => config.provider.toLowerCase() === p.toLowerCase(),
+      (config) =>
+        config.provider.toLowerCase() === p.toLowerCase() ||
+        config.id.toLowerCase() === p.toLowerCase(),
     )
     if (match?.api_key.trim()) return match.api_key.trim()
   } catch {
@@ -230,7 +318,9 @@ export async function openWorkspaceConfiguredModelSelector(
 
       const meta = document.createElement('span')
       meta.className = 'wc-model-dialog-item-meta'
-      meta.textContent = `${config.provider} / ${config.model_id}`
+      meta.textContent = config.base_url
+        ? `${config.api || 'openai'} → ${config.base_url}`
+        : `${config.provider} / ${config.model_id}`
 
       const badge = document.createElement('span')
       badge.className = 'wc-model-dialog-item-badge'

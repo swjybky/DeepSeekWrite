@@ -13,10 +13,7 @@ export function buildWritingAssistantPrompt(
   stageLabel: string,
   stageBody: string,
 ): string {
-  const excerpt =
-    stageBody.length > 12000
-      ? `${stageBody.slice(0, 12000)}\n\n…（内容过长已截断）`
-      : stageBody
+  const excerpt = stageBody
   return [
     WRITING_ASSISTANT_ROLE,
     '',

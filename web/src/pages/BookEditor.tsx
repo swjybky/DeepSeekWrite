@@ -2,12 +2,16 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import {
+  readExpertSectionWriterPromptTemplate,
   readWorkspacePromptTemplate,
+  resetExpertSectionWriterPromptOverride,
   resetWorkspacePromptOverride,
+  saveExpertSectionWriterPromptOverride,
   saveWorkspacePromptOverride,
   type Book,
   type ExpertDraft,
   type StageId,
+  defaultExpertDraft,
   mergeStagePatchIntoAll,
   normalizeExpertDraft,
   normalizeStagesForWorkspaceBook,
@@ -22,11 +26,16 @@ import {
   MATERIAL_STAGE_LABELS,
   type Material,
   type MaterialSummary,
+  generateBookCover,
+  getBookCover,
+  pickFolder,
+  exportDocx,
 } from '../bridge'
 import { WorkspaceAiChat } from '../components/WorkspaceAiChat'
 import type { ApplyToStageEditorPayload } from '../pi/workspaceStageAgents'
 import { ExpertDraftAiChat } from '../workspaces/short/expertDraft/ExpertDraftAiChat'
 import { ExpertDraftEditor } from '../workspaces/short/expertDraft/ExpertDraftEditor'
+import { promptKindStyleLabel } from '../workspaces/short/expertDraft/prompts'
 import {
   runExpertDraftSectionWriter,
   type RunExpertDraftSectionWriterOptions,
@@ -49,6 +58,7 @@ const WORKSPACE_COL_R = 36
 const WORKSPACE_COL_SUM = 18 + 36 + 36
 /** 为中间编辑区保留的近似最小宽度（用于计算 AI 栏在当前窗口下最大能拉多宽） */
 const EDITOR_MIN_FOR_LAYOUT = 160
+type PromptEditorTarget = 'workspace-stage' | 'expert-section-writer'
 
 function usableWidthLessSplitter(viewportWidth: number): number {
   return Math.max(0, viewportWidth - WORKSPACE_SPLITTER_W)
@@ -91,6 +101,18 @@ function stageTextCounts(text: string): { total: number; nonSpace: number } {
   }
 }
 
+function combineExpertDraftSections(draft: ExpertDraft): string {
+  return draft.sections
+    .map((section) => {
+      const body = section.body.trim()
+      if (!body) return ''
+      const title = section.title.trim()
+      return title ? `${title}\n${body}` : body
+    })
+    .filter(Boolean)
+    .join('\n\n')
+}
+
 function readStoredAiWidth(): number {
   const vw =
     typeof window !== 'undefined' ? window.innerWidth : 1280
@@ -123,6 +145,8 @@ export function BookEditor() {
   const [aiPanelWidth, setAiPanelWidth] = useState(readStoredAiWidth)
   /** 当前阶段 AI 侧栏「对话轮次」：递增后重建 Pi 会话并清空该阶段对话历史 */
   const [promptEditorOpen, setPromptEditorOpen] = useState(false)
+  const [promptEditorTarget, setPromptEditorTarget] =
+    useState<PromptEditorTarget>('workspace-stage')
   const [promptDraft, setPromptDraft] = useState('')
   const [promptEditorLoading, setPromptEditorLoading] = useState(false)
   const [promptEditorSaving, setPromptEditorSaving] = useState(false)
@@ -133,12 +157,20 @@ export function BookEditor() {
   const [materialSummaries, setMaterialSummaries] = useState<MaterialSummary[]>([])
   const [materialSelectorLoading, setMaterialSelectorLoading] = useState(false)
   const [materialSelectorSaving, setMaterialSelectorSaving] = useState(false)
+  const [editingTitle, setEditingTitle] = useState(false)
+  const [titleDraft, setTitleDraft] = useState('')
   /** 传给当前阶段 WorkspaceAiChat，保存模板后递增以重拉后端 systemPrompt */
   const [promptReloadNonce, setPromptReloadNonce] = useState(0)
   const [aiChatEpochByStage, setAiChatEpochByStage] = useState<
     Partial<Record<StageId, number>>
   >({})
   const [expertAiChatEpoch, setExpertAiChatEpoch] = useState(0)
+  /** 封面相关状态 */
+  const [coverData, setCoverData] = useState<string | null>(null)
+  const [coverGenerating, setCoverGenerating] = useState(false)
+  const [coverDialogOpen, setCoverDialogOpen] = useState(false)
+  const [coverPromptDraft, setCoverPromptDraft] = useState('')
+  const [coverViewerOpen, setCoverViewerOpen] = useState(false)
   const splitDragRef = useRef<{ startX: number; startWidth: number } | null>(
     null,
   )
@@ -147,20 +179,33 @@ export function BookEditor() {
   const activeStageRef = useRef<StageId>(activeStage)
   /** 当前激活阶段的 textarea ref，用于自动滚动 */
   const textareaRef = useRef<HTMLTextAreaElement | null>(null)
-  /** 流式 token 缓冲区 */
-  const tokenBufferRef = useRef<string>('')
-  const tokenBufferRafRef = useRef<number | null>(null)
+  /** 流式 token 缓冲区；按阶段隔离，避免切换阶段后写入串台 */
+  const tokenBuffersRef = useRef<Partial<Record<StageId, string>>>({})
+  const tokenBufferRafRefs = useRef<Partial<Record<StageId, number>>>({})
   /** 最新 stages 的 ref，用于流式写入时读取当前值 */
   const stagesRef = useRef<Record<StageId, string>>(EMPTY_STAGES)
   /** 最新专家模式正文结构，用于后台小节智能体读取和写入 */
   const expertDraftRef = useRef<ExpertDraft>(normalizeExpertDraft(null))
   const expertRunAbortRef = useRef<AbortController | null>(null)
   const expertRunPromiseRef = useRef<Promise<void> | null>(null)
-  /** 正在流式输出时禁用用户输入（设为只读） */
-  const [isStreaming, setIsStreaming] = useState(false)
+  /** 正在流式输出的阶段禁用用户输入（设为只读） */
+  const [streamingStages, setStreamingStages] = useState<Partial<Record<StageId, boolean>>>({})
+  const streamingStagesRef = useRef<Partial<Record<StageId, boolean>>>({})
   const currentPromptKind: PromptKind = book
     ? resolvePromptKind(book) ?? 'shiqing'
     : 'shiqing'
+
+  const setEditorStreaming = useCallback((stageId: StageId, next: boolean) => {
+    if (Boolean(streamingStagesRef.current[stageId]) === next) return
+    const updated = { ...streamingStagesRef.current }
+    if (next) {
+      updated[stageId] = true
+    } else {
+      delete updated[stageId]
+    }
+    streamingStagesRef.current = updated
+    setStreamingStages(updated)
+  }, [])
 
   useEffect(() => {
     activeStageRef.current = activeStage
@@ -178,9 +223,9 @@ export function BookEditor() {
   // 清理 RAF
   useEffect(() => {
     return () => {
-      if (tokenBufferRafRef.current) {
-        cancelAnimationFrame(tokenBufferRafRef.current)
-      }
+      Object.values(tokenBufferRafRefs.current).forEach((rafId) => {
+        if (rafId !== undefined) cancelAnimationFrame(rafId)
+      })
       expertRunAbortRef.current?.abort()
     }
   }, [])
@@ -199,29 +244,59 @@ export function BookEditor() {
   // 细粒度的阶段更新函数（使用函数式更新避免不必要的重渲染）
   const updateStage = useCallback(
     (stageId: StageId, updater: (current: string) => string) => {
-      setStages((prev) => {
-        const current = prev[stageId] ?? ''
-        const next = updater(current)
-        if (next === current) return prev
-        return { ...prev, [stageId]: next }
-      })
+      const currentStages = stagesRef.current
+      const current = currentStages[stageId] ?? ''
+      const next = updater(current)
+      if (next === current) return
+      const updated = { ...currentStages, [stageId]: next }
+      stagesRef.current = updated
+      setStages(updated)
     },
     [],
   )
 
-  // 将缓冲区的 token 刷新到 state（使用 RAF 节流）
-  const flushTokenBuffer = useCallback(() => {
-    tokenBufferRafRef.current = null
-    const buffer = tokenBufferRef.current
-    if (!buffer) return
-    tokenBufferRef.current = ''
+  const cancelTokenFlush = useCallback((stageId: StageId) => {
+    const rafId = tokenBufferRafRefs.current[stageId]
+    if (rafId !== undefined) {
+      cancelAnimationFrame(rafId)
+      delete tokenBufferRafRefs.current[stageId]
+    }
+  }, [])
 
-    const stage = activeStageRef.current
-    updateStage(stage, (cur) => cur + buffer)
+  // 将某个阶段缓冲区的 token 刷新到 state（使用 RAF 节流）
+  const flushTokenBuffer = useCallback(
+    (stageId: StageId) => {
+      delete tokenBufferRafRefs.current[stageId]
+      const buffer = tokenBuffersRef.current[stageId] ?? ''
+      if (!buffer) return
+      delete tokenBuffersRef.current[stageId]
+
+      updateStage(stageId, (cur) => cur + buffer)
+    },
+    [updateStage],
+  )
+
+  const flushAllTokenBuffers = useCallback(() => {
+    const rafIds = Object.values(tokenBufferRafRefs.current)
+    tokenBufferRafRefs.current = {}
+    rafIds.forEach((rafId) => {
+      if (rafId !== undefined) cancelAnimationFrame(rafId)
+    })
+
+    const buffers = tokenBuffersRef.current
+    tokenBuffersRef.current = {}
+    for (const [stageId, buffer] of Object.entries(buffers) as [
+      StageId,
+      string | undefined,
+    ][]) {
+      if (!buffer) continue
+      updateStage(stageId, (cur) => cur + buffer)
+    }
   }, [updateStage])
 
   // 自动滚动 textarea 到底部（如果用户正在底部）
-  const autoScrollTextarea = useCallback(() => {
+  const autoScrollTextarea = useCallback((stageId: StageId) => {
+    if (activeStageRef.current !== stageId) return
     const textarea = textareaRef.current
     if (!textarea) return
     const wasAtBottom =
@@ -232,69 +307,59 @@ export function BookEditor() {
   }, [])
 
   const applyToStageEditor = useCallback(
-    (payload: ApplyToStageEditorPayload) => {
-      const stage = activeStageRef.current
-
+    (stage: StageId, payload: ApplyToStageEditorPayload) => {
       if (payload.mode === 'replace') {
         // replace 模式立即执行，清空缓冲区
-        if (tokenBufferRafRef.current) {
-          cancelAnimationFrame(tokenBufferRafRef.current)
-          tokenBufferRafRef.current = null
-        }
-        tokenBufferRef.current = ''
-        setIsStreaming(false)
+        cancelTokenFlush(stage)
+        delete tokenBuffersRef.current[stage]
+        setEditorStreaming(stage, false)
         updateStage(stage, () => payload.text.trim())
         // DOM 更新后尝试自动滚动
-        requestAnimationFrame(autoScrollTextarea)
+        requestAnimationFrame(() => autoScrollTextarea(stage))
         return
       }
 
       if (payload.mode === 'append_token') {
         if (!payload.text) return
-        setIsStreaming(true)
-        // 累积到缓冲区并立即刷新到 state（不再通过 RAF 延迟，避免重复）
-        tokenBufferRef.current += payload.text
-        // 立即刷新缓冲区，只追加新内容
-        const buffer = tokenBufferRef.current
-        tokenBufferRef.current = ''
-        if (tokenBufferRafRef.current) {
-          cancelAnimationFrame(tokenBufferRafRef.current)
-          tokenBufferRafRef.current = null
+        setEditorStreaming(stage, true)
+        tokenBuffersRef.current[stage] =
+          (tokenBuffersRef.current[stage] ?? '') + payload.text
+        if (tokenBufferRafRefs.current[stage] === undefined) {
+          tokenBufferRafRefs.current[stage] = requestAnimationFrame(() => {
+            flushTokenBuffer(stage)
+            requestAnimationFrame(() => autoScrollTextarea(stage))
+          })
         }
-        // 使用函数式更新确保追加到最新值
-        updateStage(stage, (cur) => cur + buffer)
-        // DOM 更新后尝试自动滚动
-        requestAnimationFrame(autoScrollTextarea)
         return
       }
 
       // 流式结束标记
       if (payload.mode === 'streaming_end') {
-        if (tokenBufferRafRef.current) {
-          cancelAnimationFrame(tokenBufferRafRef.current)
-          tokenBufferRafRef.current = null
-        }
-        tokenBufferRef.current = ''
-        setIsStreaming(false)
+        cancelTokenFlush(stage)
+        flushTokenBuffer(stage)
+        setEditorStreaming(stage, false)
         return
       }
 
       // 其他模式（append）立即执行
-      if (tokenBufferRafRef.current) {
-        cancelAnimationFrame(tokenBufferRafRef.current)
-        tokenBufferRafRef.current = null
-      }
-      tokenBufferRef.current = ''
-      setIsStreaming(false)
+      cancelTokenFlush(stage)
+      delete tokenBuffersRef.current[stage]
+      setEditorStreaming(stage, false)
       const trimmed = payload.text.trim()
       if (!trimmed) return
       updateStage(stage, (cur) => {
         const sep = cur.length === 0 ? '' : cur.endsWith('\n') ? '\n' : '\n\n'
         return cur + sep + trimmed
       })
-      requestAnimationFrame(autoScrollTextarea)
+      requestAnimationFrame(() => autoScrollTextarea(stage))
     },
-    [updateStage, autoScrollTextarea],
+    [
+      updateStage,
+      cancelTokenFlush,
+      flushTokenBuffer,
+      autoScrollTextarea,
+      setEditorStreaming,
+    ],
   )
 
   useEffect(() => {
@@ -325,6 +390,8 @@ export function BookEditor() {
         return
       }
       setBook(b)
+      const coverRes = await getBookCover(b.id)
+      setCoverData(coverRes.cover_data)
       if (b.linked_material_id) {
         const material = await getMaterial(b.linked_material_id)
         setLinkedMaterial(material)
@@ -334,6 +401,7 @@ export function BookEditor() {
       const rows = resolveWorkspaceStagesForBook(b)
       const normalized = normalizeStagesForWorkspaceBook(b, b.stages)
       const normalizedExpertDraft = normalizeExpertDraft(b.expert_draft, true)
+      stagesRef.current = normalized
       setStages(normalized)
       expertDraftRef.current = normalizedExpertDraft
       setExpertDraftState(normalizedExpertDraft)
@@ -352,6 +420,32 @@ export function BookEditor() {
     void load()
   }, [load])
 
+  const handleExportDocx = useCallback(async () => {
+    if (!book) return
+    const folder = await pickFolder()
+    if (!folder) return
+    setMessage(null)
+    setError(null)
+    try {
+      const body = stagesRef.current[activeStageRef.current] ?? ''
+      const res = await exportDocx(
+        book.id,
+        activeStageRef.current,
+        folder,
+        body,
+        coverData,
+      )
+      if (res.success) {
+        setMessage('导出成功')
+        window.setTimeout(() => setMessage(null), 2000)
+      } else {
+        setError(res.error || '导出失败')
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : '导出失败')
+    }
+  }, [book, coverData])
+
   const handleSave = useCallback(async () => {
     if (!id || !book || saveInFlightRef.current) return
     saveInFlightRef.current = true
@@ -359,24 +453,18 @@ export function BookEditor() {
     setMessage(null)
     setError(null)
     try {
-      // 先刷新缓冲区确保数据完整
-      if (tokenBufferRef.current && !tokenBufferRafRef.current) {
-        flushTokenBuffer()
-      }
-      // 如果有正在进行的 RAF，等待它完成
-      if (tokenBufferRafRef.current) {
-        cancelAnimationFrame(tokenBufferRafRef.current)
-        tokenBufferRafRef.current = null
-        flushTokenBuffer()
-      }
-      const merged = mergeStagePatchIntoAll(book.stages, stages)
+      // 先刷新所有阶段的流式缓冲区，确保保存数据完整
+      flushAllTokenBuffers()
+      const merged = mergeStagePatchIntoAll(book.stages, stagesRef.current)
       const next = await saveBook(id, { stages: merged, expert_draft: expertDraft })
       if (!next) {
         setError('保存失败：书籍不存在')
         return
       }
       setBook(next)
-      setStages(normalizeStagesForWorkspaceBook(next, next.stages))
+      const normalizedStages = normalizeStagesForWorkspaceBook(next, next.stages)
+      stagesRef.current = normalizedStages
+      setStages(normalizedStages)
       const normalizedExpertDraft = normalizeExpertDraft(next.expert_draft)
       expertDraftRef.current = normalizedExpertDraft
       setExpertDraftState(normalizedExpertDraft)
@@ -388,7 +476,7 @@ export function BookEditor() {
       saveInFlightRef.current = false
       setSaving(false)
     }
-  }, [id, book, stages, expertDraft, flushTokenBuffer])
+  }, [id, book, expertDraft, flushAllTokenBuffers])
 
   const startExpertWriting = useCallback(
     (
@@ -462,6 +550,34 @@ export function BookEditor() {
     }))
   }, [updateExpertDraft])
 
+  const resetExpertDraft = useCallback(() => {
+    if (expertDraftRef.current.running) return
+    const ok = window.confirm('清空专家模式内容，并恢复为导语和第一节的初始状态？')
+    if (!ok) return
+    const next = normalizeExpertDraft(defaultExpertDraft(), true)
+    expertDraftRef.current = next
+    setExpertDraftState(next)
+    setMessage('专家模式已清空')
+    setError(null)
+    window.setTimeout(() => setMessage(null), 2000)
+  }, [])
+
+  const writeExpertDraftToStage = useCallback(() => {
+    if (expertDraftRef.current.running) return
+    const body = combineExpertDraftSections(expertDraftRef.current)
+    if (!body) {
+      setMessage(null)
+      setError('专家正文列表没有可写入的正文')
+      return
+    }
+    updateStage('draft', () => body)
+    setExpertMode(false)
+    setActiveStage('draft')
+    setError(null)
+    setMessage('已写入普通模式正文')
+    window.setTimeout(() => setMessage(null), 2000)
+  }, [updateStage])
+
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if (!(e.ctrlKey || e.metaKey) || e.key.toLowerCase() !== 's') return
@@ -474,10 +590,9 @@ export function BookEditor() {
   }, [id, book, handleSave])
 
   const handleStageBodyChange = (value: string) => {
-    // 清理缓冲区，避免冲突
-    if (tokenBufferRef.current) {
-      tokenBufferRef.current = ''
-    }
+    // 清理当前阶段缓冲区，避免用户输入和流式写入冲突
+    cancelTokenFlush(activeStage)
+    delete tokenBuffersRef.current[activeStage]
     updateStage(activeStage, () => value)
   }
 
@@ -530,7 +645,7 @@ export function BookEditor() {
         <div className="editor-pending-main">
           <p className="editor-pending-title">该类型工作台开发中</p>
           <p className="muted editor-pending-desc">
-            当前仅「短篇 · 世情」或「短篇 · 追妻」可使用完整写作台与 AI
+            当前仅「短篇 · 世情 / 追妻 / 科幻 / 悬疑」可使用完整写作台与 AI
             协作；其余组合仍在扩展中。
           </p>
           <Link className="btn-pending-home" to="/">
@@ -566,9 +681,30 @@ export function BookEditor() {
         await new Promise((r) => setTimeout(r, minDelay - elapsed))
       }
       setPromptDraft(t)
+      setPromptEditorTarget('workspace-stage')
       setPromptEditorOpen(true)
     } catch (e) {
       setError(e instanceof Error ? e.message : '无法加载提示词模板')
+    } finally {
+      setPromptEditorLoading(false)
+    }
+  }
+
+  const openExpertPromptEditor = async () => {
+    const start = Date.now()
+    const minDelay = 150
+    setPromptEditorLoading(true)
+    try {
+      const t = await readExpertSectionWriterPromptTemplate(promptKind)
+      const elapsed = Date.now() - start
+      if (elapsed < minDelay) {
+        await new Promise((r) => setTimeout(r, minDelay - elapsed))
+      }
+      setPromptDraft(t)
+      setPromptEditorTarget('expert-section-writer')
+      setPromptEditorOpen(true)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : '无法加载专家模式提示词模板')
     } finally {
       setPromptEditorLoading(false)
     }
@@ -578,8 +714,12 @@ export function BookEditor() {
     setPromptEditorSaving(true)
     setError(null)
     try {
-      await saveWorkspacePromptOverride(promptKind, activeStage, promptDraft)
-      setPromptReloadNonce((n) => n + 1)
+      if (promptEditorTarget === 'expert-section-writer') {
+        await saveExpertSectionWriterPromptOverride(promptKind, promptDraft)
+      } else {
+        await saveWorkspacePromptOverride(promptKind, activeStage, promptDraft)
+        setPromptReloadNonce((n) => n + 1)
+      }
       setPromptEditorOpen(false)
     } catch (e) {
       setError(e instanceof Error ? e.message : '保存提示词失败')
@@ -627,10 +767,18 @@ export function BookEditor() {
   const resetPromptTemplateToBuiltin = async () => {
     setPromptEditorSaving(true)
     try {
-      await resetWorkspacePromptOverride(promptKind, activeStage)
-      const t = await readWorkspacePromptTemplate(promptKind, activeStage)
+      const t =
+        promptEditorTarget === 'expert-section-writer'
+          ? await (async () => {
+              await resetExpertSectionWriterPromptOverride(promptKind)
+              return readExpertSectionWriterPromptTemplate(promptKind)
+            })()
+          : await (async () => {
+              await resetWorkspacePromptOverride(promptKind, activeStage)
+              setPromptReloadNonce((n) => n + 1)
+              return readWorkspacePromptTemplate(promptKind, activeStage)
+            })()
       setPromptDraft(t)
-      setPromptReloadNonce((n) => n + 1)
     } catch (e) {
       setError(e instanceof Error ? e.message : '重置提示词失败')
     } finally {
@@ -640,6 +788,12 @@ export function BookEditor() {
 
   const { total: stageCharTotal, nonSpace: stageCharNonSpace } =
     stageTextCounts(stageBody)
+  const promptEditorIsExpert = promptEditorTarget === 'expert-section-writer'
+  const promptEditorTitle = promptEditorIsExpert
+    ? `专家模式 · 后台小节编写智能体 · ${promptKindStyleLabel(promptKind)}`
+    : `短篇 · ${book?.categories.join('、') || '未分类'} · ${
+        railStages.find((s) => s.id === activeStage)?.label
+      }`
 
   return (
     <div className="editor-page editor-page--workspace">
@@ -648,7 +802,54 @@ export function BookEditor() {
           ← 书架
         </Link>
         <div className="editor-title-block">
-          <h1 className="editor-title">{book?.title ?? ''}</h1>
+          {editingTitle ? (
+            <input
+              className="editor-title-input"
+              value={titleDraft}
+              onChange={(e) => setTitleDraft(e.target.value)}
+              onBlur={() => {
+                const trimmed = titleDraft.trim()
+                if (trimmed && trimmed !== book?.title && book) {
+                  void (async () => {
+                    try {
+                      const next = await saveBook(book.id, { title: trimmed })
+                      if (next) {
+                        setBook(next)
+                        setMessage('书名已修改')
+                        window.setTimeout(() => setMessage(null), 2000)
+                      } else {
+                        setError('保存书名失败')
+                      }
+                    } catch (e) {
+                      setError(e instanceof Error ? e.message : '保存书名失败')
+                    }
+                  })()
+                }
+                setEditingTitle(false)
+                setTitleDraft('')
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.currentTarget.blur()
+                } else if (e.key === 'Escape') {
+                  setEditingTitle(false)
+                  setTitleDraft('')
+                }
+              }}
+              autoFocus
+            />
+          ) : (
+            <h1
+              className="editor-title editor-title--editable"
+              onDoubleClick={() => {
+                setTitleDraft(book?.title ?? '')
+                setEditingTitle(true)
+              }}
+              title="双击编辑书名"
+            >
+              {book?.title ?? ''}
+            </h1>
+          )}
           <span className="editor-sub">
             {book?.book_type === 'short' ? '短篇' : '长篇'}
             {book?.book_type === 'short' && book.categories.length > 0
@@ -664,14 +865,43 @@ export function BookEditor() {
             ) : null}
           </span>
         </div>
-        <button
-          type="button"
-          className="btn-save"
-          onClick={() => void handleSave()}
-          disabled={saving}
-        >
-          {saving ? '保存中…' : '保存'}
-        </button>
+        <div className="editor-header-actions">
+          {coverData ? (
+            <button
+              type="button"
+              className="btn-cover-view"
+              title="查看封面"
+              onClick={() => setCoverViewerOpen(true)}
+            >
+              <img
+                src={`data:image/png;base64,${coverData}`}
+                alt="封面"
+                className="btn-cover-thumb"
+                onError={() => setCoverData(null)}
+              />
+            </button>
+          ) : null}
+          <button
+            type="button"
+            className="btn-cover-generate"
+            onClick={() => {
+              const defaultPrompt = `基于下面的书内容介绍，给我生成一个具有吸引力的书封面，封面不要有小字，给出合适配图，加上书名\n书名：${book?.title ?? ''}\n剧情设计：${stages.plot_design ?? ''}`
+              setCoverPromptDraft(defaultPrompt)
+              setCoverDialogOpen(true)
+            }}
+            disabled={coverGenerating}
+          >
+            {coverGenerating ? '生成中…' : '生成封面'}
+          </button>
+          <button
+            type="button"
+            className="btn-save"
+            onClick={() => void handleSave()}
+            disabled={saving}
+          >
+            {saving ? '保存中…' : '保存'}
+          </button>
+        </div>
       </header>
 
       {error && <p className="editor-toast error">{error}</p>}
@@ -711,6 +941,10 @@ export function BookEditor() {
               draft={expertDraft}
               updateDraft={updateExpertDraft}
               stopWriting={stopExpertWriting}
+              resetDraft={resetExpertDraft}
+              writeToDraftStage={writeExpertDraftToStage}
+              editPrompt={openExpertPromptEditor}
+              promptEditorLoading={promptEditorLoading}
             />
           ) : (
             <>
@@ -718,6 +952,16 @@ export function BookEditor() {
                 <label className="workspace-stage-label" htmlFor="stage-body">
                   {railStages.find((s) => s.id === activeStage)?.label}
                 </label>
+                {['draft', 'draft_review', 'format_conversion'].includes(activeStage) ? (
+                  <button
+                    type="button"
+                    className="btn-export-docx"
+                    title="导出正文为 docx"
+                    onClick={() => void handleExportDocx()}
+                  >
+                    导出正文
+                  </button>
+                ) : null}
                 <span
                   className="workspace-char-count muted"
                   aria-live="polite"
@@ -740,7 +984,7 @@ export function BookEditor() {
                 onChange={(e) => handleStageBodyChange(e.target.value)}
                 placeholder="在此编辑当前阶段内容…"
                 spellCheck={false}
-                readOnly={isStreaming}
+                readOnly={Boolean(streamingStages[activeStage])}
               />
             </>
           )}
@@ -946,12 +1190,16 @@ export function BookEditor() {
                       bookTitle={book.title}
                       stageId={s.id}
                       stageBody={stages[s.id] ?? ''}
+                      getCurrentStageBody={() => stagesRef.current[s.id] ?? ''}
                       // 非激活阶段使用 stable 空对象引用，避免 allStages 变化触发重渲染
                       allStages={isActive ? stages : EMPTY_STAGES}
                       linkedMaterial={isActive ? linkedMaterial : null}
                       includePiArtifacts={WORKSPACE_AI_INCLUDE_PI_ARTIFACTS}
                       promptRevision={isActive ? promptReloadNonce : 0}
-                      applyToStageEditor={applyToStageEditor}
+                      applyToStageEditor={(payload) =>
+                        applyToStageEditor(s.id, payload)
+                      }
+                      onRequestSave={handleSave}
                       // 非激活阶段暂停实时更新，减少后台计算
                       isPaused={!isActive}
                     />
@@ -1005,8 +1253,7 @@ export function BookEditor() {
             <div className="workspace-prompt-editor-panel">
               <div className="workspace-prompt-editor-head">
                 <h2 id="wc-prompt-editor-title" className="workspace-prompt-editor-title">
-                  短篇 · {book?.categories.join('、') || '未分类'} ·{' '}
-                  {railStages.find((s) => s.id === activeStage)?.label}
+                  {promptEditorTitle}
                 </h2>
                 <button
                   type="button"
@@ -1019,11 +1266,17 @@ export function BookEditor() {
                 </button>
               </div>
               <p className="workspace-prompt-editor-hint muted">
-                {'模板占位写法示例（各占一行）：'}
+                {promptEditorIsExpert
+                  ? '专家模式占位写法示例（各占一行）：'
+                  : '模板占位写法示例（各占一行）：'}
                 <span className="workspace-prompt-editor-code">
-                  {'{{BOOK_TITLE}} {{BOOK_LINE}} {{OTHER_STAGES_EXCERPT}} {{STAGE_BODY}}'}
+                  {promptEditorIsExpert
+                    ? '{{BOOK_TITLE}} {{STYLE}}'
+                    : '{{BOOK_TITLE}} {{BOOK_LINE}} {{OTHER_STAGES_EXCERPT}} {{STAGE_BODY}}'}
                 </span>
-                {' 。保存后立即作用于当前工作台阶段。'}
+                {promptEditorIsExpert
+                  ? ' 。保存后作用于后台小节编写智能体。'
+                  : ' 。保存后立即作用于当前工作台阶段。'}
               </p>
               <textarea
                 className="workspace-prompt-editor-area"
@@ -1154,6 +1407,112 @@ export function BookEditor() {
                   关闭
                 </button>
               </div>
+            </div>
+          </div>
+        ) : null}
+
+        {/* 封面生成弹窗 */}
+        {coverDialogOpen ? (
+          <div
+            className="workspace-cover-dialog-backdrop"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="wc-cover-dialog-title"
+          >
+            <div className="workspace-cover-dialog-panel">
+              <div className="workspace-cover-dialog-head">
+                <h2 id="wc-cover-dialog-title" className="workspace-cover-dialog-title">
+                  生成封面
+                </h2>
+                <button
+                  type="button"
+                  className="workspace-cover-dialog-close"
+                  aria-label="关闭"
+                  disabled={coverGenerating}
+                  onClick={() => setCoverDialogOpen(false)}
+                >
+                  ×
+                </button>
+              </div>
+              <div className="workspace-cover-dialog-body">
+                <label className="workspace-cover-dialog-label" htmlFor="cover-prompt">
+                  提示词（可修改）
+                </label>
+                <textarea
+                  id="cover-prompt"
+                  className="workspace-cover-dialog-area"
+                  value={coverPromptDraft}
+                  spellCheck={false}
+                  disabled={coverGenerating}
+                  onChange={(e) => setCoverPromptDraft(e.target.value)}
+                />
+              </div>
+              <div className="workspace-cover-dialog-foot">
+                <button
+                  type="button"
+                  className="btn-cover-dialog-cancel"
+                  disabled={coverGenerating}
+                  onClick={() => setCoverDialogOpen(false)}
+                >
+                  取消
+                </button>
+                <button
+                  type="button"
+                  className="btn-cover-dialog-confirm"
+                  disabled={coverGenerating || !coverPromptDraft.trim()}
+                  onClick={() => {
+                    if (!book || !coverPromptDraft.trim()) return
+                    setCoverGenerating(true)
+                    setCoverDialogOpen(false)
+                    generateBookCover(book.id, coverPromptDraft.trim())
+                      .then(async (res) => {
+                        if (res.success) {
+                          const refreshed = await getBookCover(book.id)
+                          setCoverData(refreshed.cover_data)
+                          setMessage('封面生成成功')
+                          window.setTimeout(() => setMessage(null), 2000)
+                        } else {
+                          setError(res.error || '封面生成失败')
+                        }
+                      })
+                      .catch((e) => {
+                        setError(e instanceof Error ? e.message : '封面生成失败')
+                      })
+                      .finally(() => {
+                        setCoverGenerating(false)
+                      })
+                  }}
+                >
+                  {coverGenerating ? '生成中…' : '确认生成'}
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : null}
+
+        {/* 封面查看弹窗 */}
+        {coverViewerOpen && coverData ? (
+          <div
+            className="workspace-cover-viewer-backdrop"
+            role="dialog"
+            aria-modal="true"
+            onClick={() => setCoverViewerOpen(false)}
+          >
+            <div className="workspace-cover-viewer-panel">
+              <button
+                type="button"
+                className="workspace-cover-viewer-close"
+                aria-label="关闭"
+                onClick={() => setCoverViewerOpen(false)}
+              >
+                ×
+              </button>
+              <img
+                src={`data:image/png;base64,${coverData}`}
+                alt="书籍封面"
+                className="workspace-cover-viewer-img"
+                onClick={(e) => e.stopPropagation()}
+              />
             </div>
           </div>
         ) : null}

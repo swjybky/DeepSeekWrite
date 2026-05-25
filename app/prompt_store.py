@@ -37,19 +37,32 @@ SHORT_STAGE_LABELS: dict[str, str] = {
     "format_conversion": "格式转换",
 }
 
-# 有效的提示词目录（用于区分世情和情感风格）
-VALID_PROMPT_KINDS: frozenset[str] = frozenset({"shiqing", "qinggan"})
+# 有效的提示词目录（用于区分短篇类型风格）
+VALID_PROMPT_KINDS: frozenset[str] = frozenset(
+    {"shiqing", "qinggan", "kehuan", "xuanyi"}
+)
+
+# 专家模式提示词槽位。当前只暴露后台小节编写智能体，文件名保持独立，
+# 避免与普通「正文编写」阶段模板混用。
+EXPERT_SECTION_WRITER_PROMPT_ID = "expert_section_writer"
+VALID_EXPERT_PROMPT_IDS: frozenset[str] = frozenset(
+    {EXPERT_SECTION_WRITER_PROMPT_ID}
+)
 
 # 阶段顺序映射（按提示词目录）
 STAGED_ORDER: dict[str, tuple[str, ...]] = {
     "shiqing": SHORT_STAGES_ORDER,
     "qinggan": SHORT_STAGES_ORDER,
+    "kehuan": SHORT_STAGES_ORDER,
+    "xuanyi": SHORT_STAGES_ORDER,
 }
 
 # 阶段标签映射（按提示词目录）
 STAGED_LABELS: dict[str, dict[str, str]] = {
     "shiqing": SHORT_STAGE_LABELS,
     "qinggan": SHORT_STAGE_LABELS,
+    "kehuan": SHORT_STAGE_LABELS,
+    "xuanyi": SHORT_STAGE_LABELS,
 }
 
 PEEK_EMPTY_MESSAGE = "（其它阶段暂无内容）"
@@ -62,12 +75,9 @@ _PLACEHOLDER_RE = re.compile(
 )
 
 
-def excerpt(text: str, max_len: int = STAGE_BODY_EXCERPT_CAP) -> str:
+def excerpt(text: str, _max_len: int = STAGE_BODY_EXCERPT_CAP) -> str:
     stripped = text.strip()
-    if len(stripped) <= max_len:
-        return stripped if stripped else "（暂无）"
-    suffix = "\n\n…（内容过长已截断）"
-    return stripped[:max_len].rstrip() + suffix
+    return stripped if stripped else "（暂无）"
 
 
 def _peek_other_stages(
@@ -123,11 +133,31 @@ def builtin_default_prompt_path(prompt_kind: str, stage_id: str) -> Path:
     )
 
 
+def override_expert_prompt_absolute_path(prompt_kind: str, prompt_id: str) -> Path:
+    root = writable_root() / ".data" / "prompt_overrides" / SHORT_PREFIX
+    return (root / prompt_kind / f"{prompt_id}.txt").resolve()
+
+
+def builtin_default_expert_prompt_path(prompt_kind: str, prompt_id: str) -> Path:
+    return (
+        (bundle_root() / "app" / "prompt_defaults" / SHORT_PREFIX)
+        / prompt_kind
+        / f"{prompt_id}.txt"
+    )
+
+
 def validate_slot(prompt_kind: str, stage_id: str) -> None:
     if prompt_kind not in VALID_PROMPT_KINDS:
         raise ValueError(f"未知的 prompt_kind: {prompt_kind!r}")
     if stage_id not in SHORT_STAGES_ORDER:
         raise ValueError(f"未知的 stage_id: {stage_id!r}")
+
+
+def validate_expert_prompt_slot(prompt_kind: str, prompt_id: str) -> None:
+    if prompt_kind not in VALID_PROMPT_KINDS:
+        raise ValueError(f"未知的 prompt_kind: {prompt_kind!r}")
+    if prompt_id not in VALID_EXPERT_PROMPT_IDS:
+        raise ValueError(f"未知的 expert_prompt_id: {prompt_id!r}")
 
 
 def resolve_read_path(prompt_kind: str, stage_id: str) -> Path:
@@ -137,6 +167,15 @@ def resolve_read_path(prompt_kind: str, stage_id: str) -> Path:
     if over.is_file():
         return over
     return builtin_default_prompt_path(prompt_kind, stage_id)
+
+
+def resolve_expert_prompt_read_path(prompt_kind: str, prompt_id: str) -> Path:
+    """专家模式提示词覆盖优先。"""
+    validate_expert_prompt_slot(prompt_kind, prompt_id)
+    over = override_expert_prompt_absolute_path(prompt_kind, prompt_id)
+    if over.is_file():
+        return over
+    return builtin_default_expert_prompt_path(prompt_kind, prompt_id)
 
 
 def read_prompt_template(prompt_kind: str, stage_id: str) -> str:
@@ -152,6 +191,19 @@ def read_prompt_template(prompt_kind: str, stage_id: str) -> str:
     return text
 
 
+def read_expert_prompt_template(prompt_kind: str, prompt_id: str) -> str:
+    path = resolve_expert_prompt_read_path(prompt_kind, prompt_id)
+    if not path.is_file():
+        return (
+            f"[缺少默认专家模式提示模板文件]\n路径: {path}\n\n"
+            "请 reinstall 或补齐 app/prompt_defaults 下的同名 .txt。\n"
+        )
+    text = path.read_text(encoding="utf-8")
+    if text.endswith("\n"):
+        return text[:-1]
+    return text
+
+
 def save_prompt_override(prompt_kind: str, stage_id: str, body: str) -> None:
     validate_slot(prompt_kind, stage_id)
     path = override_prompt_absolute_path(prompt_kind, stage_id)
@@ -159,9 +211,25 @@ def save_prompt_override(prompt_kind: str, stage_id: str, body: str) -> None:
     path.write_text(body if body.endswith("\n") else body + "\n", encoding="utf-8")
 
 
+def save_expert_prompt_override(prompt_kind: str, prompt_id: str, body: str) -> None:
+    validate_expert_prompt_slot(prompt_kind, prompt_id)
+    path = override_expert_prompt_absolute_path(prompt_kind, prompt_id)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(body if body.endswith("\n") else body + "\n", encoding="utf-8")
+
+
 def reset_prompt_override(prompt_kind: str, stage_id: str) -> bool:
     validate_slot(prompt_kind, stage_id)
     path = override_prompt_absolute_path(prompt_kind, stage_id)
+    if path.is_file():
+        path.unlink()
+        return True
+    return False
+
+
+def reset_expert_prompt_override(prompt_kind: str, prompt_id: str) -> bool:
+    validate_expert_prompt_slot(prompt_kind, prompt_id)
+    path = override_expert_prompt_absolute_path(prompt_kind, prompt_id)
     if path.is_file():
         path.unlink()
         return True
@@ -258,26 +326,45 @@ def read_raw_prompt_for_editor(prompt_kind: str, stage_id: str) -> str:
     return text
 
 
+def read_raw_expert_prompt_for_editor(prompt_kind: str, prompt_id: str) -> str:
+    """专家模式编辑框：读写当前生效来源（优先覆盖）原始模板正文。"""
+    path = resolve_expert_prompt_read_path(prompt_kind, prompt_id)
+    if not path.is_file():
+        return ""
+    text = path.read_text(encoding="utf-8")
+    if text.endswith("\n"):
+        return text[:-1]
+    return text
+
+
 # ==================== 素材库提示词管线 ====================
 
 MATERIAL_PREFIX = Path("material")
 
-# 素材阶段顺序（人设/梗/节奏），对齐 app/models.py MATERIAL_STAGE_KEYS
+# 素材阶段顺序（人设/导语/梗/节奏），对齐 app/models.py MATERIAL_STAGE_KEYS
 MATERIAL_STAGES_ORDER: tuple[str, ...] = (
     "character",
+    "intro",
     "gimmick",
     "pacing",
 )
 
 MATERIAL_STAGE_LABELS: dict[str, str] = {
     "character": "人设素材",
+    "intro": "导语素材",
     "gimmick": "梗素材",
     "pacing": "节奏素材",
 }
 
-# 素材提示词目录：long(长篇) / short_shiqing(短篇·世情) / short_qinggan(短篇·情感)
+# 素材提示词目录：long(长篇) / short_*(短篇分类)
 VALID_MATERIAL_PROMPT_KINDS: frozenset[str] = frozenset(
-    {"material_long", "material_short_shiqing", "material_short_qinggan"}
+    {
+        "material_long",
+        "material_short_shiqing",
+        "material_short_qinggan",
+        "material_short_kehuan",
+        "material_short_xuanyi",
+    }
 )
 
 

@@ -17,7 +17,7 @@ import { WorkspaceAiChat } from '../components/WorkspaceAiChat'
 import type { ApplyToStageEditorPayload } from '../pi/workspaceStageAgents'
 import './BookEditor.css'
 
-const MATERIAL_STAGE_KEYS: MaterialStageId[] = ['character', 'gimmick', 'pacing']
+const MATERIAL_STAGE_KEYS: MaterialStageId[] = ['character', 'intro', 'gimmick', 'pacing']
 
 const AI_PANEL_WIDTH_KEY = 'write-claw:material-ai-width'
 const AI_PANEL_MIN = 240
@@ -32,6 +32,8 @@ const EDITOR_MIN_FOR_LAYOUT = 160
 function resolveMaterialPromptKind(material: Material): MaterialPromptKind {
   if (material.material_type === 'long') return 'material_long'
   if (material.parent_genre === '世情') return 'material_short_shiqing'
+  if (material.parent_genre === '科幻') return 'material_short_kehuan'
+  if (material.parent_genre === '悬疑') return 'material_short_xuanyi'
   return 'material_short_qinggan'
 }
 
@@ -98,15 +100,32 @@ export function MaterialEditor() {
   const saveInFlightRef = useRef(false)
   const activeStageRef = useRef<MaterialStageId>(activeStage)
   const textareaRef = useRef<HTMLTextAreaElement | null>(null)
-  const tokenBufferRef = useRef<string>('')
-  const tokenBufferRafRef = useRef<number | null>(null)
+  const tokenBuffersRef = useRef<Partial<Record<MaterialStageId, string>>>({})
+  const tokenBufferRafRefs = useRef<Partial<Record<MaterialStageId, number>>>({})
   const stagesRef = useRef<Record<MaterialStageId, string>>(stages)
-  const [isStreaming, setIsStreaming] = useState(false)
+  const [streamingStages, setStreamingStages] = useState<
+    Partial<Record<MaterialStageId, boolean>>
+  >({})
+  const streamingStagesRef = useRef<Partial<Record<MaterialStageId, boolean>>>({})
+
+  const setEditorStreaming = useCallback((stageId: MaterialStageId, next: boolean) => {
+    if (Boolean(streamingStagesRef.current[stageId]) === next) return
+    const updated = { ...streamingStagesRef.current }
+    if (next) {
+      updated[stageId] = true
+    } else {
+      delete updated[stageId]
+    }
+    streamingStagesRef.current = updated
+    setStreamingStages(updated)
+  }, [])
   const [promptEditorOpen, setPromptEditorOpen] = useState(false)
   const [promptDraft, setPromptDraft] = useState('')
   const [promptEditorLoading, setPromptEditorLoading] = useState(false)
   const [promptEditorSaving, setPromptEditorSaving] = useState(false)
   const [promptReloadNonce, setPromptReloadNonce] = useState(0)
+  const [editingTitle, setEditingTitle] = useState(false)
+  const [titleDraft, setTitleDraft] = useState('')
 
   useEffect(() => {
     activeStageRef.current = activeStage
@@ -118,9 +137,9 @@ export function MaterialEditor() {
 
   useEffect(() => {
     return () => {
-      if (tokenBufferRafRef.current) {
-        cancelAnimationFrame(tokenBufferRafRef.current)
-      }
+      Object.values(tokenBufferRafRefs.current).forEach((rafId) => {
+        if (rafId !== undefined) cancelAnimationFrame(rafId)
+      })
     }
   }, [])
 
@@ -130,22 +149,53 @@ export function MaterialEditor() {
         const current = prev[stageId] ?? ''
         const next = updater(current)
         if (next === current) return prev
-        return { ...prev, [stageId]: next }
+        const updated = { ...prev, [stageId]: next }
+        stagesRef.current = updated
+        return updated
       })
     },
     [],
   )
 
-  const flushTokenBuffer = useCallback(() => {
-    tokenBufferRafRef.current = null
-    const buffer = tokenBufferRef.current
-    if (!buffer) return
-    tokenBufferRef.current = ''
-    const stage = activeStageRef.current
-    updateStage(stage, (cur) => cur + buffer)
+  const cancelTokenFlush = useCallback((stageId: MaterialStageId) => {
+    const rafId = tokenBufferRafRefs.current[stageId]
+    if (rafId !== undefined) {
+      cancelAnimationFrame(rafId)
+      delete tokenBufferRafRefs.current[stageId]
+    }
+  }, [])
+
+  const flushTokenBuffer = useCallback(
+    (stageId: MaterialStageId) => {
+      delete tokenBufferRafRefs.current[stageId]
+      const buffer = tokenBuffersRef.current[stageId] ?? ''
+      if (!buffer) return
+      delete tokenBuffersRef.current[stageId]
+      updateStage(stageId, (cur) => cur + buffer)
+    },
+    [updateStage],
+  )
+
+  const flushAllTokenBuffers = useCallback(() => {
+    const rafIds = Object.values(tokenBufferRafRefs.current)
+    tokenBufferRafRefs.current = {}
+    rafIds.forEach((rafId) => {
+      if (rafId !== undefined) cancelAnimationFrame(rafId)
+    })
+
+    const buffers = tokenBuffersRef.current
+    tokenBuffersRef.current = {}
+    for (const [stageId, buffer] of Object.entries(buffers) as [
+      MaterialStageId,
+      string | undefined,
+    ][]) {
+      if (!buffer) continue
+      updateStage(stageId, (cur) => cur + buffer)
+    }
   }, [updateStage])
 
-  const autoScrollTextarea = useCallback(() => {
+  const autoScrollTextarea = useCallback((stageId: MaterialStageId) => {
+    if (activeStageRef.current !== stageId) return
     const textarea = textareaRef.current
     if (!textarea) return
     const wasAtBottom =
@@ -156,61 +206,55 @@ export function MaterialEditor() {
   }, [])
 
   const applyToStageEditor = useCallback(
-    (payload: ApplyToStageEditorPayload) => {
-      const stage = activeStageRef.current
-
+    (stage: MaterialStageId, payload: ApplyToStageEditorPayload) => {
       if (payload.mode === 'replace') {
-        if (tokenBufferRafRef.current) {
-          cancelAnimationFrame(tokenBufferRafRef.current)
-          tokenBufferRafRef.current = null
-        }
-        tokenBufferRef.current = ''
-        setIsStreaming(false)
+        cancelTokenFlush(stage)
+        delete tokenBuffersRef.current[stage]
+        setEditorStreaming(stage, false)
         updateStage(stage, () => payload.text.trim())
-        requestAnimationFrame(autoScrollTextarea)
+        requestAnimationFrame(() => autoScrollTextarea(stage))
         return
       }
 
       if (payload.mode === 'append_token') {
         if (!payload.text) return
-        setIsStreaming(true)
-        tokenBufferRef.current += payload.text
-        const buffer = tokenBufferRef.current
-        tokenBufferRef.current = ''
-        if (tokenBufferRafRef.current) {
-          cancelAnimationFrame(tokenBufferRafRef.current)
-          tokenBufferRafRef.current = null
+        setEditorStreaming(stage, true)
+        tokenBuffersRef.current[stage] =
+          (tokenBuffersRef.current[stage] ?? '') + payload.text
+        if (tokenBufferRafRefs.current[stage] === undefined) {
+          tokenBufferRafRefs.current[stage] = requestAnimationFrame(() => {
+            flushTokenBuffer(stage)
+            requestAnimationFrame(() => autoScrollTextarea(stage))
+          })
         }
-        updateStage(stage, (cur) => cur + buffer)
-        requestAnimationFrame(autoScrollTextarea)
         return
       }
 
       if (payload.mode === 'streaming_end') {
-        if (tokenBufferRafRef.current) {
-          cancelAnimationFrame(tokenBufferRafRef.current)
-          tokenBufferRafRef.current = null
-        }
-        tokenBufferRef.current = ''
-        setIsStreaming(false)
+        cancelTokenFlush(stage)
+        flushTokenBuffer(stage)
+        setEditorStreaming(stage, false)
         return
       }
 
-      if (tokenBufferRafRef.current) {
-        cancelAnimationFrame(tokenBufferRafRef.current)
-        tokenBufferRafRef.current = null
-      }
-      tokenBufferRef.current = ''
-      setIsStreaming(false)
+      cancelTokenFlush(stage)
+      delete tokenBuffersRef.current[stage]
+      setEditorStreaming(stage, false)
       const trimmed = payload.text.trim()
       if (!trimmed) return
       updateStage(stage, (cur) => {
         const sep = cur.length === 0 ? '' : cur.endsWith('\n') ? '\n' : '\n\n'
         return cur + sep + trimmed
       })
-      requestAnimationFrame(autoScrollTextarea)
+      requestAnimationFrame(() => autoScrollTextarea(stage))
     },
-    [updateStage, autoScrollTextarea],
+    [
+      updateStage,
+      cancelTokenFlush,
+      flushTokenBuffer,
+      autoScrollTextarea,
+      setEditorStreaming,
+    ],
   )
 
   useEffect(() => {
@@ -242,6 +286,7 @@ export function MaterialEditor() {
       }
       setMaterial(m)
       const normalized = normalizeMaterialStages(m.stages)
+      stagesRef.current = normalized
       setStages(normalized)
       setActiveStage('character')
     } catch (e) {
@@ -267,15 +312,8 @@ export function MaterialEditor() {
     setMessage(null)
     setError(null)
     try {
-      if (tokenBufferRef.current && !tokenBufferRafRef.current) {
-        flushTokenBuffer()
-      }
-      if (tokenBufferRafRef.current) {
-        cancelAnimationFrame(tokenBufferRafRef.current)
-        tokenBufferRafRef.current = null
-        flushTokenBuffer()
-      }
-      const next = await saveMaterial(id, { stages })
+      flushAllTokenBuffers()
+      const next = await saveMaterial(id, { stages: stagesRef.current })
       if (!next) {
         setError('保存失败：素材不存在')
         return
@@ -290,7 +328,7 @@ export function MaterialEditor() {
       saveInFlightRef.current = false
       setSaving(false)
     }
-  }, [id, material, stages, flushTokenBuffer])
+  }, [id, material, flushAllTokenBuffers])
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
@@ -303,9 +341,8 @@ export function MaterialEditor() {
   }, [handleSave])
 
   const handleStageBodyChange = (value: string) => {
-    if (tokenBufferRef.current) {
-      tokenBufferRef.current = ''
-    }
+    cancelTokenFlush(activeStage)
+    delete tokenBuffersRef.current[activeStage]
     updateStage(activeStage, () => value)
   }
 
@@ -411,7 +448,54 @@ export function MaterialEditor() {
           ← 首页
         </Link>
         <div className="editor-title-block">
-          <h1 className="editor-title">{material.title}</h1>
+          {editingTitle ? (
+            <input
+              className="editor-title-input"
+              value={titleDraft}
+              onChange={(e) => setTitleDraft(e.target.value)}
+              onBlur={() => {
+                const trimmed = titleDraft.trim()
+                if (trimmed && trimmed !== material?.title && material) {
+                  void (async () => {
+                    try {
+                      const next = await saveMaterial(material.id, { title: trimmed })
+                      if (next) {
+                        setMaterial(next)
+                        setMessage('素材名已修改')
+                        window.setTimeout(() => setMessage(null), 2000)
+                      } else {
+                        setError('保存素材名失败')
+                      }
+                    } catch (e) {
+                      setError(e instanceof Error ? e.message : '保存素材名失败')
+                    }
+                  })()
+                }
+                setEditingTitle(false)
+                setTitleDraft('')
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.currentTarget.blur()
+                } else if (e.key === 'Escape') {
+                  setEditingTitle(false)
+                  setTitleDraft('')
+                }
+              }}
+              autoFocus
+            />
+          ) : (
+            <h1
+              className="editor-title editor-title--editable"
+              onDoubleClick={() => {
+                setTitleDraft(material?.title ?? '')
+                setEditingTitle(true)
+              }}
+              title="双击编辑素材名"
+            >
+              {material?.title ?? ''}
+            </h1>
+          )}
           <span className="editor-sub">
             {materialTypeText}
             {material.output_dir ? (
@@ -488,7 +572,7 @@ export function MaterialEditor() {
             onChange={(e) => handleStageBodyChange(e.target.value)}
             placeholder={`在此编辑${MATERIAL_STAGE_LABELS[activeStage]}内容…`}
             spellCheck={false}
-            readOnly={isStreaming}
+            readOnly={Boolean(streamingStages[activeStage])}
           />
         </div>
 
@@ -618,7 +702,9 @@ export function MaterialEditor() {
                       allStages={isActive ? stages : {}}
                       includePiArtifacts={WORKSPACE_AI_INCLUDE_PI_ARTIFACTS}
                       promptRevision={isActive ? promptReloadNonce : 0}
-                      applyToStageEditor={applyToStageEditor}
+                      applyToStageEditor={(payload) =>
+                        applyToStageEditor(stageId, payload)
+                      }
                       isPaused={!isActive}
                       workspaceType="material"
                     />

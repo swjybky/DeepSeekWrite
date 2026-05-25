@@ -17,7 +17,7 @@ Write Claw（涌泉写作）是一款**本地桌面写作应用**，面向网文
 
 1. **书架管理**：创建/删除短篇或长篇书籍，选择本机工作文件夹（`output_dir`）。
 2. **短篇创作空间**：针对「世情」与「追妻」两类短篇，提供统一的 8 阶段三栏工作台（左阶段导航、中编辑区、右 AI 聊天面板）。
-3. **素材库**：独立管理「人设素材」「梗素材」「节奏素材」，按世情/追妻大分类与子分类组织。
+3. **素材库**：独立管理「人设素材」「导语素材」「梗素材」「节奏素材」，按世情/追妻大分类与子分类组织。
 4. **提示词系统**：每个阶段对应一份系统提示词模板（`app/prompt_defaults/` 下的 `.txt` 文件），支持运行时覆盖。
 
 ---
@@ -167,7 +167,7 @@ write-claw/
   - `Material` dataclass：包含 `id`、`title`、`material_type`、`parent_genre`、`sub_genre`、`stages`、时间戳。
   - **统一短篇阶段键**（8 个）：`character_design`、`intro_design`、`plot_design`、`plot_refine`、`outline`、`draft`、`draft_review`、`format_conversion`。世情和追妻共用同一套阶段键，仅在提示词内容上区分。
   - **数据迁移**：自动将旧版追妻阶段键（如 `qinggan_character`）迁移到统一键，见 `migrate_legacy_stages`。
-  - 素材阶段键（3 个）：`character`、`gimmick`、`pacing`。
+  - 素材阶段键（4 个）：`character`、`intro`、`gimmick`、`pacing`。
 
 - **`ai_env.py`**：
   - 按优先级读取 `.env`、`.deepseek.env`、`.kimi.env`（先 `writable_root()`，再模块目录，再 `app/` 目录）。
@@ -242,7 +242,7 @@ write-claw/
 | `material_type` | `"short" \| "long"` | 短篇 / 长篇素材 |
 | `parent_genre` | string | 世情 / 追妻（仅 short） |
 | `sub_genre` | string | 子分类（如家庭、甜宠） |
-| `stages` | `Record<MaterialStageId, string>` | `character`、`gimmick`、`pacing` |
+| `stages` | `Record<MaterialStageId, string>` | `character`、`intro`、`gimmick`、`pacing` |
 
 ---
 

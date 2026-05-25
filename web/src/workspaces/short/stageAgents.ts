@@ -15,10 +15,13 @@ export type ShortWorkspaceStageAgentContext = {
   bookTitle: string
   stageId: ShortStageId
   stageBody: string
+  getCurrentStageBody?: () => string
   allStages: Partial<Record<ShortStageId, string>>
   linkedMaterial?: Material | null
   applyToStageEditor?: (payload: { mode: 'replace' | 'append'; text: string }) => void
   isToolCallStreamed?: (toolCallId: string) => boolean
+  /** 请求上层保存当前书籍；用于复制工具写入后自动落盘 */
+  onRequestSave?: () => void | Promise<void>
 }
 
 export function buildReadWorkspaceContentTool(
@@ -69,18 +72,19 @@ export function buildReadLinkedMaterialContentTool(
     name: 'read_linked_material_content',
     label: '读取关联素材库内容',
     description:
-      '读取当前书籍在 AI 助手上方关联的素材库内容。每次调用只返回一个素材阶段：character、gimmick 或 pacing。'
+      '读取当前书籍在 AI 助手上方关联的素材库内容。每次调用只返回一个素材阶段：character、intro、gimmick 或 pacing。'
       +'\n此工具不要随便使用，仅在使用者明确要求或智能体提示明确标记使用时调用',
     parameters: Type.Object({
       stage_id: Type.Union(
         [
           Type.Literal('character'),
+          Type.Literal('intro'),
           Type.Literal('gimmick'),
           Type.Literal('pacing'),
         ],
         {
           description:
-            '素材库阶段键名：character=人设素材，gimmick=梗素材，pacing=节奏素材；单次只读取该阶段',
+            '素材库阶段键名：character=人设素材，intro=导语素材，gimmick=梗素材，pacing=节奏素材；单次只读取该阶段',
         },
       ),
     }),
@@ -117,6 +121,109 @@ export function buildReadLinkedMaterialContentTool(
 }
 
 
+
+export function buildCopyStageToFormatTool(
+  ctx: ShortWorkspaceStageAgentContext,
+): AgentTool {
+  return defineTool({
+    name: 'copy_stage_to_format_conversion',
+    label: '复制阶段内容到格式转换',
+    description:
+      '将本书其他阶段已保存的内容复制到当前「格式转换」编辑区。'
+      +'\n适用于格式转换阶段需要基于正文、大纲或其他阶段内容进行再加工的场景。',
+    parameters: Type.Object({
+      source_stage_id: Type.Union(
+        [
+          Type.Literal('character_design'),
+          Type.Literal('intro_design'),
+          Type.Literal('plot_design'),
+          Type.Literal('plot_refine'),
+          Type.Literal('outline'),
+          Type.Literal('draft'),
+          Type.Literal('draft_review'),
+          Type.Literal('format_conversion'),
+        ],
+        {
+          description:
+            '源阶段键名：人物设计（character_design）、导语设计（intro_design）、剧情设计（plot_design）、剧情细化（plot_refine）、大纲纲要（outline）、正文编写（draft）、正文审阅（draft_review）、格式转换（format_conversion）',
+        },
+      ),
+      mode: Type.Union(
+        [Type.Literal('replace'), Type.Literal('append')],
+        { description: 'replace：覆盖格式转换编辑区全文；append：在格式转换编辑区文末追加' },
+      ),
+    }),
+    execute: async (_toolCallId, params) => {
+      const sid = params.source_stage_id as ShortStageId
+      const label = SHORT_STAGE_LABELS[sid]
+      const raw = (ctx.allStages[sid] ?? '').trim()
+      if (!raw) {
+        return textBlock(`【${label}】（${sid}）暂无已保存正文，无法复制。`)
+      }
+      const apply = ctx.applyToStageEditor
+      if (!apply) {
+        return textBlock('（当前环境无法写入编辑区：未连接界面）')
+      }
+      apply({ text: raw, mode: params.mode })
+      // 延迟一小段时间后触发保存，让 React state 更新完毕
+      if (ctx.onRequestSave) {
+        await new Promise((r) => setTimeout(r, 50))
+        await ctx.onRequestSave()
+      }
+      const targetLabel = SHORT_STAGE_LABELS[ctx.stageId]
+      return textBlock(
+        params.mode === 'replace'
+          ? `已将【${label}】内容覆盖到「${targetLabel}」编辑区，并已自动保存。`
+          : `已将【${label}】内容追加到「${targetLabel}」编辑区文末，并已自动保存。`,
+      )
+    },
+  })
+}
+
+export function buildGlobalReplaceTool(
+  ctx: ShortWorkspaceStageAgentContext,
+): AgentTool {
+  return defineTool({
+    name: 'global_text_replace',
+    label: '全局字符替换',
+    description:
+      '对当前「格式转换」阶段编辑区内容进行全局字符替换。'
+      +'\n将当前编辑区最新内容中所有匹配查找文本的片段替换为指定文本，然后写回编辑区。'
+      +'\n适用于批量修改人名、地名、标点规范化或格式清洗等场景。',
+    parameters: Type.Object({
+      find: Type.String({
+        description: '要查找的文本（区分大小写）',
+      }),
+      replace: Type.String({
+        description: '用于替换的文本',
+      }),
+    }),
+    execute: async (_toolCallId, params) => {
+      const find = params.find
+      const replace = params.replace
+      const currentBody = ctx.getCurrentStageBody?.() ?? ctx.stageBody ?? ''
+      if (!currentBody.trim()) {
+        return textBlock('当前「格式转换」阶段暂无内容，无法执行替换。')
+      }
+      if (!find) {
+        return textBlock('查找文本不能为空。')
+      }
+      if (!currentBody.includes(find)) {
+        return textBlock(`未在内容中找到「${find}」，未执行任何替换。`)
+      }
+      const newText = currentBody.split(find).join(replace)
+      const apply = ctx.applyToStageEditor
+      if (!apply) {
+        return textBlock('（当前环境无法写入编辑区：未连接界面）')
+      }
+      apply({ text: newText, mode: 'replace' })
+      const count = currentBody.split(find).length - 1
+      return textBlock(
+        `已完成全局替换：将 ${count} 处「${find}」替换为「${replace}」，已更新「格式转换」编辑区。`,
+      )
+    },
+  })
+}
 
 export function buildWriteWorkspaceEditorTool(
   ctx: ShortWorkspaceStageAgentContext,
@@ -189,19 +296,19 @@ export function buildShortWorkspaceAdditionalTools(
 
     case 'outline':
       // 大纲纲要阶段：增加大纲扫描和章节生成工具
-      return [readSaved,readMaterial]
+      return [readSaved,readMaterial,writeWorkspace]
 
     case 'draft':
       // 正文编写阶段：增加字数统计工具
-      return [readSaved,readMaterial]
+      return [readSaved,readMaterial,writeWorkspace]
 
     case 'draft_review':
       // 正文审阅阶段：增加完整审阅工具集
-      return [readSaved]
+      return [readSaved,writeWorkspace]
 
     case 'format_conversion':
-      // 格式转换阶段：基础读取工具
-      return [readSaved]
+      // 格式转换阶段：基础读取工具 + 阶段复制工具 + 全局替换工具
+      return [readSaved, buildCopyStageToFormatTool(ctx), buildGlobalReplaceTool(ctx)]
 
     default:
       return [readSaved]

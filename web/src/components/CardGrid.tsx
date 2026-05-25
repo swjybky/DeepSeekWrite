@@ -11,6 +11,7 @@ export interface CardItem {
   subGenre?: string
   meta?: string
   outputDir?: string
+  coverData?: string
   to: string
 }
 
@@ -35,8 +36,17 @@ export function CardGrid({ items, emptyText = '暂无项目', onDelete, deleting
           data-type={item.type}
           data-subtype={item.subtype}
           data-genre={item.genre}
+          data-has-cover={item.coverData ? 'true' : undefined}
         >
           <Link className="card-link" to={item.to}>
+            {item.coverData ? (
+              <img
+                className="card-cover"
+                src={`data:image/png;base64,${item.coverData}`}
+                alt=""
+                loading="lazy"
+              />
+            ) : null}
             <div className="card-content">
               <h3 className="card-title">{item.title || '未命名'}</h3>
               <div className="card-meta">
@@ -90,7 +100,7 @@ function truncatePath(path: string, maxLen: number): string {
 
 // 辅助函数：将 BookSummary 转换为 CardItem
 // eslint-disable-next-line react-refresh/only-export-components
-export function bookToCardItem(book: BookSummary): CardItem {
+export function bookToCardItem(book: BookSummary, coverData?: string): CardItem {
   return {
     id: book.id,
     title: book.title,
@@ -98,6 +108,7 @@ export function bookToCardItem(book: BookSummary): CardItem {
     subtype: book.book_type,
     genre: book.categories?.[0],
     outputDir: book.output_dir,
+    coverData,
     to: `/book/${book.id}`,
   }
 }

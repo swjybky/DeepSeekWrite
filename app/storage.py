@@ -336,10 +336,13 @@ class BookStore:
         stages: dict[str, str] | None = None,
         linked_material_id: str | None = None,
         expert_draft: dict[str, Any] | None = None,
+        title: str | None = None,
     ) -> dict[str, Any] | None:
         b = self._books.get(book_id)
         if b is None:
             return None
+        if title is not None:
+            b.title = title.strip()
         if linked_material_id is not None:
             mid = linked_material_id.strip()
             b.linked_material_id = mid if mid in self._materials else ""
@@ -444,6 +447,7 @@ class BookStore:
         self,
         material_id: str,
         stages: dict[str, str] | None = None,
+        title: str | None = None,
     ) -> dict[str, Any] | None:
         """保存素材阶段内容"""
         m = self._materials.get(material_id)
@@ -452,6 +456,8 @@ class BookStore:
         if stages is not None:
             # 归一化阶段数据
             m.stages = normalize_material_stages_from_storage(stages)
+        if title is not None:
+            m.title = title.strip()
         m.updated_at = _utc_now_iso()
         save_materials_atomic(self._materials_path, self._materials)
         _write_material_stages_to_disk(m)

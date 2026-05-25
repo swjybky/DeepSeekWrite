@@ -4,6 +4,10 @@ type Props = {
   draft: ExpertDraft
   updateDraft: (updater: (draft: ExpertDraft) => ExpertDraft) => void
   stopWriting: () => void
+  resetDraft: () => void
+  writeToDraftStage: () => void
+  editPrompt: () => void
+  promptEditorLoading?: boolean
 }
 
 function textCounts(text: string): { total: number; nonSpace: number } {
@@ -50,7 +54,15 @@ function updateStateList(
   )
 }
 
-export function ExpertDraftEditor({ draft, updateDraft, stopWriting }: Props) {
+export function ExpertDraftEditor({
+  draft,
+  updateDraft,
+  stopWriting,
+  resetDraft,
+  writeToDraftStage,
+  editPrompt,
+  promptEditorLoading = false,
+}: Props) {
   const activeId = draft.active_section_id
   const totalBody = draft.sections.map((s) => s.body).join('\n\n')
   const counts = textCounts(totalBody)
@@ -61,7 +73,10 @@ export function ExpertDraftEditor({ draft, updateDraft, stopWriting }: Props) {
       const title = `第${current.sections.length}节`
       return {
         ...current,
-        sections: [...current.sections, { id, title, body: '' }],
+        sections: [
+          ...current.sections,
+          { id, title, word_count_requirement: '', body: '' },
+        ],
         character_states: [
           ...current.character_states,
           { section_id: id, title: `${title}人物状态`, body: '' },
@@ -87,6 +102,30 @@ export function ExpertDraftEditor({ draft, updateDraft, stopWriting }: Props) {
               立即停止
             </button>
           ) : null}
+          <button
+            type="button"
+            className="expert-draft-action"
+            onClick={resetDraft}
+            disabled={draft.running}
+          >
+            清空
+          </button>
+          <button
+            type="button"
+            className="expert-draft-action"
+            onClick={writeToDraftStage}
+            disabled={draft.running}
+          >
+            写入正文
+          </button>
+          <button
+            type="button"
+            className="expert-draft-action"
+            onClick={editPrompt}
+            disabled={promptEditorLoading}
+          >
+            {promptEditorLoading ? '加载…' : '编辑提示词'}
+          </button>
         </div>
         <span
           className="workspace-char-count muted"
@@ -148,6 +187,22 @@ export function ExpertDraftEditor({ draft, updateDraft, stopWriting }: Props) {
                     {sectionCounts.nonSpace.toLocaleString('zh-CN')} 字
                   </span>
                 </div>
+                <input
+                  className="expert-draft-word-input"
+                  value={section.word_count_requirement ?? ''}
+                  aria-label={`${section.title}字数要求`}
+                  onChange={(e) => {
+                    const word_count_requirement = e.target.value
+                    updateDraft((current) => ({
+                      ...current,
+                      sections: updateSectionList(current.sections, section.id, {
+                        word_count_requirement,
+                      }),
+                    }))
+                  }}
+                  placeholder="字数要求，如 800-1000"
+                  disabled={draft.running}
+                />
                 <textarea
                   className="editor-body workspace-textarea expert-draft-textarea"
                   value={section.body}
@@ -210,6 +265,12 @@ export function ExpertDraftEditor({ draft, updateDraft, stopWriting }: Props) {
                     disabled={draft.running}
                   />
                 </div>
+                <input
+                  className="expert-draft-word-input expert-draft-word-input--placeholder"
+                  readOnly
+                  tabIndex={-1}
+                  aria-hidden="true"
+                />
                 <textarea
                   className="editor-body workspace-textarea expert-draft-state-textarea"
                   value={state.body}

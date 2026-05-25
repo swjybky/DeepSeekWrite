@@ -7,12 +7,17 @@ import { getWorkspaceSystemPrompt, getMaterialSystemPrompt } from '../bridge'
 import { ensurePiAppStorage } from '../pi/setupPiWorkspace'
 import {
   openWorkspaceConfiguredModelSelector,
-  resolveWorkspaceChatModel,
 } from '../pi/resolveWorkspaceChatModel'
+import { createPiSessionId } from '../pi/sessionId'
 import {
   type ApplyToStageEditorPayload,
   getWorkspaceStageAdditionalTools,
 } from '../pi/workspaceStageAgents'
+import {
+  bindWorkspaceChatPreferences,
+  getPreferredWorkspaceThinkingLevel,
+  resolvePreferredWorkspaceChatModel,
+} from '../pi/workspaceChatPreferences'
 
 const ARTIFACTS_TOOL_NAME = 'artifacts'
 
@@ -48,6 +53,7 @@ type Props = {
   bookTitle: string
   stageId: StageId | MaterialStageId
   stageBody: string
+  getCurrentStageBody?: () => string
   /** 各阶段全文，用于提示词中的交叉参考 */
   allStages: Partial<Record<StageId | MaterialStageId, string>>
   /** 当前书籍关联的素材库；前期设计阶段会将其暴露为 AI 工具可读取内容 */
@@ -62,6 +68,8 @@ type Props = {
   promptRevision?: number
   /** 供「写入编辑区」工具调用：写入中间栏当前阶段文本框 */
   applyToStageEditor?: (payload: ApplyToStageEditorPayload) => void
+  /** 供工具调用后请求上层保存（如阶段复制后自动落盘） */
+  onRequestSave?: () => void | Promise<void>
   /**
    * 是否暂停实时更新（非激活阶段使用）。为 true 时跳过提示词重新加载和工具更新，
    * 减少后台计算开销，但保留对话状态。
@@ -109,13 +117,14 @@ function WorkspaceAiChatInner({
   useEffect(() => {
     let cancelled = false
     let unsubscribeMessagesRefresh: (() => void) | undefined
+    let unsubscribePreferences: (() => void) | undefined
     let postAgentEndRaf = 0
 
     let resizeObserver: ResizeObserver | undefined
 
     ;(async () => {
       await ensurePiAppStorage()
-      const initialModel = await resolveWorkspaceChatModel()
+      const initialModel = await resolvePreferredWorkspaceChatModel()
       const root = hostRef.current
       if (cancelled || !root) return
 
@@ -151,9 +160,13 @@ function WorkspaceAiChatInner({
           promptKind: propsLatestRef.current.promptKind,
           stageId: propsLatestRef.current.stageId,
           stageBody: propsLatestRef.current.stageBody,
+          getCurrentStageBody:
+            propsLatestRef.current.getCurrentStageBody ??
+            (() => propsLatestRef.current.stageBody),
           allStages: propsLatestRef.current.allStages,
           linkedMaterial: propsLatestRef.current.linkedMaterial,
           applyToStageEditor: propsLatestRef.current.applyToStageEditor,
+          onRequestSave: propsLatestRef.current.onRequestSave,
           isToolCallStreamed: (id) => streamedToolCallIdsRef.current.has(id),
         })
 
@@ -179,21 +192,30 @@ function WorkspaceAiChatInner({
             )
       if (cancelled || !hostRef.current) return
 
-      const baseSessionId = `write-claw:${props.sessionBookId}:${props.promptKind}:${props.stageId}`
-      const sessionId =
-        sessionEpoch > 0 ? `${baseSessionId}:${sessionEpoch}` : baseSessionId
+      const sessionId = createPiSessionId(
+        'workspace',
+        props.sessionBookId,
+        props.promptKind,
+        props.stageId,
+        sessionEpoch > 0 ? sessionEpoch : undefined,
+      )
 
       const agent = new Agent({
         sessionId,
         initialState: {
           systemPrompt: systemPromptInitial,
           model: initialModel,
-          thinkingLevel: 'high',
+          thinkingLevel: getPreferredWorkspaceThinkingLevel(),
           messages: [],
           tools: [],
         },
       })
       agentRef.current = agent
+      unsubscribePreferences = bindWorkspaceChatPreferences(agent, () => {
+        nudgePiLayout()
+        chatPanel.requestUpdate?.()
+        requestAnimationFrame(nudgePiLayout)
+      })
 
       // pi-agent-core mutates `messages` in place; pi-web-ui's Lit `message-list`
       // only re-renders when the array reference changes. Without this, turns after
@@ -346,6 +368,7 @@ function WorkspaceAiChatInner({
       resizeObserver = undefined
       setChatReady(false)
       unsubscribeMessagesRefresh?.()
+      unsubscribePreferences?.()
       agentRef.current = null
       chatPanelRef.current?.remove()
       chatPanelRef.current = null
@@ -397,9 +420,12 @@ function WorkspaceAiChatInner({
         promptKind: p.promptKind,
         stageId: p.stageId,
         stageBody: debouncedBody,
+        getCurrentStageBody:
+          p.getCurrentStageBody ?? (() => propsLatestRef.current.stageBody),
         allStages: p.allStages,
         linkedMaterial: p.linkedMaterial,
         applyToStageEditor: p.applyToStageEditor,
+        onRequestSave: p.onRequestSave,
         isToolCallStreamed: (id) => streamedToolCallIdsRef.current.has(id),
       })
       agent.state.tools = includePiArtifacts

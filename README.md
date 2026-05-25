@@ -100,3 +100,85 @@ npm run dev
 - `app/main.py`：pywebview 窗口与 `Api`（`list_books` / `create_book` / `get_book` / `save_book`）
 - `app/storage.py`：JSON 原子写入
 - `web/`：Vite + React + TypeScript，`base: './'` 以支持 `file://` 加载资源
+
+## AI 配置
+
+应用支持通过环境文件配置 AI 模型，文件格式为纯文本 `KEY=VALUE`。配置文件**已被 `.gitignore` 排除**，请勿将含密钥的文件提交到仓库。
+
+### 配置文件位置（按优先级从高到低）
+
+| 场景 | 读取路径 |
+|------|---------|
+| 源码运行 | 1. 项目根目录（`writable_root()`）<br>2. `app/` 模块同级目录<br>3. `app/` 包目录 |
+| PyInstaller 打包版 | 优先读取 **可执行文件同级目录**，方便用户自行放置配置而不必重新打包 |
+
+支持的文件名：`.env`、`.deepseek.env`、`.kimi.env`（可同时存在，按上述顺序合并，先出现的键优先）。
+
+### 配置模式
+
+通过 `models_type` 控制前端模型选择行为：
+
+- **`models_type=pi`**（默认）：前端使用 Pi 原生模型选择器，用户在界面内自行填写 API Key 和选择模型。
+- **`models_type=owner`**：后端锁定模型列表，用户只能在预设模型中切换，无需在 UI 内手动输入密钥。
+
+### owner 模式：多模型配置（推荐）
+
+适合需要同时配置多个模型（如主模型 + 轻量模型）的场景：
+
+```ini
+models_type=owner
+model_list=deepseekflash,kimi
+
+deepseekflash_model_name=deepseek-v4-flash
+deepseekflash_model_key=sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+deepseekflash_model_source=deepseek
+deepseekflash_label=DeepSeek Flash
+deepseekflash_model_url=https://api.deepseek.com
+deepseekflash_model_like=openai
+deepseekflash_model_reasoning=false
+
+kimi_model_name=kimi-k2-0711-preview
+kimi_model_key=sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+kimi_model_source=kimi
+kimi_label=Kimi K2
+kimi_model_url=https://api.moonshot.cn
+kimi_model_like=openai
+kimi_model_reasoning=true
+
+default_model=deepseekflash
+```
+
+#### 字段说明
+
+| 字段 | 必填 | 说明 |
+|------|------|------|
+| `models_type` | 是 | 固定填 `owner` 才会启用此模式 |
+| `model_list` | 是 | 模型配置 ID 列表，英文逗号分隔，对应下方前缀 |
+| `{id}_model_name` | 是 | 模型 ID，如 `deepseek-chat`、`kimi-k2-0711-preview`、`gpt-4o` |
+| `{id}_model_key` | 是 | API Key |
+| `{id}_model_source` | 是 | 提供商标识，如 `deepseek`、`kimi`、`openai`、`xiaomi`、`anthropic` |
+| `{id}_label` | 否 | 在前端下拉框中显示的友好名称 |
+| `{id}_model_url` | 否 | 自定义 API Base URL（兼容第三方代理或私有化部署） |
+| `{id}_model_like` | 否 | API 格式：`openai`（默认）、`openai-completions`、`openai-response`/`openai-responses`、`claude`/`anthropic`/`anthropic-messages` |
+| `{id}_model_reasoning` | 否 | 是否支持推理/思考链：`true`/`false` |
+| `default_model` | 否 | 默认选中的模型 ID，需与 `model_list` 中的某一项匹配 |
+
+> **命名灵活度**：字段支持多种等价写法。例如密钥可同时识别 `{id}_model_key`、`{id}_model_api_key`、`{id}_api_key`、`{id}_key`；Base URL 可同时识别 `{id}_model_url`、`{id}_url`、`{id}_endpoint`、`{id}_base_url`。
+
+### owner 模式：单模型配置（旧格式，仍兼容）
+
+如果只需要配置一个模型，可使用简化格式：
+
+```ini
+models_type=owner
+model_name_main=deepseek-chat
+model_api_key=sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+model_source=deepseek
+```
+
+旧格式字段：`model_name_main`（或 `model_name`）、`model_api_key`、`model_source`。未填写 `model_list` 时，程序会自动退化为仅有一个模型的列表。
+
+### 安全提醒
+
+- `.env`、`.deepseek.env`、`.kimi.env` 均已被 `.gitignore` 排除，**不要手动强制添加进 git**。
+- 分发打包版时，不要在构建包内携带密钥文件；用户应将密钥文件放在可执行文件同级目录自行管理。

@@ -11,8 +11,10 @@ import {
 // 提示词目录映射
 import {
   type PromptKind,
+  isKehuanShortBook,
   isQingganShortBook,
   isShiqingShortBook,
+  isXuanyiShortBook,
   isWorkspaceShortBook,
   resolvePromptKind,
 } from './workspaces/resolvePromptKind'
@@ -23,7 +25,9 @@ import { renderPromptFromTemplateRaw } from './prompt/renderTemplate'
 export type { ShortStageId, PromptKind }
 export {
   isQingganShortBook,
+  isKehuanShortBook,
   isShiqingShortBook,
+  isXuanyiShortBook,
   isWorkspaceShortBook,
   resolvePromptKind,
 }
@@ -33,6 +37,8 @@ export type MaterialPromptKind =
   | 'material_long'
   | 'material_short_shiqing'
   | 'material_short_qinggan'
+  | 'material_short_kehuan'
+  | 'material_short_xuanyi'
 
 // 统一阶段ID类型
 export type StageId = ShortStageId
@@ -43,6 +49,7 @@ export const WORKSPACE_STAGES = SHORT_WORKSPACE_STAGES
 export interface ExpertDraftSection {
   id: string
   title: string
+  word_count_requirement?: string
   body: string
 }
 
@@ -62,8 +69,8 @@ export interface ExpertDraft {
 export function defaultExpertDraft(): ExpertDraft {
   return {
     sections: [
-      { id: 'intro', title: '导语', body: '' },
-      { id: 'section-1', title: '第一节', body: '' },
+      { id: 'intro', title: '导语', word_count_requirement: '', body: '' },
+      { id: 'section-1', title: '第一节', word_count_requirement: '', body: '' },
     ],
     character_states: [
       { section_id: 'intro', title: '导语人物状态', body: '' },
@@ -101,6 +108,7 @@ export function normalizeExpertDraft(
       sections.push({
         id,
         title,
+        word_count_requirement: String(maybe.word_count_requirement ?? '').trim(),
         body: String(maybe.body ?? ''),
       })
     })
@@ -152,7 +160,7 @@ export function normalizeExpertDraft(
 }
 
 /** 短篇可选分类（可扩展） */
-export const SHORT_GENRE_OPTIONS = ['世情', '追妻'] as const
+export const SHORT_GENRE_OPTIONS = ['世情', '追妻', '科幻', '悬疑'] as const
 
 /** 获取统一阶段列表（所有短篇书籍使用同一套阶段） */
 export function resolveWorkspaceStagesForBook(
@@ -237,10 +245,11 @@ export interface Book extends BookSummary {
 
 export type MaterialType = 'long' | 'short'
 
-export type MaterialStageId = 'character' | 'gimmick' | 'pacing'
+export type MaterialStageId = 'character' | 'intro' | 'gimmick' | 'pacing'
 
 export const MATERIAL_STAGE_LABELS: Record<MaterialStageId, string> = {
   character: '人设素材',
+  intro: '导语素材',
   gimmick: '梗素材',
   pacing: '节奏素材',
 }
@@ -248,6 +257,8 @@ export const MATERIAL_STAGE_LABELS: Record<MaterialStageId, string> = {
 export const SHORT_MATERIAL_GENRES: Record<string, string[]> = {
   '世情': ['家庭', '职场', '婚恋', '邻里', '亲子', '继承', '养老'],
   '追妻': ['甜宠', '虐恋', '重生', '穿越', '暗恋', '破镜重圆', '先婚后爱'],
+  '科幻': ['未来都市', '星际', '人工智能', '赛博朋克', '末日', '时间旅行', '异星文明'],
+  '悬疑': ['刑侦', '推理', '惊悚', '密室', '民俗', '心理', '反转'],
 }
 
 /** 素材大分类兼容映射（旧名称 → 新名称） */
@@ -286,6 +297,7 @@ export function normalizeMaterialStages(
 ): Record<MaterialStageId, string> {
   const out: Record<MaterialStageId, string> = {
     character: '',
+    intro: '',
     gimmick: '',
     pacing: '',
   }
@@ -302,12 +314,18 @@ export interface AiModelConfig {
   id: string
   /** 显示名称，未配置时等于 id */
   label: string
-  /** pi-ai provider，如 deepseek / moonshotai-cn */
+  /** pi-ai provider，如 deepseek / moonshotai-cn；owner 模式下作为标识 */
   provider: string
   /** pi-ai model id，如 deepseek-v4-flash */
   model_id: string
   /** 该模型配置对应的 API Key */
   api_key: string
+  /** 自定义 API 地址（owner 模式） */
+  base_url?: string
+  /** 底层 API 类型：openai-completions / openai-responses / anthropic-messages */
+  api?: string
+  /** 是否支持 Pi 的思考/推理等级选择器 */
+  reasoning?: boolean
 }
 
 export interface AiModelDefaults {
@@ -340,6 +358,7 @@ declare global {
           stages?: Record<string, string> | null,
           linked_material_id?: string | null,
           expert_draft?: ExpertDraft | null,
+          title?: string | null,
         ): Promise<Book | null>
         delete_book(book_id: string): Promise<boolean>
         /** 上次选定的工作文件夹（持久化在应用 .data/preferences.json） */
@@ -369,6 +388,21 @@ declare global {
           stage_id: string,
         ): Promise<boolean>
 
+        // ==================== 专家模式提示词 API ====================
+        read_expert_prompt_template(
+          prompt_kind: string,
+          prompt_id: string,
+        ): Promise<string>
+        save_expert_prompt_override(
+          prompt_kind: string,
+          prompt_id: string,
+          body: string,
+        ): Promise<void>
+        reset_expert_prompt_override(
+          prompt_kind: string,
+          prompt_id: string,
+        ): Promise<boolean>
+
         // ==================== 素材库 API ====================
         list_materials(): Promise<MaterialSummary[]>
         get_material(material_id: string): Promise<Material | null>
@@ -382,6 +416,7 @@ declare global {
         save_material(
           material_id: string,
           stages?: Record<string, string> | null,
+          title?: string | null,
         ): Promise<Material | null>
         delete_material(material_id: string): Promise<boolean>
         get_material_genres(): Promise<Record<string, string[]>>
@@ -405,6 +440,22 @@ declare global {
           material_kind: string,
           stage_id: string,
         ): Promise<boolean>
+
+        // ==================== 封面 API ====================
+        get_book_cover(book_id: string): Promise<{ cover_data: string | null }>
+        generate_book_cover(
+          book_id: string,
+          prompt: string,
+        ): Promise<{ cover_path: string | null; success: boolean; error: string | null }>
+
+        // ==================== 导出 API ====================
+        export_docx(
+          book_id: string,
+          stage_id: string,
+          folder_path: string,
+          content: string,
+          cover_data: string | null,
+        ): Promise<{ success: boolean; error: string | null; path: string | null }>
       }
     }
   }
@@ -575,6 +626,7 @@ async function mockSaveBook(
     stages?: Record<string, string> | null
     linked_material_id?: string | null
     expert_draft?: ExpertDraft | null
+    title?: string | null
   },
 ): Promise<Book | null> {
   const map = loadMock()
@@ -582,6 +634,9 @@ async function mockSaveBook(
   if (!b) return null
   const now = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z')
   let next: Book = { ...b, updated_at: now }
+  if (options.title != null) {
+    next = { ...next, title: options.title.trim() }
+  }
   if (options.stages != null) {
     const merged = mergeStagePatchIntoAll(b.stages, options.stages as Partial<Record<StageId, string>>)
     next = { ...next, stages: merged, content: merged[primaryDraftStageId(next)] ?? '' }
@@ -671,12 +726,16 @@ async function mockCreateMaterial(
 async function mockSaveMaterial(
   material_id: string,
   stages?: Record<string, string> | null,
+  title?: string,
 ): Promise<Material | null> {
   const map = loadMockMaterials()
   const m = map.get(material_id)
   if (!m) return null
   const now = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z')
   let next: Material = { ...m, updated_at: now }
+  if (title != null) {
+    next = { ...next, title: title.trim() }
+  }
   if (stages != null) {
     const normalized = normalizeMaterialStages(stages as Partial<Record<MaterialStageId, string>>)
     next = { ...next, stages: normalized }
@@ -829,6 +888,7 @@ export type SaveBookOptions = {
   stages?: Record<string, string> | null
   linked_material_id?: string | null
   expert_draft?: ExpertDraft | null
+  title?: string | null
 }
 
 export async function saveBook(
@@ -848,6 +908,7 @@ export async function saveBook(
       opts.stages ?? null,
       opts.linked_material_id ?? undefined,
       opts.expert_draft ?? undefined,
+      opts.title ?? undefined,
     )
   }
   return mockSaveBook(book_id, opts)
@@ -889,6 +950,7 @@ export async function createMaterial(
 
 export type SaveMaterialOptions = {
   stages?: Record<string, string> | null
+  title?: string
 }
 
 export async function saveMaterial(
@@ -898,9 +960,9 @@ export async function saveMaterial(
   const api = await getBridgeApi()
   const opts = options ?? {}
   if (api?.save_material) {
-    return api.save_material(material_id, opts.stages ?? null)
+    return api.save_material(material_id, opts.stages ?? null, opts.title ?? null)
   }
-  return mockSaveMaterial(material_id, opts.stages)
+  return mockSaveMaterial(material_id, opts.stages, opts.title)
 }
 
 export async function deleteMaterial(material_id: string): Promise<boolean> {
@@ -1009,9 +1071,76 @@ export async function resetMaterialPromptOverride(
 }
 
 const PROMPT_TEMPLATE_LS_PREFIX = 'write_claw_prompt_template_override:'
+export const EXPERT_SECTION_WRITER_PROMPT_ID = 'expert_section_writer'
 
 function localPromptLsKey(promptKind: string, stage: string): string {
   return PROMPT_TEMPLATE_LS_PREFIX + `${promptKind}:${stage}`
+}
+
+export async function readExpertSectionWriterPromptTemplate(
+  promptKind: PromptKind,
+): Promise<string> {
+  const api = await getBridgeApi()
+  if (api?.read_expert_prompt_template) {
+    const t = await api.read_expert_prompt_template(
+      promptKind,
+      EXPERT_SECTION_WRITER_PROMPT_ID,
+    )
+    return t.endsWith('\n') ? t.slice(0, -1) : t
+  }
+  try {
+    const ls = localStorage.getItem(
+      localPromptLsKey(promptKind, EXPERT_SECTION_WRITER_PROMPT_ID),
+    )
+    if (ls != null && ls.trim() !== '')
+      return ls.endsWith('\n') ? ls.slice(0, -1) : ls
+  } catch {
+    /* ignore */
+  }
+  return getEmbeddedPromptTemplate(promptKind, EXPERT_SECTION_WRITER_PROMPT_ID)
+}
+
+export async function saveExpertSectionWriterPromptOverride(
+  promptKind: PromptKind,
+  body: string,
+): Promise<void> {
+  const api = await getBridgeApi()
+  if (api?.save_expert_prompt_override) {
+    await api.save_expert_prompt_override(
+      promptKind,
+      EXPERT_SECTION_WRITER_PROMPT_ID,
+      body,
+    )
+    return
+  }
+  try {
+    localStorage.setItem(
+      localPromptLsKey(promptKind, EXPERT_SECTION_WRITER_PROMPT_ID),
+      body,
+    )
+  } catch {
+    console.warn('[涌泉] 无法保存专家模式提示词覆盖：无桌面桥接且无可用 localStorage')
+  }
+}
+
+export async function resetExpertSectionWriterPromptOverride(
+  promptKind: PromptKind,
+): Promise<boolean> {
+  const api = await getBridgeApi()
+  if (api?.reset_expert_prompt_override) {
+    return api.reset_expert_prompt_override(
+      promptKind,
+      EXPERT_SECTION_WRITER_PROMPT_ID,
+    )
+  }
+  try {
+    const k = localPromptLsKey(promptKind, EXPERT_SECTION_WRITER_PROMPT_ID)
+    const had = localStorage.getItem(k) != null
+    localStorage.removeItem(k)
+    return had
+  } catch {
+    return false
+  }
 }
 
 /** 磁盘 / 嵌入式默认 + （浏览器）localStorage 覆盖；用于编辑器与离线渲染。 */
@@ -1069,6 +1198,54 @@ export async function resetWorkspacePromptOverride(
     return had
   } catch {
     return false
+  }
+}
+
+export async function getBookCover(book_id: string): Promise<{ cover_data: string | null }> {
+  const api = await getBridgeApi()
+  if (api?.get_book_cover) {
+    return api.get_book_cover(book_id)
+  }
+  return { cover_data: null }
+}
+
+export async function generateBookCover(
+  book_id: string,
+  prompt: string,
+): Promise<{ cover_path: string | null; success: boolean; error: string | null }> {
+  const api = await getBridgeApi()
+  if (api?.generate_book_cover) {
+    return api.generate_book_cover(book_id, prompt)
+  }
+  // 浏览器开发模式：模拟成功
+  console.warn('[涌泉] 浏览器开发模式：封面生成 API 不可用，返回模拟数据')
+  return { cover_path: null, success: false, error: '浏览器开发模式暂不支持封面生成' }
+}
+
+export async function exportDocx(
+  book_id: string,
+  stage_id: string,
+  folder_path: string,
+  content: string,
+  cover_data: string | null,
+): Promise<{ success: boolean; error: string | null; path: string | null }> {
+  const api = await getBridgeApi()
+  if (api?.export_docx) {
+    return api.export_docx(book_id, stage_id, folder_path, content, cover_data)
+  }
+  // 浏览器开发模式：提供下载
+  try {
+    const title = content.slice(0, 20).replace(/[\\/:*?"<>|\n\r\t]/g, '_') || '未命名'
+    const blob = new Blob([content], { type: 'text/plain;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `${title}.txt`
+    a.click()
+    URL.revokeObjectURL(url)
+    return { success: true, error: null, path: null }
+  } catch (e) {
+    return { success: false, error: e instanceof Error ? e.message : '导出失败', path: null }
   }
 }
 
