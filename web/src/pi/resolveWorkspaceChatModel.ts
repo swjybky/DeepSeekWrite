@@ -9,6 +9,11 @@ type ResolvedModelConfig = AiModelConfig & {
   model: Model<Api>
 }
 
+type CustomProviderStoreApi =
+  | 'openai-completions'
+  | 'openai-responses'
+  | 'anthropic-messages'
+
 function trimString(value: unknown): string {
   return typeof value === 'string' ? value.trim() : ''
 }
@@ -30,6 +35,14 @@ function inferReasoningSupport(modelId: string, api: string): boolean {
   if (api !== 'openai-responses') return false
   const normalized = modelId.trim().toLowerCase()
   return /^(gpt-5|o[134]|gpt-oss|codex)/.test(normalized)
+}
+
+function canStoreCustomProvider(api: Api): api is CustomProviderStoreApi {
+  return (
+    api === 'openai-completions' ||
+    api === 'openai-responses' ||
+    api === 'anthropic-messages'
+  )
 }
 
 function coerceModelConfig(raw: unknown): AiModelConfig | null {
@@ -122,16 +135,13 @@ async function syncOwnerModelsToCustomProvidersStore(
   for (const config of configs) {
     if (!config.base_url) continue
     const api = (config.api || 'openai-completions') as Api
-    const providerType = api as
-      | 'openai-completions'
-      | 'openai-responses'
-      | 'anthropic-messages'
+    if (!canStoreCustomProvider(api)) continue
     const providerId = `writeclaw-owner-${config.id}`
     const model = createOwnerModel(config)
     await storage.customProviders.set({
       id: providerId,
       name: config.id,
-      type: providerType,
+      type: api,
       baseUrl: config.base_url,
       apiKey: config.api_key,
       models: [model],

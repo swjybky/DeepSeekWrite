@@ -322,7 +322,7 @@ export interface AiModelConfig {
   api_key: string
   /** 自定义 API 地址（owner 模式） */
   base_url?: string
-  /** 底层 API 类型：openai-completions / openai-responses / anthropic-messages */
+  /** 底层 API 类型：openai-completions / openai-responses / anthropic-messages / google-generative-ai */
   api?: string
   /** 是否支持 Pi 的思考/推理等级选择器 */
   reasoning?: boolean

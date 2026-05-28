@@ -159,6 +159,8 @@ def _load_configured_models(data: dict[str, str]) -> list[dict[str, str]]:
             api = "openai-responses"
         elif model_like in ("claude", "anthropic", "anthropic-messages"):
             api = "anthropic-messages"
+        elif model_like in ("gemini", "google", "google-generative-ai"):
+            api = "google-generative-ai"
         entry: dict[str, str] = {
             "id": _normalize_config_id(config_id) or config_id,
             "label": label or config_id,
@@ -239,9 +241,18 @@ def load_image_model_defaults() -> dict[str, str] | None:
     data = _load_ai_env_data()
     model = (data.get("image_model") or "").strip()
     api_key = (data.get("image_model_key") or "").strip()
+    base_url = (
+        data.get("image_model_url")
+        or data.get("image_url")
+        or data.get("image_base_url")
+        or ""
+    ).strip()
     if not model or not api_key:
         return None
-    return {
+    out = {
         "model": model,
         "api_key": api_key,
     }
+    if base_url:
+        out["base_url"] = base_url
+    return out

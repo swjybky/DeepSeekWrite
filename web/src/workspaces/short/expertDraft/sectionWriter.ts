@@ -23,7 +23,6 @@ import {
   buildSectionWriterSystemPrompt,
   buildSectionWriterUserPrompt,
 } from './prompts'
-import { buildReadWorkspaceContentTool } from '../stageAgents'
 
 type ExpertDraftUpdater = (updater: (draft: ExpertDraft) => ExpertDraft) => void
 
@@ -156,14 +155,23 @@ function buildSectionWriterTools(input: {
     onSectionBodyWritten,
     onCharacterStateWritten,
   } = input
-  const readWorkspaceContent = buildReadWorkspaceContentTool({
-    bookTitle,
-    stageId: 'draft',
-    stageBody: allStages.draft ?? '',
-    allStages,
+  const readOutlineContent = defineTool({
+    name: 'read_outline_content',
+    label: '读取大纲',
+    description:
+      '读取本书「大纲纲要」阶段已保存的完整内容。此工具没有其它用途，不读取人物设计、导语设计、剧情设计、剧情细化或正文。',
+    parameters: Type.Object({}),
+    execute: async () => {
+      const outline = (allStages.outline ?? '').trim()
+      const header = `书名：《${bookTitle}》\n【大纲纲要】（outline）`
+      if (!outline) {
+        return textBlock(`${header}\n\n大纲暂无已保存正文，请先保存书籍。`)
+      }
+      return textBlock(`${header}\n\n${outline}`)
+    },
   })
   return [
-    readWorkspaceContent,
+    readOutlineContent,
     defineTool({
       name: 'write_section_body',
       label: '写入正文',

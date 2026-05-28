@@ -159,7 +159,7 @@ default_model=deepseekflash
 | `{id}_model_source` | 是 | 提供商标识，如 `deepseek`、`kimi`、`openai`、`xiaomi`、`anthropic` |
 | `{id}_label` | 否 | 在前端下拉框中显示的友好名称 |
 | `{id}_model_url` | 否 | 自定义 API Base URL（兼容第三方代理或私有化部署） |
-| `{id}_model_like` | 否 | API 格式：`openai`（默认）、`openai-completions`、`openai-response`/`openai-responses`、`claude`/`anthropic`/`anthropic-messages` |
+| `{id}_model_like` | 否 | API 格式：`openai`（默认）、`openai-completions`、`openai-response`/`openai-responses`、`claude`/`anthropic`/`anthropic-messages`、`gemini`/`google`/`google-generative-ai` |
 | `{id}_model_reasoning` | 否 | 是否支持推理/思考链：`true`/`false` |
 | `default_model` | 否 | 默认选中的模型 ID，需与 `model_list` 中的某一项匹配 |
 

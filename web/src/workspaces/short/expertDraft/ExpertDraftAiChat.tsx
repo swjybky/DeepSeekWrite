@@ -84,8 +84,8 @@ function toolStatus(toolName: string, done = false): string {
   if (toolName === 'write_character_state') {
     return done ? '人物状态已写入' : '正在写入人物状态'
   }
-  if (toolName === 'read_workspace_content') {
-    return done ? '已读取工作台内容' : '正在读取工作台内容'
+  if (toolName === 'read_outline_content') {
+    return done ? '已读取大纲' : '正在读取大纲'
   }
   return done ? '工具调用完成' : '正在调用工具'
 }

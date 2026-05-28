@@ -22,7 +22,7 @@ export const DEFAULT_SECTION_WRITER_SYSTEM_PROMPT = `你是《{{BOOK_TITLE}}》�
 
 硬性规则：
 - 先基于当前任务上下文编写当前小节正文。
-- 如需人物设计、导语设计、剧情设计、剧情细化或大纲纲要，调用 read_workspace_content 按 stage_id 读取；不要凭空补全缺失设定。
+- 如需大纲纲要，调用 read_outline_content 读取；不要尝试读取其它工作台阶段，不要凭空补全缺失设定。
 - 正文完成后必须调用 write_section_body，传入干净正文，覆盖当前小节正文框。
 - 然后总结当前小节结束时的人物状态，并调用 write_character_state 覆盖当前小节人物状态框。
 - write_section_body 里的 text 只允许是小说正文，不要包含思考、说明、标题解释、工具调用说明。
@@ -175,7 +175,7 @@ export function buildSectionWriterUserPrompt(input: {
 - id：${sectionId}
 - 本章节字数要求：${currentWordRequirement}
 
-如需人物设计、导语设计、剧情设计、剧情细化或大纲纲要，请调用 read_workspace_content 读取对应阶段内容；本消息不再直接附带这些阶段全文。
+如需大纲纲要，请调用 read_outline_content 读取完整大纲；本消息不再直接附带大纲全文，也不能读取其它工作台阶段。
 
 前文（为保证连续长文写作性能，只附最近 ${RECENT_PREVIOUS_SECTION_LIMIT} 个已完成小节正文；更早变化见人物状态摘要）：
 ${omittedCount > 0 ? `（更早 ${omittedCount} 个小节正文已省略）\n\n` : ''}${previousBodies || '（无）'}
