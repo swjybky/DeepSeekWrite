@@ -59,6 +59,7 @@ export function getWorkspaceStageAdditionalTools(
     linkedMaterial: ctx.linkedMaterial,
     applyToStageEditor: ctx.applyToStageEditor,
     onRequestSave: ctx.onRequestSave,
+    isToolCallStreamed: ctx.isToolCallStreamed,
   }
   return buildShortWorkspaceAdditionalTools(narrow)
 }

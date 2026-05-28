@@ -225,6 +225,139 @@ export function buildGlobalReplaceTool(
   })
 }
 
+const MAX_DRAFT_TEXT_REPLACE_CHARS = 2400
+
+type DraftTextReplacement = {
+  original_text: string
+  new_text: string
+}
+
+function normalizeNewlines(text: string): string {
+  return text.replace(/\r\n/g, '\n').replace(/\r/g, '\n')
+}
+
+function countExactOccurrences(haystack: string, needle: string): number {
+  if (!needle) return 0
+  let count = 0
+  let pos = 0
+  while (pos <= haystack.length) {
+    const found = haystack.indexOf(needle, pos)
+    if (found === -1) break
+    count += 1
+    pos = found + needle.length
+  }
+  return count
+}
+
+function replaceDraftText(input: {
+  currentBody: string
+  replacements: DraftTextReplacement[]
+}): { next: string; count: number } | { error: string } {
+  if (input.replacements.length === 0) return { error: 'replacements 不能为空。' }
+
+  let next = normalizeNewlines(input.currentBody)
+  for (const [index, replacement] of input.replacements.entries()) {
+    const itemName = `第 ${index + 1} 个片段`
+    const originalText = normalizeNewlines(replacement.original_text)
+    const newText = normalizeNewlines(replacement.new_text)
+    if (!originalText.trim()) {
+      return { error: `${itemName}的 original_text 不能为空。` }
+    }
+    if (originalText.length > MAX_DRAFT_TEXT_REPLACE_CHARS) {
+      return {
+        error:
+          `${itemName}的 original_text 过长（${originalText.length} 字符）。请只传需要替换的小段原文。`,
+      }
+    }
+    if (newText.length > MAX_DRAFT_TEXT_REPLACE_CHARS) {
+      return {
+        error:
+          `${itemName}的 new_text 过长（${newText.length} 字符）。请拆成多个小段替换。`,
+      }
+    }
+
+    const occurrenceCount = countExactOccurrences(next, originalText)
+    if (occurrenceCount === 0) {
+      return {
+        error:
+          `${itemName}的 original_text 未在当前正文中找到。请先读取当前正文，传入完全一致的原文片段。`,
+      }
+    }
+    if (occurrenceCount > 1) {
+      return {
+        error:
+          `${itemName}的 original_text 在当前正文中出现了 ${occurrenceCount} 次。请扩大原文片段，使其唯一后再替换。`,
+      }
+    }
+
+    next = next.replace(originalText, newText)
+  }
+
+  return { next, count: input.replacements.length }
+}
+
+export function buildReplaceDraftTextTool(
+  ctx: ShortWorkspaceStageAgentContext,
+): AgentTool {
+  return defineTool({
+    name: 'replace_draft_editor_text',
+    label: '替换正文原文',
+    description:
+      '正文编写普通模式专用：根据“当前正文中的精确原文片段”替换成新文本，不使用行号。'
+      + '\n必须先读取当前正文，再把需要修改的小段原文完整放入 original_text，把改写后内容放入 new_text。'
+      + '\noriginal_text 必须在当前正文中精确且唯一匹配；找不到或出现多次都会拒绝，避免误改。'
+      + '\n需要多处修改时，传 replacements 数组；每个 replacement 只放一个小段，不要把整篇正文作为 original_text 或 new_text。',
+    parameters: Type.Object({
+      replacements: Type.Array(
+        Type.Object({
+          original_text: Type.String({
+            maxLength: MAX_DRAFT_TEXT_REPLACE_CHARS,
+            description:
+              '当前正文中要被替换的精确原文片段。必须完整照抄，包含标点、空格和换行，并且在正文中只出现一次。',
+          }),
+          new_text: Type.String({
+            maxLength: MAX_DRAFT_TEXT_REPLACE_CHARS,
+            description:
+              '替换后的新文本。只放这个片段的新内容，可包含换行；不要放整篇正文。',
+          }),
+        }),
+        {
+          minItems: 1,
+          maxItems: 20,
+          description:
+            '需要替换的正文片段列表。每项都用 original_text 精确定位，再用 new_text 替换。',
+        },
+      ),
+    }),
+    execute: async (_toolCallId, params) => {
+      if (ctx.stageId !== 'draft') {
+        return textBlock('未替换：该工具仅用于「正文编写」普通模式。')
+      }
+      const apply = ctx.applyToStageEditor
+      if (!apply) {
+        return textBlock('（当前环境无法写入编辑区：未连接界面）')
+      }
+
+      const result = replaceDraftText({
+        currentBody: ctx.getCurrentStageBody?.() ?? ctx.stageBody ?? '',
+        replacements: params.replacements,
+      })
+      if ('error' in result) return textBlock(`未替换：${result.error}`)
+
+      apply({ text: result.next, mode: 'replace' })
+      if (ctx.onRequestSave) {
+        await new Promise((r) => setTimeout(r, 50))
+        await ctx.onRequestSave()
+      }
+      return textBlock(
+        ctx.onRequestSave
+          ? `已按原文精确替换正文编写编辑区 ${result.count} 个片段，并已自动保存。`
+          : `已按原文精确替换正文编写编辑区 ${result.count} 个片段。`,
+      )
+    },
+  })
+}
+
 export function buildWriteWorkspaceEditorTool(
   ctx: ShortWorkspaceStageAgentContext,
 ): AgentTool {
@@ -283,6 +416,7 @@ export function buildShortWorkspaceAdditionalTools(
   const readSaved = buildReadWorkspaceContentTool(ctx)
   const readMaterial = buildReadLinkedMaterialContentTool(ctx)
   const writeWorkspace = buildWriteWorkspaceEditorTool(ctx)
+  const replaceDraftText = buildReplaceDraftTextTool(ctx)
   switch (ctx.stageId) {
     case 'character_design':
     case 'intro_design':
@@ -299,8 +433,8 @@ export function buildShortWorkspaceAdditionalTools(
       return [readSaved,readMaterial,writeWorkspace]
 
     case 'draft':
-      // 正文编写阶段：增加字数统计工具
-      return [readSaved,readMaterial,writeWorkspace]
+      // 正文编写普通模式：通过精确原文片段替换，不注册整段写入工具
+      return [readSaved, readMaterial, replaceDraftText]
 
     case 'draft_review':
       // 正文审阅阶段：增加完整审阅工具集

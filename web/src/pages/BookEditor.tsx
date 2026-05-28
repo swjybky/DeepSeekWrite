@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import {
@@ -101,6 +101,10 @@ function stageTextCounts(text: string): { total: number; nonSpace: number } {
   }
 }
 
+function splitEditorLogicalLines(text: string): string[] {
+  return text.split('\n')
+}
+
 function combineExpertDraftSections(draft: ExpertDraft): string {
   return draft.sections
     .map((section) => {
@@ -179,6 +183,8 @@ export function BookEditor() {
   const activeStageRef = useRef<StageId>(activeStage)
   /** 当前激活阶段的 textarea ref，用于自动滚动 */
   const textareaRef = useRef<HTMLTextAreaElement | null>(null)
+  const lineNumberGutterRef = useRef<HTMLDivElement | null>(null)
+  const lineMeasureRef = useRef<HTMLDivElement | null>(null)
   /** 流式 token 缓冲区；按阶段隔离，避免切换阶段后写入串台 */
   const tokenBuffersRef = useRef<Partial<Record<StageId, string>>>({})
   const tokenBufferRafRefs = useRef<Partial<Record<StageId, number>>>({})
@@ -303,6 +309,9 @@ export function BookEditor() {
       textarea.scrollHeight - textarea.scrollTop <= textarea.clientHeight + 20
     if (wasAtBottom) {
       textarea.scrollTop = textarea.scrollHeight
+      if (lineNumberGutterRef.current) {
+        lineNumberGutterRef.current.scrollTop = textarea.scrollTop
+      }
     }
   }, [])
 
@@ -596,6 +605,75 @@ export function BookEditor() {
     updateStage(activeStage, () => value)
   }
 
+  const handleStageTextareaScroll = () => {
+    const textarea = textareaRef.current
+    const gutter = lineNumberGutterRef.current
+    if (!textarea || !gutter) return
+    gutter.scrollTop = textarea.scrollTop
+  }
+
+  const activeStageBody = stages[activeStage] ?? ''
+
+  useLayoutEffect(() => {
+    if (activeStage !== 'draft') return
+    const textarea = textareaRef.current
+    const gutter = lineNumberGutterRef.current
+    const measure = lineMeasureRef.current
+    if (!textarea || !gutter || !measure) return
+
+    let rafId = 0
+    const syncLineNumberHeights = () => {
+      const style = window.getComputedStyle(textarea)
+      const paddingLeft = Number.parseFloat(style.paddingLeft) || 0
+      const paddingRight = Number.parseFloat(style.paddingRight) || 0
+      const contentWidth = Math.max(
+        0,
+        textarea.clientWidth - paddingLeft - paddingRight,
+      )
+
+      measure.style.width = `${contentWidth}px`
+      measure.style.fontFamily = style.fontFamily
+      measure.style.fontSize = style.fontSize
+      measure.style.fontStyle = style.fontStyle
+      measure.style.fontWeight = style.fontWeight
+      measure.style.letterSpacing = style.letterSpacing
+      measure.style.lineHeight = style.lineHeight
+      measure.style.textTransform = style.textTransform
+      measure.style.wordSpacing = style.wordSpacing
+      measure.style.tabSize = style.tabSize
+
+      const fallbackHeight =
+        Number.parseFloat(style.lineHeight) ||
+        Number.parseFloat(style.fontSize) * 1.55 ||
+        22
+      const measureRows = Array.from(measure.children) as HTMLElement[]
+      const gutterRows = Array.from(
+        gutter.querySelectorAll<HTMLElement>('.workspace-line-number'),
+      )
+      gutterRows.forEach((row, index) => {
+        const measured = measureRows[index]?.offsetHeight ?? fallbackHeight
+        row.style.height = `${Math.max(fallbackHeight, measured)}px`
+      })
+      gutter.scrollTop = textarea.scrollTop
+    }
+
+    const scheduleSync = () => {
+      cancelAnimationFrame(rafId)
+      rafId = requestAnimationFrame(syncLineNumberHeights)
+    }
+
+    scheduleSync()
+    const resizeObserver = new ResizeObserver(scheduleSync)
+    resizeObserver.observe(textarea)
+    window.addEventListener('resize', scheduleSync)
+
+    return () => {
+      cancelAnimationFrame(rafId)
+      resizeObserver.disconnect()
+      window.removeEventListener('resize', scheduleSync)
+    }
+  }, [activeStage, activeStageBody, aiPanelWidth])
+
   if (!id) {
     return (
       <div className="editor-wrap">
@@ -667,8 +745,9 @@ export function BookEditor() {
 
   const railStages = resolveWorkspaceStagesForBook(book)
   const promptKind: PromptKind = currentPromptKind
-  const stageBody = stages[activeStage] ?? ''
+  const stageBody = activeStageBody
   const expertDraftActive = expertMode && activeStage === 'draft'
+  const draftLogicalLines = activeStage === 'draft' ? splitEditorLogicalLines(stageBody) : []
 
   const openPromptEditor = async () => {
     const start = Date.now()
@@ -976,16 +1055,54 @@ export function BookEditor() {
                   </span>
                 </span>
               </div>
-              <textarea
-                id="stage-body"
-                ref={textareaRef}
-                className="editor-body workspace-textarea"
-                value={stageBody}
-                onChange={(e) => handleStageBodyChange(e.target.value)}
-                placeholder="在此编辑当前阶段内容…"
-                spellCheck={false}
-                readOnly={Boolean(streamingStages[activeStage])}
-              />
+              {activeStage === 'draft' ? (
+                <div className="workspace-textarea-shell workspace-textarea-shell--line-numbers">
+                  <div
+                    ref={lineNumberGutterRef}
+                    className="workspace-line-number-gutter"
+                    aria-hidden="true"
+                  >
+                    {draftLogicalLines.map((_line, index) => (
+                      <div className="workspace-line-number" key={index}>
+                        {index + 1}
+                      </div>
+                    ))}
+                  </div>
+                  <textarea
+                    id="stage-body"
+                    ref={textareaRef}
+                    className="editor-body workspace-textarea workspace-textarea--with-line-numbers"
+                    value={stageBody}
+                    onChange={(e) => handleStageBodyChange(e.target.value)}
+                    onScroll={handleStageTextareaScroll}
+                    placeholder="在此编辑当前阶段内容…"
+                    spellCheck={false}
+                    readOnly={Boolean(streamingStages[activeStage])}
+                  />
+                  <div
+                    ref={lineMeasureRef}
+                    className="workspace-line-measure"
+                    aria-hidden="true"
+                  >
+                    {draftLogicalLines.map((line, index) => (
+                      <div className="workspace-line-measure-row" key={index}>
+                        {line || '\u00a0'}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : (
+                <textarea
+                  id="stage-body"
+                  ref={textareaRef}
+                  className="editor-body workspace-textarea"
+                  value={stageBody}
+                  onChange={(e) => handleStageBodyChange(e.target.value)}
+                  placeholder="在此编辑当前阶段内容…"
+                  spellCheck={false}
+                  readOnly={Boolean(streamingStages[activeStage])}
+                />
+              )}
             </>
           )}
         </div>
