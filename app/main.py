@@ -219,6 +219,11 @@ class DistHTTPRequestHandler(SimpleHTTPRequestHandler):
             return 'application/wasm'
         return super().guess_type(path)
 
+    def end_headers(self) -> None:
+        # Vite 每次 build 会换 chunk 哈希；WebView2 若缓存旧 index.js，会 404 动态 import 的子模块。
+        self.send_header("Cache-Control", "no-store, must-revalidate")
+        super().end_headers()
+
 
 def _start_local_dist_server(dist_dir: Path) -> tuple[ThreadingHTTPServer, str]:
     """本机回环 HTTP 提供 dist，与 `npm run dev` 同为 http 源，避免 file:// 下 fetch 异常。"""
@@ -337,7 +342,7 @@ class Api:
 
         Args:
             material_id: 素材ID
-            stages: 阶段内容字典，键为 'character'/'intro'/'gimmick'/'pacing'
+            stages: 阶段内容字典，键为 'character'/'intro'/'gimmick'/'plot_refine'/'pacing'/'draft_excerpt'
             title: 素材标题
         """
         return self._store.save_material(material_id, stages, title)

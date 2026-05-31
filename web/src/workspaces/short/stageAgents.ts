@@ -65,31 +65,62 @@ export function buildReadWorkspaceContentTool(
   })
 }
 
+/** 创作空间各阶段允许读取的关联素材阶段；未列出表示不提供读取素材工具 */
+export const SHORT_STAGE_LINKED_MATERIAL_ACCESS: Partial<
+  Record<ShortStageId, readonly MaterialStageId[]>
+> = {
+  character_design: ['character'],
+  intro_design: ['intro'],
+  plot_design: ['character', 'intro', 'gimmick', 'pacing'],
+  plot_refine: ['plot_refine', 'pacing'],
+}
+
+export function getLinkedMaterialStagesForShortStage(
+  stageId: ShortStageId,
+): readonly MaterialStageId[] | null {
+  return SHORT_STAGE_LINKED_MATERIAL_ACCESS[stageId] ?? null
+}
+
+function materialStageIdParameterSchema(
+  allowedStageIds: readonly MaterialStageId[],
+) {
+  const description = allowedStageIds
+    .map((id) => `${MATERIAL_STAGE_LABELS[id]}（${id}）`)
+    .join('、')
+  const literals = allowedStageIds.map((id) => Type.Literal(id))
+  if (literals.length === 1) {
+    return { schema: literals[0]!, description }
+  }
+  return {
+    schema: Type.Union(literals, { description: `允许读取的素材阶段：${description}` }),
+    description,
+  }
+}
+
 export function buildReadLinkedMaterialContentTool(
   ctx: ShortWorkspaceStageAgentContext,
+  allowedStageIds: readonly MaterialStageId[],
 ): AgentTool {
+  const allowedSet = new Set(allowedStageIds)
+  const { schema: stageIdSchema, description: allowedDescription } =
+    materialStageIdParameterSchema(allowedStageIds)
+
   return defineTool({
     name: 'read_linked_material_content',
     label: '读取关联素材库内容',
     description:
-      '读取当前书籍在 AI 助手上方关联的素材库内容。每次调用只返回一个素材阶段：character、intro、gimmick 或 pacing。'
-      +'\n此工具不要随便使用，仅在使用者明确要求或智能体提示明确标记使用时调用',
+      `读取当前书籍在 AI 助手上方关联的素材库内容。当前仅允许读取：${allowedDescription}。每次调用只返回一个素材阶段。`
+      + '\n此工具不要随便使用，仅在使用者明确要求或智能体提示明确标记使用时调用',
     parameters: Type.Object({
-      stage_id: Type.Union(
-        [
-          Type.Literal('character'),
-          Type.Literal('intro'),
-          Type.Literal('gimmick'),
-          Type.Literal('pacing'),
-        ],
-        {
-          description:
-            '素材库阶段键名：character=人设素材，intro=导语素材，gimmick=梗素材，pacing=节奏素材；单次只读取该阶段',
-        },
-      ),
+      stage_id: stageIdSchema,
     }),
     execute: async (_toolCallId, params) => {
       const stageId = params.stage_id as MaterialStageId
+      if (!allowedSet.has(stageId)) {
+        return textBlock(
+          `当前不允许读取「${MATERIAL_STAGE_LABELS[stageId]}」。仅可读取：${allowedDescription}。`,
+        )
+      }
       const material = ctx.linkedMaterial
       if (!material) {
         return textBlock('当前书籍尚未关联素材库。请先在 AI 助手上方点击「素材库选择」并选择素材。')
@@ -410,38 +441,40 @@ export function buildWriteWorkspaceEditorTool(
  * 工作台系统提示词由后端磁盘模板提供；此处仅附加 Pi 工具。
  * 统一工具配置，世情和情感共用同一套工具集
  */
+function linkedMaterialTools(
+  ctx: ShortWorkspaceStageAgentContext,
+): AgentTool[] {
+  const allowed = getLinkedMaterialStagesForShortStage(ctx.stageId)
+  if (!allowed?.length) return []
+  return [buildReadLinkedMaterialContentTool(ctx, allowed)]
+}
+
 export function buildShortWorkspaceAdditionalTools(
   ctx: ShortWorkspaceStageAgentContext,
 ): AgentTool[] {
   const readSaved = buildReadWorkspaceContentTool(ctx)
-  const readMaterial = buildReadLinkedMaterialContentTool(ctx)
+  const readMaterial = linkedMaterialTools(ctx)
   const writeWorkspace = buildWriteWorkspaceEditorTool(ctx)
   const replaceDraftText = buildReplaceDraftTextTool(ctx)
   switch (ctx.stageId) {
     case 'character_design':
     case 'intro_design':
     case 'plot_design':
-      // 前期构思阶段：基础读取工具 + 关联素材读取工具
-      return [readSaved, readMaterial, writeWorkspace]
+      return [readSaved, ...readMaterial, writeWorkspace]
 
     case 'plot_refine':
-      // 剧情细化阶段：增加场景节拍和因果工具
-      return [readSaved,readMaterial, writeWorkspace]
+      return [readSaved, ...readMaterial, writeWorkspace]
 
     case 'outline':
-      // 大纲纲要阶段：增加大纲扫描和章节生成工具
-      return [readSaved,readMaterial,writeWorkspace]
+    case 'draft_review':
+      // 大纲纲要 / 正文审阅：暂不提供读取关联素材
+      return [readSaved, writeWorkspace]
 
     case 'draft':
-      // 正文编写普通模式：通过精确原文片段替换，不注册整段写入工具
-      return [readSaved, readMaterial, replaceDraftText]
-
-    case 'draft_review':
-      // 正文审阅阶段：增加完整审阅工具集
-      return [readSaved,writeWorkspace]
+      // 正文编写普通模式：精确片段替换，不读取关联素材
+      return [readSaved, replaceDraftText]
 
     case 'format_conversion':
-      // 格式转换阶段：基础读取工具 + 阶段复制工具 + 全局替换工具
       return [readSaved, buildCopyStageToFormatTool(ctx), buildGlobalReplaceTool(ctx)]
 
     default:

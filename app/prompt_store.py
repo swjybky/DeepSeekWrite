@@ -341,19 +341,23 @@ def read_raw_expert_prompt_for_editor(prompt_kind: str, prompt_id: str) -> str:
 
 MATERIAL_PREFIX = Path("material")
 
-# 素材阶段顺序（人设/导语/梗/节奏），对齐 app/models.py MATERIAL_STAGE_KEYS
+# 素材阶段顺序（人设/导语/梗/剧情细化/节奏/正文片段），对齐 app/models.py MATERIAL_STAGE_KEYS
 MATERIAL_STAGES_ORDER: tuple[str, ...] = (
     "character",
     "intro",
     "gimmick",
+    "plot_refine",
     "pacing",
+    "draft_excerpt",
 )
 
 MATERIAL_STAGE_LABELS: dict[str, str] = {
     "character": "人设素材",
     "intro": "导语素材",
     "gimmick": "梗素材",
+    "plot_refine": "剧情细化素材",
     "pacing": "节奏素材",
+    "draft_excerpt": "正文片段",
 }
 
 # 素材提示词目录：long(长篇) / short_*(短篇分类)

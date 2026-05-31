@@ -15,12 +15,14 @@ SHORT_MATERIAL_GENRES: dict[str, list[str]] = {
     "悬疑": ["刑侦", "推理", "惊悚", "密室", "民俗", "心理", "反转"],
 }
 
-# 素材阶段键（人设、导语、梗、节奏）
+# 素材阶段键（人设、导语、梗、剧情细化、节奏、正文片段）
 MATERIAL_STAGE_KEYS: tuple[str, ...] = (
-    "character",  # 人设素材
-    "intro",      # 导语素材
-    "gimmick",    # 梗素材
-    "pacing",     # 节奏素材
+    "character",     # 人设素材
+    "intro",         # 导语素材
+    "gimmick",       # 梗素材
+    "plot_refine",   # 剧情细化素材
+    "pacing",        # 节奏素材
+    "draft_excerpt", # 正文片段
 )
 
 # 统一的短篇工作台阶段键（世情和情感共用）

@@ -363,6 +363,7 @@ function WorkspaceAiChatInner({
 
     return () => {
       cancelled = true
+      agentRef.current?.abort()
       cancelAnimationFrame(postAgentEndRaf)
       resizeObserver?.disconnect()
       resizeObserver = undefined

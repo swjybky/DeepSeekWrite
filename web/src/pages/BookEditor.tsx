@@ -519,6 +519,7 @@ export function BookEditor() {
         sectionIds: ids,
         getDraft: () => expertDraftRef.current,
         getWorkspaceStages: () => stagesRef.current,
+        linkedMaterial,
         updateDraft: updateExpertDraft,
         signal: ac.signal,
         onError: setError,
@@ -545,7 +546,7 @@ export function BookEditor() {
       void run
       return true
     },
-    [book, currentPromptKind, updateExpertDraft],
+    [book, currentPromptKind, linkedMaterial, updateExpertDraft],
   )
 
   const stopExpertWriting = useCallback(() => {

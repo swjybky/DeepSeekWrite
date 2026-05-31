@@ -6,9 +6,11 @@ import { Type } from 'typebox'
 import {
   readExpertSectionWriterPromptTemplate,
   type ExpertDraft,
+  type Material,
   type PromptKind,
   type StageId,
 } from '../../../bridge'
+import { buildReadLinkedMaterialContentTool } from '../stageAgents'
 import {
   resolveWorkspaceProviderApiKey,
 } from '../../../pi/resolveWorkspaceChatModel'
@@ -33,6 +35,8 @@ export type RunExpertDraftSectionWriterOptions = {
   sectionIds: string[]
   getDraft: () => ExpertDraft
   getWorkspaceStages: () => Partial<Record<StageId, string>>
+  /** 书籍关联的素材库；子智能体可读取正文片段素材（draft_excerpt） */
+  linkedMaterial?: Material | null
   updateDraft: ExpertDraftUpdater
   signal?: AbortSignal
   onError?: (message: string) => void
@@ -142,6 +146,7 @@ function buildSectionWriterTools(input: {
   sectionId: string
   sectionTitle: string
   allStages: Partial<Record<StageId, string>>
+  linkedMaterial?: Material | null
   updateDraft: ExpertDraftUpdater
   onSectionBodyWritten?: (text: string) => void
   onCharacterStateWritten?: (text: string) => void
@@ -151,6 +156,7 @@ function buildSectionWriterTools(input: {
     sectionId,
     sectionTitle,
     allStages,
+    linkedMaterial,
     updateDraft,
     onSectionBodyWritten,
     onCharacterStateWritten,
@@ -170,8 +176,20 @@ function buildSectionWriterTools(input: {
       return textBlock(`${header}\n\n${outline}`)
     },
   })
+  const readDraftExcerptMaterial = buildReadLinkedMaterialContentTool(
+    {
+      bookTitle,
+      stageId: 'draft',
+      stageBody: '',
+      allStages,
+      linkedMaterial: linkedMaterial ?? null,
+    },
+    ['draft_excerpt'],
+  )
+
   return [
     readOutlineContent,
+    readDraftExcerptMaterial,
     defineTool({
       name: 'write_section_body',
       label: '写入正文',
@@ -284,6 +302,7 @@ export async function runExpertDraftSectionWriter(
             sectionId,
             sectionTitle: section.title,
             allStages: opts.getWorkspaceStages(),
+            linkedMaterial: opts.linkedMaterial,
             updateDraft: opts.updateDraft,
             onSectionBodyWritten: (text) => {
               sectionBodyWritten = text

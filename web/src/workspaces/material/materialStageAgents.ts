@@ -34,18 +34,20 @@ export function buildReadMaterialContentTool(
     name: 'read_material_content',
     label: '读取素材内容',
     description:
-      '读取当前素材库其它阶段已保存的内容，每次调用只返回一个 stage_id。不含编辑栏未写入的未保存草稿。',
+      '读取当前素材库其它阶段已保存的内容，每次调用只返回一个 stage_id（character/intro/gimmick/plot_refine/pacing/draft_excerpt）。不含编辑栏未写入的未保存草稿。',
     parameters: Type.Object({
       stage_id: Type.Union(
         [
           Type.Literal('character'),
           Type.Literal('intro'),
           Type.Literal('gimmick'),
+          Type.Literal('plot_refine'),
           Type.Literal('pacing'),
+          Type.Literal('draft_excerpt'),
         ],
         {
           description:
-            '素材阶段键名：character=人设素材，intro=导语素材，gimmick=梗素材，pacing=节奏素材；单次只读取该阶段',
+            '素材阶段键名：character=人设素材，intro=导语素材，gimmick=梗素材，plot_refine=剧情细化素材，pacing=节奏素材，draft_excerpt=正文片段；单次只读取该阶段',
         },
       ),
     }),
@@ -111,7 +113,7 @@ export function buildWriteMaterialEditorTool(
 
 /**
  * 素材库工作台系统提示词由后端磁盘模板提供；此处仅附加 Pi 工具。
- * 所有素材阶段（人设/导语/梗/节奏）共用同一套工具：读取 + 写入。
+ * 所有素材阶段（人设/导语/梗/剧情细化/节奏/正文片段）共用同一套工具：读取 + 写入。
  */
 export function buildMaterialWorkspaceAdditionalTools(
   ctx: MaterialWorkspaceStageAgentContext,

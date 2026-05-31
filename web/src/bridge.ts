@@ -245,13 +245,21 @@ export interface Book extends BookSummary {
 
 export type MaterialType = 'long' | 'short'
 
-export type MaterialStageId = 'character' | 'intro' | 'gimmick' | 'pacing'
+export type MaterialStageId =
+  | 'character'
+  | 'intro'
+  | 'gimmick'
+  | 'plot_refine'
+  | 'pacing'
+  | 'draft_excerpt'
 
 export const MATERIAL_STAGE_LABELS: Record<MaterialStageId, string> = {
   character: '人设素材',
   intro: '导语素材',
   gimmick: '梗素材',
+  plot_refine: '剧情细化素材',
   pacing: '节奏素材',
+  draft_excerpt: '正文片段',
 }
 
 export const SHORT_MATERIAL_GENRES: Record<string, string[]> = {
@@ -299,7 +307,9 @@ export function normalizeMaterialStages(
     character: '',
     intro: '',
     gimmick: '',
+    plot_refine: '',
     pacing: '',
+    draft_excerpt: '',
   }
   if (!raw) return out
   for (const k of Object.keys(out) as MaterialStageId[]) {
