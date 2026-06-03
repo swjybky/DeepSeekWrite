@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Link } from 'react-router-dom'
 import {
   SHORT_GENRE_OPTIONS,
   type BookSummary,
@@ -31,7 +32,7 @@ function truncatePath(path: string, max = 42): string {
 }
 
 export function Home() {
-  // ==================== 书架状态 ====================
+  // ==================== 创作空间状态 ====================
   const [books, setBooks] = useState<BookSummary[]>([])
   const [loadingBooks, setLoadingBooks] = useState(true)
   const [showBookForm, setShowBookForm] = useState(false)
@@ -56,7 +57,7 @@ export function Home() {
   const [deletingMaterialId, setDeletingMaterialId] = useState<string | null>(null)
   const [materialError, setMaterialError] = useState<string | null>(null)
 
-  // ==================== 书架封面加载 ====================
+  // ==================== 创作空间封面加载 ====================
   const loadBookCovers = useCallback(async (bookList: BookSummary[]) => {
     const api = await getBridgeApi()
     if (!api?.get_book_cover) return
@@ -77,7 +78,7 @@ export function Home() {
     setBookCovers(map)
   }, [])
 
-  // ==================== 书架数据加载 ====================
+  // ==================== 创作空间数据加载 ====================
   const refreshBooks = useCallback(async () => {
     setLoadingBooks(true)
     setBookError(null)
@@ -86,7 +87,7 @@ export function Home() {
       setBooks(list)
       void loadBookCovers(list)
     } catch (e) {
-      setBookError(e instanceof Error ? e.message : '加载书架失败')
+      setBookError(e instanceof Error ? e.message : '加载创作空间失败')
     } finally {
       setLoadingBooks(false)
     }
@@ -105,7 +106,7 @@ export function Home() {
         if (!cancelled) setBooks(list)
         if (!cancelled) void loadBookCovers(list)
       } catch (e) {
-        if (!cancelled) setBookError(e instanceof Error ? e.message : '加载书架失败')
+        if (!cancelled) setBookError(e instanceof Error ? e.message : '加载创作空间失败')
       } finally {
         if (!cancelled) setLoadingBooks(false)
       }
@@ -198,7 +199,7 @@ export function Home() {
   const handleDeleteBook = async (bookId: string) => {
     const b = books.find((book) => book.id === bookId)
     if (!b) return
-    const ok = window.confirm(`确定从书架移除「${b.title}」？\n书本文件夹仍会保留在工作目录中。`)
+    const ok = window.confirm(`确定从创作空间移除「${b.title}」？\n书本文件夹仍会保留在工作目录中。`)
     if (!ok) return
     setDeletingBookId(bookId)
     try {
@@ -305,7 +306,7 @@ export function Home() {
       {/* 双栏卡片布局 */}
       <div className="home-cards-layout">
         {/* 书籍卡片 */}
-        <section className="main-card books-card" aria-label="书架">
+        <section className="main-card books-card" aria-label="创作空间">
           <header className="card-header">
             <div className="card-header-icon book-icon">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
@@ -313,16 +314,24 @@ export function Home() {
               </svg>
             </div>
             <div className="card-header-content">
-              <h2 className="card-header-title">书架</h2>
+              <h2 className="card-header-title">创作空间</h2>
               <span className="card-header-count">{books.length} 本书</span>
             </div>
-            <button
-              type="button"
-              className="btn-primary btn-small"
-              onClick={() => setShowBookForm((v) => !v)}
-            >
-              {showBookForm ? '收起' : '+ 创建书籍'}
-            </button>
+            <div className="card-header-actions">
+              <Link
+                className="btn-secondary btn-small"
+                to="/workspace-settings"
+              >
+                设置
+              </Link>
+              <button
+                type="button"
+                className="btn-primary btn-small"
+                onClick={() => setShowBookForm((v) => !v)}
+              >
+                {showBookForm ? '收起' : '+ 创建书籍'}
+              </button>
+            </div>
           </header>
 
           {showBookForm && (

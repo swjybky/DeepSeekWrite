@@ -52,7 +52,7 @@ def _unique_child_dir(parent: Path, base_name: str) -> Path:
 def _write_stages_to_disk(book: Book) -> None:
     """
     将各阶段内容写入书籍输出目录
-    使用统一阶段键，不再区分世情和情感
+    使用所有短篇分类共享的统一阶段键
     """
     od = (book.output_dir or "").strip()
     if not od:
@@ -181,18 +181,28 @@ def write_saved_workspace_root(path: str | None) -> None:
     save_preferences_atomic(prefs)
 
 
-def read_stage_read_access() -> dict[str, Any]:
-    """全局创作空间阶段可读配置（各阶段 workspace/material 列表）。"""
-    raw = load_preferences().get("stage_read_access")
-    return raw if isinstance(raw, dict) else {}
+def read_workspace_agent_read_access() -> dict[str, Any]:
+    """全局创作空间智能体读取配置，首次读取时兼容旧阶段配置。"""
+    prefs = load_preferences()
+    raw = prefs.get("workspace_agent_read_access")
+    if isinstance(raw, dict):
+        return raw
+
+    legacy = prefs.get("stage_read_access")
+    if not isinstance(legacy, dict):
+        return {}
+
+    prefs["workspace_agent_read_access"] = legacy
+    save_preferences_atomic(prefs)
+    return legacy
 
 
-def write_stage_read_access(config: dict[str, Any]) -> None:
+def write_workspace_agent_read_access(config: dict[str, Any]) -> None:
     prefs = load_preferences()
     if config:
-        prefs["stage_read_access"] = config
+        prefs["workspace_agent_read_access"] = config
     else:
-        prefs.pop("stage_read_access", None)
+        prefs.pop("workspace_agent_read_access", None)
     save_preferences_atomic(prefs)
 
 

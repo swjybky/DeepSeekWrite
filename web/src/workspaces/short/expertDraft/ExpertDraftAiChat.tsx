@@ -3,7 +3,12 @@ import type { AgentMessage, AgentTool } from '@mariozechner/pi-agent-core'
 import { ApiKeyPromptDialog, ChatPanel, ModelSelector } from '@mariozechner/pi-web-ui'
 import { useCallback, useEffect, useRef, useState } from 'react'
 
-import type { ExpertDraft, PromptKind, StageId } from '../../../bridge'
+import {
+  readWorkspaceAgentPromptTemplate,
+  type ExpertDraft,
+  type Material,
+  type StageId,
+} from '../../../bridge'
 import {
   openWorkspaceConfiguredModelSelector,
   resolveWorkspaceProviderApiKey,
@@ -18,15 +23,21 @@ import {
 import { buildExpertDraftCoordinatorTools } from './coordinatorTools'
 import { buildExpertDraftCoordinatorSystemPrompt } from './prompts'
 import type { RunExpertDraftSectionWriterOptions } from './sectionWriter'
+import {
+  EXPERT_DRAFT_COORDINATOR_AGENT_ID,
+  type WorkspaceAgentReadAccessEntry,
+} from '../stageReadAccess'
 
 const ARTIFACTS_TOOL_NAME = 'artifacts'
 
 type Props = {
   bookId: string
   bookTitle: string
-  promptKind: PromptKind
+  bookGenre: string
   sessionEpoch?: number
   stages: Partial<Record<StageId, string>>
+  linkedMaterial?: Material | null
+  readAccess: WorkspaceAgentReadAccessEntry
   expertDraft: ExpertDraft
   updateDraft: (updater: (draft: ExpertDraft) => ExpertDraft) => void
   startWriting: (
@@ -84,8 +95,11 @@ function toolStatus(toolName: string, done = false): string {
   if (toolName === 'write_character_state') {
     return done ? '人物状态已写入' : '正在写入人物状态'
   }
-  if (toolName === 'read_outline_content') {
-    return done ? '已读取大纲' : '正在读取大纲'
+  if (toolName === 'read_workspace_content') {
+    return done ? '已读取创作阶段' : '正在读取创作阶段'
+  }
+  if (toolName === 'read_linked_material_content') {
+    return done ? '已读取关联素材' : '正在读取关联素材'
   }
   return done ? '工具调用完成' : '正在调用工具'
 }
@@ -95,6 +109,7 @@ export function ExpertDraftAiChat(props: Props) {
   const agentRef = useRef<Agent | null>(null)
   const chatPanelRef = useRef<ChatPanel | null>(null)
   const propsLatestRef = useRef(props)
+  const promptTemplateRef = useRef('')
   const unsubscribeWriterPreviewRef = useRef<(() => void) | null>(null)
   const writerPreviewRafRef = useRef(0)
   const writerPreviewPatchRef = useRef<Partial<WriterPreview> | null>(null)
@@ -190,6 +205,10 @@ export function ExpertDraftAiChat(props: Props) {
 
     const currentTools = () =>
       buildExpertDraftCoordinatorTools({
+        bookTitle: propsLatestRef.current.bookTitle,
+        allStages: propsLatestRef.current.stages,
+        linkedMaterial: propsLatestRef.current.linkedMaterial,
+        readAccess: propsLatestRef.current.readAccess,
         getDraft: () => propsLatestRef.current.expertDraft,
         updateDraft: propsLatestRef.current.updateDraft,
         startWriting: (sectionIds) =>
@@ -202,6 +221,10 @@ export function ExpertDraftAiChat(props: Props) {
     ;(async () => {
       await ensurePiAppStorage()
       const initialModel = await resolvePreferredWorkspaceChatModel()
+      const promptTemplate = await readWorkspaceAgentPromptTemplate(
+        EXPERT_DRAFT_COORDINATOR_AGENT_ID,
+      )
+      promptTemplateRef.current = promptTemplate
       const root = hostRef.current
       if (cancelled || !root) return
 
@@ -232,6 +255,7 @@ export function ExpertDraftAiChat(props: Props) {
         sessionId: createPiSessionId(
           'expert-draft-coordinator',
           props.bookId,
+          'shared',
           props.sessionEpoch && props.sessionEpoch > 0
             ? props.sessionEpoch
             : undefined,
@@ -241,9 +265,11 @@ export function ExpertDraftAiChat(props: Props) {
         initialState: {
           systemPrompt: buildExpertDraftCoordinatorSystemPrompt({
             bookTitle: props.bookTitle,
-            promptKind: props.promptKind,
-            stages: props.stages,
+            bookGenre: props.bookGenre,
             draft: props.expertDraft,
+            workspaceStages: props.stages,
+            allowedWorkspaceStages: props.readAccess.workspace,
+            template: promptTemplate,
           }),
           model: initialModel,
           thinkingLevel: getPreferredWorkspaceThinkingLevel(),
@@ -375,12 +401,18 @@ export function ExpertDraftAiChat(props: Props) {
     const agent = agentRef.current
     agent.state.systemPrompt = buildExpertDraftCoordinatorSystemPrompt({
       bookTitle: p.bookTitle,
-      promptKind: p.promptKind,
-      stages: p.stages,
+      bookGenre: p.bookGenre,
       draft: debouncedDraft,
+      workspaceStages: p.stages,
+      allowedWorkspaceStages: p.readAccess.workspace,
+      template: promptTemplateRef.current,
     })
     agent.state.tools = stripArtifacts(
       buildExpertDraftCoordinatorTools({
+        bookTitle: p.bookTitle,
+        allStages: p.stages,
+        linkedMaterial: p.linkedMaterial,
+        readAccess: p.readAccess,
         getDraft: () => propsLatestRef.current.expertDraft,
         updateDraft: propsLatestRef.current.updateDraft,
         startWriting: (sectionIds) =>
@@ -393,8 +425,10 @@ export function ExpertDraftAiChat(props: Props) {
   }, [
     chatReady,
     props.bookTitle,
-    props.promptKind,
+    props.bookGenre,
     props.stages,
+    props.linkedMaterial,
+    props.readAccess,
     debouncedDraft,
     watchWriterAgent,
     finishWriterPreview,

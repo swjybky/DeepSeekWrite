@@ -4,11 +4,10 @@ import { Type } from 'typebox'
 import type { Material, MaterialStageId } from '../../bridge'
 import { MATERIAL_STAGE_LABELS, normalizeMaterialStages } from '../../bridge'
 import type { ShortStageId } from './stages'
-import { SHORT_STAGE_LABELS, SHORT_WORKSPACE_STAGES } from './stages'
+import { SHORT_STAGE_LABELS } from './stages'
 import {
-  isConfigurableReadStage,
-  resolveReadAccessForStage,
-  type StageReadAccessConfig,
+  resolveWorkspaceAgentReadAccess,
+  type WorkspaceAgentReadAccessConfig,
 } from './stageReadAccess'
 import {
   defineTool,
@@ -27,7 +26,7 @@ export type ShortWorkspaceStageAgentContext = {
   allowedWorkspaceStages?: readonly ShortStageId[]
   /** 全局配置解析后：当前阶段允许读取的素材库阶段 */
   allowedMaterialStages?: readonly MaterialStageId[]
-  stageReadAccess?: StageReadAccessConfig | null
+  workspaceAgentReadAccess?: WorkspaceAgentReadAccessConfig | null
   applyToStageEditor?: (payload: { mode: 'replace' | 'append'; text: string }) => void
   isToolCallStreamed?: (toolCallId: string) => boolean
   /** 请求上层保存当前书籍；用于复制工具写入后自动落盘 */
@@ -55,8 +54,6 @@ function shortStageIdParameterSchema(allowedStageIds: readonly ShortStageId[]) {
     description,
   }
 }
-
-const ALL_SHORT_STAGE_IDS = SHORT_WORKSPACE_STAGES.map((s) => s.id)
 
 export function buildReadWorkspaceContentTool(
   ctx: ShortWorkspaceStageAgentContext,
@@ -105,11 +102,11 @@ function resolveAllowedStagesFromContext(
       material: ctx.allowedMaterialStages ?? [],
     }
   }
-  const resolved = resolveReadAccessForStage(ctx.stageReadAccess, ctx.stageId)
-  if (resolved) {
-    return { workspace: resolved.workspace, material: resolved.material }
-  }
-  return { workspace: ALL_SHORT_STAGE_IDS, material: [] }
+  const resolved = resolveWorkspaceAgentReadAccess(
+    ctx.workspaceAgentReadAccess,
+    ctx.stageId,
+  )
+  return { workspace: resolved.workspace, material: resolved.material }
 }
 
 function materialStageIdParameterSchema(
@@ -197,8 +194,8 @@ export function buildCopyStageToFormatTool(
       source_stage_id: Type.Union(
         [
           Type.Literal('character_design'),
-          Type.Literal('intro_design'),
           Type.Literal('plot_design'),
+          Type.Literal('intro_design'),
           Type.Literal('plot_refine'),
           Type.Literal('outline'),
           Type.Literal('draft'),
@@ -207,7 +204,7 @@ export function buildCopyStageToFormatTool(
         ],
         {
           description:
-            '源阶段键名：人物设计（character_design）、导语设计（intro_design）、剧情设计（plot_design）、剧情细化（plot_refine）、大纲纲要（outline）、正文编写（draft）、正文审阅（draft_review）、格式转换（format_conversion）',
+            '源阶段键名：人物设计（character_design）、剧情设计（plot_design）、导语设计（intro_design）、剧情细化（plot_refine）、大纲纲要（outline）、正文编写（draft）、正文审阅（draft_review）、格式转换（format_conversion）',
         },
       ),
       mode: Type.Union(
@@ -486,7 +483,7 @@ function readMaterialTools(
 
 /**
  * 工作台系统提示词由后端磁盘模板提供；此处仅附加 Pi 工具。
- * 统一工具配置，世情和情感共用同一套工具集
+ * 所有短篇分类共用同一套工具配置。
  */
 export function buildShortWorkspaceAdditionalTools(
   ctx: ShortWorkspaceStageAgentContext,
@@ -494,21 +491,15 @@ export function buildShortWorkspaceAdditionalTools(
   const { workspace: allowedWorkspace, material: allowedMaterial } =
     resolveAllowedStagesFromContext(ctx)
 
-  const configurable = isConfigurableReadStage(ctx.stageId)
-  const readSaved = configurable
-    ? readWorkspaceTools(ctx, allowedWorkspace)
-    : readWorkspaceTools(ctx, ALL_SHORT_STAGE_IDS)
-
-  const readMaterial = configurable
-    ? readMaterialTools(ctx, allowedMaterial)
-    : []
+  const readSaved = readWorkspaceTools(ctx, allowedWorkspace)
+  const readMaterial = readMaterialTools(ctx, allowedMaterial)
 
   const writeWorkspace = buildWriteWorkspaceEditorTool(ctx)
   const replaceDraftText = buildReplaceDraftTextTool(ctx)
   switch (ctx.stageId) {
     case 'character_design':
-    case 'intro_design':
     case 'plot_design':
+    case 'intro_design':
       return [...readSaved, ...readMaterial, writeWorkspace]
 
     case 'plot_refine':
@@ -523,7 +514,8 @@ export function buildShortWorkspaceAdditionalTools(
 
     case 'format_conversion':
       return [
-        ...readWorkspaceTools(ctx, ALL_SHORT_STAGE_IDS),
+        ...readSaved,
+        ...readMaterial,
         buildCopyStageToFormatTool(ctx),
         buildGlobalReplaceTool(ctx),
       ]

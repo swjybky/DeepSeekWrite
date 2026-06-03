@@ -4,31 +4,35 @@ import {
   type ShortStageId,
 } from './stages'
 
-/** 支持配置「可读取阶段」的创作空间阶段 */
-export const CONFIGURABLE_READ_STAGES = [
-  'character_design',
-  'intro_design',
-  'plot_design',
-  'plot_refine',
-  'outline',
-  'draft',
+export const EXPERT_DRAFT_COORDINATOR_AGENT_ID =
+  'expert_draft_coordinator' as const
+export const EXPERT_SECTION_WRITER_AGENT_ID =
+  'expert_section_writer' as const
+
+export const WORKSPACE_AGENT_IDS = [
+  ...SHORT_WORKSPACE_STAGES.map((stage) => stage.id),
+  EXPERT_DRAFT_COORDINATOR_AGENT_ID,
+  EXPERT_SECTION_WRITER_AGENT_ID,
 ] as const
 
-export type ConfigurableReadStageId = (typeof CONFIGURABLE_READ_STAGES)[number]
+export type WorkspaceAgentId = (typeof WORKSPACE_AGENT_IDS)[number]
 
-export type StageReadAccessEntry = {
+export type WorkspaceAgentReadAccessEntry = {
   workspace: ShortStageId[]
   material: MaterialStageId[]
 }
 
-export type StageReadAccessConfig = Partial<
-  Record<ConfigurableReadStageId, StageReadAccessEntry>
+export type WorkspaceAgentReadAccessConfig = Record<
+  WorkspaceAgentId,
+  WorkspaceAgentReadAccessEntry
 >
 
-const ALL_SHORT_STAGE_IDS = SHORT_WORKSPACE_STAGES.map((s) => s.id)
+export const ALL_WORKSPACE_STAGE_IDS_FOR_READ = SHORT_WORKSPACE_STAGES.map(
+  (stage) => stage.id,
+)
 
-/** 与 bridge.MATERIAL_STAGE_LABELS 键一致；勿从 bridge 取值以免循环依赖 */
-const ALL_MATERIAL_STAGE_IDS: MaterialStageId[] = [
+/** 与 bridge.MATERIAL_STAGE_LABELS 键一致；勿从 bridge 取值以免循环依赖。 */
+export const ALL_MATERIAL_STAGE_IDS: MaterialStageId[] = [
   'character',
   'intro',
   'gimmick',
@@ -37,42 +41,74 @@ const ALL_MATERIAL_STAGE_IDS: MaterialStageId[] = [
   'draft_excerpt',
 ]
 
-/** 与现网 stageAgents 硬编码对齐的默认素材可读阶段 */
 const DEFAULT_MATERIAL_BY_STAGE: Record<
-  ConfigurableReadStageId,
+  ShortStageId,
   readonly MaterialStageId[]
 > = {
   character_design: ['character'],
-  intro_design: ['intro'],
   plot_design: ['character', 'intro', 'gimmick', 'pacing'],
+  intro_design: ['intro'],
   plot_refine: ['plot_refine', 'pacing'],
   outline: [],
   draft: [],
+  draft_review: [],
+  format_conversion: [],
 }
 
-function defaultEntryForStage(
-  stageId: ConfigurableReadStageId,
-): StageReadAccessEntry {
+const DEFAULT_COORDINATOR_WORKSPACE: ShortStageId[] = [
+  'character_design',
+  'plot_design',
+  'intro_design',
+  'plot_refine',
+  'outline',
+]
+
+function defaultEntryForAgent(
+  agentId: WorkspaceAgentId,
+): WorkspaceAgentReadAccessEntry {
+  if (agentId === EXPERT_DRAFT_COORDINATOR_AGENT_ID) {
+    return {
+      workspace: [...DEFAULT_COORDINATOR_WORKSPACE],
+      material: [],
+    }
+  }
+  if (agentId === EXPERT_SECTION_WRITER_AGENT_ID) {
+    return {
+      workspace: [...ALL_WORKSPACE_STAGE_IDS_FOR_READ],
+      material: [],
+    }
+  }
   return {
-    workspace: [...ALL_SHORT_STAGE_IDS],
-    material: [...DEFAULT_MATERIAL_BY_STAGE[stageId]],
+    workspace: [...ALL_WORKSPACE_STAGE_IDS_FOR_READ],
+    material: [...DEFAULT_MATERIAL_BY_STAGE[agentId]],
   }
 }
 
-export function getDefaultStageReadAccess(): StageReadAccessConfig {
-  const out: StageReadAccessConfig = {}
-  for (const id of CONFIGURABLE_READ_STAGES) {
-    out[id] = defaultEntryForStage(id)
-  }
-  return out
+export function getDefaultWorkspaceAgentReadAccess(): WorkspaceAgentReadAccessConfig {
+  return Object.fromEntries(
+    WORKSPACE_AGENT_IDS.map((agentId) => [
+      agentId,
+      defaultEntryForAgent(agentId),
+    ]),
+  ) as WorkspaceAgentReadAccessConfig
 }
 
-function isConfigurableStageId(id: string): id is ConfigurableReadStageId {
-  return (CONFIGURABLE_READ_STAGES as readonly string[]).includes(id)
+export function getDefaultWorkspaceAgentReadAccessEntry(
+  agentId: WorkspaceAgentId,
+): WorkspaceAgentReadAccessEntry {
+  return defaultEntryForAgent(agentId)
+}
+
+export function isWorkspaceAgentId(id: string): id is WorkspaceAgentId {
+  return (WORKSPACE_AGENT_IDS as readonly string[]).includes(id)
+}
+
+export function isWorkspaceStageAgentId(id: string): id is ShortStageId {
+  return ALL_WORKSPACE_STAGE_IDS_FOR_READ.includes(id as ShortStageId)
 }
 
 function isShortStageId(id: string): id is ShortStageId {
-  return ALL_SHORT_STAGE_IDS.includes(id as ShortStageId)
+  return ALL_WORKSPACE_STAGE_IDS_FOR_READ.includes(id as ShortStageId)
 }
 
 function isMaterialStageId(id: string): id is MaterialStageId {
@@ -84,10 +120,10 @@ function dedupe<T>(items: T[]): T[] {
 }
 
 function normalizeEntry(
-  stageId: ConfigurableReadStageId,
+  agentId: WorkspaceAgentId,
   raw: unknown,
-): StageReadAccessEntry {
-  const fallback = defaultEntryForStage(stageId)
+): WorkspaceAgentReadAccessEntry {
+  const fallback = defaultEntryForAgent(agentId)
   if (!raw || typeof raw !== 'object') return fallback
   const obj = raw as Record<string, unknown>
   const workspaceRaw = Array.isArray(obj.workspace) ? obj.workspace : null
@@ -95,58 +131,39 @@ function normalizeEntry(
   const workspace =
     workspaceRaw === null
       ? fallback.workspace
-      : dedupe(
-          workspaceRaw
-            .map((v) => String(v))
-            .filter(isShortStageId),
-        )
+      : dedupe(workspaceRaw.map(String).filter(isShortStageId))
   const material =
     materialRaw === null
       ? fallback.material
-      : dedupe(
-          materialRaw
-            .map((v) => String(v))
-            .filter(isMaterialStageId),
-        )
+      : dedupe(materialRaw.map(String).filter(isMaterialStageId))
   return { workspace, material }
 }
 
-export function normalizeStageReadAccess(
+export function normalizeWorkspaceAgentReadAccess(
   raw: unknown,
-): StageReadAccessConfig {
-  const defaults = getDefaultStageReadAccess()
+): WorkspaceAgentReadAccessConfig {
+  const defaults = getDefaultWorkspaceAgentReadAccess()
   if (!raw || typeof raw !== 'object') return defaults
-  const out: StageReadAccessConfig = { ...defaults }
-  for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
-    if (!isConfigurableStageId(key)) continue
-    out[key] = normalizeEntry(key, value)
+  const input = raw as Record<string, unknown>
+  for (const agentId of WORKSPACE_AGENT_IDS) {
+    defaults[agentId] = normalizeEntry(agentId, input[agentId])
   }
-  return out
+  return defaults
 }
 
-export function resolveReadAccessForStage(
-  config: StageReadAccessConfig | null | undefined,
-  stageId: ShortStageId,
-): StageReadAccessEntry | null {
-  if (!isConfigurableStageId(stageId)) return null
-  const normalized = normalizeStageReadAccess(config)
-  return normalized[stageId] ?? defaultEntryForStage(stageId)
+export function resolveWorkspaceAgentReadAccess(
+  config: WorkspaceAgentReadAccessConfig | null | undefined,
+  agentId: WorkspaceAgentId,
+): WorkspaceAgentReadAccessEntry {
+  return normalizeWorkspaceAgentReadAccess(config)[agentId]
 }
 
-export function isConfigurableReadStage(
-  stageId: string,
-): stageId is ConfigurableReadStageId {
-  return isConfigurableStageId(stageId)
-}
-
-/** 判断某阶段配置是否与默认值不同（用于导航图标高亮） */
-export function isStageReadAccessCustomized(
-  config: StageReadAccessConfig | null | undefined,
-  stageId: ConfigurableReadStageId,
+export function isWorkspaceAgentReadAccessCustomized(
+  config: WorkspaceAgentReadAccessConfig | null | undefined,
+  agentId: WorkspaceAgentId,
 ): boolean {
-  const current = resolveReadAccessForStage(config, stageId)
-  const defaults = defaultEntryForStage(stageId)
-  if (!current) return false
+  const current = resolveWorkspaceAgentReadAccess(config, agentId)
+  const defaults = defaultEntryForAgent(agentId)
   const sameWorkspace =
     current.workspace.length === defaults.workspace.length &&
     current.workspace.every((id) => defaults.workspace.includes(id))
@@ -154,9 +171,4 @@ export function isStageReadAccessCustomized(
     current.material.length === defaults.material.length &&
     current.material.every((id) => defaults.material.includes(id))
   return !sameWorkspace || !sameMaterial
-}
-
-export {
-  ALL_SHORT_STAGE_IDS as ALL_WORKSPACE_STAGE_IDS_FOR_READ,
-  ALL_MATERIAL_STAGE_IDS,
 }

@@ -5,10 +5,9 @@ import { memo, useEffect, useRef, useState } from 'react'
 import type {
   Material,
   StageId,
-  PromptKind,
   MaterialStageId,
   MaterialPromptKind,
-  StageReadAccessConfig,
+  WorkspaceAgentReadAccessConfig,
 } from '../bridge'
 import { getWorkspaceSystemPrompt, getMaterialSystemPrompt } from '../bridge'
 import { ensurePiAppStorage } from '../pi/setupPiWorkspace'
@@ -25,6 +24,7 @@ import {
   getPreferredWorkspaceThinkingLevel,
   resolvePreferredWorkspaceChatModel,
 } from '../pi/workspaceChatPreferences'
+import { resolveWorkspaceAgentReadAccess } from '../workspaces/short/stageReadAccess'
 
 const ARTIFACTS_TOOL_NAME = 'artifacts'
 
@@ -55,9 +55,11 @@ type Props = {
    * @default 0
    */
   sessionEpoch?: number
-  /** 提示词目录：shiqing / qinggan / material_*，决定加载哪种风格的提示词 */
-  promptKind: PromptKind | MaterialPromptKind
+  /** 素材库提示词目录；创作空间共享提示词时不传。 */
+  promptKind?: MaterialPromptKind
   bookTitle: string
+  /** 创作空间共享模板可见的书籍分类上下文。 */
+  bookGenre?: string
   stageId: StageId | MaterialStageId
   stageBody: string
   getCurrentStageBody?: () => string
@@ -65,15 +67,15 @@ type Props = {
   allStages: Partial<Record<StageId | MaterialStageId, string>>
   /** 当前书籍关联的素材库；前期设计阶段会将其暴露为 AI 工具可读取内容 */
   linkedMaterial?: Material | null
-  /** 全局阶段可读配置（仅书籍短篇工作台） */
-  stageReadAccess?: StageReadAccessConfig | null
+  /** 全局创作空间智能体可读配置（仅书籍短篇工作台） */
+  workspaceAgentReadAccess?: WorkspaceAgentReadAccessConfig | null
   /**
    * Pi `ChatPanel` 无法在内部关闭，仍会把 `artifacts` 塞进 `agent.state.tools`。
    * 为 `false` 时在 `setAgent` 之后从状态中移除该工具，阶段更新时也仅同步业务工具。
    * @default true
    */
   includePiArtifacts?: boolean
-  /** 侧栏「编辑提示词」保存后递增，强制重新拉取 disk 模板并刷新 systemPrompt */
+  /** 素材库侧栏「编辑提示词」保存后递增，强制重新拉取模板并刷新 systemPrompt */
   promptRevision?: number
   /** 供「写入编辑区」工具调用：写入中间栏当前阶段文本框 */
   applyToStageEditor?: (payload: ApplyToStageEditorPayload) => void
@@ -166,6 +168,7 @@ function WorkspaceAiChatInner({
       const ctxTools = (): AgentTool[] =>
         getWorkspaceStageAdditionalTools({
           bookTitle: propsLatestRef.current.bookTitle,
+          workspaceType,
           promptKind: propsLatestRef.current.promptKind,
           stageId: propsLatestRef.current.stageId,
           stageBody: propsLatestRef.current.stageBody,
@@ -174,7 +177,8 @@ function WorkspaceAiChatInner({
             (() => propsLatestRef.current.stageBody),
           allStages: propsLatestRef.current.allStages,
           linkedMaterial: propsLatestRef.current.linkedMaterial,
-          stageReadAccess: propsLatestRef.current.stageReadAccess,
+          workspaceAgentReadAccess:
+            propsLatestRef.current.workspaceAgentReadAccess,
           applyToStageEditor: propsLatestRef.current.applyToStageEditor,
           onRequestSave: propsLatestRef.current.onRequestSave,
           isToolCallStreamed: (id) => streamedToolCallIdsRef.current.has(id),
@@ -192,12 +196,16 @@ function WorkspaceAiChatInner({
               },
             )
           : await getWorkspaceSystemPrompt(
-              props.promptKind as PromptKind,
               props.stageId as StageId,
               {
                 bookTitle: props.bookTitle,
+                bookGenre: props.bookGenre ?? '未分类',
                 stageBody: props.stageBody,
                 allStages: props.allStages as Partial<Record<StageId, string>>,
+                allowedWorkspaceStages: resolveWorkspaceAgentReadAccess(
+                  props.workspaceAgentReadAccess,
+                  props.stageId as StageId,
+                ).workspace,
               },
             )
       if (cancelled || !hostRef.current) return
@@ -205,7 +213,7 @@ function WorkspaceAiChatInner({
       const sessionId = createPiSessionId(
         'workspace',
         props.sessionBookId,
-        props.promptKind,
+        workspaceType === 'material' ? props.promptKind : 'shared',
         props.stageId,
         sessionEpoch > 0 ? sessionEpoch : undefined,
       )
@@ -415,12 +423,16 @@ function WorkspaceAiChatInner({
               },
             )
           : await getWorkspaceSystemPrompt(
-              p.promptKind as PromptKind,
               p.stageId as StageId,
               {
                 bookTitle: p.bookTitle,
+                bookGenre: p.bookGenre ?? '未分类',
                 stageBody: debouncedBody,
                 allStages: p.allStages as Partial<Record<StageId, string>>,
+                allowedWorkspaceStages: resolveWorkspaceAgentReadAccess(
+                  p.workspaceAgentReadAccess,
+                  p.stageId as StageId,
+                ).workspace,
               },
             )
       if (!agentRef.current || seq !== promptPullSeqRef.current) return
@@ -428,6 +440,7 @@ function WorkspaceAiChatInner({
       agent.state.systemPrompt = nextPrompt
       const extras = getWorkspaceStageAdditionalTools({
         bookTitle: p.bookTitle,
+        workspaceType,
         promptKind: p.promptKind,
         stageId: p.stageId,
         stageBody: debouncedBody,
@@ -435,7 +448,7 @@ function WorkspaceAiChatInner({
           p.getCurrentStageBody ?? (() => propsLatestRef.current.stageBody),
         allStages: p.allStages,
         linkedMaterial: p.linkedMaterial,
-        stageReadAccess: p.stageReadAccess,
+        workspaceAgentReadAccess: p.workspaceAgentReadAccess,
         applyToStageEditor: p.applyToStageEditor,
         onRequestSave: p.onRequestSave,
         isToolCallStreamed: (id) => streamedToolCallIdsRef.current.has(id),
@@ -447,12 +460,13 @@ function WorkspaceAiChatInner({
   }, [
     chatReady,
     props.bookTitle,
+    props.bookGenre,
     props.promptKind,
     props.stageId,
     debouncedBody,
     props.allStages,
     props.linkedMaterial,
-    props.stageReadAccess,
+    props.workspaceAgentReadAccess,
     props.applyToStageEditor,
     includePiArtifacts,
     promptRevision,
@@ -509,6 +523,8 @@ export const WorkspaceAiChat = memo(WorkspaceAiChatInner, (prev, next) => {
 
   // bookTitle 变化需要更新
   if (prev.bookTitle !== next.bookTitle) return false
+  if (prev.bookGenre !== next.bookGenre) return false
+  if (prev.workspaceAgentReadAccess !== next.workspaceAgentReadAccess) return false
 
   // applyToStageEditor 函数引用不比较（总是使用最新）
 

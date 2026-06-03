@@ -46,16 +46,17 @@ npm run lint
 
 ### 前端（`web/src/`）
 - `main.tsx` — 入口文件；等待 `pywebviewready` 事件后再启动 React 应用。
-- `App.tsx` — 使用 `HashRouter`，包含两条路由：`/`（首页/书架）和 `/book/:id`（书籍编辑页）。
+- `App.tsx` — 使用 `HashRouter`，包含首页、创作空间设置、书籍编辑和素材编辑路由。
 - `bridge.ts` — 关键桥接层。桌面端通过 `window.pywebview.api` 调用 Python API；浏览器开发模式（无 pywebview）下回退到 `localStorage` 模拟数据。调用后端方法前务必使用 `getBridgeApi()`，以避免竞态条件。
 - `pages/Home.tsx` — 书架页，含创建书籍表单。
-- `pages/BookEditor.tsx` — 书籍工作台。当短篇且分类解析为世情或追妻工作台（见 `workspaces/resolvePromptKind.ts`）时渲染完整三栏工作台；其余组合显示「开发中」占位状态。
+- `pages/BookEditor.tsx` — 书籍工作台。所有短篇书籍渲染完整三栏工作台；长篇显示「开发中」占位状态。
+- `pages/WorkspaceSettings.tsx` — 集中管理 8 个普通阶段与 2 个专家智能体的共享提示词和读取范围。
 - `components/WorkspaceAiChat.tsx` — 集成 Pi Web UI 的 AI 聊天面板。
 - `pi/` — Pi AI 集成：`setupPiWorkspace.ts` 初始化基于 IndexedDB 的 Pi 会话/设置存储；`resolveWorkspaceChatModel.ts` 和 `writingAssistantPrompt.ts` 配置 AI 助手。
 
 ### 数据模型
-- **统一阶段定义**：`book_type` 为 `short` 时，世情和追妻共用同一套阶段定义（`SHORT_STAGE_KEYS` / `SHORT_WORKSPACE_STAGES`），包含 9 个阶段：人物设计、导语设计、剧情设计、剧情细化、大纲纲要、大纲审阅、正文编写、正文审阅、格式转换。两端约定见 `web/src/workspaces/short/stages.ts` 与 `app/models.py` 中的 `SHORT_STAGE_KEYS`。
-- **提示词区分**：世情和追妻仅通过提示词内容区分风格。`resolvePromptKind` 根据书籍分类返回 `shiqing` 或 `qinggan`，用于确定加载哪个提示词目录（`app/prompt_defaults/short/{shiqing,qinggan}/`）。
+- **统一阶段定义**：`book_type` 为 `short` 时，所有分类共用同一套 8 阶段定义（`SHORT_STAGE_KEYS` / `SHORT_WORKSPACE_STAGES`）：人物设计、剧情设计、导语设计、剧情细化、大纲纲要、正文编写、正文审阅、格式转换。
+- **共享提示词**：所有短篇创作空间智能体读取 `app/prompt_defaults/short/shared/`；书籍分类仅作为 `{{BOOK_GENRE}}` 上下文传入，不影响智能体、工具集或会话标识。
 - **数据迁移**：后端自动将旧版追妻阶段键（`qinggan_character` 等）迁移到统一键（`character_design` 等），详见 `app/models.py` 中的 `migrate_legacy_stages`。
 - 通过 `save_book` 保存时，传入 `stages` 会合并阶段内容，并将顶层 `content` 同步为「正文编写」阶段（统一使用 `draft` 键）；仅传入 `content` 则只更新顶层 `content` 字段。
 - 书籍数据存储在 `.data/books.json` 中。工作空间根目录（上次选定的文件夹）存储在 `.data/preferences.json` 中。

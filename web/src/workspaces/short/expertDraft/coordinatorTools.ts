@@ -1,12 +1,27 @@
 import type { AgentTool } from '@mariozechner/pi-agent-core'
 import { Type } from 'typebox'
 
-import type { ExpertDraft, ExpertDraftCharacterState, ExpertDraftSection } from '../../../bridge'
+import type {
+  ExpertDraft,
+  ExpertDraftCharacterState,
+  ExpertDraftSection,
+  Material,
+  StageId,
+} from '../../../bridge'
 import { defineTool, textBlock } from '../../shared/piToolkit'
+import {
+  buildReadLinkedMaterialContentTool,
+  buildReadWorkspaceContentTool,
+} from '../stageAgents'
+import type { WorkspaceAgentReadAccessEntry } from '../stageReadAccess'
 
 type ExpertDraftUpdater = (updater: (draft: ExpertDraft) => ExpertDraft) => void
 
 export type ExpertDraftCoordinatorToolContext = {
+  bookTitle: string
+  allStages: Partial<Record<StageId, string>>
+  linkedMaterial?: Material | null
+  readAccess: WorkspaceAgentReadAccessEntry
   getDraft: () => ExpertDraft
   updateDraft: ExpertDraftUpdater
   startWriting: (sectionIds: string[]) => boolean
@@ -54,7 +69,27 @@ function mergeStatesForSections(
 export function buildExpertDraftCoordinatorTools(
   ctx: ExpertDraftCoordinatorToolContext,
 ): AgentTool[] {
+  const readTools: AgentTool[] = []
+  const toolCtx = {
+    bookTitle: ctx.bookTitle,
+    stageId: 'draft' as const,
+    stageBody: '',
+    allStages: ctx.allStages,
+    linkedMaterial: ctx.linkedMaterial ?? null,
+  }
+  if (ctx.readAccess.workspace.length > 0) {
+    readTools.push(
+      buildReadWorkspaceContentTool(toolCtx, ctx.readAccess.workspace),
+    )
+  }
+  if (ctx.readAccess.material.length > 0) {
+    readTools.push(
+      buildReadLinkedMaterialContentTool(toolCtx, ctx.readAccess.material),
+    )
+  }
+
   return [
+    ...readTools,
     defineTool({
       name: 'create_draft_sections',
       label: '创建正文列表',

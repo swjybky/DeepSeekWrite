@@ -8,34 +8,36 @@ import {
   migrateLegacyStages,
 } from './workspaces/short/stages'
 
-// 提示词目录映射
-import {
-  type PromptKind,
-  isKehuanShortBook,
-  isQingganShortBook,
-  isShiqingShortBook,
-  isXuanyiShortBook,
-  isWorkspaceShortBook,
-  resolvePromptKind,
-} from './workspaces/resolvePromptKind'
-
 import { getEmbeddedPromptTemplate } from './prompt/embeddedDefaults'
 import { renderPromptFromTemplateRaw } from './prompt/renderTemplate'
 import {
-  normalizeStageReadAccess,
-  type StageReadAccessConfig,
+  WORKSPACE_AGENT_IDS,
+  normalizeWorkspaceAgentReadAccess,
+  type WorkspaceAgentId,
+  type WorkspaceAgentReadAccessConfig,
 } from './workspaces/short/stageReadAccess'
 
-export type { StageReadAccessConfig } from './workspaces/short/stageReadAccess'
+export type {
+  WorkspaceAgentId,
+  WorkspaceAgentReadAccessConfig,
+  WorkspaceAgentReadAccessEntry,
+} from './workspaces/short/stageReadAccess'
 
-export type { ShortStageId, PromptKind }
-export {
-  isQingganShortBook,
-  isKehuanShortBook,
-  isShiqingShortBook,
-  isXuanyiShortBook,
-  isWorkspaceShortBook,
-  resolvePromptKind,
+export type { ShortStageId }
+
+type BookWorkspaceSlice = {
+  book_type: BookType
+  categories: string[]
+}
+
+/** 所有短篇书籍共用同一套完整创作空间。 */
+export function isWorkspaceShortBook(book: BookWorkspaceSlice): boolean {
+  return book.book_type === 'short'
+}
+
+/** 提示词可见的分类上下文，不再影响智能体或模板选择。 */
+export function resolveWorkspaceBookGenre(book: BookWorkspaceSlice): string {
+  return book.categories.map((item) => item.trim()).filter(Boolean).join('、') || '未分类'
 }
 
 // ==================== 素材提示词类型 ====================
@@ -172,7 +174,7 @@ export const SHORT_GENRE_OPTIONS = ['世情', '追妻', '科幻', '悬疑'] as c
 export function resolveWorkspaceStagesForBook(
   _book?: Pick<Book, 'book_type' | 'categories'>,
 ): typeof SHORT_WORKSPACE_STAGES {
-  // 不再区分世情和情感，统一返回 SHORT_WORKSPACE_STAGES
+  // 所有短篇分类统一返回 SHORT_WORKSPACE_STAGES
   void _book
   return SHORT_WORKSPACE_STAGES
 }
@@ -380,47 +382,26 @@ declare global {
         /** 上次选定的工作文件夹（持久化在应用 .data/preferences.json） */
         get_workspace_root(): Promise<string | null>
         set_workspace_root(path: string | null): Promise<void>
-        /** 全局创作空间阶段可读配置 */
-        get_stage_read_access(): Promise<Record<string, unknown>>
-        set_stage_read_access(config: Record<string, unknown>): Promise<void>
+        /** 全局创作空间智能体可读配置 */
+        get_workspace_agent_read_access(): Promise<Record<string, unknown>>
+        set_workspace_agent_read_access(
+          config: Record<string, unknown>,
+        ): Promise<void>
         /** app/.env 中的默认模型与 Key；未配置完整时返回 null */
         get_ai_defaults(): Promise<AiModelDefaults | null>
 
         /** 渲染工作台系统提示词（磁盘默认 + `.data/prompt_overrides`，占位符服务端替换）。 */
         get_workspace_system_prompt(
-          prompt_kind: string,
           stage_id: string,
           context_json: string,
         ): Promise<string>
-        /** 读取当前生效的模板原文（便于侧栏编辑器）。 */
-        read_workspace_prompt_template(
-          prompt_kind: string,
-          stage_id: string,
-        ): Promise<string>
-        save_workspace_prompt_override(
-          prompt_kind: string,
-          stage_id: string,
+        /** 读取当前生效的共享创作空间智能体模板原文。 */
+        read_workspace_agent_prompt_template(agent_id: string): Promise<string>
+        save_workspace_agent_prompt_override(
+          agent_id: string,
           body: string,
         ): Promise<void>
-        reset_workspace_prompt_override(
-          prompt_kind: string,
-          stage_id: string,
-        ): Promise<boolean>
-
-        // ==================== 专家模式提示词 API ====================
-        read_expert_prompt_template(
-          prompt_kind: string,
-          prompt_id: string,
-        ): Promise<string>
-        save_expert_prompt_override(
-          prompt_kind: string,
-          prompt_id: string,
-          body: string,
-        ): Promise<void>
-        reset_expert_prompt_override(
-          prompt_kind: string,
-          prompt_id: string,
-        ): Promise<boolean>
+        reset_workspace_agent_prompt_override(agent_id: string): Promise<boolean>
 
         // ==================== 素材库 API ====================
         list_materials(): Promise<MaterialSummary[]>
@@ -485,8 +466,10 @@ const MOCK_STORAGE_KEY = 'write_claw_dev_books'
 /** 书架「工作文件夹」持久化键（浏览器 / pywebview 同源存储） */
 export const WORKSPACE_ROOT_STORAGE_KEY = 'write_claw_workspace_root'
 
-/** 全局阶段读取配置（浏览器开发模式 localStorage） */
-export const STAGE_READ_ACCESS_STORAGE_KEY = 'write-claw:stage_read_access'
+/** 全局创作空间智能体读取配置（浏览器开发模式 localStorage） */
+export const WORKSPACE_AGENT_READ_ACCESS_STORAGE_KEY =
+  'write-claw:workspace_agent_read_access'
+const LEGACY_STAGE_READ_ACCESS_STORAGE_KEY = 'write-claw:stage_read_access'
 
 /** 与 main.tsx boot 一致：桌面壳加载的打包页（含本机 HTTP + `?pywebview=1`） */
 export function isPywebviewDesktopBundle(): boolean {
@@ -569,9 +552,11 @@ export async function persistWorkspaceRoot(path: string | null): Promise<void> {
   }
 }
 
-function getStoredStageReadAccessRaw(): unknown {
+function getStoredWorkspaceAgentReadAccessRaw(): unknown {
   try {
-    const raw = localStorage.getItem(STAGE_READ_ACCESS_STORAGE_KEY)
+    const raw =
+      localStorage.getItem(WORKSPACE_AGENT_READ_ACCESS_STORAGE_KEY) ??
+      localStorage.getItem(LEGACY_STAGE_READ_ACCESS_STORAGE_KEY)
     if (!raw?.trim()) return null
     return JSON.parse(raw) as unknown
   } catch {
@@ -579,39 +564,55 @@ function getStoredStageReadAccessRaw(): unknown {
   }
 }
 
-function setStoredStageReadAccess(config: StageReadAccessConfig): void {
+function setStoredWorkspaceAgentReadAccess(
+  config: WorkspaceAgentReadAccessConfig,
+): void {
   try {
-    localStorage.setItem(STAGE_READ_ACCESS_STORAGE_KEY, JSON.stringify(config))
+    localStorage.setItem(
+      WORKSPACE_AGENT_READ_ACCESS_STORAGE_KEY,
+      JSON.stringify(config),
+    )
   } catch {
     /* ignore */
   }
 }
 
-/** 读取全局阶段可读配置；桌面端以 preferences.json 为准。 */
-export async function getStageReadAccess(): Promise<StageReadAccessConfig> {
+/** 读取全局创作空间智能体可读配置；桌面端以 preferences.json 为准。 */
+export async function getWorkspaceAgentReadAccess(): Promise<WorkspaceAgentReadAccessConfig> {
   const api = await getBridgeApi()
-  if (api?.get_stage_read_access) {
+  if (api?.get_workspace_agent_read_access) {
     try {
-      const fromDisk = await api.get_stage_read_access()
-      const normalized = normalizeStageReadAccess(fromDisk)
-      setStoredStageReadAccess(normalized)
+      const fromDisk = await api.get_workspace_agent_read_access()
+      const normalized = normalizeWorkspaceAgentReadAccess(fromDisk)
+      setStoredWorkspaceAgentReadAccess(normalized)
+      try {
+        await api.set_workspace_agent_read_access(
+          normalized as unknown as Record<string, unknown>,
+        )
+      } catch {
+        /* 读取结果仍可使用；保存失败由后续设置修改重试 */
+      }
       return normalized
     } catch {
       /* fall through */
     }
   }
-  return normalizeStageReadAccess(getStoredStageReadAccessRaw())
+  const normalized = normalizeWorkspaceAgentReadAccess(
+    getStoredWorkspaceAgentReadAccessRaw(),
+  )
+  setStoredWorkspaceAgentReadAccess(normalized)
+  return normalized
 }
 
-/** 保存全局阶段可读配置，同步 localStorage 与桌面 preferences。 */
-export async function saveStageReadAccess(
-  config: StageReadAccessConfig,
-): Promise<StageReadAccessConfig> {
-  const normalized = normalizeStageReadAccess(config)
-  setStoredStageReadAccess(normalized)
+/** 保存全局创作空间智能体可读配置，同步 localStorage 与桌面 preferences。 */
+export async function saveWorkspaceAgentReadAccess(
+  config: WorkspaceAgentReadAccessConfig,
+): Promise<WorkspaceAgentReadAccessConfig> {
+  const normalized = normalizeWorkspaceAgentReadAccess(config)
+  setStoredWorkspaceAgentReadAccess(normalized)
   const api = await getBridgeApi()
-  if (api?.set_stage_read_access) {
-    await api.set_stage_read_access(
+  if (api?.set_workspace_agent_read_access) {
+    await api.set_workspace_agent_read_access(
       normalized as unknown as Record<string, unknown>,
     )
   }
@@ -1081,9 +1082,9 @@ export async function getMaterialSystemPrompt(
   return renderPromptFromTemplateRaw(raw, {
     bookTitle: input.materialTitle,
     stageBody: input.stageBody,
-    allStages: input.allStages as Partial<Record<StageId, string>>,
-    promptKind: promptKind as unknown as PromptKind,
-    stageId: stageId as unknown as StageId,
+    allStages: input.allStages,
+    promptKind,
+    stageId,
   })
 }
 
@@ -1142,195 +1143,83 @@ export async function resetMaterialPromptOverride(
 }
 
 const PROMPT_TEMPLATE_LS_PREFIX = 'write_claw_prompt_template_override:'
-export const EXPERT_SECTION_WRITER_PROMPT_ID = 'expert_section_writer'
-export const DEAI_FLAVOR_REMOVAL_PROMPT_ID = 'deai_flavor_removal'
+const SHARED_WORKSPACE_PROMPT_KIND = 'shared'
+const LEGACY_QINGGAN_PROMPT_KIND = 'qinggan'
+const SHARED_PROMPT_LS_MIGRATION_MARKER =
+  'write_claw_shared_prompt_migration_from_qinggan_v1'
 
 function localPromptLsKey(promptKind: string, stage: string): string {
   return PROMPT_TEMPLATE_LS_PREFIX + `${promptKind}:${stage}`
 }
 
-export async function readExpertSectionWriterPromptTemplate(
-  promptKind: PromptKind,
+function ensureLocalSharedPromptMigrated(): void {
+  try {
+    if (localStorage.getItem(SHARED_PROMPT_LS_MIGRATION_MARKER)) return
+    for (const agentId of WORKSPACE_AGENT_IDS) {
+      const target = localPromptLsKey(SHARED_WORKSPACE_PROMPT_KIND, agentId)
+      const source = localPromptLsKey(LEGACY_QINGGAN_PROMPT_KIND, agentId)
+      if (localStorage.getItem(target) == null) {
+        const legacy = localStorage.getItem(source)
+        if (legacy != null) localStorage.setItem(target, legacy)
+      }
+    }
+    localStorage.setItem(SHARED_PROMPT_LS_MIGRATION_MARKER, '1')
+  } catch {
+    /* ignore */
+  }
+}
+
+/** 磁盘 / 嵌入式默认 + （浏览器）localStorage 覆盖；供集中设置页使用。 */
+export async function readWorkspaceAgentPromptTemplate(
+  agentId: WorkspaceAgentId,
 ): Promise<string> {
   const api = await getBridgeApi()
-  if (api?.read_expert_prompt_template) {
-    const t = await api.read_expert_prompt_template(
-      promptKind,
-      EXPERT_SECTION_WRITER_PROMPT_ID,
-    )
+  if (api?.read_workspace_agent_prompt_template) {
+    const t = await api.read_workspace_agent_prompt_template(agentId)
     return t.endsWith('\n') ? t.slice(0, -1) : t
   }
+  ensureLocalSharedPromptMigrated()
   try {
     const ls = localStorage.getItem(
-      localPromptLsKey(promptKind, EXPERT_SECTION_WRITER_PROMPT_ID),
+      localPromptLsKey(SHARED_WORKSPACE_PROMPT_KIND, agentId),
     )
-    if (ls != null && ls.trim() !== '')
-      return ls.endsWith('\n') ? ls.slice(0, -1) : ls
+    if (ls != null) return ls.endsWith('\n') ? ls.slice(0, -1) : ls
   } catch {
     /* ignore */
   }
-  return getEmbeddedPromptTemplate(promptKind, EXPERT_SECTION_WRITER_PROMPT_ID)
+  return getEmbeddedPromptTemplate(SHARED_WORKSPACE_PROMPT_KIND, agentId)
 }
 
-export async function saveExpertSectionWriterPromptOverride(
-  promptKind: PromptKind,
+export async function saveWorkspaceAgentPromptOverride(
+  agentId: WorkspaceAgentId,
   body: string,
 ): Promise<void> {
   const api = await getBridgeApi()
-  if (api?.save_expert_prompt_override) {
-    await api.save_expert_prompt_override(
-      promptKind,
-      EXPERT_SECTION_WRITER_PROMPT_ID,
-      body,
-    )
+  if (api?.save_workspace_agent_prompt_override) {
+    await api.save_workspace_agent_prompt_override(agentId, body)
     return
   }
+  ensureLocalSharedPromptMigrated()
   try {
     localStorage.setItem(
-      localPromptLsKey(promptKind, EXPERT_SECTION_WRITER_PROMPT_ID),
+      localPromptLsKey(SHARED_WORKSPACE_PROMPT_KIND, agentId),
       body,
     )
   } catch {
-    console.warn('[涌泉] 无法保存专家模式提示词覆盖：无桌面桥接且无可用 localStorage')
+    console.warn('[涌泉] 无法保存创作空间提示词覆盖：无桌面桥接且无可用 localStorage')
   }
 }
 
-export async function resetExpertSectionWriterPromptOverride(
-  promptKind: PromptKind,
+export async function resetWorkspaceAgentPromptOverride(
+  agentId: WorkspaceAgentId,
 ): Promise<boolean> {
   const api = await getBridgeApi()
-  if (api?.reset_expert_prompt_override) {
-    return api.reset_expert_prompt_override(
-      promptKind,
-      EXPERT_SECTION_WRITER_PROMPT_ID,
-    )
+  if (api?.reset_workspace_agent_prompt_override) {
+    return api.reset_workspace_agent_prompt_override(agentId)
   }
+  ensureLocalSharedPromptMigrated()
   try {
-    const k = localPromptLsKey(promptKind, EXPERT_SECTION_WRITER_PROMPT_ID)
-    const had = localStorage.getItem(k) != null
-    localStorage.removeItem(k)
-    return had
-  } catch {
-    return false
-  }
-}
-
-export async function readDeaiFlavorRemovalPromptTemplate(
-  promptKind: PromptKind,
-): Promise<string> {
-  const api = await getBridgeApi()
-  if (api?.read_expert_prompt_template) {
-    const t = await api.read_expert_prompt_template(
-      promptKind,
-      DEAI_FLAVOR_REMOVAL_PROMPT_ID,
-    )
-    return t.endsWith('\n') ? t.slice(0, -1) : t
-  }
-  try {
-    const ls = localStorage.getItem(
-      localPromptLsKey(promptKind, DEAI_FLAVOR_REMOVAL_PROMPT_ID),
-    )
-    if (ls != null && ls.trim() !== '')
-      return ls.endsWith('\n') ? ls.slice(0, -1) : ls
-  } catch {
-    /* ignore */
-  }
-  return getEmbeddedPromptTemplate(promptKind, DEAI_FLAVOR_REMOVAL_PROMPT_ID)
-}
-
-export async function saveDeaiFlavorRemovalPromptOverride(
-  promptKind: PromptKind,
-  body: string,
-): Promise<void> {
-  const api = await getBridgeApi()
-  if (api?.save_expert_prompt_override) {
-    await api.save_expert_prompt_override(
-      promptKind,
-      DEAI_FLAVOR_REMOVAL_PROMPT_ID,
-      body,
-    )
-    return
-  }
-  try {
-    localStorage.setItem(
-      localPromptLsKey(promptKind, DEAI_FLAVOR_REMOVAL_PROMPT_ID),
-      body,
-    )
-  } catch {
-    console.warn('[涌泉] 无法保存去 AI 味提示词覆盖：无桌面桥接且无可用 localStorage')
-  }
-}
-
-export async function resetDeaiFlavorRemovalPromptOverride(
-  promptKind: PromptKind,
-): Promise<boolean> {
-  const api = await getBridgeApi()
-  if (api?.reset_expert_prompt_override) {
-    return api.reset_expert_prompt_override(
-      promptKind,
-      DEAI_FLAVOR_REMOVAL_PROMPT_ID,
-    )
-  }
-  try {
-    const k = localPromptLsKey(promptKind, DEAI_FLAVOR_REMOVAL_PROMPT_ID)
-    const had = localStorage.getItem(k) != null
-    localStorage.removeItem(k)
-    return had
-  } catch {
-    return false
-  }
-}
-
-/** 磁盘 / 嵌入式默认 + （浏览器）localStorage 覆盖；用于编辑器与离线渲染。 */
-export async function readWorkspacePromptTemplate(
-  promptKind: PromptKind,
-  stageId: StageId,
-): Promise<string> {
-  const api = await getBridgeApi()
-  if (api?.read_workspace_prompt_template) {
-    const t = await api.read_workspace_prompt_template(
-      promptKind,
-      stageId,
-    )
-    return t.endsWith('\n') ? t.slice(0, -1) : t
-  }
-  try {
-    const ls = localStorage.getItem(localPromptLsKey(promptKind, stageId))
-    if (ls != null && ls.trim() !== '')
-      return ls.endsWith('\n') ? ls.slice(0, -1) : ls
-  } catch {
-    /* ignore */
-  }
-  return getEmbeddedPromptTemplate(promptKind, stageId)
-}
-
-export async function saveWorkspacePromptOverride(
-  promptKind: PromptKind,
-  stageId: StageId,
-  body: string,
-): Promise<void> {
-  const api = await getBridgeApi()
-  if (api?.save_workspace_prompt_override) {
-    await api.save_workspace_prompt_override(promptKind, stageId, body)
-    return
-  }
-  try {
-    localStorage.setItem(localPromptLsKey(promptKind, stageId), body)
-  } catch {
-    console.warn('[涌泉] 无法保存提示词覆盖：无桌面桥接且无可用 localStorage')
-  }
-}
-
-export async function resetWorkspacePromptOverride(
-  promptKind: PromptKind,
-  stageId: StageId,
-): Promise<boolean> {
-  const api = await getBridgeApi()
-  if (api?.reset_workspace_prompt_override) {
-    return api.reset_workspace_prompt_override(promptKind, stageId)
-  }
-  try {
-    const k = localPromptLsKey(promptKind, stageId)
+    const k = localPromptLsKey(SHARED_WORKSPACE_PROMPT_KIND, agentId)
     const had = localStorage.getItem(k) != null
     localStorage.removeItem(k)
     return had
@@ -1388,12 +1277,13 @@ export async function exportDocx(
 }
 
 export async function getWorkspaceSystemPrompt(
-  promptKind: PromptKind,
   stageId: StageId,
   input: {
     bookTitle: string
+    bookGenre: string
     stageBody: string
     allStages: Partial<Record<StageId, string>>
+    allowedWorkspaceStages: readonly StageId[]
   },
 ): Promise<string> {
   const stagesObj: Record<string, string> = {}
@@ -1404,22 +1294,28 @@ export async function getWorkspaceSystemPrompt(
   const api = await getBridgeApi()
   if (api?.get_workspace_system_prompt) {
     return api.get_workspace_system_prompt(
-      promptKind,
       stageId,
       JSON.stringify({
         book_title: input.bookTitle,
+        book_genre: input.bookGenre,
         stage_body: input.stageBody,
         all_stages: stagesObj,
+        allowed_workspace_stages: input.allowedWorkspaceStages,
       }),
     )
   }
 
-  const raw = await readWorkspacePromptTemplate(promptKind, stageId)
+  const allowed = new Set(input.allowedWorkspaceStages)
+  const filteredStages = Object.fromEntries(
+    Object.entries(input.allStages).filter(([id]) => allowed.has(id as StageId)),
+  ) as Partial<Record<StageId, string>>
+  const raw = await readWorkspaceAgentPromptTemplate(stageId)
   return renderPromptFromTemplateRaw(raw, {
     bookTitle: input.bookTitle,
+    bookGenre: input.bookGenre,
     stageBody: input.stageBody,
-    allStages: input.allStages,
-    promptKind,
+    allStages: filteredStages,
+    promptKind: 'workspace',
     stageId,
   })
 }

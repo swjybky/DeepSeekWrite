@@ -4,17 +4,19 @@ import { ApiKeyPromptDialog } from '@mariozechner/pi-web-ui'
 import { Type } from 'typebox'
 
 import {
-  readExpertSectionWriterPromptTemplate,
+  readWorkspaceAgentPromptTemplate,
   type ExpertDraft,
   type Material,
-  type PromptKind,
   type StageId,
 } from '../../../bridge'
 import {
   buildReadLinkedMaterialContentTool,
   buildReadWorkspaceContentTool,
 } from '../stageAgents'
-import type { StageReadAccessEntry } from '../stageReadAccess'
+import {
+  EXPERT_SECTION_WRITER_AGENT_ID,
+  type WorkspaceAgentReadAccessEntry,
+} from '../stageReadAccess'
 import {
   resolveWorkspaceProviderApiKey,
 } from '../../../pi/resolveWorkspaceChatModel'
@@ -35,14 +37,14 @@ type ExpertDraftUpdater = (updater: (draft: ExpertDraft) => ExpertDraft) => void
 export type RunExpertDraftSectionWriterOptions = {
   bookId: string
   bookTitle: string
-  promptKind: PromptKind
+  bookGenre: string
   sectionIds: string[]
   getDraft: () => ExpertDraft
   getWorkspaceStages: () => Partial<Record<StageId, string>>
   /** 书籍关联的素材库 */
   linkedMaterial?: Material | null
-  /** 正文编写阶段的全局可读配置 */
-  draftReadAccess: StageReadAccessEntry
+  /** 后台小节编写智能体的全局可读配置 */
+  readAccess: WorkspaceAgentReadAccessEntry
   updateDraft: ExpertDraftUpdater
   signal?: AbortSignal
   onError?: (message: string) => void
@@ -153,7 +155,7 @@ function buildSectionWriterTools(input: {
   sectionTitle: string
   allStages: Partial<Record<StageId, string>>
   linkedMaterial?: Material | null
-  draftReadAccess: StageReadAccessEntry
+  readAccess: WorkspaceAgentReadAccessEntry
   updateDraft: ExpertDraftUpdater
   onSectionBodyWritten?: (text: string) => void
   onCharacterStateWritten?: (text: string) => void
@@ -164,7 +166,7 @@ function buildSectionWriterTools(input: {
     sectionTitle,
     allStages,
     linkedMaterial,
-    draftReadAccess,
+    readAccess,
     updateDraft,
     onSectionBodyWritten,
     onCharacterStateWritten,
@@ -177,14 +179,14 @@ function buildSectionWriterTools(input: {
     linkedMaterial: linkedMaterial ?? null,
   }
   const readTools: AgentTool[] = []
-  if (draftReadAccess.workspace.length > 0) {
+  if (readAccess.workspace.length > 0) {
     readTools.push(
-      buildReadWorkspaceContentTool(toolCtx, draftReadAccess.workspace),
+      buildReadWorkspaceContentTool(toolCtx, readAccess.workspace),
     )
   }
-  if (draftReadAccess.material.length > 0) {
+  if (readAccess.material.length > 0) {
     readTools.push(
-      buildReadLinkedMaterialContentTool(toolCtx, draftReadAccess.material),
+      buildReadLinkedMaterialContentTool(toolCtx, readAccess.material),
     )
   }
 
@@ -266,8 +268,8 @@ export async function runExpertDraftSectionWriter(
       const draftBefore = opts.getDraft()
       const section = draftBefore.sections.find((s) => s.id === sectionId)
       if (!section) continue
-      const systemPromptTemplate = await readExpertSectionWriterPromptTemplate(
-        opts.promptKind,
+      const systemPromptTemplate = await readWorkspaceAgentPromptTemplate(
+        EXPERT_SECTION_WRITER_AGENT_ID,
       )
 
       opts.updateDraft((draft) => ({
@@ -283,6 +285,7 @@ export async function runExpertDraftSectionWriter(
         sessionId: createPiSessionId(
           'expert-draft-writer',
           opts.bookId,
+          'shared',
           sectionId,
           Date.now(),
         ),
@@ -291,7 +294,10 @@ export async function runExpertDraftSectionWriter(
         initialState: {
           systemPrompt: buildSectionWriterSystemPrompt({
             bookTitle: opts.bookTitle,
-            promptKind: opts.promptKind,
+            bookGenre: opts.bookGenre,
+            stageBody: section.body,
+            workspaceStages: opts.getWorkspaceStages(),
+            allowedWorkspaceStages: opts.readAccess.workspace,
             template: systemPromptTemplate,
           }),
           model,
@@ -303,7 +309,7 @@ export async function runExpertDraftSectionWriter(
             sectionTitle: section.title,
             allStages: opts.getWorkspaceStages(),
             linkedMaterial: opts.linkedMaterial,
-            draftReadAccess: opts.draftReadAccess,
+            readAccess: opts.readAccess,
             updateDraft: opts.updateDraft,
             onSectionBodyWritten: (text) => {
               sectionBodyWritten = text

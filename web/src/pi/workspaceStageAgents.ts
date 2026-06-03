@@ -3,12 +3,11 @@ import type { AgentTool } from '@mariozechner/pi-agent-core'
 import type {
   Material,
   StageId,
-  PromptKind,
   MaterialPromptKind,
   MaterialStageId,
-  StageReadAccessConfig,
+  WorkspaceAgentReadAccessConfig,
 } from '../bridge'
-import { resolveReadAccessForStage } from '../workspaces/short/stageReadAccess'
+import { resolveWorkspaceAgentReadAccess } from '../workspaces/short/stageReadAccess'
 import type { ShortStageId } from '../workspaces/short/stages'
 import {
   buildShortWorkspaceAdditionalTools,
@@ -27,14 +26,15 @@ export type ApplyToStageEditorPayload = {
 
 export type WorkspaceStageAgentContext = {
   bookTitle: string
-  promptKind: PromptKind | MaterialPromptKind
+  workspaceType?: 'book' | 'material'
+  promptKind?: MaterialPromptKind
   stageId: StageId | MaterialStageId
   stageBody: string
   getCurrentStageBody?: () => string
   allStages: Partial<Record<StageId | MaterialStageId, string>>
   linkedMaterial?: Material | null
-  /** 全局阶段可读配置（短篇创作空间） */
-  stageReadAccess?: StageReadAccessConfig | null
+  /** 全局创作空间智能体可读配置（短篇创作空间） */
+  workspaceAgentReadAccess?: WorkspaceAgentReadAccessConfig | null
   applyToStageEditor?: (payload: ApplyToStageEditorPayload) => void
   /** 查询某 toolCallId 是否已在流式生成阶段同步到编辑器 */
   isToolCallStreamed?: (toolCallId: string) => boolean
@@ -47,10 +47,11 @@ export function getWorkspaceStageAdditionalTools(
   ctx: WorkspaceStageAgentContext,
 ): AgentTool[] {
   // 素材库模式
-  if (ctx.promptKind.startsWith('material_')) {
+  if (ctx.workspaceType === 'material') {
+    if (!ctx.promptKind) return []
     const materialCtx: MaterialWorkspaceStageAgentContext = {
       materialTitle: ctx.bookTitle,
-      promptKind: ctx.promptKind as MaterialPromptKind,
+      promptKind: ctx.promptKind,
       stageId: ctx.stageId as MaterialStageId,
       stageBody: ctx.stageBody,
       allStages: ctx.allStages as Partial<Record<MaterialStageId, string>>,
@@ -62,7 +63,10 @@ export function getWorkspaceStageAdditionalTools(
 
   // 书籍短篇工作台模式
   const shortStageId = ctx.stageId as ShortStageId
-  const readAccess = resolveReadAccessForStage(ctx.stageReadAccess, shortStageId)
+  const readAccess = resolveWorkspaceAgentReadAccess(
+    ctx.workspaceAgentReadAccess,
+    shortStageId,
+  )
   const narrow: ShortWorkspaceStageAgentContext = {
     bookTitle: ctx.bookTitle,
     stageId: shortStageId,
@@ -70,7 +74,7 @@ export function getWorkspaceStageAdditionalTools(
     getCurrentStageBody: ctx.getCurrentStageBody,
     allStages: ctx.allStages as Partial<Record<ShortWorkspaceStageAgentContext['stageId'], string>>,
     linkedMaterial: ctx.linkedMaterial,
-    stageReadAccess: ctx.stageReadAccess,
+    workspaceAgentReadAccess: ctx.workspaceAgentReadAccess,
     allowedWorkspaceStages: readAccess?.workspace,
     allowedMaterialStages: readAccess?.material,
     applyToStageEditor: ctx.applyToStageEditor,

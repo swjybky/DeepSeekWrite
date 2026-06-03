@@ -1,4 +1,4 @@
-import type { StageId, PromptKind, MaterialStageId, MaterialPromptKind } from '../bridge'
+import type { StageId, MaterialStageId, MaterialPromptKind } from '../bridge'
 import { SHORT_WORKSPACE_STAGES } from '../workspaces/short/stages'
 
 const PEEK_EMPTY = '（其它阶段暂无内容）'
@@ -13,16 +13,7 @@ export function excerptText(body: string, maxLen = BODY_CAP): string {
   return t
 }
 
-/**
- * 统一使用 SHORT_WORKSPACE_STAGES 作为阶段顺序
- * 世情和情感共用同一套阶段定义
- */
-const BOOK_ORDER: Record<string, readonly { id: string; label: string }[]> = {
-  shiqing: SHORT_WORKSPACE_STAGES,
-  qinggan: SHORT_WORKSPACE_STAGES,
-  kehuan: SHORT_WORKSPACE_STAGES,
-  xuanyi: SHORT_WORKSPACE_STAGES,
-}
+export type PromptRenderKind = 'workspace' | MaterialPromptKind
 
 const MATERIAL_ORDER: Record<string, readonly { id: string; label: string }[]> = {
   material_long: [
@@ -72,19 +63,19 @@ function isMaterialPromptKind(kind: string): kind is MaterialPromptKind {
 }
 
 export function peekOtherStagesExcerpt(
-  promptKind: PromptKind | MaterialPromptKind,
-  excludeStageId: StageId | MaterialStageId,
+  promptKind: PromptRenderKind,
+  excludeStageId: StageId | MaterialStageId | null,
   allStages: Partial<Record<StageId | MaterialStageId, string>>,
 ): string {
   const rows = isMaterialPromptKind(promptKind)
     ? MATERIAL_ORDER[promptKind]
-    : BOOK_ORDER[promptKind]
+    : SHORT_WORKSPACE_STAGES
   if (!rows) return PEEK_EMPTY
   const parts: string[] = []
   const stages = allStages ?? {}
   for (const row of rows) {
     const sid = row.id as StageId | MaterialStageId
-    if (sid === excludeStageId) continue
+    if (excludeStageId !== null && sid === excludeStageId) continue
     const raw = (stages[sid] ?? '').trim()
     if (!raw.length) continue
     parts.push(`【${row.label}】\n${excerptText(raw, PEER_CAP)}`)
@@ -92,19 +83,37 @@ export function peekOtherStagesExcerpt(
   return parts.length ? parts.join('\n\n') : PEEK_EMPTY
 }
 
-const TAG = /\{\{(BOOK_TITLE|STAGE_BODY|OTHER_STAGES_EXCERPT|BOOK_LINE)\}\}/g
+export function peekAllowedWorkspaceStagesExcerpt(
+  allStages: Partial<Record<StageId, string>>,
+  allowedStageIds: readonly StageId[],
+): string {
+  const allowed = new Set(allowedStageIds)
+  const filtered: Partial<Record<StageId, string>> = {}
+  for (const stage of SHORT_WORKSPACE_STAGES) {
+    if (allowed.has(stage.id)) filtered[stage.id] = allStages[stage.id] ?? ''
+  }
+  return peekOtherStagesExcerpt('workspace', null, filtered)
+}
+
+const WORKSPACE_TAG =
+  /\{\{(BOOK_TITLE|BOOK_LINE|BOOK_GENRE|STYLE|STAGE_BODY|OTHER_STAGES_EXCERPT)\}\}/g
+const MATERIAL_TAG =
+  /\{\{(BOOK_TITLE|BOOK_LINE|STAGE_BODY|OTHER_STAGES_EXCERPT)\}\}/g
 
 export type PromptSubstitutePayload = {
   bookTitle: string
+  bookGenre?: string
   stageBody: string
   otherStagesComputed: string
+  promptKind: PromptRenderKind
 }
 
 export type PromptRenderPayload = {
   bookTitle: string
+  bookGenre?: string
   stageBody: string
   otherStagesExcerpt?: string | null
-  promptKind: PromptKind | MaterialPromptKind
+  promptKind: PromptRenderKind
   stageId: StageId | MaterialStageId
   allStages: Partial<Record<StageId | MaterialStageId, string>>
 }
@@ -114,13 +123,17 @@ export function substitutePromptPlaceholders(
   input: PromptSubstitutePayload,
 ): string {
   const bt = input.bookTitle.trim()
+  const genre = input.bookGenre?.trim() || '未分类'
   const rep: Record<string, string> = {
     BOOK_TITLE: bt,
     BOOK_LINE: `书名：《${bt}》`,
+    BOOK_GENRE: genre,
+    STYLE: genre,
     STAGE_BODY: excerptText(input.stageBody),
     OTHER_STAGES_EXCERPT: input.otherStagesComputed,
   }
-  return templateRaw.replace(TAG, (_, k: keyof typeof rep) => rep[k] ?? '')
+  const tag = input.promptKind === 'workspace' ? WORKSPACE_TAG : MATERIAL_TAG
+  return templateRaw.replace(tag, (_, k: keyof typeof rep) => rep[k] ?? '')
 }
 
 export function renderPromptFromTemplateRaw(
@@ -136,7 +149,9 @@ export function renderPromptFromTemplateRaw(
     )
   return substitutePromptPlaceholders(templateRaw, {
     bookTitle: payload.bookTitle,
+    bookGenre: payload.bookGenre,
     stageBody: payload.stageBody,
     otherStagesComputed: other,
+    promptKind: payload.promptKind,
   })
 }

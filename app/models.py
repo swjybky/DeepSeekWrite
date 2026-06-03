@@ -25,12 +25,12 @@ MATERIAL_STAGE_KEYS: tuple[str, ...] = (
     "draft_excerpt", # 正文片段
 )
 
-# 统一的短篇工作台阶段键（世情和情感共用）
+# 统一的短篇工作台阶段键（所有短篇分类共用）
 # 对应 web/src/workspaces/short/stages.ts 中的 SHORT_WORKSPACE_STAGES
 SHORT_STAGE_KEYS: tuple[str, ...] = (
     "character_design",   # 人物设计（统一命名，世情原character_design，情感原qinggan_character）
-    "intro_design",         # 导语设计
     "plot_design",          # 剧情设计（新增到情感）
+    "intro_design",         # 导语设计
     "plot_refine",          # 剧情细化
     "outline",              # 大纲纲要
     "draft",                # 正文编写
@@ -240,47 +240,6 @@ def normalize_expert_draft_from_storage(raw: Any | None) -> dict[str, Any]:
         "running": bool(raw.get("running")),
         "active_section_id": active,
     }
-
-
-def is_workspace_short_book(categories: list[str], book_type: str) -> bool:
-    """判断是否为支持工作台的短篇书籍。"""
-    if book_type != "short":
-        return False
-    cats = set(categories)
-    return bool(cats & {"世情", "追妻", "科幻", "悬疑", "现实情感", "情感"})
-
-
-def is_shiqing_short_book(categories: list[str], book_type: str) -> bool:
-    """判断是否为世情短篇（用于提示词选择）"""
-    if book_type != "short":
-        return False
-    return "世情" in categories
-
-
-def is_qinggan_short_book(categories: list[str], book_type: str) -> bool:
-    """
-    判断是否为追妻短篇（用于提示词选择）
-    追妻或旧名称「现实情感」「情感」分类；与世情并存时以世情为准
-    """
-    if book_type != "short":
-        return False
-    if "世情" in categories:
-        return False
-    return ("追妻" in categories) or ("现实情感" in categories) or ("情感" in categories)
-
-
-def is_kehuan_short_book(categories: list[str], book_type: str) -> bool:
-    """判断是否为科幻短篇（用于提示词选择）。"""
-    if book_type != "short":
-        return False
-    return "科幻" in categories
-
-
-def is_xuanyi_short_book(categories: list[str], book_type: str) -> bool:
-    """判断是否为悬疑短篇（用于提示词选择）。"""
-    if book_type != "short":
-        return False
-    return "悬疑" in categories
 
 
 def primary_draft_stage_key(book: "Book") -> str:

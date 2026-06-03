@@ -3,6 +3,7 @@ import './App.css'
 import { BookEditor } from './pages/BookEditor'
 import { Home } from './pages/Home'
 import { MaterialEditor } from './pages/MaterialEditor'
+import { WorkspaceSettings } from './pages/WorkspaceSettings'
 
 function App() {
   return (
@@ -10,6 +11,7 @@ function App() {
       <div className="app-shell">
         <Routes>
           <Route path="/" element={<Home />} />
+          <Route path="/workspace-settings" element={<WorkspaceSettings />} />
           <Route path="/book/:id" element={<BookEditor />} />
           <Route path="/material/:id" element={<MaterialEditor />} />
         </Routes>

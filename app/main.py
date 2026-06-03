@@ -140,24 +140,21 @@ import webview
 from app.ai_env import load_ai_model_defaults, load_image_model_defaults
 from app.runtime_paths import bundle_root
 from app.prompt_store import (
-    read_raw_expert_prompt_for_editor,
     read_raw_material_prompt_for_editor,
-    read_raw_prompt_for_editor,
+    read_raw_workspace_agent_prompt_for_editor,
     render_from_api_context,
     render_material_from_api_context,
-    reset_expert_prompt_override,
     reset_material_prompt_override as _reset_material_prompt_override,
-    reset_prompt_override,
-    save_expert_prompt_override,
+    reset_workspace_agent_prompt_override as _reset_workspace_agent_prompt_override,
     save_material_prompt_override as _save_material_prompt_override,
-    save_prompt_override,
+    save_workspace_agent_prompt_override as _save_workspace_agent_prompt_override,
 )
 from app.storage import (
     BookStore,
     read_saved_workspace_root,
-    read_stage_read_access,
+    read_workspace_agent_read_access,
     write_saved_workspace_root,
-    write_stage_read_access,
+    write_workspace_agent_read_access,
 )
 
 
@@ -368,14 +365,14 @@ class Api:
     def set_workspace_root(self, path: str | None) -> None:
         write_saved_workspace_root(path)
 
-    def get_stage_read_access(self) -> dict[str, object]:
-        """全局阶段读取配置（创作空间各阶段可读的 workspace/material 阶段列表）。"""
-        return read_stage_read_access()
+    def get_workspace_agent_read_access(self) -> dict[str, object]:
+        """全局创作空间智能体可读的 workspace/material 阶段列表。"""
+        return read_workspace_agent_read_access()
 
-    def set_stage_read_access(self, config: dict[str, object]) -> None:
+    def set_workspace_agent_read_access(self, config: dict[str, object]) -> None:
         if not isinstance(config, dict):
-            raise ValueError("stage_read_access 须为对象")
-        write_stage_read_access(config)
+            raise ValueError("workspace_agent_read_access 须为对象")
+        write_workspace_agent_read_access(config)
 
     def get_ai_defaults(self) -> dict[str, object] | None:
         """与 app/.env 同步的默认模型与 Key，供前端注入 Pi 存储并跳过首次选模型/填 Key。"""
@@ -383,43 +380,19 @@ class Api:
 
     def get_workspace_system_prompt(
         self,
-        workspace_kind: str,
         stage_id: str,
         context_json: str,
     ) -> str:
-        return render_from_api_context(workspace_kind, stage_id, context_json)
+        return render_from_api_context(stage_id, context_json)
 
-    def read_workspace_prompt_template(
-        self, workspace_kind: str, stage_id: str
-    ) -> str:
-        return read_raw_prompt_for_editor(workspace_kind, stage_id)
+    def read_workspace_agent_prompt_template(self, agent_id: str) -> str:
+        return read_raw_workspace_agent_prompt_for_editor(agent_id)
 
-    def save_workspace_prompt_override(
-        self, workspace_kind: str, stage_id: str, body: str
-    ) -> None:
-        save_prompt_override(workspace_kind, stage_id, body)
+    def save_workspace_agent_prompt_override(self, agent_id: str, body: str) -> None:
+        _save_workspace_agent_prompt_override(agent_id, body)
 
-    def reset_workspace_prompt_override(
-        self, workspace_kind: str, stage_id: str
-    ) -> bool:
-        return reset_prompt_override(workspace_kind, stage_id)
-
-    # ==================== 专家模式提示词 API ====================
-
-    def read_expert_prompt_template(
-        self, workspace_kind: str, prompt_id: str
-    ) -> str:
-        return read_raw_expert_prompt_for_editor(workspace_kind, prompt_id)
-
-    def save_expert_prompt_override(
-        self, workspace_kind: str, prompt_id: str, body: str
-    ) -> None:
-        save_expert_prompt_override(workspace_kind, prompt_id, body)
-
-    def reset_expert_prompt_override(
-        self, workspace_kind: str, prompt_id: str
-    ) -> bool:
-        return reset_expert_prompt_override(workspace_kind, prompt_id)
+    def reset_workspace_agent_prompt_override(self, agent_id: str) -> bool:
+        return _reset_workspace_agent_prompt_override(agent_id)
 
     # ==================== 素材库提示词 API ====================
 

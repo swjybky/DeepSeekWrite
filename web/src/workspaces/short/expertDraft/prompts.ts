@@ -1,5 +1,8 @@
-import type { ExpertDraft, PromptKind, StageId } from '../../../bridge'
-import { SHORT_STAGE_LABELS } from '../stages'
+import type { ExpertDraft, StageId } from '../../../bridge'
+import {
+  excerptText,
+  peekAllowedWorkspaceStagesExcerpt,
+} from '../../../prompt/renderTemplate'
 
 const EXCERPT_LIMIT = 8000
 const RECENT_PREVIOUS_SECTION_LIMIT = 3
@@ -7,14 +10,8 @@ const PREVIOUS_SECTION_EXCERPT_LIMIT = 2200
 const PREVIOUS_STATE_EXCERPT_LIMIT = 900
 const CURRENT_SECTION_DRAFT_LIMIT = 3000
 
-const SECTION_WRITER_PLACEHOLDER_RE = /\{\{(BOOK_TITLE|STYLE)\}\}/g
-
-export function promptKindStyleLabel(promptKind: PromptKind): string {
-  if (promptKind === 'qinggan') return '追妻短篇'
-  if (promptKind === 'kehuan') return '科幻短篇'
-  if (promptKind === 'xuanyi') return '悬疑短篇'
-  return '世情短篇'
-}
+const EXPERT_PLACEHOLDER_RE =
+  /\{\{(BOOK_TITLE|BOOK_LINE|BOOK_GENRE|STYLE|STAGE_BODY|OTHER_STAGES_EXCERPT|EXPERT_DRAFT_CONTEXT)\}\}/g
 
 export const DEFAULT_SECTION_WRITER_SYSTEM_PROMPT = `你是《{{BOOK_TITLE}}》专家模式的后台小节编写智能体，当前类型：{{STYLE}}。
 
@@ -22,28 +19,28 @@ export const DEFAULT_SECTION_WRITER_SYSTEM_PROMPT = `你是《{{BOOK_TITLE}}》�
 
 硬性规则：
 - 先基于当前任务上下文编写当前小节正文。
-- 如需大纲纲要，调用 read_outline_content 读取；不要尝试读取其它工作台阶段，不要凭空补全缺失设定。
+- 如需普通创作阶段或关联素材内容，调用当前可用的读取工具；不要凭空补全缺失设定。
 - 正文完成后必须调用 write_section_body，传入干净正文，覆盖当前小节正文框。
 - 然后总结当前小节结束时的人物状态，并调用 write_character_state 覆盖当前小节人物状态框。
 - write_section_body 里的 text 只允许是小说正文，不要包含思考、说明、标题解释、工具调用说明。
 - write_character_state 里的 text 要记录人物处境、关系、情绪、隐瞒信息、冲突推进、下一节接续点。
 - 不要修改其它小节，不要调用普通模式工具。`
 
+export const DEFAULT_COORDINATOR_SYSTEM_PROMPT = `你是《{{BOOK_TITLE}}》的专家模式正文编写总控智能体，当前短篇分类：{{BOOK_GENRE}}。
+
+你负责根据现有内容初始化专家模式正文与人物状态列表，并在用户确认后调用 start_expert_writing 启动后台写作。
+
+工作规则：
+- 必须使用工具修改左侧专家模式编辑器，不要只在聊天里输出列表。
+- 如需普通创作阶段或关联素材内容，调用可用的读取工具。
+- 正文列表和人物状态列表必须一一对应。
+- 不要调用普通模式写入工具，不要要求用户复制粘贴。
+
+{{EXPERT_DRAFT_CONTEXT}}`
+
 function excerpt(body: string, max = EXCERPT_LIMIT): string {
   void max
   return body.trim()
-}
-
-function stageExcerptLimit(stageId: StageId): number {
-  return stageId === 'outline' ? Number.POSITIVE_INFINITY : EXCERPT_LIMIT
-}
-
-function stageBlock(
-  stages: Partial<Record<StageId, string>>,
-  stageId: StageId,
-): string {
-  const body = excerpt(String(stages[stageId] ?? ''), stageExcerptLimit(stageId))
-  return `【${SHORT_STAGE_LABELS[stageId]}】（${stageId}）\n${body || '（空）'}`
 }
 
 function wordCountRequirementLabel(value: string | undefined): string {
@@ -75,58 +72,71 @@ function expertDraftBlock(draft: ExpertDraft): string {
 
 export function buildExpertDraftCoordinatorSystemPrompt(input: {
   bookTitle: string
-  promptKind: PromptKind
-  stages: Partial<Record<StageId, string>>
+  bookGenre: string
   draft: ExpertDraft
+  workspaceStages: Partial<Record<StageId, string>>
+  allowedWorkspaceStages: readonly StageId[]
+  template?: string
 }): string {
-  const { bookTitle, promptKind, stages, draft } = input
-  const style = promptKindStyleLabel(promptKind)
-  return `你是《${bookTitle}》的专家模式正文编写总控智能体，当前类型：${style}。
-
-你只负责两件事：
-1. 根据已有大纲和设计内容，初始化专家模式的正文小节列表与人物状态列表。
-2. 当用户确认开始后，调用 start_expert_writing 启动后台小节编写。从第一节开始写，不写导语。
-3. 启动后台编写之前，必须进行初始化
-
-工作规则：
-- 必须使用工具修改左侧专家模式编辑器，不要只在聊天里输出列表。
-- 正文列表默认至少包含「导语」「第一节」；如果大纲要求更多小节，用 create_draft_sections 一次性创建完整列表。
-- 人物状态列表必须与正文小节一一对应；导语对应「导语人物状态」，第一节对应「第一节人物状态」。
-- 创建正文列表时，必须把大纲/章节设计里的「预估字数」「字数规划」填入 create_draft_sections 的 word_count_requirement；没有明确数字再留空。
-- 如果能从导语设计或大纲中确定导语正文和导语人物状态，直接填入对应 body。
-- start_expert_writing 是异步启动工具；调用成功后不要等待后台逐节完成。
-- 不要调用普通模式工具，不要要求用户复制粘贴。
-- 初始化时，不要进行除开导语人物状态的其他写入
-
-可用小节 id 已显示在专家正文列表中。启动写书时传入 section_ids，顺序就是后台串行写作顺序。
-
-${stageBlock(stages, 'character_design')}
-
-${stageBlock(stages, 'intro_design')}
-
-${stageBlock(stages, 'plot_design')}
-
-${stageBlock(stages, 'plot_refine')}
-
-${stageBlock(stages, 'outline')}
-
-${expertDraftBlock(draft)}`
+  const template = input.template ?? DEFAULT_COORDINATOR_SYSTEM_PROMPT
+  const expertDraftContext = expertDraftBlock(input.draft)
+  return renderExpertTemplate(template, {
+    bookTitle: input.bookTitle,
+    bookGenre: input.bookGenre,
+    stageBody: expertDraftContext,
+    otherStagesExcerpt: peekAllowedWorkspaceStagesExcerpt(
+      input.workspaceStages,
+      input.allowedWorkspaceStages,
+    ),
+    expertDraftContext,
+  })
 }
 
 export function buildSectionWriterSystemPrompt(input: {
   bookTitle: string
-  promptKind: PromptKind
+  bookGenre: string
+  stageBody: string
+  workspaceStages: Partial<Record<StageId, string>>
+  allowedWorkspaceStages: readonly StageId[]
   template?: string
 }): string {
-  const style = promptKindStyleLabel(input.promptKind)
-  const template = input.template?.trim()
-    ? input.template
-    : DEFAULT_SECTION_WRITER_SYSTEM_PROMPT
-  return template.replace(SECTION_WRITER_PLACEHOLDER_RE, (_match, key) => {
-    if (key === 'BOOK_TITLE') return input.bookTitle.trim()
-    if (key === 'STYLE') return style
-    return ''
+  const template = input.template ?? DEFAULT_SECTION_WRITER_SYSTEM_PROMPT
+  return renderExpertTemplate(template, {
+    bookTitle: input.bookTitle,
+    bookGenre: input.bookGenre,
+    stageBody: input.stageBody,
+    otherStagesExcerpt: peekAllowedWorkspaceStagesExcerpt(
+      input.workspaceStages,
+      input.allowedWorkspaceStages,
+    ),
   })
+}
+
+function renderExpertTemplate(
+  template: string,
+  input: {
+    bookTitle: string
+    bookGenre: string
+    stageBody?: string
+    otherStagesExcerpt?: string
+    expertDraftContext?: string
+  },
+): string {
+  const title = input.bookTitle.trim()
+  const genre = input.bookGenre.trim() || '未分类'
+  const replacements: Record<string, string> = {
+    BOOK_TITLE: title,
+    BOOK_LINE: `书名：《${title}》`,
+    BOOK_GENRE: genre,
+    STYLE: genre,
+    STAGE_BODY: excerptText(input.stageBody ?? ''),
+    OTHER_STAGES_EXCERPT: input.otherStagesExcerpt ?? '',
+    EXPERT_DRAFT_CONTEXT: input.expertDraftContext ?? '',
+  }
+  return template.replace(
+    EXPERT_PLACEHOLDER_RE,
+    (_match, key: keyof typeof replacements) => replacements[key] ?? '',
+  )
 }
 
 export function buildSectionWriterUserPrompt(input: {
@@ -175,7 +185,7 @@ export function buildSectionWriterUserPrompt(input: {
 - id：${sectionId}
 - 本章节字数要求：${currentWordRequirement}
 
-如需大纲纲要，请调用 read_outline_content 读取完整大纲；本消息不再直接附带大纲全文，也不能读取其它工作台阶段。
+如需普通创作阶段或关联素材内容，请调用当前可用的读取工具；本消息不再直接附带这些内容。
 
 前文（为保证连续长文写作性能，只附最近 ${RECENT_PREVIOUS_SECTION_LIMIT} 个已完成小节正文；更早变化见人物状态摘要）：
 ${omittedCount > 0 ? `（更早 ${omittedCount} 个小节正文已省略）\n\n` : ''}${previousBodies || '（无）'}

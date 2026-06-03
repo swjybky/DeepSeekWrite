@@ -101,18 +101,18 @@ write-claw/
 │   ├── prompt_store.py           # 提示词模板读取、覆盖、服务端占位符渲染
 │   ├── runtime_paths.py          # bundle_root() / writable_root()：区分源码与 PyInstaller 冻结环境
 │   ├── prompt_defaults/          # 默认提示词模板（.txt）
-│   │   ├── short/shiqing/        # 短篇·世情各阶段提示词
-│   │   ├── short/qinggan/        # 短篇·追妻各阶段提示词
+│   │   ├── short/shared/         # 所有短篇创作空间共享提示词（8 阶段 + 2 个专家智能体）
 │   │   └── material/             # 素材库提示词（long / short_shiqing / short_qinggan）
 │   └── assets/                   # 应用图标（.ico / .png）
 ├── web/                          # 前端（Vite + React + TypeScript）
 │   ├── src/
 │   │   ├── main.tsx              # React 入口；处理 pywebviewready 延迟挂载
-│   │   ├── App.tsx               # HashRouter：/（书架）、/book/:id（书籍编辑）、/material/:id（素材编辑）
+│   │   ├── App.tsx               # HashRouter：首页、创作空间设置、书籍编辑、素材编辑
 │   │   ├── bridge.ts             # **核心桥接层**：封装 pywebview API / localStorage Mock / 工作目录同步
 │   │   ├── pages/
 │   │   │   ├── Home.tsx          # 书架首页 + 素材库（双栏卡片布局）
 │   │   │   ├── BookEditor.tsx    # 书籍三栏工作台（左导航、中编辑、右 AI）
+│   │   │   ├── WorkspaceSettings.tsx # 全局创作空间智能体设置
 │   │   │   └── MaterialEditor.tsx # 素材编辑器
 │   │   ├── components/
 │   │   │   ├── WorkspaceAiChat.tsx   # Pi Web UI 集成的 AI 聊天面板
@@ -126,8 +126,8 @@ write-claw/
 │   │   │   └── writingAssistantPrompt.ts    # 通用写作助手提示词片段
 │   │   ├── workspaces/
 │   │   │   ├── short/
-│   │   │   │   └── stages.ts       # 统一短篇阶段定义（8 阶段）
-│   │   │   ├── resolvePromptKind.ts # 根据书籍分类解析提示词目录（shiqing / qinggan）
+│   │   │   │   ├── stages.ts       # 统一短篇阶段定义（8 阶段）
+│   │   │   │   └── stageReadAccess.ts # 10 个创作空间智能体的读取范围配置
 │   │   │   └── shared/
 │   │   │       └── piToolkit.ts    # Pi 工具集共享逻辑
 │   │   └── prompt/
@@ -165,7 +165,7 @@ write-claw/
 - **`models.py`**：
   - `Book` dataclass：包含 `id`、`title`、`book_type`（`short` | `long`）、`categories`、`content`、`output_dir`、`stages`、时间戳。
   - `Material` dataclass：包含 `id`、`title`、`material_type`、`parent_genre`、`sub_genre`、`stages`、时间戳。
-  - **统一短篇阶段键**（8 个）：`character_design`、`intro_design`、`plot_design`、`plot_refine`、`outline`、`draft`、`draft_review`、`format_conversion`。世情和追妻共用同一套阶段键，仅在提示词内容上区分。
+  - **统一短篇阶段键**（8 个）：`character_design`、`plot_design`、`intro_design`、`plot_refine`、`outline`、`draft`、`draft_review`、`format_conversion`。所有短篇分类共用同一套阶段、智能体与提示词。
   - **数据迁移**：自动将旧版追妻阶段键（如 `qinggan_character`）迁移到统一键，见 `migrate_legacy_stages`。
   - 素材阶段键（4 个）：`character`、`intro`、`gimmick`、`pacing`。
 
@@ -175,9 +175,10 @@ write-claw/
   - 返回 `provider`、`model_id`、`api_key`，可选 `model_id_flash`。
 
 - **`prompt_store.py`**：
-  - 工作台提示词与素材库提示词各有一套独立的读取/覆盖/渲染管线。
-  - 读取优先级：`.data/prompt_overrides/` 下的覆盖文件 > `app/prompt_defaults/` 下的内置默认文件。
-  - 支持占位符：`{{BOOK_TITLE}}`、`{{BOOK_LINE}}`、`{{STAGE_BODY}}`、`{{OTHER_STAGES_EXCERPT}}`。
+  - 创作空间共享提示词与素材库提示词各有一套独立的读取/覆盖/渲染管线。
+  - 创作空间读取优先级：`.data/prompt_overrides/short/shared/` > `app/prompt_defaults/short/shared/`。
+  - 首次加载会将旧 `.data/prompt_overrides/short/qinggan/` 覆盖复制到共享目录；旧分类目录之后不再参与运行时选择。
+  - 创作空间支持占位符：`{{BOOK_TITLE}}`、`{{BOOK_LINE}}`、`{{BOOK_GENRE}}`、兼容别名 `{{STYLE}}`、`{{STAGE_BODY}}`、`{{OTHER_STAGES_EXCERPT}}`；专家总控额外支持 `{{EXPERT_DRAFT_CONTEXT}}`。
 
 ### 前端（`web/src/`）
 
@@ -194,7 +195,11 @@ write-claw/
 - **`pages/BookEditor.tsx`**：
   - 三栏布局：左侧阶段导航、中间富文本编辑区、右侧可拖拽宽度的 AI 面板。
   - AI 面板基于 `ChatPanel`（Pi Web UI），集成了自定义 Agent 工具（如 `apply_to_stage_editor`）。
-  - 非工作台支持的组合（如长篇、未分类短篇）显示「开发中」占位状态。
+  - 所有短篇书籍进入完整创作空间；长篇显示「开发中」占位状态。
+
+- **`pages/WorkspaceSettings.tsx`**：
+  - 集中管理 8 个普通阶段与 2 个专家智能体的共享系统提示词和读取范围。
+  - 书籍分类仅作为 `{{BOOK_GENRE}}` 上下文传入模板，不影响提示词路径、工具集或会话标识。
 
 - **`pi/` 目录**：
   - `setupPiWorkspace.ts`：初始化 IndexedDB 后端（`dbName: 'write_claw_pi'`），存储会话、API Key、设置。
@@ -223,15 +228,15 @@ write-claw/
 阶段顺序固定为：
 
 1. `character_design` — 人物设计
-2. `intro_design` — 导语设计
-3. `plot_design` — 剧情设计
+2. `plot_design` — 剧情设计
+3. `intro_design` — 导语设计
 4. `plot_refine` — 剧情细化
 5. `outline` — 大纲纲要
 6. `draft` — 正文编写
 7. `draft_review` — 正文审阅
 8. `format_conversion` — 格式转换
 
-**注意**：世情和追妻共用上述阶段定义，仅在加载提示词时根据 `resolvePromptKind()` 选择 `shiqing/` 或 `qinggan/` 目录。
+**注意**：所有短篇分类共用上述阶段定义和 `short/shared/` 提示词；分类仅作为 `{{BOOK_GENRE}}` 上下文传入。
 
 ### 素材（Material）
 
@@ -301,5 +306,3 @@ write-claw/
 | 素材/书籍保存后 `.txt` 未写出 | 检查书籍/素材是否设置了 `output_dir`（工作文件夹）；检查目录写入权限。 |
 
 ---
-
-

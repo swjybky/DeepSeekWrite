@@ -1,11 +1,11 @@
 /**
  * 统一的短篇工作台阶段定义
- * 世情和情感共用同一套阶段，仅在提示词层面区分
+ * 所有短篇分类共用同一套阶段、智能体与提示词
  */
 export const SHORT_WORKSPACE_STAGES = [
   { id: 'character_design', label: '人物设计' },
-  { id: 'intro_design', label: '导语设计' },
   { id: 'plot_design', label: '剧情设计' },
+  { id: 'intro_design', label: '导语设计' },
   { id: 'plot_refine', label: '剧情细化' },
   { id: 'outline', label: '大纲纲要' },
   { id: 'draft', label: '正文编写' },
