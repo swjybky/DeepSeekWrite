@@ -137,7 +137,7 @@ export function buildReadLinkedMaterialContentTool(
     name: 'read_linked_material_content',
     label: '读取关联素材库内容',
     description:
-      `读取当前书籍在 AI 助手上方关联的素材库内容。当前仅允许读取：${allowedDescription}。每次调用只返回一个素材阶段。`
+      `读取当前书籍在页面顶部关联的素材库内容。当前仅允许读取：${allowedDescription}。每次调用只返回一个素材阶段。`
       + '\n此工具不要随便使用，仅在使用者明确要求或智能体提示明确标记使用时调用',
     parameters: Type.Object({
       stage_id: stageIdSchema,
@@ -151,7 +151,7 @@ export function buildReadLinkedMaterialContentTool(
       }
       const material = ctx.linkedMaterial
       if (!material) {
-        return textBlock('当前书籍尚未关联素材库。请先在 AI 助手上方点击「素材库选择」并选择素材。')
+        return textBlock('当前书籍尚未关联素材库。请先在页面顶部「生成封面」右侧点击「素材库选择」并选择素材。')
       }
 
       const stages = normalizeMaterialStages(material.stages)

@@ -856,6 +856,25 @@ export function BookEditor() {
           >
             {coverGenerating ? '生成中…' : '生成封面'}
           </button>
+          <span
+            className="editor-header-material-name"
+            title={linkedMaterial ? `已关联：${linkedMaterial.title}` : '未关联素材库'}
+          >
+            {linkedMaterial ? linkedMaterial.title : '未关联素材'}
+          </span>
+          <button
+            type="button"
+            className={
+              linkedMaterial
+                ? 'editor-header-material-select editor-header-material-select--active'
+                : 'editor-header-material-select'
+            }
+            aria-label="选择关联素材库"
+            title={linkedMaterial ? `已关联：${linkedMaterial.title}` : '选择关联素材库'}
+            onClick={() => void openMaterialSelector()}
+          >
+            素材库选择
+          </button>
           <button
             type="button"
             className="btn-save"
@@ -1029,78 +1048,48 @@ export function BookEditor() {
             <span className="workspace-ai-header-title">AI 助手</span>
             {book ? (
               <div className="workspace-ai-header-actions">
-                <span
-                  className="workspace-ai-material-name"
-                  title={linkedMaterial ? `已关联：${linkedMaterial.title}` : '未关联素材库'}
-                >
-                  {linkedMaterial ? linkedMaterial.title : '未关联素材'}
-                </span>
+                {activeStage === 'draft' ? (
+                  <button
+                    type="button"
+                    className={
+                      expertMode
+                        ? 'workspace-ai-expert-mode workspace-ai-expert-mode--active'
+                        : 'workspace-ai-expert-mode'
+                    }
+                    aria-label={expertMode ? '退出专家模式' : '进入专家模式'}
+                    title="切换正文专家模式"
+                    onClick={() => setExpertMode((v) => !v)}
+                  >
+                    专家模式
+                  </button>
+                ) : null}
                 <button
                   type="button"
-                  className={
-                    linkedMaterial
-                      ? 'workspace-ai-material-select workspace-ai-material-select--active'
-                      : 'workspace-ai-material-select'
+                  className="workspace-ai-new-chat"
+                  aria-label={
+                    expertDraftActive
+                      ? '清空专家模式主智能体对话并开始新会话'
+                      : '清空当前阶段 AI 对话并开始新会话'
                   }
-                  aria-label="选择关联素材库"
-                  title={linkedMaterial ? `已关联：${linkedMaterial.title}` : '选择关联素材库'}
-                  onClick={() => void openMaterialSelector()}
+                  title={
+                    expertDraftActive
+                      ? '仅清空专家模式右侧主智能体上下文，不影响后台小节编写任务'
+                      : '仅影响当前左侧阶段对应的助手会话，其他阶段各有一份独立历史'
+                  }
+                  disabled={expertDraftActive && expertDraft.running}
+                  onClick={() => {
+                    if (expertDraftActive) {
+                      setExpertAiChatEpoch((epoch) => epoch + 1)
+                      return
+                    }
+                    setAiChatEpochByStage((prev) => ({
+                      ...prev,
+                      [activeStage]: (prev[activeStage] ?? 0) + 1,
+                    }))
+                  }}
                 >
-                  素材库选择
+                  新建对话
                 </button>
-                {expertDraftActive ? (
-                  <>
-                    {activeStage === 'draft' ? (
-                      <button
-                        type="button"
-                        className={expertMode ? 'workspace-ai-expert-mode workspace-ai-expert-mode--active' : 'workspace-ai-expert-mode'}
-                        aria-label={expertMode ? '退出专家模式' : '进入专家模式'}
-                        title="切换专家模式"
-                        onClick={() => setExpertMode((v) => !v)}
-                      >
-                        专家模式
-                      </button>
-                    ) : null}
-                    <button
-                      type="button"
-                      className="workspace-ai-new-chat"
-                      aria-label="清空专家模式主智能体对话并开始新会话"
-                      title="仅清空专家模式右侧主智能体上下文，不影响后台小节编写任务"
-                      disabled={expertDraft.running}
-                      onClick={() => setExpertAiChatEpoch((epoch) => epoch + 1)}
-                    >
-                      新建对话
-                    </button>
-                  </>
-                ) : (
-                  <>
-                    {activeStage === 'draft' ? (
-                      <button
-                        type="button"
-                        className={expertMode ? 'workspace-ai-expert-mode workspace-ai-expert-mode--active' : 'workspace-ai-expert-mode'}
-                        aria-label={expertMode ? '退出专家模式' : '进入专家模式'}
-                        title="切换专家模式"
-                        onClick={() => setExpertMode((v) => !v)}
-                      >
-                        专家模式
-                      </button>
-                    ) : null}
-                    <button
-                      type="button"
-                      className="workspace-ai-new-chat"
-                      aria-label="清空当前阶段 AI 对话并开始新会话"
-                      title="仅影响当前左侧阶段对应的助手会话，其他阶段各有一份独立历史"
-                      onClick={() =>
-                        setAiChatEpochByStage((prev) => ({
-                          ...prev,
-                          [activeStage]: (prev[activeStage] ?? 0) + 1,
-                        }))
-                      }
-                    >
-                      新建对话
-                    </button>
-                  </>
-                )}
               </div>
             ) : null}
           </div>
