@@ -2,7 +2,14 @@ import type { AgentTool } from '@mariozechner/pi-agent-core'
 import { Agent } from '@mariozechner/pi-agent-core'
 import { ApiKeyPromptDialog, ChatPanel, ModelSelector } from '@mariozechner/pi-web-ui'
 import { memo, useEffect, useRef, useState } from 'react'
-import type { Material, StageId, PromptKind, MaterialStageId, MaterialPromptKind } from '../bridge'
+import type {
+  Material,
+  StageId,
+  PromptKind,
+  MaterialStageId,
+  MaterialPromptKind,
+  StageReadAccessConfig,
+} from '../bridge'
 import { getWorkspaceSystemPrompt, getMaterialSystemPrompt } from '../bridge'
 import { ensurePiAppStorage } from '../pi/setupPiWorkspace'
 import {
@@ -58,6 +65,8 @@ type Props = {
   allStages: Partial<Record<StageId | MaterialStageId, string>>
   /** 当前书籍关联的素材库；前期设计阶段会将其暴露为 AI 工具可读取内容 */
   linkedMaterial?: Material | null
+  /** 全局阶段可读配置（仅书籍短篇工作台） */
+  stageReadAccess?: StageReadAccessConfig | null
   /**
    * Pi `ChatPanel` 无法在内部关闭，仍会把 `artifacts` 塞进 `agent.state.tools`。
    * 为 `false` 时在 `setAgent` 之后从状态中移除该工具，阶段更新时也仅同步业务工具。
@@ -165,6 +174,7 @@ function WorkspaceAiChatInner({
             (() => propsLatestRef.current.stageBody),
           allStages: propsLatestRef.current.allStages,
           linkedMaterial: propsLatestRef.current.linkedMaterial,
+          stageReadAccess: propsLatestRef.current.stageReadAccess,
           applyToStageEditor: propsLatestRef.current.applyToStageEditor,
           onRequestSave: propsLatestRef.current.onRequestSave,
           isToolCallStreamed: (id) => streamedToolCallIdsRef.current.has(id),
@@ -425,6 +435,7 @@ function WorkspaceAiChatInner({
           p.getCurrentStageBody ?? (() => propsLatestRef.current.stageBody),
         allStages: p.allStages,
         linkedMaterial: p.linkedMaterial,
+        stageReadAccess: p.stageReadAccess,
         applyToStageEditor: p.applyToStageEditor,
         onRequestSave: p.onRequestSave,
         isToolCallStreamed: (id) => streamedToolCallIdsRef.current.has(id),
@@ -441,6 +452,7 @@ function WorkspaceAiChatInner({
     debouncedBody,
     props.allStages,
     props.linkedMaterial,
+    props.stageReadAccess,
     props.applyToStageEditor,
     includePiArtifacts,
     promptRevision,
@@ -486,8 +498,8 @@ export const WorkspaceAiChat = memo(WorkspaceAiChatInner, (prev, next) => {
   if (prev.stageBody !== next.stageBody) return false
 
   // allStages 内容浅比较（阶段数量或内容变化时更新）
-  const prevKeys = Object.keys(prev.allStages)
-  const nextKeys = Object.keys(next.allStages)
+  const prevKeys = Object.keys(prev.allStages ?? {})
+  const nextKeys = Object.keys(next.allStages ?? {})
   if (prevKeys.length !== nextKeys.length) return false
   for (const key of prevKeys) {
     if (prev.allStages[key as StageId] !== next.allStages[key as StageId]) {

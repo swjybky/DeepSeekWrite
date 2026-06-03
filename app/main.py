@@ -152,7 +152,13 @@ from app.prompt_store import (
     save_material_prompt_override as _save_material_prompt_override,
     save_prompt_override,
 )
-from app.storage import BookStore, read_saved_workspace_root, write_saved_workspace_root
+from app.storage import (
+    BookStore,
+    read_saved_workspace_root,
+    read_stage_read_access,
+    write_saved_workspace_root,
+    write_stage_read_access,
+)
 
 
 def _windows_webview2_runtime_hint() -> bool:
@@ -361,6 +367,15 @@ class Api:
 
     def set_workspace_root(self, path: str | None) -> None:
         write_saved_workspace_root(path)
+
+    def get_stage_read_access(self) -> dict[str, object]:
+        """全局阶段读取配置（创作空间各阶段可读的 workspace/material 阶段列表）。"""
+        return read_stage_read_access()
+
+    def set_stage_read_access(self, config: dict[str, object]) -> None:
+        if not isinstance(config, dict):
+            raise ValueError("stage_read_access 须为对象")
+        write_stage_read_access(config)
 
     def get_ai_defaults(self) -> dict[str, object] | None:
         """与 app/.env 同步的默认模型与 Key，供前端注入 Pi 存储并跳过首次选模型/填 Key。"""

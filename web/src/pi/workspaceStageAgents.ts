@@ -1,6 +1,15 @@
 import type { AgentTool } from '@mariozechner/pi-agent-core'
 
-import type { Material, StageId, PromptKind, MaterialPromptKind, MaterialStageId } from '../bridge'
+import type {
+  Material,
+  StageId,
+  PromptKind,
+  MaterialPromptKind,
+  MaterialStageId,
+  StageReadAccessConfig,
+} from '../bridge'
+import { resolveReadAccessForStage } from '../workspaces/short/stageReadAccess'
+import type { ShortStageId } from '../workspaces/short/stages'
 import {
   buildShortWorkspaceAdditionalTools,
   type ShortWorkspaceStageAgentContext,
@@ -24,6 +33,8 @@ export type WorkspaceStageAgentContext = {
   getCurrentStageBody?: () => string
   allStages: Partial<Record<StageId | MaterialStageId, string>>
   linkedMaterial?: Material | null
+  /** 全局阶段可读配置（短篇创作空间） */
+  stageReadAccess?: StageReadAccessConfig | null
   applyToStageEditor?: (payload: ApplyToStageEditorPayload) => void
   /** 查询某 toolCallId 是否已在流式生成阶段同步到编辑器 */
   isToolCallStreamed?: (toolCallId: string) => boolean
@@ -50,13 +61,18 @@ export function getWorkspaceStageAdditionalTools(
   }
 
   // 书籍短篇工作台模式
+  const shortStageId = ctx.stageId as ShortStageId
+  const readAccess = resolveReadAccessForStage(ctx.stageReadAccess, shortStageId)
   const narrow: ShortWorkspaceStageAgentContext = {
     bookTitle: ctx.bookTitle,
-    stageId: ctx.stageId as ShortWorkspaceStageAgentContext['stageId'],
+    stageId: shortStageId,
     stageBody: ctx.stageBody,
     getCurrentStageBody: ctx.getCurrentStageBody,
     allStages: ctx.allStages as Partial<Record<ShortWorkspaceStageAgentContext['stageId'], string>>,
     linkedMaterial: ctx.linkedMaterial,
+    stageReadAccess: ctx.stageReadAccess,
+    allowedWorkspaceStages: readAccess?.workspace,
+    allowedMaterialStages: readAccess?.material,
     applyToStageEditor: ctx.applyToStageEditor,
     onRequestSave: ctx.onRequestSave,
     isToolCallStreamed: ctx.isToolCallStreamed,

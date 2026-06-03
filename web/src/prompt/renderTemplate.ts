@@ -81,10 +81,11 @@ export function peekOtherStagesExcerpt(
     : BOOK_ORDER[promptKind]
   if (!rows) return PEEK_EMPTY
   const parts: string[] = []
+  const stages = allStages ?? {}
   for (const row of rows) {
     const sid = row.id as StageId | MaterialStageId
     if (sid === excludeStageId) continue
-    const raw = (allStages[sid] ?? '').trim()
+    const raw = (stages[sid] ?? '').trim()
     if (!raw.length) continue
     parts.push(`【${row.label}】\n${excerptText(raw, PEER_CAP)}`)
   }
@@ -131,7 +132,7 @@ export function renderPromptFromTemplateRaw(
     peekOtherStagesExcerpt(
       payload.promptKind,
       payload.stageId,
-      payload.allStages,
+      payload.allStages ?? {},
     )
   return substitutePromptPlaceholders(templateRaw, {
     bookTitle: payload.bookTitle,

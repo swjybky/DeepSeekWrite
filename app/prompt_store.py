@@ -45,8 +45,9 @@ VALID_PROMPT_KINDS: frozenset[str] = frozenset(
 # 专家模式提示词槽位。当前只暴露后台小节编写智能体，文件名保持独立，
 # 避免与普通「正文编写」阶段模板混用。
 EXPERT_SECTION_WRITER_PROMPT_ID = "expert_section_writer"
+DEAI_FLAVOR_REMOVAL_PROMPT_ID = "deai_flavor_removal"
 VALID_EXPERT_PROMPT_IDS: frozenset[str] = frozenset(
-    {EXPERT_SECTION_WRITER_PROMPT_ID}
+    {EXPERT_SECTION_WRITER_PROMPT_ID, DEAI_FLAVOR_REMOVAL_PROMPT_ID}
 )
 
 # 阶段顺序映射（按提示词目录）

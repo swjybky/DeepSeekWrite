@@ -4,7 +4,12 @@ import { Type } from 'typebox'
 import type { Material, MaterialStageId } from '../../bridge'
 import { MATERIAL_STAGE_LABELS, normalizeMaterialStages } from '../../bridge'
 import type { ShortStageId } from './stages'
-import { SHORT_STAGE_LABELS } from './stages'
+import { SHORT_STAGE_LABELS, SHORT_WORKSPACE_STAGES } from './stages'
+import {
+  isConfigurableReadStage,
+  resolveReadAccessForStage,
+  type StageReadAccessConfig,
+} from './stageReadAccess'
 import {
   defineTool,
   excerptFn as excerpt,
@@ -18,42 +23,65 @@ export type ShortWorkspaceStageAgentContext = {
   getCurrentStageBody?: () => string
   allStages: Partial<Record<ShortStageId, string>>
   linkedMaterial?: Material | null
+  /** 全局配置解析后：当前阶段允许读取的创作空间阶段 */
+  allowedWorkspaceStages?: readonly ShortStageId[]
+  /** 全局配置解析后：当前阶段允许读取的素材库阶段 */
+  allowedMaterialStages?: readonly MaterialStageId[]
+  stageReadAccess?: StageReadAccessConfig | null
   applyToStageEditor?: (payload: { mode: 'replace' | 'append'; text: string }) => void
   isToolCallStreamed?: (toolCallId: string) => boolean
   /** 请求上层保存当前书籍；用于复制工具写入后自动落盘 */
   onRequestSave?: () => void | Promise<void>
 }
 
+function shortStageIdParameterSchema(allowedStageIds: readonly ShortStageId[]) {
+  const description = allowedStageIds
+    .map((id) => `${SHORT_STAGE_LABELS[id]}（${id}）`)
+    .join('、')
+  const literals = allowedStageIds.map((id) => Type.Literal(id))
+  if (literals.length === 0) {
+    return {
+      schema: Type.String({ description: '当前未配置任何可读创作阶段' }),
+      description: '',
+    }
+  }
+  if (literals.length === 1) {
+    return { schema: literals[0]!, description }
+  }
+  return {
+    schema: Type.Union(literals, {
+      description: `允许读取的创作阶段：${description}`,
+    }),
+    description,
+  }
+}
+
+const ALL_SHORT_STAGE_IDS = SHORT_WORKSPACE_STAGES.map((s) => s.id)
+
 export function buildReadWorkspaceContentTool(
   ctx: ShortWorkspaceStageAgentContext,
+  allowedStageIds: readonly ShortStageId[],
 ): AgentTool {
+  const allowedSet = new Set(allowedStageIds)
+  const { schema: stageIdSchema, description: allowedDescription } =
+    shortStageIdParameterSchema(allowedStageIds)
+
   return defineTool({
     name: 'read_workspace_content',
     label: '读取工作区内容',
     description:
-      '读取本书创作空间某一阶段已保存的内容，每次调用只返回一个 stage_id。不含编辑栏未写入的未保存内容。'
-      +'\n此工具不要随便使用，仅在使用者明确要求或智能体提示明确标记为使用时使用，默认读取当前阶段的内容',
+      `读取本书创作空间某一阶段已保存的内容。当前仅允许读取：${allowedDescription || '（无）'}。每次调用只返回一个 stage_id。不含编辑栏未写入的未保存内容。`
+      + '\n此工具不要随便使用，仅在使用者明确要求或智能体提示明确标记为使用时使用',
     parameters: Type.Object({
-      stage_id: Type.Union(
-        [
-          Type.Literal('character_design'),
-          Type.Literal('intro_design'),
-          Type.Literal('plot_design'),
-          Type.Literal('plot_refine'),
-          Type.Literal('outline'),
-          Type.Literal('draft'),
-          Type.Literal('draft_review'),
-          Type.Literal('format_conversion'),
-        ],
-        {
-            description:
-              '工作台阶段键名，描述下各个阶段的中文描述，例如：\n' +
-              '人物设计（character_design）、导语设计（intro_design）、剧情设计（plot_design）、剧情细化（plot_refine）、大纲纲要（outline）、正文编写（draft）、正文审阅（draft_review）、格式转换（format_conversion）；单次只读取该阶段内容',
-        },
-      ),
+      stage_id: stageIdSchema,
     }),
     execute: async (_toolCallId, params) => {
       const sid = params.stage_id as ShortStageId
+      if (!allowedSet.has(sid)) {
+        return textBlock(
+          `当前不允许读取「${SHORT_STAGE_LABELS[sid]}」。仅可读取：${allowedDescription}。`,
+        )
+      }
       const label = SHORT_STAGE_LABELS[sid]
       const raw = (ctx.allStages[sid] ?? '').trim()
       const header = `书名：《${ctx.bookTitle}》\n【${label}】（${sid}）`
@@ -65,20 +93,23 @@ export function buildReadWorkspaceContentTool(
   })
 }
 
-/** 创作空间各阶段允许读取的关联素材阶段；未列出表示不提供读取素材工具 */
-export const SHORT_STAGE_LINKED_MATERIAL_ACCESS: Partial<
-  Record<ShortStageId, readonly MaterialStageId[]>
-> = {
-  character_design: ['character'],
-  intro_design: ['intro'],
-  plot_design: ['character', 'intro', 'gimmick', 'pacing'],
-  plot_refine: ['plot_refine', 'pacing'],
-}
-
-export function getLinkedMaterialStagesForShortStage(
-  stageId: ShortStageId,
-): readonly MaterialStageId[] | null {
-  return SHORT_STAGE_LINKED_MATERIAL_ACCESS[stageId] ?? null
+function resolveAllowedStagesFromContext(
+  ctx: ShortWorkspaceStageAgentContext,
+): {
+  workspace: readonly ShortStageId[]
+  material: readonly MaterialStageId[]
+} {
+  if (ctx.allowedWorkspaceStages !== undefined || ctx.allowedMaterialStages !== undefined) {
+    return {
+      workspace: ctx.allowedWorkspaceStages ?? [],
+      material: ctx.allowedMaterialStages ?? [],
+    }
+  }
+  const resolved = resolveReadAccessForStage(ctx.stageReadAccess, ctx.stageId)
+  if (resolved) {
+    return { workspace: resolved.workspace, material: resolved.material }
+  }
+  return { workspace: ALL_SHORT_STAGE_IDS, material: [] }
 }
 
 function materialStageIdParameterSchema(
@@ -437,47 +468,67 @@ export function buildWriteWorkspaceEditorTool(
 }
 
 
+function readWorkspaceTools(
+  ctx: ShortWorkspaceStageAgentContext,
+  allowedWorkspace: readonly ShortStageId[],
+): AgentTool[] {
+  if (!allowedWorkspace.length) return []
+  return [buildReadWorkspaceContentTool(ctx, allowedWorkspace)]
+}
+
+function readMaterialTools(
+  ctx: ShortWorkspaceStageAgentContext,
+  allowedMaterial: readonly MaterialStageId[],
+): AgentTool[] {
+  if (!allowedMaterial.length) return []
+  return [buildReadLinkedMaterialContentTool(ctx, allowedMaterial)]
+}
+
 /**
  * 工作台系统提示词由后端磁盘模板提供；此处仅附加 Pi 工具。
  * 统一工具配置，世情和情感共用同一套工具集
  */
-function linkedMaterialTools(
-  ctx: ShortWorkspaceStageAgentContext,
-): AgentTool[] {
-  const allowed = getLinkedMaterialStagesForShortStage(ctx.stageId)
-  if (!allowed?.length) return []
-  return [buildReadLinkedMaterialContentTool(ctx, allowed)]
-}
-
 export function buildShortWorkspaceAdditionalTools(
   ctx: ShortWorkspaceStageAgentContext,
 ): AgentTool[] {
-  const readSaved = buildReadWorkspaceContentTool(ctx)
-  const readMaterial = linkedMaterialTools(ctx)
+  const { workspace: allowedWorkspace, material: allowedMaterial } =
+    resolveAllowedStagesFromContext(ctx)
+
+  const configurable = isConfigurableReadStage(ctx.stageId)
+  const readSaved = configurable
+    ? readWorkspaceTools(ctx, allowedWorkspace)
+    : readWorkspaceTools(ctx, ALL_SHORT_STAGE_IDS)
+
+  const readMaterial = configurable
+    ? readMaterialTools(ctx, allowedMaterial)
+    : []
+
   const writeWorkspace = buildWriteWorkspaceEditorTool(ctx)
   const replaceDraftText = buildReplaceDraftTextTool(ctx)
   switch (ctx.stageId) {
     case 'character_design':
     case 'intro_design':
     case 'plot_design':
-      return [readSaved, ...readMaterial, writeWorkspace]
+      return [...readSaved, ...readMaterial, writeWorkspace]
 
     case 'plot_refine':
-      return [readSaved, ...readMaterial, writeWorkspace]
+      return [...readSaved, ...readMaterial, writeWorkspace]
 
     case 'outline':
     case 'draft_review':
-      // 大纲纲要 / 正文审阅：暂不提供读取关联素材
-      return [readSaved, writeWorkspace]
+      return [...readSaved, ...readMaterial, writeWorkspace]
 
     case 'draft':
-      // 正文编写普通模式：精确片段替换，不读取关联素材
-      return [readSaved, replaceDraftText]
+      return [...readSaved, ...readMaterial, replaceDraftText]
 
     case 'format_conversion':
-      return [readSaved, buildCopyStageToFormatTool(ctx), buildGlobalReplaceTool(ctx)]
+      return [
+        ...readWorkspaceTools(ctx, ALL_SHORT_STAGE_IDS),
+        buildCopyStageToFormatTool(ctx),
+        buildGlobalReplaceTool(ctx),
+      ]
 
     default:
-      return [readSaved]
+      return [...readSaved]
   }
 }

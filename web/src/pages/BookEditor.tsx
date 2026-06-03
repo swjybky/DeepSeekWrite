@@ -1,11 +1,14 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import {
+  readDeaiFlavorRemovalPromptTemplate,
   readExpertSectionWriterPromptTemplate,
   readWorkspacePromptTemplate,
+  resetDeaiFlavorRemovalPromptOverride,
   resetExpertSectionWriterPromptOverride,
   resetWorkspacePromptOverride,
+  saveDeaiFlavorRemovalPromptOverride,
   saveExpertSectionWriterPromptOverride,
   saveWorkspacePromptOverride,
   type Book,
@@ -30,16 +33,30 @@ import {
   getBookCover,
   pickFolder,
   exportDocx,
+  getStageReadAccess,
+  saveStageReadAccess,
+  type StageReadAccessConfig,
 } from '../bridge'
+import {
+  DraftStageEditor,
+  type DraftStageEditorMetrics,
+} from '../components/DraftStageEditor'
+import { StageReadAccessPicker } from '../components/StageReadAccessPicker'
 import { WorkspaceAiChat } from '../components/WorkspaceAiChat'
 import type { ApplyToStageEditorPayload } from '../pi/workspaceStageAgents'
 import { ExpertDraftAiChat } from '../workspaces/short/expertDraft/ExpertDraftAiChat'
 import { ExpertDraftEditor } from '../workspaces/short/expertDraft/ExpertDraftEditor'
 import { promptKindStyleLabel } from '../workspaces/short/expertDraft/prompts'
+import { runDeaiFlavorRemoval } from '../workspaces/short/deaiFlavorRemoval'
 import {
   runExpertDraftSectionWriter,
   type RunExpertDraftSectionWriterOptions,
 } from '../workspaces/short/expertDraft/sectionWriter'
+import {
+  getDefaultStageReadAccess,
+  isConfigurableReadStage,
+  resolveReadAccessForStage,
+} from '../workspaces/short/stageReadAccess'
 import './BookEditor.css'
 
 /** 空 stages 对象，用于非激活阶段的稳定引用，避免不必要的重渲染 */
@@ -58,7 +75,10 @@ const WORKSPACE_COL_R = 36
 const WORKSPACE_COL_SUM = 18 + 36 + 36
 /** 为中间编辑区保留的近似最小宽度（用于计算 AI 栏在当前窗口下最大能拉多宽） */
 const EDITOR_MIN_FOR_LAYOUT = 160
-type PromptEditorTarget = 'workspace-stage' | 'expert-section-writer'
+type PromptEditorTarget =
+  | 'workspace-stage'
+  | 'expert-section-writer'
+  | 'deai-flavor-removal'
 
 function usableWidthLessSplitter(viewportWidth: number): number {
   return Math.max(0, viewportWidth - WORKSPACE_SPLITTER_W)
@@ -94,15 +114,11 @@ function clampAiPanelWidth(width: number, viewportWidth: number): number {
 }
 
 /** 总字符长度与不含 Unicode 空白类字符的字数（换行不计入后者） */
-function stageTextCounts(text: string): { total: number; nonSpace: number } {
+function stageTextCounts(text: string): DraftStageEditorMetrics {
   return {
     total: text.length,
     nonSpace: text.replace(/\p{White_Space}/gu, '').length,
   }
-}
-
-function splitEditorLogicalLines(text: string): string[] {
-  return text.split('\n')
 }
 
 function combineExpertDraftSections(draft: ExpertDraft): string {
@@ -157,6 +173,9 @@ export function BookEditor() {
   /** 专家模式开关（仅世情文类型） */
   const [expertMode, setExpertMode] = useState(false)
   const [linkedMaterial, setLinkedMaterial] = useState<Material | null>(null)
+  const [stageReadAccess, setStageReadAccess] = useState<StageReadAccessConfig>(
+    () => getDefaultStageReadAccess(),
+  )
   const [materialSelectorOpen, setMaterialSelectorOpen] = useState(false)
   const [materialSummaries, setMaterialSummaries] = useState<MaterialSummary[]>([])
   const [materialSelectorLoading, setMaterialSelectorLoading] = useState(false)
@@ -183,8 +202,10 @@ export function BookEditor() {
   const activeStageRef = useRef<StageId>(activeStage)
   /** 当前激活阶段的 textarea ref，用于自动滚动 */
   const textareaRef = useRef<HTMLTextAreaElement | null>(null)
-  const lineNumberGutterRef = useRef<HTMLDivElement | null>(null)
-  const lineMeasureRef = useRef<HTMLDivElement | null>(null)
+  const [draftMetrics, setDraftMetrics] = useState<DraftStageEditorMetrics>({
+    total: 0,
+    nonSpace: 0,
+  })
   /** 流式 token 缓冲区；按阶段隔离，避免切换阶段后写入串台 */
   const tokenBuffersRef = useRef<Partial<Record<StageId, string>>>({})
   const tokenBufferRafRefs = useRef<Partial<Record<StageId, number>>>({})
@@ -194,6 +215,8 @@ export function BookEditor() {
   const expertDraftRef = useRef<ExpertDraft>(normalizeExpertDraft(null))
   const expertRunAbortRef = useRef<AbortController | null>(null)
   const expertRunPromiseRef = useRef<Promise<void> | null>(null)
+  const deaiAbortRef = useRef<AbortController | null>(null)
+  const [deaiRunning, setDeaiRunning] = useState(false)
   /** 正在流式输出的阶段禁用用户输入（设为只读） */
   const [streamingStages, setStreamingStages] = useState<Partial<Record<StageId, boolean>>>({})
   const streamingStagesRef = useRef<Partial<Record<StageId, boolean>>>({})
@@ -233,6 +256,7 @@ export function BookEditor() {
         if (rafId !== undefined) cancelAnimationFrame(rafId)
       })
       expertRunAbortRef.current?.abort()
+      deaiAbortRef.current?.abort()
     }
   }, [])
 
@@ -387,6 +411,30 @@ export function BookEditor() {
     return () => window.removeEventListener('resize', onResize)
   }, [])
 
+  useEffect(() => {
+    let cancelled = false
+    void getStageReadAccess().then((cfg) => {
+      if (!cancelled) setStageReadAccess(cfg)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  const handleStageReadAccessChange = useCallback(
+    async (next: StageReadAccessConfig) => {
+      setStageReadAccess(next)
+      try {
+        const saved = await saveStageReadAccess(next)
+        setStageReadAccess(saved)
+        setPromptReloadNonce((n) => n + 1)
+      } catch (e) {
+        setError(e instanceof Error ? e.message : '保存阶段读取配置失败')
+      }
+    },
+    [],
+  )
+
   const load = useCallback(async () => {
     if (!id) return
     setLoading(true)
@@ -412,6 +460,7 @@ export function BookEditor() {
       const normalizedExpertDraft = normalizeExpertDraft(b.expert_draft, true)
       stagesRef.current = normalized
       setStages(normalized)
+      setDraftMetrics(stageTextCounts(normalized.draft ?? ''))
       expertDraftRef.current = normalizedExpertDraft
       setExpertDraftState(normalizedExpertDraft)
       setExpertMode(false)
@@ -455,6 +504,27 @@ export function BookEditor() {
     }
   }, [book, coverData])
 
+  const handleDraftLiveChange = useCallback(
+    (value: string) => {
+      cancelTokenFlush('draft')
+      delete tokenBuffersRef.current.draft
+      stagesRef.current = { ...stagesRef.current, draft: value }
+    },
+    [cancelTokenFlush],
+  )
+
+  const handleDraftCommit = useCallback((value: string) => {
+    setStages((prev) => {
+      if ((prev.draft ?? '') === value) return prev
+      return { ...prev, draft: value }
+    })
+  }, [])
+
+  const flushDraftCommit = useCallback(() => {
+    const value = stagesRef.current.draft ?? ''
+    handleDraftCommit(value)
+  }, [handleDraftCommit])
+
   const handleSave = useCallback(async () => {
     if (!id || !book || saveInFlightRef.current) return
     saveInFlightRef.current = true
@@ -462,8 +532,8 @@ export function BookEditor() {
     setMessage(null)
     setError(null)
     try {
-      // 先刷新所有阶段的流式缓冲区，确保保存数据完整
       flushAllTokenBuffers()
+      flushDraftCommit()
       const merged = mergeStagePatchIntoAll(book.stages, stagesRef.current)
       const next = await saveBook(id, { stages: merged, expert_draft: expertDraft })
       if (!next) {
@@ -485,7 +555,7 @@ export function BookEditor() {
       saveInFlightRef.current = false
       setSaving(false)
     }
-  }, [id, book, expertDraft, flushAllTokenBuffers])
+  }, [id, book, expertDraft, flushAllTokenBuffers, flushDraftCommit])
 
   const startExpertWriting = useCallback(
     (
@@ -520,6 +590,10 @@ export function BookEditor() {
         getDraft: () => expertDraftRef.current,
         getWorkspaceStages: () => stagesRef.current,
         linkedMaterial,
+        draftReadAccess: resolveReadAccessForStage(stageReadAccess, 'draft') ?? {
+          workspace: [],
+          material: [],
+        },
         updateDraft: updateExpertDraft,
         signal: ac.signal,
         onError: setError,
@@ -546,7 +620,7 @@ export function BookEditor() {
       void run
       return true
     },
-    [book, currentPromptKind, linkedMaterial, updateExpertDraft],
+    [book, currentPromptKind, linkedMaterial, stageReadAccess, updateExpertDraft],
   )
 
   const stopExpertWriting = useCallback(() => {
@@ -600,80 +674,159 @@ export function BookEditor() {
   }, [id, book, handleSave])
 
   const handleStageBodyChange = (value: string) => {
-    // 清理当前阶段缓冲区，避免用户输入和流式写入冲突
     cancelTokenFlush(activeStage)
     delete tokenBuffersRef.current[activeStage]
     updateStage(activeStage, () => value)
   }
 
-  const handleStageTextareaScroll = () => {
-    const textarea = textareaRef.current
-    const gutter = lineNumberGutterRef.current
-    if (!textarea || !gutter) return
-    gutter.scrollTop = textarea.scrollTop
-  }
+  useEffect(() => {
+    flushDraftCommit()
+  }, [activeStage, flushDraftCommit])
+
+  useEffect(() => {
+    if (activeStage === 'draft') {
+      setDraftMetrics(stageTextCounts(stagesRef.current.draft ?? ''))
+    }
+  }, [activeStage])
+
+  const runDeaiOnText = useCallback(
+    async (input: {
+      text: string
+      stageId?: StageId
+      /** 为 true 时用阶段编辑区的流式缓冲（普通阶段）；专家模式小节为 false */
+      useStageStreaming?: boolean
+      applyToEditor: (payload: ApplyToStageEditorPayload) => void
+    }) => {
+      if (!book || deaiRunning) return
+      if (!input.text.trim()) {
+        setError('当前编辑框为空，无需去 AI 味。')
+        return
+      }
+      deaiAbortRef.current?.abort()
+      const ac = new AbortController()
+      deaiAbortRef.current = ac
+      setDeaiRunning(true)
+      const streamStage = input.useStageStreaming !== false ? input.stageId : undefined
+      if (streamStage) setEditorStreaming(streamStage, true)
+      setError(null)
+      try {
+        const result = await runDeaiFlavorRemoval({
+          bookId: book.id,
+          bookTitle: book.title,
+          promptKind: currentPromptKind,
+          stageBody: input.text,
+          stageId: input.stageId ?? 'draft',
+          allStages: stagesRef.current,
+          applyToEditor: input.applyToEditor,
+          signal: ac.signal,
+        })
+        if (!result.ok) {
+          setError(result.error)
+          return
+        }
+        if (!result.streamed && result.text) {
+          input.applyToEditor({ text: result.text, mode: 'replace' })
+        }
+        setMessage('已去除 AI 味')
+        window.setTimeout(() => setMessage(null), 2000)
+      } finally {
+        input.applyToEditor({ text: '', mode: 'streaming_end' })
+        if (streamStage) setEditorStreaming(streamStage, false)
+        if (deaiAbortRef.current === ac) deaiAbortRef.current = null
+        setDeaiRunning(false)
+      }
+    },
+    [book, currentPromptKind, deaiRunning, setEditorStreaming],
+  )
+
+  const handleActiveStageDeai = useCallback(() => {
+    void runDeaiOnText({
+      text: stagesRef.current[activeStage] ?? '',
+      stageId: activeStage,
+      applyToEditor: (payload) => applyToStageEditor(activeStage, payload),
+    })
+  }, [activeStage, runDeaiOnText, applyToStageEditor])
+
+  const handleExpertSectionDeai = useCallback(
+    (sectionId: string, field: 'body' | 'state') => {
+      const draft = expertDraftRef.current
+      const section = draft.sections.find((s) => s.id === sectionId)
+      if (!section) return
+      const text =
+        field === 'body'
+          ? section.body
+          : (
+              draft.character_states.find((s) => s.section_id === sectionId)
+                ?.body ?? ''
+            )
+      const streamAccRef = { current: text }
+      const applyExpertField = (body: string) => {
+        updateExpertDraft((current) => {
+          if (field === 'body') {
+            return {
+              ...current,
+              sections: current.sections.map((s) =>
+                s.id === sectionId ? { ...s, body } : s,
+              ),
+            }
+          }
+          const exists = current.character_states.some(
+            (s) => s.section_id === sectionId,
+          )
+          return {
+            ...current,
+            character_states: exists
+              ? current.character_states.map((s) =>
+                  s.section_id === sectionId ? { ...s, body } : s,
+                )
+              : [
+                  ...current.character_states,
+                  {
+                    section_id: sectionId,
+                    title: `${section.title}人物状态`,
+                    body,
+                  },
+                ],
+          }
+        })
+      }
+      void runDeaiOnText({
+        text,
+        useStageStreaming: false,
+        applyToEditor: (payload) => {
+          if (payload.mode === 'replace') {
+            if (payload.text === '') {
+              streamAccRef.current = ''
+              applyExpertField('')
+              return
+            }
+            streamAccRef.current = payload.text
+            applyExpertField(payload.text.trim())
+            return
+          }
+          if (payload.mode === 'append_token') {
+            if (!payload.text) return
+            streamAccRef.current += payload.text
+            applyExpertField(streamAccRef.current)
+            return
+          }
+          if (payload.mode === 'streaming_end') return
+          if (payload.mode === 'append') {
+            const trimmed = payload.text.trim()
+            if (!trimmed) return
+            streamAccRef.current =
+              streamAccRef.current.length === 0
+                ? trimmed
+                : `${streamAccRef.current}\n\n${trimmed}`
+            applyExpertField(streamAccRef.current)
+          }
+        },
+      })
+    },
+    [runDeaiOnText, updateExpertDraft],
+  )
 
   const activeStageBody = stages[activeStage] ?? ''
-
-  useLayoutEffect(() => {
-    if (activeStage !== 'draft') return
-    const textarea = textareaRef.current
-    const gutter = lineNumberGutterRef.current
-    const measure = lineMeasureRef.current
-    if (!textarea || !gutter || !measure) return
-
-    let rafId = 0
-    const syncLineNumberHeights = () => {
-      const style = window.getComputedStyle(textarea)
-      const paddingLeft = Number.parseFloat(style.paddingLeft) || 0
-      const paddingRight = Number.parseFloat(style.paddingRight) || 0
-      const contentWidth = Math.max(
-        0,
-        textarea.clientWidth - paddingLeft - paddingRight,
-      )
-
-      measure.style.width = `${contentWidth}px`
-      measure.style.fontFamily = style.fontFamily
-      measure.style.fontSize = style.fontSize
-      measure.style.fontStyle = style.fontStyle
-      measure.style.fontWeight = style.fontWeight
-      measure.style.letterSpacing = style.letterSpacing
-      measure.style.lineHeight = style.lineHeight
-      measure.style.textTransform = style.textTransform
-      measure.style.wordSpacing = style.wordSpacing
-      measure.style.tabSize = style.tabSize
-
-      const fallbackHeight =
-        Number.parseFloat(style.lineHeight) ||
-        Number.parseFloat(style.fontSize) * 1.55 ||
-        22
-      const measureRows = Array.from(measure.children) as HTMLElement[]
-      const gutterRows = Array.from(
-        gutter.querySelectorAll<HTMLElement>('.workspace-line-number'),
-      )
-      gutterRows.forEach((row, index) => {
-        const measured = measureRows[index]?.offsetHeight ?? fallbackHeight
-        row.style.height = `${Math.max(fallbackHeight, measured)}px`
-      })
-      gutter.scrollTop = textarea.scrollTop
-    }
-
-    const scheduleSync = () => {
-      cancelAnimationFrame(rafId)
-      rafId = requestAnimationFrame(syncLineNumberHeights)
-    }
-
-    scheduleSync()
-    const resizeObserver = new ResizeObserver(scheduleSync)
-    resizeObserver.observe(textarea)
-    window.addEventListener('resize', scheduleSync)
-
-    return () => {
-      cancelAnimationFrame(rafId)
-      resizeObserver.disconnect()
-      window.removeEventListener('resize', scheduleSync)
-    }
-  }, [activeStage, activeStageBody, aiPanelWidth])
 
   if (!id) {
     return (
@@ -748,7 +901,6 @@ export function BookEditor() {
   const promptKind: PromptKind = currentPromptKind
   const stageBody = activeStageBody
   const expertDraftActive = expertMode && activeStage === 'draft'
-  const draftLogicalLines = activeStage === 'draft' ? splitEditorLogicalLines(stageBody) : []
 
   const openPromptEditor = async () => {
     const start = Date.now()
@@ -790,12 +942,34 @@ export function BookEditor() {
     }
   }
 
+  const openDeaiPromptEditor = async () => {
+    const start = Date.now()
+    const minDelay = 150
+    setPromptEditorLoading(true)
+    try {
+      const t = await readDeaiFlavorRemovalPromptTemplate(promptKind)
+      const elapsed = Date.now() - start
+      if (elapsed < minDelay) {
+        await new Promise((r) => setTimeout(r, minDelay - elapsed))
+      }
+      setPromptDraft(t)
+      setPromptEditorTarget('deai-flavor-removal')
+      setPromptEditorOpen(true)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : '无法加载去 AI 味提示词模板')
+    } finally {
+      setPromptEditorLoading(false)
+    }
+  }
+
   const savePromptTemplateEdit = async () => {
     setPromptEditorSaving(true)
     setError(null)
     try {
       if (promptEditorTarget === 'expert-section-writer') {
         await saveExpertSectionWriterPromptOverride(promptKind, promptDraft)
+      } else if (promptEditorTarget === 'deai-flavor-removal') {
+        await saveDeaiFlavorRemovalPromptOverride(promptKind, promptDraft)
       } else {
         await saveWorkspacePromptOverride(promptKind, activeStage, promptDraft)
         setPromptReloadNonce((n) => n + 1)
@@ -853,11 +1027,16 @@ export function BookEditor() {
               await resetExpertSectionWriterPromptOverride(promptKind)
               return readExpertSectionWriterPromptTemplate(promptKind)
             })()
-          : await (async () => {
-              await resetWorkspacePromptOverride(promptKind, activeStage)
-              setPromptReloadNonce((n) => n + 1)
-              return readWorkspacePromptTemplate(promptKind, activeStage)
-            })()
+          : promptEditorTarget === 'deai-flavor-removal'
+            ? await (async () => {
+                await resetDeaiFlavorRemovalPromptOverride(promptKind)
+                return readDeaiFlavorRemovalPromptTemplate(promptKind)
+              })()
+            : await (async () => {
+                await resetWorkspacePromptOverride(promptKind, activeStage)
+                setPromptReloadNonce((n) => n + 1)
+                return readWorkspacePromptTemplate(promptKind, activeStage)
+              })()
       setPromptDraft(t)
     } catch (e) {
       setError(e instanceof Error ? e.message : '重置提示词失败')
@@ -867,13 +1046,18 @@ export function BookEditor() {
   }
 
   const { total: stageCharTotal, nonSpace: stageCharNonSpace } =
-    stageTextCounts(stageBody)
+    activeStage === 'draft'
+      ? draftMetrics
+      : stageTextCounts(stageBody)
   const promptEditorIsExpert = promptEditorTarget === 'expert-section-writer'
-  const promptEditorTitle = promptEditorIsExpert
-    ? `专家模式 · 后台小节编写智能体 · ${promptKindStyleLabel(promptKind)}`
-    : `短篇 · ${book?.categories.join('、') || '未分类'} · ${
-        railStages.find((s) => s.id === activeStage)?.label
-      }`
+  const promptEditorIsDeai = promptEditorTarget === 'deai-flavor-removal'
+  const promptEditorTitle = promptEditorIsDeai
+    ? `去 AI 味 · ${promptKindStyleLabel(promptKind)}`
+    : promptEditorIsExpert
+      ? `专家模式 · 后台小节编写智能体 · ${promptKindStyleLabel(promptKind)}`
+      : `短篇 · ${book?.categories.join('、') || '未分类'} · ${
+          railStages.find((s) => s.id === activeStage)?.label
+        }`
 
   return (
     <div className="editor-page editor-page--workspace">
@@ -975,6 +1159,17 @@ export function BookEditor() {
           </button>
           <button
             type="button"
+            className="btn-deai-prompt-edit"
+            onClick={() => void openDeaiPromptEditor()}
+            disabled={promptEditorLoading}
+            title="编辑去 AI 味提示词模板"
+          >
+            {promptEditorLoading && promptEditorTarget === 'deai-flavor-removal'
+              ? '加载…'
+              : 'AI味去除提示词'}
+          </button>
+          <button
+            type="button"
             className="btn-save"
             onClick={() => void handleSave()}
             disabled={saving}
@@ -998,7 +1193,14 @@ export function BookEditor() {
         <nav className="workspace-rail" aria-label="写作阶段">
           <ul className="workspace-rail-list">
             {railStages.map((s) => (
-              <li key={s.id}>
+              <li
+                key={s.id}
+                className={
+                  isConfigurableReadStage(s.id)
+                    ? 'workspace-rail-row'
+                    : undefined
+                }
+              >
                 <button
                   type="button"
                   className={
@@ -1010,6 +1212,13 @@ export function BookEditor() {
                 >
                   {s.label}
                 </button>
+                {isConfigurableReadStage(s.id) ? (
+                  <StageReadAccessPicker
+                    stageId={s.id}
+                    config={stageReadAccess}
+                    onChange={(next) => void handleStageReadAccessChange(next)}
+                  />
+                ) : null}
               </li>
             ))}
           </ul>
@@ -1025,6 +1234,13 @@ export function BookEditor() {
               writeToDraftStage={writeExpertDraftToStage}
               editPrompt={openExpertPromptEditor}
               promptEditorLoading={promptEditorLoading}
+              onDeaiSectionBody={(sectionId) =>
+                handleExpertSectionDeai(sectionId, 'body')
+              }
+              onDeaiCharacterState={(sectionId) =>
+                handleExpertSectionDeai(sectionId, 'state')
+              }
+              deaiBusy={deaiRunning}
             />
           ) : (
             <>
@@ -1032,6 +1248,21 @@ export function BookEditor() {
                 <label className="workspace-stage-label" htmlFor="stage-body">
                   {railStages.find((s) => s.id === activeStage)?.label}
                 </label>
+                <button
+                  type="button"
+                  className="btn-deai-flavor"
+                  title="用 AI 去除当前编辑框内容的 AI 腔"
+                  disabled={
+                    deaiRunning ||
+                    Boolean(streamingStages[activeStage]) ||
+                    (activeStage === 'draft'
+                      ? draftMetrics.nonSpace === 0
+                      : !stageBody.trim())
+                  }
+                  onClick={() => void handleActiveStageDeai()}
+                >
+                  {deaiRunning ? '处理中…' : '去除AI味道'}
+                </button>
                 {['draft', 'draft_review', 'format_conversion'].includes(activeStage) ? (
                   <button
                     type="button"
@@ -1057,41 +1288,15 @@ export function BookEditor() {
                 </span>
               </div>
               {activeStage === 'draft' ? (
-                <div className="workspace-textarea-shell workspace-textarea-shell--line-numbers">
-                  <div
-                    ref={lineNumberGutterRef}
-                    className="workspace-line-number-gutter"
-                    aria-hidden="true"
-                  >
-                    {draftLogicalLines.map((_line, index) => (
-                      <div className="workspace-line-number" key={index}>
-                        {index + 1}
-                      </div>
-                    ))}
-                  </div>
-                  <textarea
-                    id="stage-body"
-                    ref={textareaRef}
-                    className="editor-body workspace-textarea workspace-textarea--with-line-numbers"
-                    value={stageBody}
-                    onChange={(e) => handleStageBodyChange(e.target.value)}
-                    onScroll={handleStageTextareaScroll}
-                    placeholder="在此编辑当前阶段内容…"
-                    spellCheck={false}
-                    readOnly={Boolean(streamingStages[activeStage])}
-                  />
-                  <div
-                    ref={lineMeasureRef}
-                    className="workspace-line-measure"
-                    aria-hidden="true"
-                  >
-                    {draftLogicalLines.map((line, index) => (
-                      <div className="workspace-line-measure-row" key={index}>
-                        {line || '\u00a0'}
-                      </div>
-                    ))}
-                  </div>
-                </div>
+                <DraftStageEditor
+                  value={stages.draft ?? ''}
+                  onLiveChange={handleDraftLiveChange}
+                  onCommit={handleDraftCommit}
+                  onMetrics={setDraftMetrics}
+                  readOnly={Boolean(streamingStages.draft)}
+                  textareaRef={textareaRef}
+                  resizeKey={aiPanelWidth}
+                />
               ) : (
                 <textarea
                   id="stage-body"
@@ -1312,6 +1517,7 @@ export function BookEditor() {
                       // 非激活阶段使用 stable 空对象引用，避免 allStages 变化触发重渲染
                       allStages={isActive ? stages : EMPTY_STAGES}
                       linkedMaterial={isActive ? linkedMaterial : null}
+                      stageReadAccess={stageReadAccess}
                       includePiArtifacts={WORKSPACE_AI_INCLUDE_PI_ARTIFACTS}
                       promptRevision={isActive ? promptReloadNonce : 0}
                       applyToStageEditor={(payload) =>
@@ -1384,17 +1590,23 @@ export function BookEditor() {
                 </button>
               </div>
               <p className="workspace-prompt-editor-hint muted">
-                {promptEditorIsExpert
-                  ? '专家模式占位写法示例（各占一行）：'
-                  : '模板占位写法示例（各占一行）：'}
+                {promptEditorIsDeai
+                  ? '去 AI 味占位写法示例（各占一行）：'
+                  : promptEditorIsExpert
+                    ? '专家模式占位写法示例（各占一行）：'
+                    : '模板占位写法示例（各占一行）：'}
                 <span className="workspace-prompt-editor-code">
-                  {promptEditorIsExpert
-                    ? '{{BOOK_TITLE}} {{STYLE}}'
-                    : '{{BOOK_TITLE}} {{BOOK_LINE}} {{OTHER_STAGES_EXCERPT}} {{STAGE_BODY}}'}
+                  {promptEditorIsDeai
+                    ? '{{BOOK_TITLE}} {{BOOK_LINE}} {{STAGE_BODY}}'
+                    : promptEditorIsExpert
+                      ? '{{BOOK_TITLE}} {{STYLE}}'
+                      : '{{BOOK_TITLE}} {{BOOK_LINE}} {{OTHER_STAGES_EXCERPT}} {{STAGE_BODY}}'}
                 </span>
-                {promptEditorIsExpert
-                  ? ' 。保存后作用于后台小节编写智能体。'
-                  : ' 。保存后立即作用于当前工作台阶段。'}
+                {promptEditorIsDeai
+                  ? ' 。保存后作用于各阶段「去除AI味道」按钮。'
+                  : promptEditorIsExpert
+                    ? ' 。保存后作用于后台小节编写智能体。'
+                    : ' 。保存后立即作用于当前工作台阶段。'}
               </p>
               <textarea
                 className="workspace-prompt-editor-area"

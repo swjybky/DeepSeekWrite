@@ -8,6 +8,9 @@ type Props = {
   writeToDraftStage: () => void
   editPrompt: () => void
   promptEditorLoading?: boolean
+  onDeaiSectionBody?: (sectionId: string) => void
+  onDeaiCharacterState?: (sectionId: string) => void
+  deaiBusy?: boolean
 }
 
 function textCounts(text: string): { total: number; nonSpace: number } {
@@ -62,7 +65,11 @@ export function ExpertDraftEditor({
   writeToDraftStage,
   editPrompt,
   promptEditorLoading = false,
+  onDeaiSectionBody,
+  onDeaiCharacterState,
+  deaiBusy = false,
 }: Props) {
+  const deaiDisabled = draft.running || deaiBusy
   const activeId = draft.active_section_id
   const totalBody = draft.sections.map((s) => s.body).join('\n\n')
   const counts = textCounts(totalBody)
@@ -183,6 +190,17 @@ export function ExpertDraftEditor({
                     }}
                     disabled={draft.running}
                   />
+                  {onDeaiSectionBody ? (
+                    <button
+                      type="button"
+                      className="btn-deai-flavor btn-deai-flavor--compact"
+                      title="去除本节正文的 AI 腔"
+                      disabled={deaiDisabled || !section.body.trim()}
+                      onClick={() => onDeaiSectionBody(section.id)}
+                    >
+                      {deaiBusy ? '处理中…' : '去除AI味道'}
+                    </button>
+                  ) : null}
                   <span className="expert-draft-count muted">
                     {sectionCounts.nonSpace.toLocaleString('zh-CN')} 字
                   </span>
@@ -218,6 +236,7 @@ export function ExpertDraftEditor({
                   }}
                   placeholder="正文内容…"
                   spellCheck={false}
+                  readOnly={deaiDisabled}
                 />
               </article>
             )
@@ -264,6 +283,17 @@ export function ExpertDraftEditor({
                     }}
                     disabled={draft.running}
                   />
+                  {onDeaiCharacterState ? (
+                    <button
+                      type="button"
+                      className="btn-deai-flavor btn-deai-flavor--compact"
+                      title="去除本框人物状态的 AI 腔"
+                      disabled={deaiDisabled || !state.body.trim()}
+                      onClick={() => onDeaiCharacterState(section.id)}
+                    >
+                      {deaiBusy ? '处理中…' : '去除AI味道'}
+                    </button>
+                  ) : null}
                 </div>
                 <input
                   className="expert-draft-word-input expert-draft-word-input--placeholder"
@@ -288,6 +318,7 @@ export function ExpertDraftEditor({
                   }}
                   placeholder="人物状态…"
                   spellCheck={false}
+                  readOnly={deaiDisabled}
                 />
               </article>
             )

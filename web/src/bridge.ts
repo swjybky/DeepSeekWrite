@@ -21,6 +21,12 @@ import {
 
 import { getEmbeddedPromptTemplate } from './prompt/embeddedDefaults'
 import { renderPromptFromTemplateRaw } from './prompt/renderTemplate'
+import {
+  normalizeStageReadAccess,
+  type StageReadAccessConfig,
+} from './workspaces/short/stageReadAccess'
+
+export type { StageReadAccessConfig } from './workspaces/short/stageReadAccess'
 
 export type { ShortStageId, PromptKind }
 export {
@@ -374,6 +380,9 @@ declare global {
         /** 上次选定的工作文件夹（持久化在应用 .data/preferences.json） */
         get_workspace_root(): Promise<string | null>
         set_workspace_root(path: string | null): Promise<void>
+        /** 全局创作空间阶段可读配置 */
+        get_stage_read_access(): Promise<Record<string, unknown>>
+        set_stage_read_access(config: Record<string, unknown>): Promise<void>
         /** app/.env 中的默认模型与 Key；未配置完整时返回 null */
         get_ai_defaults(): Promise<AiModelDefaults | null>
 
@@ -476,6 +485,9 @@ const MOCK_STORAGE_KEY = 'write_claw_dev_books'
 /** 书架「工作文件夹」持久化键（浏览器 / pywebview 同源存储） */
 export const WORKSPACE_ROOT_STORAGE_KEY = 'write_claw_workspace_root'
 
+/** 全局阶段读取配置（浏览器开发模式 localStorage） */
+export const STAGE_READ_ACCESS_STORAGE_KEY = 'write-claw:stage_read_access'
+
 /** 与 main.tsx boot 一致：桌面壳加载的打包页（含本机 HTTP + `?pywebview=1`） */
 export function isPywebviewDesktopBundle(): boolean {
   if (typeof window === 'undefined') return false
@@ -555,6 +567,55 @@ export async function persistWorkspaceRoot(path: string | null): Promise<void> {
   if (api?.set_workspace_root) {
     await api.set_workspace_root(path)
   }
+}
+
+function getStoredStageReadAccessRaw(): unknown {
+  try {
+    const raw = localStorage.getItem(STAGE_READ_ACCESS_STORAGE_KEY)
+    if (!raw?.trim()) return null
+    return JSON.parse(raw) as unknown
+  } catch {
+    return null
+  }
+}
+
+function setStoredStageReadAccess(config: StageReadAccessConfig): void {
+  try {
+    localStorage.setItem(STAGE_READ_ACCESS_STORAGE_KEY, JSON.stringify(config))
+  } catch {
+    /* ignore */
+  }
+}
+
+/** 读取全局阶段可读配置；桌面端以 preferences.json 为准。 */
+export async function getStageReadAccess(): Promise<StageReadAccessConfig> {
+  const api = await getBridgeApi()
+  if (api?.get_stage_read_access) {
+    try {
+      const fromDisk = await api.get_stage_read_access()
+      const normalized = normalizeStageReadAccess(fromDisk)
+      setStoredStageReadAccess(normalized)
+      return normalized
+    } catch {
+      /* fall through */
+    }
+  }
+  return normalizeStageReadAccess(getStoredStageReadAccessRaw())
+}
+
+/** 保存全局阶段可读配置，同步 localStorage 与桌面 preferences。 */
+export async function saveStageReadAccess(
+  config: StageReadAccessConfig,
+): Promise<StageReadAccessConfig> {
+  const normalized = normalizeStageReadAccess(config)
+  setStoredStageReadAccess(normalized)
+  const api = await getBridgeApi()
+  if (api?.set_stage_read_access) {
+    await api.set_stage_read_access(
+      normalized as unknown as Record<string, unknown>,
+    )
+  }
+  return normalized
 }
 
 function loadMock(): Map<string, Book> {
@@ -1082,6 +1143,7 @@ export async function resetMaterialPromptOverride(
 
 const PROMPT_TEMPLATE_LS_PREFIX = 'write_claw_prompt_template_override:'
 export const EXPERT_SECTION_WRITER_PROMPT_ID = 'expert_section_writer'
+export const DEAI_FLAVOR_REMOVAL_PROMPT_ID = 'deai_flavor_removal'
 
 function localPromptLsKey(promptKind: string, stage: string): string {
   return PROMPT_TEMPLATE_LS_PREFIX + `${promptKind}:${stage}`
@@ -1145,6 +1207,72 @@ export async function resetExpertSectionWriterPromptOverride(
   }
   try {
     const k = localPromptLsKey(promptKind, EXPERT_SECTION_WRITER_PROMPT_ID)
+    const had = localStorage.getItem(k) != null
+    localStorage.removeItem(k)
+    return had
+  } catch {
+    return false
+  }
+}
+
+export async function readDeaiFlavorRemovalPromptTemplate(
+  promptKind: PromptKind,
+): Promise<string> {
+  const api = await getBridgeApi()
+  if (api?.read_expert_prompt_template) {
+    const t = await api.read_expert_prompt_template(
+      promptKind,
+      DEAI_FLAVOR_REMOVAL_PROMPT_ID,
+    )
+    return t.endsWith('\n') ? t.slice(0, -1) : t
+  }
+  try {
+    const ls = localStorage.getItem(
+      localPromptLsKey(promptKind, DEAI_FLAVOR_REMOVAL_PROMPT_ID),
+    )
+    if (ls != null && ls.trim() !== '')
+      return ls.endsWith('\n') ? ls.slice(0, -1) : ls
+  } catch {
+    /* ignore */
+  }
+  return getEmbeddedPromptTemplate(promptKind, DEAI_FLAVOR_REMOVAL_PROMPT_ID)
+}
+
+export async function saveDeaiFlavorRemovalPromptOverride(
+  promptKind: PromptKind,
+  body: string,
+): Promise<void> {
+  const api = await getBridgeApi()
+  if (api?.save_expert_prompt_override) {
+    await api.save_expert_prompt_override(
+      promptKind,
+      DEAI_FLAVOR_REMOVAL_PROMPT_ID,
+      body,
+    )
+    return
+  }
+  try {
+    localStorage.setItem(
+      localPromptLsKey(promptKind, DEAI_FLAVOR_REMOVAL_PROMPT_ID),
+      body,
+    )
+  } catch {
+    console.warn('[涌泉] 无法保存去 AI 味提示词覆盖：无桌面桥接且无可用 localStorage')
+  }
+}
+
+export async function resetDeaiFlavorRemovalPromptOverride(
+  promptKind: PromptKind,
+): Promise<boolean> {
+  const api = await getBridgeApi()
+  if (api?.reset_expert_prompt_override) {
+    return api.reset_expert_prompt_override(
+      promptKind,
+      DEAI_FLAVOR_REMOVAL_PROMPT_ID,
+    )
+  }
+  try {
+    const k = localPromptLsKey(promptKind, DEAI_FLAVOR_REMOVAL_PROMPT_ID)
     const had = localStorage.getItem(k) != null
     localStorage.removeItem(k)
     return had

@@ -181,6 +181,21 @@ def write_saved_workspace_root(path: str | None) -> None:
     save_preferences_atomic(prefs)
 
 
+def read_stage_read_access() -> dict[str, Any]:
+    """全局创作空间阶段可读配置（各阶段 workspace/material 列表）。"""
+    raw = load_preferences().get("stage_read_access")
+    return raw if isinstance(raw, dict) else {}
+
+
+def write_stage_read_access(config: dict[str, Any]) -> None:
+    prefs = load_preferences()
+    if config:
+        prefs["stage_read_access"] = config
+    else:
+        prefs.pop("stage_read_access", None)
+    save_preferences_atomic(prefs)
+
+
 def _sanitize_material_folder_name(title: str) -> str:
     """清理素材文件夹名称"""
     t = (title or "").strip() or "未命名素材"

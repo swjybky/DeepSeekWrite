@@ -10,7 +10,11 @@ import {
   type PromptKind,
   type StageId,
 } from '../../../bridge'
-import { buildReadLinkedMaterialContentTool } from '../stageAgents'
+import {
+  buildReadLinkedMaterialContentTool,
+  buildReadWorkspaceContentTool,
+} from '../stageAgents'
+import type { StageReadAccessEntry } from '../stageReadAccess'
 import {
   resolveWorkspaceProviderApiKey,
 } from '../../../pi/resolveWorkspaceChatModel'
@@ -35,8 +39,10 @@ export type RunExpertDraftSectionWriterOptions = {
   sectionIds: string[]
   getDraft: () => ExpertDraft
   getWorkspaceStages: () => Partial<Record<StageId, string>>
-  /** 书籍关联的素材库；子智能体可读取正文片段素材（draft_excerpt） */
+  /** 书籍关联的素材库 */
   linkedMaterial?: Material | null
+  /** 正文编写阶段的全局可读配置 */
+  draftReadAccess: StageReadAccessEntry
   updateDraft: ExpertDraftUpdater
   signal?: AbortSignal
   onError?: (message: string) => void
@@ -147,6 +153,7 @@ function buildSectionWriterTools(input: {
   sectionTitle: string
   allStages: Partial<Record<StageId, string>>
   linkedMaterial?: Material | null
+  draftReadAccess: StageReadAccessEntry
   updateDraft: ExpertDraftUpdater
   onSectionBodyWritten?: (text: string) => void
   onCharacterStateWritten?: (text: string) => void
@@ -157,39 +164,32 @@ function buildSectionWriterTools(input: {
     sectionTitle,
     allStages,
     linkedMaterial,
+    draftReadAccess,
     updateDraft,
     onSectionBodyWritten,
     onCharacterStateWritten,
   } = input
-  const readOutlineContent = defineTool({
-    name: 'read_outline_content',
-    label: '读取大纲',
-    description:
-      '读取本书「大纲纲要」阶段已保存的完整内容。此工具没有其它用途，不读取人物设计、导语设计、剧情设计、剧情细化或正文。',
-    parameters: Type.Object({}),
-    execute: async () => {
-      const outline = (allStages.outline ?? '').trim()
-      const header = `书名：《${bookTitle}》\n【大纲纲要】（outline）`
-      if (!outline) {
-        return textBlock(`${header}\n\n大纲暂无已保存正文，请先保存书籍。`)
-      }
-      return textBlock(`${header}\n\n${outline}`)
-    },
-  })
-  const readDraftExcerptMaterial = buildReadLinkedMaterialContentTool(
-    {
-      bookTitle,
-      stageId: 'draft',
-      stageBody: '',
-      allStages,
-      linkedMaterial: linkedMaterial ?? null,
-    },
-    ['draft_excerpt'],
-  )
+  const toolCtx = {
+    bookTitle,
+    stageId: 'draft' as const,
+    stageBody: '',
+    allStages,
+    linkedMaterial: linkedMaterial ?? null,
+  }
+  const readTools: AgentTool[] = []
+  if (draftReadAccess.workspace.length > 0) {
+    readTools.push(
+      buildReadWorkspaceContentTool(toolCtx, draftReadAccess.workspace),
+    )
+  }
+  if (draftReadAccess.material.length > 0) {
+    readTools.push(
+      buildReadLinkedMaterialContentTool(toolCtx, draftReadAccess.material),
+    )
+  }
 
   return [
-    readOutlineContent,
-    readDraftExcerptMaterial,
+    ...readTools,
     defineTool({
       name: 'write_section_body',
       label: '写入正文',
@@ -303,6 +303,7 @@ export async function runExpertDraftSectionWriter(
             sectionTitle: section.title,
             allStages: opts.getWorkspaceStages(),
             linkedMaterial: opts.linkedMaterial,
+            draftReadAccess: opts.draftReadAccess,
             updateDraft: opts.updateDraft,
             onSectionBodyWritten: (text) => {
               sectionBodyWritten = text
