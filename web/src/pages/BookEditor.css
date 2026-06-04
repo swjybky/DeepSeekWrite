@@ -119,6 +119,29 @@
   cursor: not-allowed;
 }
 
+.btn-book-status {
+  padding: 0.45rem 0.8rem;
+  border: 1px solid color-mix(in oklab, var(--accent) 45%, var(--border));
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.btn-book-status:hover:not(:disabled) {
+  background: color-mix(in oklab, var(--accent) 9%, var(--surface));
+}
+
+.btn-book-status--completed {
+  border-color: color-mix(in oklab, var(--ink-faint) 45%, var(--border));
+  color: var(--ink-soft);
+}
+
+.btn-book-status:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
 .editor-toast {
   font-size: 0.875rem;
   margin: 0 1rem 0.5rem;
@@ -485,6 +508,26 @@
   gap: 0.35rem;
 }
 
+.workspace-tree-books {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
+.workspace-tree-book-node {
+  min-width: 0;
+}
+
+.workspace-tree-book-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.15rem;
+  padding: 0.25rem 0.25rem 0.15rem;
+}
+
 .workspace-tree-root {
   display: flex;
   align-items: flex-start;
@@ -531,10 +574,35 @@
   border: none;
   border-radius: var(--radius-sm);
   background: transparent;
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
 }
 
 .workspace-tree-book:hover {
   background: var(--accent-soft);
+}
+
+.workspace-tree-book--active {
+  color: var(--accent);
+}
+
+.workspace-tree-book-title,
+.workspace-tree-book-meta {
+  display: block;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workspace-tree-book-meta {
+  font-family: var(--font-sans);
+  font-size: 0.6875rem;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  color: var(--ink-faint);
 }
 
 .workspace-tree-title-input {
@@ -552,6 +620,11 @@
   display: flex;
   flex-direction: column;
   gap: 0.1rem;
+}
+
+.workspace-tree-book-node .workspace-tree-stages {
+  padding-top: 0.05rem;
+  padding-left: 1.85rem;
 }
 
 .workspace-tree-stage {
@@ -590,6 +663,12 @@
 
 .workspace-tree-stage--active .workspace-tree-stage-dot {
   background: var(--accent);
+}
+
+.workspace-tree-empty {
+  margin: 0;
+  padding: 0.55rem 0.45rem;
+  font-size: 0.8125rem;
 }
 
 .workspace-ai-header {

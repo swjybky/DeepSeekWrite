@@ -817,9 +817,13 @@ export function Home() {
   }, [materialParentGenre])
 
   // ==================== 渲染 ====================
+  const visibleBooks = useMemo(
+    () => books.filter((book) => book.status !== 'completed'),
+    [books],
+  )
   const bookCardItems = useMemo(
-    () => books.map((b) => bookToCardItem(b, bookCovers[b.id])),
-    [books, bookCovers],
+    () => visibleBooks.map((b) => bookToCardItem(b, bookCovers[b.id])),
+    [visibleBooks, bookCovers],
   )
   const materialCardItems = useMemo(() => materials.map(materialToCardItem), [materials])
   const skillCardItems = useMemo(() => skills.map(skillToCardItem), [skills])
@@ -900,7 +904,7 @@ export function Home() {
             </div>
             <div className="card-header-content">
               <h2 className="card-header-title">创作空间</h2>
-              <span className="card-header-count">{books.length} 本书</span>
+              <span className="card-header-count">{visibleBooks.length} 本书</span>
             </div>
             <div className="card-header-actions">
               <Link
@@ -990,7 +994,7 @@ export function Home() {
                 <div className="spinner" />
                 <span>加载中…</span>
               </div>
-            ) : books.length === 0 ? (
+            ) : visibleBooks.length === 0 ? (
               <div className="empty-state">
                 <div className="empty-icon">
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">

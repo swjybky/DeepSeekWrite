@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
-import { Link, useParams } from 'react-router-dom'
+import { Link, useNavigate, useParams } from 'react-router-dom'
 import {
   type Book,
+  type BookStatus,
+  type BookSummary,
   type ExpertDraft,
   type StageId,
   defaultExpertDraft,
@@ -13,6 +15,7 @@ import {
   resolveWorkspaceBookGenre,
   getBook,
   isWorkspaceShortBook,
+  listBooks,
   saveBook,
   listMaterials,
   getMaterial,
@@ -49,6 +52,11 @@ import './BookEditor.css'
 
 /** 空 stages 对象，用于非激活阶段的稳定引用，避免不必要的重渲染 */
 const EMPTY_STAGES: Record<StageId, string> = {} as Record<StageId, string>
+
+type SaveCurrentBookOptions = {
+  status?: BookStatus
+  successMessage?: string | null
+}
 
 const AI_PANEL_WIDTH_KEY = 'write-claw:workspace-ai-width'
 const AI_PANEL_MIN = 240
@@ -134,7 +142,9 @@ function readStoredAiWidth(): number {
 
 export function BookEditor() {
   const { id } = useParams<{ id: string }>()
+  const navigate = useNavigate()
   const [book, setBook] = useState<Book | null>(null)
+  const [workspaceBooks, setWorkspaceBooks] = useState<BookSummary[]>([])
   const [stages, setStages] = useState<Record<StageId, string>>(() =>
     normalizeStagesForWorkspaceBook({ book_type: 'short', categories: ['世情'] }, {}),
   )
@@ -188,6 +198,10 @@ export function BookEditor() {
   const tokenBufferRafRefs = useRef<Partial<Record<StageId, number>>>({})
   /** 最新 stages 的 ref，用于流式写入时读取当前值 */
   const stagesRef = useRef<Record<StageId, string>>(EMPTY_STAGES)
+  const pendingInitialStageRef = useRef<{
+    bookId: string
+    stageId: StageId
+  } | null>(null)
   /** 最新专家模式正文结构，用于后台小节智能体读取和写入 */
   const expertDraftRef = useRef<ExpertDraft>(normalizeExpertDraft(null))
   const expertRunAbortRef = useRef<AbortController | null>(null)
@@ -380,14 +394,55 @@ export function BookEditor() {
     return () => window.removeEventListener('resize', onResize)
   }, [])
 
+  const syncBookEditorState = useCallback(
+    (next: Book, resetExpertRuntime = false) => {
+      setBook(next)
+      const normalizedStages = normalizeStagesForWorkspaceBook(next, next.stages)
+      stagesRef.current = normalizedStages
+      setStages(normalizedStages)
+      setDraftMetrics(stageTextCounts(normalizedStages.draft ?? ''))
+      const normalizedExpertDraft = normalizeExpertDraft(
+        next.expert_draft,
+        resetExpertRuntime,
+      )
+      expertDraftRef.current = normalizedExpertDraft
+      setExpertDraftState(normalizedExpertDraft)
+    },
+    [],
+  )
+
+  const refreshWorkspaceBooks = useCallback(async () => {
+    const list = await listBooks()
+    setWorkspaceBooks(list)
+    return list
+  }, [])
+
+  const syncWorkspaceBookSummary = useCallback((next: Book) => {
+    const summary: BookSummary = {
+      id: next.id,
+      title: next.title,
+      book_type: next.book_type,
+      categories: next.categories,
+      status: next.status,
+      output_dir: next.output_dir,
+      linked_material_id: next.linked_material_id,
+    }
+    setWorkspaceBooks((prev) => {
+      const index = prev.findIndex((item) => item.id === summary.id)
+      if (index < 0) return [summary, ...prev]
+      return prev.map((item) => (item.id === summary.id ? summary : item))
+    })
+  }, [])
+
   const load = useCallback(async () => {
     if (!id) return
     setLoading(true)
     setError(null)
     try {
-      const [b, readAccessConfig] = await Promise.all([
+      const [b, readAccessConfig, bookSummaries] = await Promise.all([
         getBook(id),
         getWorkspaceAgentReadAccess(),
+        listBooks(),
       ])
       if (!b) {
         setBook(null)
@@ -395,7 +450,7 @@ export function BookEditor() {
         return
       }
       setWorkspaceAgentReadAccess(readAccessConfig)
-      setBook(b)
+      setWorkspaceBooks(bookSummaries)
       const coverRes = await getBookCover(b.id)
       setCoverData(coverRes.cover_data)
       if (b.linked_material_id) {
@@ -405,22 +460,25 @@ export function BookEditor() {
         setLinkedMaterial(null)
       }
       const rows = resolveWorkspaceStagesForBook(b)
-      const normalized = normalizeStagesForWorkspaceBook(b, b.stages)
-      const normalizedExpertDraft = normalizeExpertDraft(b.expert_draft, true)
-      stagesRef.current = normalized
-      setStages(normalized)
-      setDraftMetrics(stageTextCounts(normalized.draft ?? ''))
-      expertDraftRef.current = normalizedExpertDraft
-      setExpertDraftState(normalizedExpertDraft)
+      syncBookEditorState(b, true)
       setExpertMode(false)
       setExpertAiChatEpoch(0)
-      setActiveStage(rows[0]!.id)
+      const pending = pendingInitialStageRef.current
+      const pendingStage =
+        pending?.bookId === b.id &&
+        rows.some((row) => row.id === pending.stageId)
+          ? pending.stageId
+          : null
+      if (pending?.bookId === b.id) {
+        pendingInitialStageRef.current = null
+      }
+      setActiveStage(pendingStage ?? rows[0]!.id)
     } catch (e) {
       setError(e instanceof Error ? e.message : '加载失败')
     } finally {
       setLoading(false)
     }
-  }, [id])
+  }, [id, syncBookEditorState])
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- 进入书本页 mount 拉取数据
@@ -474,37 +532,95 @@ export function BookEditor() {
     handleDraftCommit(value)
   }, [handleDraftCommit])
 
+  const saveCurrentBook = useCallback(
+    async (options: SaveCurrentBookOptions = {}): Promise<Book | null> => {
+      if (!id || !book) return null
+      if (saveInFlightRef.current) {
+        setError('正在保存，请稍后再试')
+        return null
+      }
+      saveInFlightRef.current = true
+      setSaving(true)
+      setMessage(null)
+      setError(null)
+      try {
+        flushAllTokenBuffers()
+        flushDraftCommit()
+        const merged = mergeStagePatchIntoAll(book.stages, stagesRef.current)
+        const next = await saveBook(id, {
+          stages: merged,
+          expert_draft: expertDraftRef.current,
+          status: options.status,
+        })
+        if (!next) {
+          setError('保存失败：书籍不存在')
+          return null
+        }
+        syncBookEditorState(next)
+        syncWorkspaceBookSummary(next)
+        if (options.successMessage) {
+          setMessage(options.successMessage)
+          window.setTimeout(() => setMessage(null), 2000)
+        }
+        return next
+      } catch (e) {
+        setError(e instanceof Error ? e.message : '保存失败')
+        return null
+      } finally {
+        saveInFlightRef.current = false
+        setSaving(false)
+      }
+    },
+    [
+      id,
+      book,
+      flushAllTokenBuffers,
+      flushDraftCommit,
+      syncBookEditorState,
+      syncWorkspaceBookSummary,
+    ],
+  )
+
   const handleSave = useCallback(async () => {
-    if (!id || !book || saveInFlightRef.current) return
-    saveInFlightRef.current = true
-    setSaving(true)
-    setMessage(null)
-    setError(null)
-    try {
-      flushAllTokenBuffers()
-      flushDraftCommit()
-      const merged = mergeStagePatchIntoAll(book.stages, stagesRef.current)
-      const next = await saveBook(id, { stages: merged, expert_draft: expertDraft })
-      if (!next) {
-        setError('保存失败：书籍不存在')
+    await saveCurrentBook({ successMessage: '已保存' })
+  }, [saveCurrentBook])
+
+  const handleTreeBookStageSelect = useCallback(
+    async (targetBookId: string, targetStageId: StageId) => {
+      if (!book) return
+      if (targetBookId === book.id && targetStageId === activeStageRef.current) {
         return
       }
-      setBook(next)
-      const normalizedStages = normalizeStagesForWorkspaceBook(next, next.stages)
-      stagesRef.current = normalizedStages
-      setStages(normalizedStages)
-      const normalizedExpertDraft = normalizeExpertDraft(next.expert_draft)
-      expertDraftRef.current = normalizedExpertDraft
-      setExpertDraftState(normalizedExpertDraft)
-      setMessage('已保存')
-      window.setTimeout(() => setMessage(null), 2000)
+      const saved = await saveCurrentBook({ successMessage: null })
+      if (!saved) return
+      if (targetBookId === book.id) {
+        setActiveStage(targetStageId)
+        return
+      }
+      pendingInitialStageRef.current = {
+        bookId: targetBookId,
+        stageId: targetStageId,
+      }
+      navigate(`/book/${targetBookId}`)
+    },
+    [book, navigate, saveCurrentBook],
+  )
+
+  const handleToggleBookStatus = useCallback(async () => {
+    if (!book) return
+    const nextStatus: BookStatus =
+      book.status === 'completed' ? 'editing' : 'completed'
+    const next = await saveCurrentBook({
+      status: nextStatus,
+      successMessage: nextStatus === 'completed' ? '已标记完成' : '已恢复编辑',
+    })
+    if (!next) return
+    try {
+      await refreshWorkspaceBooks()
     } catch (e) {
-      setError(e instanceof Error ? e.message : '保存失败')
-    } finally {
-      saveInFlightRef.current = false
-      setSaving(false)
+      setError(e instanceof Error ? e.message : '刷新书籍列表失败')
     }
-  }, [id, book, expertDraft, flushAllTokenBuffers, flushDraftCommit])
+  }, [book, refreshWorkspaceBooks, saveCurrentBook])
 
   const startExpertWriting = useCallback(
     (
@@ -715,6 +831,15 @@ export function BookEditor() {
   }
 
   const railStages = resolveWorkspaceStagesForBook(book)
+  const workspaceTreeStages = railStages.map((s) => ({ id: s.id, label: s.label }))
+  const workspaceTreeBooks = workspaceBooks
+    .filter((item) => item.book_type === 'short' && item.status !== 'completed')
+    .map((item) => ({
+      id: item.id,
+      title: item.title,
+      meta: item.categories.length > 0 ? item.categories.join('、') : '未分类',
+      stages: workspaceTreeStages,
+    }))
   const stageBody = activeStageBody
   const expertDraftActive = expertMode && activeStage === 'draft'
 
@@ -766,10 +891,13 @@ export function BookEditor() {
           ← 返架
         </Link>
         <div className="editor-header-meta muted">
+          {book?.title || '未命名'}
+          {' · '}
           {book?.book_type === 'short' ? '短篇' : '长篇'}
           {book?.book_type === 'short' && book.categories.length > 0
             ? ` · ${book.categories.join('、')}`
             : ''}
+          {book?.status === 'completed' ? ' · 已完成' : ''}
         </div>
         <div className="editor-header-actions">
           {coverData ? (
@@ -826,6 +954,18 @@ export function BookEditor() {
           >
             {saving ? '保存中…' : '保存'}
           </button>
+          <button
+            type="button"
+            className={
+              book.status === 'completed'
+                ? 'btn-book-status btn-book-status--completed'
+                : 'btn-book-status'
+            }
+            onClick={() => void handleToggleBookStatus()}
+            disabled={saving}
+          >
+            {book.status === 'completed' ? '修改' : '完成'}
+          </button>
         </div>
       </header>
 
@@ -842,10 +982,15 @@ export function BookEditor() {
       >
         <aside className="workspace-rail workspace-rail--tree">
           <WorkspaceTreeNav
-            rootLabel={book?.title ?? ''}
-            stages={railStages.map((s) => ({ id: s.id, label: s.label }))}
+            books={workspaceTreeBooks}
+            activeBookId={book.id}
             activeStageId={activeStage}
-            onStageSelect={(stageId) => setActiveStage(stageId as StageId)}
+            onStageSelect={(stageId) =>
+              void handleTreeBookStageSelect(book.id, stageId as StageId)
+            }
+            onBookStageSelect={(bookId, stageId) =>
+              void handleTreeBookStageSelect(bookId, stageId as StageId)
+            }
             editingTitle={editingTitle}
             titleDraft={titleDraft}
             onTitleDraftChange={setTitleDraft}
@@ -861,6 +1006,7 @@ export function BookEditor() {
                     const next = await saveBook(book.id, { title: trimmed })
                     if (next) {
                       setBook(next)
+                      syncWorkspaceBookSummary(next)
                       setMessage('书名已修改')
                       window.setTimeout(() => setMessage(null), 2000)
                     } else {

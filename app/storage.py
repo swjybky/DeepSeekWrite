@@ -11,6 +11,7 @@ from app.runtime_paths import writable_root
 
 from app.models import (
     Book,
+    normalize_book_status,
     Material,
     Skill,
     SHORT_STAGE_KEYS,
@@ -564,6 +565,7 @@ class BookStore:
                 "categories": b.categories,
                 "output_dir": b.output_dir,
                 "linked_material_id": b.linked_material_id,
+                "status": b.status,
             }
             for b in sorted(
                 self._books.values(),
@@ -632,6 +634,7 @@ class BookStore:
         linked_material_id: str | None = None,
         expert_draft: dict[str, Any] | None = None,
         title: str | None = None,
+        status: str | None = None,
     ) -> dict[str, Any] | None:
         b = self._books.get(book_id)
         if b is None:
@@ -649,6 +652,8 @@ class BookStore:
             b.content = content
         if expert_draft is not None:
             b.expert_draft = normalize_expert_draft_from_storage(expert_draft)
+        if status is not None:
+            b.status = normalize_book_status(status)
         b.updated_at = _utc_now_iso()
         save_books_atomic(self._path, self._books)
         _write_stages_to_disk(b)

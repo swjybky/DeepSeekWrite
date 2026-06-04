@@ -1,4 +1,5 @@
 export type BookType = 'short' | 'long'
+export type BookStatus = 'editing' | 'completed'
 
 // 统一短篇阶段定义
 import {
@@ -235,6 +236,8 @@ export interface BookSummary {
   title: string
   book_type: BookType
   categories: string[]
+  /** 书籍工作状态：编辑中 / 已完成 */
+  status: BookStatus
   /** 本机落地目录，空表示未指定 */
   output_dir?: string
   /** 写书工作台关联的素材库 id，空表示未关联 */
@@ -448,6 +451,7 @@ declare global {
           linked_material_id?: string | null,
           expert_draft?: ExpertDraft | null,
           title?: string | null,
+          status?: BookStatus | null,
         ): Promise<Book | null>
         delete_book(book_id: string): Promise<boolean>
         /** 上次选定的工作文件夹（持久化在应用 .data/preferences.json） */
@@ -893,7 +897,15 @@ function loadMock(): Map<string, Book> {
     const raw = localStorage.getItem(MOCK_STORAGE_KEY)
     if (!raw) return new Map()
     const arr = JSON.parse(raw) as Book[]
-    return new Map(arr.map((b) => [b.id, b]))
+    return new Map(
+      arr.map((b) => [
+        b.id,
+        {
+          ...b,
+          status: normalizeBookStatus(b.status),
+        },
+      ]),
+    )
   } catch {
     return new Map()
   }
@@ -907,15 +919,20 @@ function randomId() {
   return crypto.randomUUID()
 }
 
+function normalizeBookStatus(raw: unknown): BookStatus {
+  return raw === 'completed' ? 'completed' : 'editing'
+}
+
 async function mockListBooks(): Promise<BookSummary[]> {
   const map = loadMock()
   return [...map.values()]
     .sort((a, b) => (b.updated_at || '').localeCompare(a.updated_at || ''))
-    .map(({ id, title, book_type, categories, output_dir, linked_material_id }) => ({
+    .map(({ id, title, book_type, categories, status, output_dir, linked_material_id }) => ({
       id,
       title,
       book_type,
       categories,
+      status: normalizeBookStatus(status),
       output_dir,
       linked_material_id,
     }))
@@ -941,6 +958,7 @@ async function mockCreateBook(
     title: title.trim() || '未命名',
     book_type: bt,
     categories: bt === 'short' ? [...categories] : [],
+    status: 'editing',
     content: '',
     output_dir,
     linked_material_id: '',
@@ -957,7 +975,11 @@ async function mockCreateBook(
 async function mockGetBook(book_id: string): Promise<Book | null> {
   const book = loadMock().get(book_id) ?? null
   if (!book) return null
-  return { ...book, expert_draft: normalizeExpertDraft(book.expert_draft) }
+  return {
+    ...book,
+    status: normalizeBookStatus(book.status),
+    expert_draft: normalizeExpertDraft(book.expert_draft),
+  }
 }
 
 async function mockSaveBook(
@@ -968,6 +990,7 @@ async function mockSaveBook(
     linked_material_id?: string | null
     expert_draft?: ExpertDraft | null
     title?: string | null
+    status?: BookStatus | null
   },
 ): Promise<Book | null> {
   const map = loadMock()
@@ -990,6 +1013,9 @@ async function mockSaveBook(
   }
   if (options.expert_draft != null) {
     next = { ...next, expert_draft: normalizeExpertDraft(options.expert_draft) }
+  }
+  if (options.status != null) {
+    next = { ...next, status: normalizeBookStatus(options.status) }
   }
   map.set(book_id, next)
   saveMock(map)
@@ -1315,6 +1341,7 @@ export type SaveBookOptions = {
   linked_material_id?: string | null
   expert_draft?: ExpertDraft | null
   title?: string | null
+  status?: BookStatus | null
 }
 
 export async function saveBook(
@@ -1335,6 +1362,7 @@ export async function saveBook(
       opts.linked_material_id ?? undefined,
       opts.expert_draft ?? undefined,
       opts.title ?? undefined,
+      opts.status ?? undefined,
     )
   }
   return mockSaveBook(book_id, opts)
