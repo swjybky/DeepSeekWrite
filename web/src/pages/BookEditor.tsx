@@ -16,12 +16,15 @@ import {
   getBook,
   isWorkspaceShortBook,
   listBooks,
+  listSkills,
   saveBook,
   listMaterials,
   getMaterial,
   MATERIAL_STAGE_LABELS,
+  SKILL_STAGE_LABELS,
   type Material,
   type MaterialSummary,
+  type SkillSummary,
   generateBookCover,
   getBookCover,
   pickFolder,
@@ -191,6 +194,8 @@ export function BookEditor() {
   const [materialSummaries, setMaterialSummaries] = useState<MaterialSummary[]>([])
   const [materialSelectorLoading, setMaterialSelectorLoading] = useState(false)
   const [materialSelectorSaving, setMaterialSelectorSaving] = useState(false)
+  const [activeStageSkills, setActiveStageSkills] = useState<SkillSummary[]>([])
+  const [activeStageSkillsLoading, setActiveStageSkillsLoading] = useState(false)
   const [editingTitle, setEditingTitle] = useState(false)
   const [titleDraft, setTitleDraft] = useState('')
   const [aiChatEpochByStage, setAiChatEpochByStage] = useState<
@@ -450,6 +455,7 @@ export function BookEditor() {
       status: next.status,
       output_dir: next.output_dir,
       linked_material_id: next.linked_material_id,
+      skill_library_enabled: next.skill_library_enabled,
     }
     setWorkspaceBooks((prev) => {
       const index = prev.findIndex((item) => item.id === summary.id)
@@ -818,6 +824,36 @@ export function BookEditor() {
       setDraftMetrics(stageTextCounts(stagesRef.current.draft ?? ''))
     }
   }, [activeStage])
+
+  useEffect(() => {
+    let cancelled = false
+    if (!book?.skill_library_enabled) {
+      queueMicrotask(() => {
+        if (cancelled) return
+        setActiveStageSkills([])
+        setActiveStageSkillsLoading(false)
+      })
+      return () => {
+        cancelled = true
+      }
+    }
+    queueMicrotask(() => {
+      if (!cancelled) setActiveStageSkillsLoading(true)
+    })
+    void listSkills(activeStage)
+      .then((items) => {
+        if (!cancelled) setActiveStageSkills(items)
+      })
+      .catch(() => {
+        if (!cancelled) setActiveStageSkills([])
+      })
+      .finally(() => {
+        if (!cancelled) setActiveStageSkillsLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [activeStage, book?.skill_library_enabled])
 
   const activeStageBody = stages[activeStage] ?? ''
 
@@ -1409,6 +1445,34 @@ export function BookEditor() {
                   </span>
                 </span>
               </div>
+              {book.skill_library_enabled ? (
+                <div className="workspace-stage-skills" aria-label="当前阶段技能">
+                  <div className="workspace-stage-skills-head">
+                    <span>当前阶段技能</span>
+                    <strong>
+                      {activeStageSkillsLoading
+                        ? '加载中'
+                        : `${activeStageSkills.length} 个`}
+                    </strong>
+                  </div>
+                  {activeStageSkillsLoading ? (
+                    <p className="workspace-stage-skills-empty muted">正在读取技能库…</p>
+                  ) : activeStageSkills.length === 0 ? (
+                    <p className="workspace-stage-skills-empty muted">
+                      {SKILL_STAGE_LABELS[activeStage]}暂无技能
+                    </p>
+                  ) : (
+                    <ul className="workspace-stage-skill-list">
+                      {activeStageSkills.map((skillItem) => (
+                        <li key={skillItem.id}>
+                          <Link to={`/skill/${skillItem.id}`}>{skillItem.title}</Link>
+                          <span className="muted">{skillItem.genre || '未分类'}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              ) : null}
               {activeStage === 'draft' ? (
                 <DraftStageEditor
                   value={stages.draft ?? ''}

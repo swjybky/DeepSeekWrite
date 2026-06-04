@@ -1,5 +1,6 @@
 import { Link } from 'react-router-dom'
 import type { BookSummary, MaterialSummary, SkillSummary } from '../bridge'
+import { SKILL_STAGE_LABELS } from '../bridge'
 import defaultMaterialCover from '../assets/default-material-cover.png'
 import defaultSkillCover from '../assets/default-skill-cover.png'
 import './CardGrid.css'
@@ -64,6 +65,7 @@ export function CardGrid({ items, emptyText = '暂无项目', onDelete, deleting
                     <span className="card-type">
                       短篇技能
                       {item.genre && ` · ${item.genre}`}
+                      {item.meta && ` · ${item.meta}`}
                     </span>
                   ) : (
                     <span className="card-type">
@@ -155,6 +157,7 @@ export function skillToCardItem(skill: SkillSummary): CardItem {
     type: 'skill',
     subtype: 'short',
     genre: skill.genre,
+    meta: SKILL_STAGE_LABELS[skill.stage_id],
     outputDir: skill.output_dir,
     to: `/skill/${skill.id}`,
   }

@@ -2090,6 +2090,103 @@
   box-shadow: 0 8px 32px rgb(0 0 0 / 0.3);
 }
 
+.skill-editor-meta-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+  padding: 0.9rem;
+}
+
+.skill-editor-meta-panel h2 {
+  margin: 0 0 0.2rem;
+  font-size: 0.95rem;
+  color: var(--text-h);
+}
+
+.skill-editor-meta-panel .field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.skill-editor-meta-panel .field-label {
+  font-size: 0.74rem;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.skill-editor-meta-panel input,
+.skill-editor-meta-panel select {
+  width: 100%;
+  min-height: 2.25rem;
+  padding: 0.45rem 0.55rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+}
+
+.workspace-stage-skills {
+  margin-bottom: 0.75rem;
+  padding: 0.65rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: color-mix(in oklab, var(--surface) 94%, var(--accent) 6%);
+}
+
+.workspace-stage-skills-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  font-size: 0.82rem;
+}
+
+.workspace-stage-skills-head span {
+  color: var(--text-h);
+  font-weight: 600;
+}
+
+.workspace-stage-skills-head strong {
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
+.workspace-stage-skills-empty {
+  margin: 0.45rem 0 0;
+  font-size: 0.78rem;
+}
+
+.workspace-stage-skill-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  margin: 0.55rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.workspace-stage-skill-list li {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  max-width: 100%;
+  padding: 0.28rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  font-size: 0.78rem;
+}
+
+.workspace-stage-skill-list a {
+  max-width: 14rem;
+  overflow: hidden;
+  color: var(--accent);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .rail-item,
   .ai-bubble {

@@ -72,7 +72,6 @@ export function getWorkspaceStageAdditionalTools(
       skillTitle: ctx.bookTitle,
       stageId: ctx.stageId as SkillStageId,
       stageBody: ctx.stageBody,
-      allStages: ctx.allStages as Partial<Record<SkillStageId, string>>,
       applyToStageEditor: ctx.applyToStageEditor,
       isToolCallStreamed: ctx.isToolCallStreamed,
     }

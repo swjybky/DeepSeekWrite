@@ -271,6 +271,13 @@ def normalize_book_status(raw: Any | None) -> BookStatus:
     return "completed" if raw == "completed" else "editing"
 
 
+def normalize_skill_library_enabled(raw: Any | None, book_type: BookType) -> bool:
+    """旧书缺字段时：短篇默认启用技能库，长篇默认关闭。"""
+    if isinstance(raw, bool):
+        return raw
+    return book_type == "short"
+
+
 @dataclass
 class Book:
     id: str
@@ -280,6 +287,7 @@ class Book:
     content: str = ""
     output_dir: str = ""
     linked_material_id: str = ""
+    skill_library_enabled: bool = False
     status: BookStatus = "editing"
     stages: dict[str, str] = field(default_factory=default_stages)
     expert_draft: dict[str, Any] = field(default_factory=default_expert_draft)
@@ -304,6 +312,10 @@ class Book:
             content=str(data.get("content") or ""),
             output_dir=str(data.get("output_dir") or ""),
             linked_material_id=str(data.get("linked_material_id") or ""),
+            skill_library_enabled=normalize_skill_library_enabled(
+                data.get("skill_library_enabled"),
+                bt,  # type: ignore[arg-type]
+            ),
             status=normalize_book_status(data.get("status")),
             stages=migrated_stages,
             expert_draft=normalize_expert_draft_from_storage(data.get("expert_draft")),
@@ -356,6 +368,23 @@ def normalize_skill_stages_from_storage(raw: dict[str, Any] | None) -> dict[str,
     return out
 
 
+def normalize_skill_stage_id(raw: Any | None) -> str:
+    sid = str(raw or "").strip()
+    return sid if sid in SKILL_STAGE_KEYS else "character_design"
+
+
+def first_legacy_skill_stage(raw: Any | None) -> tuple[str, str]:
+    """旧技能含 10 个阶段；升级时只保留第一个非空阶段内容。"""
+    if not isinstance(raw, dict):
+        return "character_design", ""
+    normalized = normalize_skill_stages_from_storage(raw)
+    for stage_id in SKILL_STAGE_KEYS:
+        body = normalized.get(stage_id, "")
+        if body.strip():
+            return stage_id, body
+    return "character_design", ""
+
+
 @dataclass
 class Material:
     """素材数据模型，用于存储人设、导语、梗、节奏等素材"""
@@ -395,12 +424,13 @@ class Material:
 
 @dataclass
 class Skill:
-    """技能库数据模型，用于沉淀短篇各阶段写作技能。"""
+    """技能库数据模型：单条技能只属于一个短篇创作阶段。"""
 
     id: str
     title: str
     genre: str = ""
-    stages: dict[str, str] = field(default_factory=default_skill_stages)
+    stage_id: str = "character_design"
+    body: str = ""
     output_dir: str = ""
     created_at: str = ""
     updated_at: str = ""
@@ -413,11 +443,20 @@ class Skill:
         genre = str(data.get("genre") or "").strip()
         if genre not in SHORT_MATERIAL_GENRES:
             genre = "世情"
+        raw_stage_id = str(data.get("stage_id") or "").strip()
+        if raw_stage_id in SKILL_STAGE_KEYS:
+            stage_id = raw_stage_id
+            body = str(data.get("body") or "")
+        else:
+            stage_id, body = first_legacy_skill_stage(data.get("stages"))
+            if not body and data.get("body") is not None:
+                body = str(data.get("body") or "")
         return cls(
             id=str(data["id"]),
             title=str(data["title"]),
             genre=genre,
-            stages=normalize_skill_stages_from_storage(data.get("stages")),
+            stage_id=stage_id,
+            body=body,
             output_dir=str(data.get("output_dir") or ""),
             created_at=str(data.get("created_at") or ""),
             updated_at=str(data.get("updated_at") or ""),

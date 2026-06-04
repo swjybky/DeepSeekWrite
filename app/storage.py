@@ -20,14 +20,13 @@ from app.models import (
     apply_stage_patch,
     default_stages,
     default_material_stages,
-    default_skill_stages,
     normalize_expert_draft_from_storage,
     new_book_id,
     new_material_id,
     new_skill_id,
     primary_draft_stage_key,
     normalize_material_stages_from_storage,
-    normalize_skill_stages_from_storage,
+    normalize_skill_stage_id,
 )
 
 ISO_FMT = "%Y-%m-%dT%H:%M:%SZ"
@@ -445,7 +444,7 @@ def _write_material_stages_to_disk(material: Material) -> None:
 
 
 def _write_skill_stages_to_disk(skill: Skill) -> None:
-    """将技能各阶段内容写入输出目录"""
+    """将单阶段技能内容写入输出目录。"""
     od = (skill.output_dir or "").strip()
     if not od:
         return
@@ -455,12 +454,11 @@ def _write_skill_stages_to_disk(skill: Skill) -> None:
     except OSError:
         return
 
-    for key in SKILL_STAGE_KEYS:
-        text = str(skill.stages.get(key, "") or "")
-        try:
-            (root / f"{key}.txt").write_text(text, encoding="utf-8")
-        except OSError:
-            pass
+    stage_id = normalize_skill_stage_id(skill.stage_id)
+    try:
+        (root / f"{stage_id}.txt").write_text(str(skill.body or ""), encoding="utf-8")
+    except OSError:
+        pass
 
 
 def load_materials(path: Path) -> dict[str, Material]:
@@ -565,6 +563,7 @@ class BookStore:
                 "categories": b.categories,
                 "output_dir": b.output_dir,
                 "linked_material_id": b.linked_material_id,
+                "skill_library_enabled": b.skill_library_enabled,
                 "status": b.status,
             }
             for b in sorted(
@@ -616,6 +615,7 @@ class BookStore:
             content="",
             output_dir=od,
             linked_material_id="",
+            skill_library_enabled=bt == "short",
             stages=default_stages(),
             expert_draft=normalize_expert_draft_from_storage(None),
             created_at=now,
@@ -774,17 +774,22 @@ class BookStore:
 
     # ==================== 技能管理方法 ====================
 
-    def list_skills(self) -> list[dict[str, Any]]:
+    def list_skills(self, stage_id: str | None = None) -> list[dict[str, Any]]:
         """列出所有技能，按更新时间倒序"""
+        sid = (stage_id or "").strip()
+        skills = self._skills.values()
+        if sid in SKILL_STAGE_KEYS:
+            skills = [s for s in skills if s.stage_id == sid]
         return [
             {
                 "id": s.id,
                 "title": s.title,
                 "genre": s.genre,
+                "stage_id": s.stage_id,
                 "output_dir": s.output_dir,
             }
             for s in sorted(
-                self._skills.values(),
+                skills,
                 key=lambda x: (x.updated_at or "", x.title),
                 reverse=True,
             )
@@ -801,6 +806,7 @@ class BookStore:
         self,
         title: str,
         genre: str,
+        stage_id: str,
         workspace_root: str | None = None,
     ) -> dict[str, Any]:
         """创建新技能"""
@@ -808,6 +814,7 @@ class BookStore:
         g = genre.strip() if genre.strip() else "世情"
         if g not in ("世情", "追妻", "科幻", "悬疑"):
             g = "世情"
+        normalized_stage_id = normalize_skill_stage_id(stage_id)
         wr = (workspace_root or "").strip()
         od = ""
         if wr:
@@ -832,7 +839,8 @@ class BookStore:
             id=sid,
             title=title.strip() or "未命名技能",
             genre=g,
-            stages=default_skill_stages(),
+            stage_id=normalized_stage_id,
+            body="",
             output_dir=od,
             created_at=now,
             updated_at=now,
@@ -845,17 +853,24 @@ class BookStore:
     def save_skill(
         self,
         skill_id: str,
-        stages: dict[str, str] | None = None,
         title: str | None = None,
+        genre: str | None = None,
+        stage_id: str | None = None,
+        body: str | None = None,
     ) -> dict[str, Any] | None:
         """保存技能阶段内容"""
         s = self._skills.get(skill_id)
         if s is None:
             return None
-        if stages is not None:
-            s.stages = normalize_skill_stages_from_storage(stages)
         if title is not None:
             s.title = title.strip()
+        if genre is not None:
+            g = genre.strip()
+            s.genre = g if g in ("世情", "追妻", "科幻", "悬疑") else "世情"
+        if stage_id is not None:
+            s.stage_id = normalize_skill_stage_id(stage_id)
+        if body is not None:
+            s.body = str(body)
         s.updated_at = _utc_now_iso()
         save_skills_atomic(self._skills_path, self._skills)
         _write_skill_stages_to_disk(s)
