@@ -38,7 +38,7 @@ export function WorkspaceTreeNav({
   activeStageId,
   onStageSelect,
   onBookStageSelect,
-  defaultExpanded = true,
+  defaultExpanded = false,
   ariaLabel = '项目结构',
   editingTitle = false,
   titleDraft = '',
@@ -51,12 +51,18 @@ export function WorkspaceTreeNav({
   const [expandedBookIds, setExpandedBookIds] = useState<Record<string, boolean>>({})
 
   const hasBookTree = books != null
-  const isBookExpanded = (bookId: string) =>
-    expandedBookIds[bookId] ?? defaultExpanded
+  const isBookExpanded = (bookId: string) => {
+    if (activeBookId && bookId !== activeBookId) return false
+    if (activeBookId && bookId === activeBookId) {
+      return expandedBookIds[bookId] ?? true
+    }
+    return expandedBookIds[bookId] ?? defaultExpanded
+  }
   const toggleBook = (bookId: string) => {
+    if (activeBookId && bookId !== activeBookId) return
     setExpandedBookIds((prev) => ({
       ...prev,
-      [bookId]: !(prev[bookId] ?? defaultExpanded),
+      [bookId]: !(prev[bookId] ?? bookId === activeBookId),
     }))
   }
 

@@ -125,6 +125,27 @@ function combineExpertDraftSections(draft: ExpertDraft): string {
     .join('\n\n')
 }
 
+/** 左侧树书籍列表保持进入工作台时的顺序，不因保存/切换导致按更新时间重排 */
+function mergeWorkspaceBooksStable(
+  orderRef: { current: string[] | null },
+  incoming: BookSummary[],
+): BookSummary[] {
+  const byId = new Map(incoming.map((b) => [b.id, b]))
+  let order = orderRef.current
+  if (!order?.length) {
+    order = incoming.map((b) => b.id)
+  } else {
+    for (const b of incoming) {
+      if (!order.includes(b.id)) order.push(b.id)
+    }
+    order = order.filter((bookId) => byId.has(bookId))
+  }
+  orderRef.current = order
+  return order
+    .map((bookId) => byId.get(bookId))
+    .filter((b): b is BookSummary => b != null)
+}
+
 function readStoredAiWidth(): number {
   const vw =
     typeof window !== 'undefined' ? window.innerWidth : 1280
@@ -153,6 +174,7 @@ export function BookEditor() {
   )
   const [activeStage, setActiveStage] = useState<StageId>('intro_design')
   const [loading, setLoading] = useState(true)
+  const [bookTransitioning, setBookTransitioning] = useState(false)
   const [saving, setSaving] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -202,6 +224,8 @@ export function BookEditor() {
     bookId: string
     stageId: StageId
   } | null>(null)
+  const hasLoadedOnceRef = useRef(false)
+  const workspaceBookOrderRef = useRef<string[] | null>(null)
   /** 最新专家模式正文结构，用于后台小节智能体读取和写入 */
   const expertDraftRef = useRef<ExpertDraft>(normalizeExpertDraft(null))
   const expertRunAbortRef = useRef<AbortController | null>(null)
@@ -413,7 +437,7 @@ export function BookEditor() {
 
   const refreshWorkspaceBooks = useCallback(async () => {
     const list = await listBooks()
-    setWorkspaceBooks(list)
+    setWorkspaceBooks(mergeWorkspaceBooksStable(workspaceBookOrderRef, list))
     return list
   }, [])
 
@@ -429,15 +453,35 @@ export function BookEditor() {
     }
     setWorkspaceBooks((prev) => {
       const index = prev.findIndex((item) => item.id === summary.id)
-      if (index < 0) return [summary, ...prev]
+      if (index < 0) {
+        workspaceBookOrderRef.current = [
+          ...(workspaceBookOrderRef.current ?? []),
+          summary.id,
+        ]
+        return [...prev, summary]
+      }
       return prev.map((item) => (item.id === summary.id ? summary : item))
     })
   }, [])
 
+  const waitForSaveIdle = useCallback(async (timeoutMs = 8000): Promise<boolean> => {
+    const start = Date.now()
+    while (saveInFlightRef.current) {
+      if (Date.now() - start >= timeoutMs) return false
+      await new Promise((resolve) => setTimeout(resolve, 50))
+    }
+    return true
+  }, [])
+
   const load = useCallback(async () => {
     if (!id) return
-    setLoading(true)
     setError(null)
+    const switching = hasLoadedOnceRef.current
+    if (!switching) {
+      setLoading(true)
+    } else {
+      setBookTransitioning(true)
+    }
     try {
       const [b, readAccessConfig, bookSummaries] = await Promise.all([
         getBook(id),
@@ -450,7 +494,9 @@ export function BookEditor() {
         return
       }
       setWorkspaceAgentReadAccess(readAccessConfig)
-      setWorkspaceBooks(bookSummaries)
+      setWorkspaceBooks(
+        mergeWorkspaceBooksStable(workspaceBookOrderRef, bookSummaries),
+      )
       const coverRes = await getBookCover(b.id)
       setCoverData(coverRes.cover_data)
       if (b.linked_material_id) {
@@ -476,7 +522,9 @@ export function BookEditor() {
     } catch (e) {
       setError(e instanceof Error ? e.message : '加载失败')
     } finally {
+      hasLoadedOnceRef.current = true
       setLoading(false)
+      setBookTransitioning(false)
     }
   }, [id, syncBookEditorState])
 
@@ -588,11 +636,12 @@ export function BookEditor() {
   const handleTreeBookStageSelect = useCallback(
     async (targetBookId: string, targetStageId: StageId) => {
       if (!book) return
-      if (targetBookId === book.id && targetStageId === activeStageRef.current) {
+      if (
+        targetBookId === book.id &&
+        targetStageId === activeStageRef.current
+      ) {
         return
       }
-      const saved = await saveCurrentBook({ successMessage: null })
-      if (!saved) return
       if (targetBookId === book.id) {
         setActiveStage(targetStageId)
         return
@@ -601,9 +650,19 @@ export function BookEditor() {
         bookId: targetBookId,
         stageId: targetStageId,
       }
+      if (!(await waitForSaveIdle())) {
+        pendingInitialStageRef.current = null
+        setError('正在保存，请稍后再切换书籍')
+        return
+      }
+      const saved = await saveCurrentBook({ successMessage: null })
+      if (!saved) {
+        pendingInitialStageRef.current = null
+        return
+      }
       navigate(`/book/${targetBookId}`)
     },
-    [book, navigate, saveCurrentBook],
+    [book, navigate, saveCurrentBook, waitForSaveIdle],
   )
 
   const handleToggleBookStatus = useCallback(async () => {
@@ -771,7 +830,7 @@ export function BookEditor() {
     )
   }
 
-  if (loading) {
+  if (loading && !book) {
     return (
       <div className="editor-wrap">
         <p className="muted">加载中…</p>
@@ -826,6 +885,16 @@ export function BookEditor() {
       <div className="editor-wrap">
         <p className="muted">暂无书籍数据</p>
         <Link to="/">返回书架</Link>
+      </div>
+    )
+  }
+
+  if (book.id !== id) {
+    return (
+      <div className="editor-page editor-page--workspace">
+        <div className="editor-wrap">
+          <p className="muted">正在打开书籍…</p>
+        </div>
       </div>
     )
   }
@@ -894,8 +963,8 @@ export function BookEditor() {
           {book?.title || '未命名'}
           {' · '}
           {book?.book_type === 'short' ? '短篇' : '长篇'}
-          {book?.book_type === 'short' && book.categories.length > 0
-            ? ` · ${book.categories.join('、')}`
+          {book?.book_type === 'short' && (book.categories?.length ?? 0) > 0
+            ? ` · ${(book.categories ?? []).join('、')}`
             : ''}
           {book?.status === 'completed' ? ' · 已完成' : ''}
         </div>
@@ -973,16 +1042,26 @@ export function BookEditor() {
       {message && <p className="editor-toast ok">{message}</p>}
 
       <div
-        className="workspace-grid"
+        className={
+          bookTransitioning
+            ? 'workspace-grid workspace-grid--transitioning'
+            : 'workspace-grid'
+        }
         style={
           {
             '--workspace-ai-width': `${aiPanelWidth}px`,
           } as CSSProperties
         }
       >
+        {bookTransitioning ? (
+          <div className="workspace-grid-transition" aria-live="polite">
+            正在切换书籍…
+          </div>
+        ) : null}
         <aside className="workspace-rail workspace-rail--tree">
           <WorkspaceTreeNav
             books={workspaceTreeBooks}
+            defaultExpanded={false}
             activeBookId={book.id}
             activeStageId={activeStage}
             onStageSelect={(stageId) =>

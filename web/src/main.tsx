@@ -18,11 +18,9 @@ function mount() {
 }
 
 /**
- * pywebview 桌面壳加载页面时，首轮脚本执行时刻 `window.pywebview` 可能仍为 undefined。
- * 若此时立即 mount，首屏 listBooks 会在 API 未就绪时超时并误走 localStorage mock。
- *
- * - file:// 或带 `?pywebview=1`（本机 HTTP 提供 dist）：等到 pywebviewready / api 就绪。
- * - 其它 http(s)（如 Vite dev、普通浏览器）：立即挂载。
+ * pywebview 桌面壳：首轮脚本执行时 `window.pywebview` 可能尚未注入。
+ * 数据请求由 bridge.getBridgeApi() 统一等待，不必阻塞 React 挂载（否则会长时间白屏）。
+ * index.html 内 boot-splash 在挂载前提供可见反馈。
  */
 function boot() {
   const params = new URLSearchParams(window.location.search)
@@ -48,9 +46,13 @@ function boot() {
 
   window.addEventListener('pywebviewready', () => mountOnce(), { once: true })
 
-  const deadline = Date.now() + 15_000
+  /** pywebview 对象或 api 就绪即挂载；上限 2.5s 避免壳异常时永久白屏 */
+  const deadline = Date.now() + 2_500
   const poll = () => {
-    if (window.pywebview?.api !== undefined) {
+    if (
+      window.pywebview?.api !== undefined ||
+      typeof window.pywebview !== 'undefined'
+    ) {
       mountOnce()
       return
     }

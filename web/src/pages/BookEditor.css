@@ -237,6 +237,24 @@
   min-width: 0;
   overflow: hidden;
   background: var(--paper-deep);
+  position: relative;
+}
+
+.workspace-grid--transitioning {
+  pointer-events: none;
+}
+
+.workspace-grid-transition {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: color-mix(in oklab, var(--paper-deep) 72%, transparent);
+  color: var(--ink-muted);
+  font-size: 0.9rem;
+  letter-spacing: 0.02em;
 }
 
 .workspace-rail {

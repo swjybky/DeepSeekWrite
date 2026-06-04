@@ -1,5 +1,6 @@
 import { HashRouter, Route, Routes } from 'react-router-dom'
 import './App.css'
+import { AppErrorBoundary } from './components/AppErrorBoundary'
 import { BookEditor } from './pages/BookEditor'
 import { Home } from './pages/Home'
 import { MaterialEditor } from './pages/MaterialEditor'
@@ -11,8 +12,9 @@ import { WorkspaceSettings } from './pages/WorkspaceSettings'
 function App() {
   return (
     <HashRouter>
-      <div className="app-shell">
-        <Routes>
+      <AppErrorBoundary>
+        <div className="app-shell">
+          <Routes>
           <Route path="/" element={<Home />} />
           <Route path="/workspace-settings" element={<WorkspaceSettings />} />
           <Route path="/material-settings" element={<MaterialSettings />} />
@@ -20,8 +22,9 @@ function App() {
           <Route path="/book/:id" element={<BookEditor />} />
           <Route path="/material/:id" element={<MaterialEditor />} />
           <Route path="/skill/:id" element={<SkillEditor />} />
-        </Routes>
-      </div>
+          </Routes>
+        </div>
+      </AppErrorBoundary>
     </HashRouter>
   )
 }
