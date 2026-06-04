@@ -1,5 +1,7 @@
 import { Link } from 'react-router-dom'
 import type { BookSummary, MaterialSummary, SkillSummary } from '../bridge'
+import defaultMaterialCover from '../assets/default-material-cover.png'
+import defaultSkillCover from '../assets/default-skill-cover.png'
 import './CardGrid.css'
 
 export interface CardItem {
@@ -29,70 +31,81 @@ export function CardGrid({ items, emptyText = '暂无项目', onDelete, deleting
 
   return (
     <div className="card-grid">
-      {items.map((item) => (
-        <div
-          key={item.id}
-          className="card-item"
-          data-type={item.type}
-          data-subtype={item.subtype}
-          data-genre={item.genre}
-          data-has-cover={item.coverData ? 'true' : undefined}
-        >
-          <Link className="card-link" to={item.to}>
-            {item.coverData ? (
-              <img
-                className="card-cover"
-                src={`data:image/png;base64,${item.coverData}`}
-                alt=""
-                loading="lazy"
-              />
-            ) : null}
-            <div className="card-content">
-              <h3 className="card-title">{item.title || '未命名'}</h3>
-              <div className="card-meta">
-                {item.type === 'book' ? (
-                  <span className="card-type">
-                    {item.subtype === 'short' ? '短篇' : '长篇'}
-                    {item.genre && ` · ${item.genre}`}
-                  </span>
-                ) : item.type === 'skill' ? (
-                  <span className="card-type">
-                    短篇技能
-                    {item.genre && ` · ${item.genre}`}
-                  </span>
-                ) : (
-                  <span className="card-type">
-                    {item.subtype === 'short' ? '短篇素材' : '长篇素材'}
-                    {item.genre && item.subGenre && ` · ${item.genre}`}
-                  </span>
-                )}
+      {items.map((item) => {
+        const coverSrc = getCardCoverSrc(item)
+
+        return (
+          <div
+            key={item.id}
+            className="card-item"
+            data-type={item.type}
+            data-subtype={item.subtype}
+            data-genre={item.genre}
+            data-has-cover={coverSrc ? 'true' : undefined}
+          >
+            <Link className="card-link" to={item.to}>
+              {coverSrc ? (
+                <img
+                  className="card-cover"
+                  src={coverSrc}
+                  alt=""
+                  loading="lazy"
+                />
+              ) : null}
+              <div className="card-content">
+                <h3 className="card-title">{item.title || '未命名'}</h3>
+                <div className="card-meta">
+                  {item.type === 'book' ? (
+                    <span className="card-type">
+                      {item.subtype === 'short' ? '短篇' : '长篇'}
+                      {item.genre && ` · ${item.genre}`}
+                    </span>
+                  ) : item.type === 'skill' ? (
+                    <span className="card-type">
+                      短篇技能
+                      {item.genre && ` · ${item.genre}`}
+                    </span>
+                  ) : (
+                    <span className="card-type">
+                      {item.subtype === 'short' ? '短篇素材' : '长篇素材'}
+                      {item.genre && item.subGenre && ` · ${item.genre}`}
+                    </span>
+                  )}
+                </div>
               </div>
-            </div>
-          </Link>
-          {item.outputDir && (
-            <span className="card-path muted" title={item.outputDir}>
-              {truncatePath(item.outputDir, 24)}
-            </span>
-          )}
-          {onDelete && (
-            <button
-              type="button"
-              className="card-delete-btn"
-              aria-label={`删除 ${item.title}`}
-              disabled={deletingId === item.id}
-              onClick={(e) => {
-                e.preventDefault()
-                e.stopPropagation()
-                onDelete(item.id)
-              }}
-            >
-              {deletingId === item.id ? '删除中...' : '×'}
-            </button>
-          )}
-        </div>
-      ))}
+            </Link>
+            {item.outputDir && (
+              <span className="card-path muted" title={item.outputDir}>
+                {truncatePath(item.outputDir, 24)}
+              </span>
+            )}
+            {onDelete && (
+              <button
+                type="button"
+                className="card-delete-btn"
+                aria-label={`删除 ${item.title}`}
+                disabled={deletingId === item.id}
+                onClick={(e) => {
+                  e.preventDefault()
+                  e.stopPropagation()
+                  onDelete(item.id)
+                }}
+              >
+                {deletingId === item.id ? '删除中...' : '×'}
+              </button>
+            )}
+          </div>
+        )
+      })}
     </div>
   )
+}
+
+function getCardCoverSrc(item: CardItem): string | null {
+  if (item.coverData) return `data:image/png;base64,${item.coverData}`
+  if (item.type === 'material') return defaultMaterialCover
+  if (item.type === 'skill') return defaultSkillCover
+  return null
 }
 
 function truncatePath(path: string, maxLen: number): string {
