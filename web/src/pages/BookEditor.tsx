@@ -957,16 +957,32 @@ export function BookEditor() {
     <div className="editor-page editor-page--workspace">
       <header className="editor-header editor-header--agent">
         <Link className="back-link" to="/">
-          ← 返架
+          ← 返回
         </Link>
         <div className="editor-header-meta muted">
-          {book?.title || '未命名'}
-          {' · '}
-          {book?.book_type === 'short' ? '短篇' : '长篇'}
-          {book?.book_type === 'short' && (book.categories?.length ?? 0) > 0
-            ? ` · ${(book.categories ?? []).join('、')}`
-            : ''}
-          {book?.status === 'completed' ? ' · 已完成' : ''}
+          <span className="editor-header-meta-inner">
+            <span className="editor-header-meta-text">
+              {book?.title || '未命名'}
+              {' · '}
+              {book?.book_type === 'short' ? '短篇' : '长篇'}
+              {book?.book_type === 'short' && (book.categories?.length ?? 0) > 0
+                ? ` · ${(book.categories ?? []).join('、')}`
+                : ''}
+              {book?.status === 'completed' ? ' · 已完成' : ''}
+            </span>
+            {error || message ? (
+              <span
+                className={
+                  error
+                    ? 'editor-header-flash editor-header-flash--error'
+                    : 'editor-header-flash editor-header-flash--ok'
+                }
+                aria-live="polite"
+              >
+                {error ?? message}
+              </span>
+            ) : null}
+          </span>
         </div>
         <div className="editor-header-actions">
           {coverData ? (
@@ -1037,9 +1053,6 @@ export function BookEditor() {
           </button>
         </div>
       </header>
-
-      {error && <p className="editor-toast error">{error}</p>}
-      {message && <p className="editor-toast ok">{message}</p>}
 
       <div
         className={

@@ -4,6 +4,7 @@ import { getAppStorage } from '@mariozechner/pi-web-ui'
 
 import type { AiModelConfig, AiModelDefaults } from '../bridge'
 import { getAiModelDefaults } from '../bridge'
+import '../components/WorkspaceModelDialog.css'
 
 type ResolvedModelConfig = AiModelConfig & {
   model: Model<Api>
@@ -252,6 +253,91 @@ export async function resolveWorkspaceChatModel(): Promise<Model<Api>> {
   }
 }
 
+const PROVIDER_CATEGORY_LABELS: Record<string, string> = {
+  deepseek: 'DeepSeek',
+  xiaomi: '小米 MiMo',
+  openai: 'OpenAI',
+  google: 'Google Gemini',
+  zai: '智谱 GLM',
+  'moonshotai-cn': 'Kimi',
+  moonshot: 'Kimi',
+  anthropic: 'Anthropic',
+}
+
+const PROVIDER_GROUP_ORDER = [
+  'deepseek',
+  'xiaomi',
+  'openai',
+  'google',
+  'zai',
+  'moonshotai-cn',
+  'moonshot',
+  'anthropic',
+]
+
+function providerCategoryLabel(provider: string): string {
+  const key = provider.trim().toLowerCase()
+  if (PROVIDER_CATEGORY_LABELS[key]) return PROVIDER_CATEGORY_LABELS[key]
+  if (!key) return '其他'
+  return key.charAt(0).toUpperCase() + key.slice(1)
+}
+
+function groupConfigsByProvider(
+  configs: ResolvedModelConfig[],
+): { provider: string; label: string; items: { config: ResolvedModelConfig; index: number }[] }[] {
+  const buckets = new Map<string, { config: ResolvedModelConfig; index: number }[]>()
+  configs.forEach((config, index) => {
+    const key = config.provider.trim().toLowerCase() || 'other'
+    const list = buckets.get(key) ?? []
+    list.push({ config, index })
+    buckets.set(key, list)
+  })
+
+  const orderedKeys = [
+    ...PROVIDER_GROUP_ORDER.filter((key) => buckets.has(key)),
+    ...[...buckets.keys()]
+      .filter((key) => !PROVIDER_GROUP_ORDER.includes(key))
+      .sort((a, b) => providerCategoryLabel(a).localeCompare(providerCategoryLabel(b), 'zh')),
+  ]
+
+  return orderedKeys.map((provider) => ({
+    provider,
+    label: providerCategoryLabel(provider),
+    items: buckets.get(provider) ?? [],
+  }))
+}
+
+function createModelDialogItem(
+  config: ResolvedModelConfig,
+  index: number,
+  currentIndex: number,
+  onSelect: (config: ResolvedModelConfig) => void,
+): HTMLButtonElement {
+  const item = document.createElement('button')
+  item.type = 'button'
+  item.className = 'wc-model-dialog-item'
+  if (index === currentIndex) {
+    item.classList.add('wc-model-dialog-item--active')
+    item.setAttribute('aria-current', 'true')
+  }
+
+  const name = document.createElement('span')
+  name.className = 'wc-model-dialog-item-name'
+  name.textContent = config.label
+
+  const meta = document.createElement('span')
+  meta.className = 'wc-model-dialog-item-meta'
+  meta.textContent = config.model_id
+
+  const badge = document.createElement('span')
+  badge.className = 'wc-model-dialog-item-badge'
+  badge.textContent = index === currentIndex ? '当前' : '选用'
+
+  item.append(name, meta, badge)
+  item.addEventListener('click', () => onSelect(config))
+  return item
+}
+
 /**
  * 仅展示本地声明的固定模型配置。未配置固定列表时返回 false，
  * 调用方可继续使用 Pi 默认模型选择器。
@@ -292,8 +378,8 @@ export async function openWorkspaceConfiguredModelSelector(
     close.setAttribute('aria-label', '关闭模型选择')
     close.textContent = '×'
 
-    const list = document.createElement('div')
-    list.className = 'wc-model-dialog-list'
+    const body = document.createElement('div')
+    body.className = 'wc-model-dialog-body'
 
     const cleanup = () => {
       document.removeEventListener('keydown', onKeyDown)
@@ -313,33 +399,26 @@ export async function openWorkspaceConfiguredModelSelector(
       }
     }
 
-    configured.configs.forEach((config, index) => {
-      const item = document.createElement('button')
-      item.type = 'button'
-      item.className = 'wc-model-dialog-item'
-      if (index === currentIndex) {
-        item.classList.add('wc-model-dialog-item--active')
-        item.setAttribute('aria-current', 'true')
+    for (const group of groupConfigsByProvider(configured.configs)) {
+      const section = document.createElement('section')
+      section.className = 'wc-model-dialog-group'
+
+      const groupTitle = document.createElement('h3')
+      groupTitle.className = 'wc-model-dialog-group-title'
+      groupTitle.textContent = group.label
+
+      const list = document.createElement('div')
+      list.className = 'wc-model-dialog-list'
+
+      for (const { config, index } of group.items) {
+        list.appendChild(
+          createModelDialogItem(config, index, currentIndex, selectModel),
+        )
       }
 
-      const name = document.createElement('span')
-      name.className = 'wc-model-dialog-item-name'
-      name.textContent = config.label
-
-      const meta = document.createElement('span')
-      meta.className = 'wc-model-dialog-item-meta'
-      meta.textContent = config.base_url
-        ? `${config.api || 'openai'} → ${config.base_url}`
-        : `${config.provider} / ${config.model_id}`
-
-      const badge = document.createElement('span')
-      badge.className = 'wc-model-dialog-item-badge'
-      badge.textContent = index === currentIndex ? '当前' : '切换'
-
-      item.append(name, meta, badge)
-      item.addEventListener('click', () => selectModel(config))
-      list.appendChild(item)
-    })
+      section.append(groupTitle, list)
+      body.appendChild(section)
+    }
 
     close.addEventListener('click', cleanup)
     overlay.addEventListener('click', (event) => {
@@ -348,14 +427,14 @@ export async function openWorkspaceConfiguredModelSelector(
     document.addEventListener('keydown', onKeyDown)
 
     header.append(title, close)
-    dialog.append(header, list)
+    dialog.append(header, body)
     overlay.appendChild(dialog)
     document.body.appendChild(overlay)
 
     requestAnimationFrame(() => {
       const active =
-        list.querySelector<HTMLElement>('.wc-model-dialog-item--active') ??
-        list.querySelector<HTMLElement>('.wc-model-dialog-item')
+        body.querySelector<HTMLElement>('.wc-model-dialog-item--active') ??
+        body.querySelector<HTMLElement>('.wc-model-dialog-item')
       active?.focus()
     })
   })

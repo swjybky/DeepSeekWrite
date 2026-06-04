@@ -385,9 +385,29 @@ export function MaterialEditor() {
     <div className="editor-page editor-page--workspace">
       <header className="editor-header editor-header--agent">
         <Link className="back-link" to="/">
-          ← 返架
+          ← 返回
         </Link>
-        <div className="editor-header-meta muted">{materialTypeText}</div>
+        <div className="editor-header-meta muted">
+          <span className="editor-header-meta-inner">
+            <span className="editor-header-meta-text">
+              {material.title || '未命名'}
+              {' · '}
+              {materialTypeText}
+            </span>
+            {error || message ? (
+              <span
+                className={
+                  error
+                    ? 'editor-header-flash editor-header-flash--error'
+                    : 'editor-header-flash editor-header-flash--ok'
+                }
+                aria-live="polite"
+              >
+                {error ?? message}
+              </span>
+            ) : null}
+          </span>
+        </div>
         <button
           type="button"
           className="btn-save"
@@ -397,9 +417,6 @@ export function MaterialEditor() {
           {saving ? '保存中…' : '保存'}
         </button>
       </header>
-
-      {error && <p className="editor-toast error">{error}</p>}
-      {message && <p className="editor-toast ok">{message}</p>}
 
       <div
         className="workspace-grid"

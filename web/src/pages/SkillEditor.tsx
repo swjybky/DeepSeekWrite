@@ -369,9 +369,29 @@ export function SkillEditor() {
     <div className="editor-page editor-page--workspace">
       <header className="editor-header editor-header--agent">
         <Link className="back-link" to="/">
-          ← 返架
+          ← 返回
         </Link>
-        <div className="editor-header-meta muted">{skillTypeText}</div>
+        <div className="editor-header-meta muted">
+          <span className="editor-header-meta-inner">
+            <span className="editor-header-meta-text">
+              {skill.title || '未命名'}
+              {' · '}
+              {skillTypeText}
+            </span>
+            {error || message ? (
+              <span
+                className={
+                  error
+                    ? 'editor-header-flash editor-header-flash--error'
+                    : 'editor-header-flash editor-header-flash--ok'
+                }
+                aria-live="polite"
+              >
+                {error ?? message}
+              </span>
+            ) : null}
+          </span>
+        </div>
         <button
           type="button"
           className="btn-save"
@@ -381,9 +401,6 @@ export function SkillEditor() {
           {saving ? '保存中…' : '保存'}
         </button>
       </header>
-
-      {error && <p className="editor-toast error">{error}</p>}
-      {message && <p className="editor-toast ok">{message}</p>}
 
       <div
         className="workspace-grid"
@@ -396,6 +413,7 @@ export function SkillEditor() {
               id: stageId,
               label: SKILL_STAGE_LABELS[stageId],
             }))}
+            defaultExpanded
             activeStageId={activeStage}
             onStageSelect={(stageId) => setActiveStage(stageId as SkillStageId)}
             editingTitle={editingTitle}
