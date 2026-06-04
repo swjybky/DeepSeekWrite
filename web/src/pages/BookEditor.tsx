@@ -1059,51 +1059,93 @@ export function BookEditor() {
           </div>
         ) : null}
         <aside className="workspace-rail workspace-rail--tree">
-          <WorkspaceTreeNav
-            books={workspaceTreeBooks}
-            defaultExpanded={false}
-            activeBookId={book.id}
-            activeStageId={activeStage}
-            onStageSelect={(stageId) =>
-              void handleTreeBookStageSelect(book.id, stageId as StageId)
-            }
-            onBookStageSelect={(bookId, stageId) =>
-              void handleTreeBookStageSelect(bookId, stageId as StageId)
-            }
-            editingTitle={editingTitle}
-            titleDraft={titleDraft}
-            onTitleDraftChange={setTitleDraft}
-            onTitleEditStart={() => {
-              setTitleDraft(book?.title ?? '')
-              setEditingTitle(true)
-            }}
-            onTitleEditEnd={() => {
-              const trimmed = titleDraft.trim()
-              if (trimmed && trimmed !== book?.title && book) {
-                void (async () => {
-                  try {
-                    const next = await saveBook(book.id, { title: trimmed })
-                    if (next) {
-                      setBook(next)
-                      syncWorkspaceBookSummary(next)
-                      setMessage('书名已修改')
-                      window.setTimeout(() => setMessage(null), 2000)
-                    } else {
-                      setError('保存书名失败')
+          {book.status === 'completed' ? (
+            <WorkspaceTreeNav
+              rootLabel={book.title}
+              stages={workspaceTreeStages}
+              defaultExpanded
+              activeStageId={activeStage}
+              onStageSelect={(stageId) => setActiveStage(stageId as StageId)}
+              editingTitle={editingTitle}
+              titleDraft={titleDraft}
+              onTitleDraftChange={setTitleDraft}
+              onTitleEditStart={() => {
+                setTitleDraft(book.title)
+                setEditingTitle(true)
+              }}
+              onTitleEditEnd={() => {
+                const trimmed = titleDraft.trim()
+                if (trimmed && trimmed !== book.title) {
+                  void (async () => {
+                    try {
+                      const next = await saveBook(book.id, { title: trimmed })
+                      if (next) {
+                        setBook(next)
+                        setMessage('书名已修改')
+                        window.setTimeout(() => setMessage(null), 2000)
+                      } else {
+                        setError('保存书名失败')
+                      }
+                    } catch (e) {
+                      setError(e instanceof Error ? e.message : '保存书名失败')
                     }
-                  } catch (e) {
-                    setError(e instanceof Error ? e.message : '保存书名失败')
-                  }
-                })()
+                  })()
+                }
+                setEditingTitle(false)
+                setTitleDraft('')
+              }}
+              onTitleEditCancel={() => {
+                setEditingTitle(false)
+                setTitleDraft('')
+              }}
+            />
+          ) : (
+            <WorkspaceTreeNav
+              books={workspaceTreeBooks}
+              defaultExpanded={false}
+              activeBookId={book.id}
+              activeStageId={activeStage}
+              onStageSelect={(stageId) =>
+                void handleTreeBookStageSelect(book.id, stageId as StageId)
               }
-              setEditingTitle(false)
-              setTitleDraft('')
-            }}
-            onTitleEditCancel={() => {
-              setEditingTitle(false)
-              setTitleDraft('')
-            }}
-          />
+              onBookStageSelect={(bookId, stageId) =>
+                void handleTreeBookStageSelect(bookId, stageId as StageId)
+              }
+              editingTitle={editingTitle}
+              titleDraft={titleDraft}
+              onTitleDraftChange={setTitleDraft}
+              onTitleEditStart={() => {
+                setTitleDraft(book?.title ?? '')
+                setEditingTitle(true)
+              }}
+              onTitleEditEnd={() => {
+                const trimmed = titleDraft.trim()
+                if (trimmed && trimmed !== book?.title && book) {
+                  void (async () => {
+                    try {
+                      const next = await saveBook(book.id, { title: trimmed })
+                      if (next) {
+                        setBook(next)
+                        syncWorkspaceBookSummary(next)
+                        setMessage('书名已修改')
+                        window.setTimeout(() => setMessage(null), 2000)
+                      } else {
+                        setError('保存书名失败')
+                      }
+                    } catch (e) {
+                      setError(e instanceof Error ? e.message : '保存书名失败')
+                    }
+                  })()
+                }
+                setEditingTitle(false)
+                setTitleDraft('')
+              }}
+              onTitleEditCancel={() => {
+                setEditingTitle(false)
+                setTitleDraft('')
+              }}
+            />
+          )}
         </aside>
 
         <aside className="workspace-ai workspace-ai--center" aria-label="AI 对话">

@@ -919,8 +919,33 @@ function randomId() {
   return crypto.randomUUID()
 }
 
-function normalizeBookStatus(raw: unknown): BookStatus {
+export function normalizeBookStatus(raw: unknown): BookStatus {
   return raw === 'completed' ? 'completed' : 'editing'
+}
+
+function normalizeBookSummary(raw: Partial<BookSummary> & { id: string }): BookSummary {
+  return {
+    id: raw.id,
+    title: typeof raw.title === 'string' ? raw.title : '未命名',
+    book_type: raw.book_type === 'short' ? 'short' : 'long',
+    categories: Array.isArray(raw.categories) ? [...raw.categories] : [],
+    status: normalizeBookStatus(raw.status),
+    output_dir: typeof raw.output_dir === 'string' ? raw.output_dir : undefined,
+    linked_material_id:
+      typeof raw.linked_material_id === 'string' ? raw.linked_material_id : undefined,
+  }
+}
+
+function normalizeBook(raw: Partial<Book> & { id: string }): Book {
+  const summary = normalizeBookSummary(raw)
+  return {
+    ...summary,
+    content: typeof raw.content === 'string' ? raw.content : '',
+    stages: raw.stages,
+    expert_draft: raw.expert_draft,
+    created_at: typeof raw.created_at === 'string' ? raw.created_at : undefined,
+    updated_at: typeof raw.updated_at === 'string' ? raw.updated_at : undefined,
+  }
 }
 
 async function mockListBooks(): Promise<BookSummary[]> {
@@ -1314,7 +1339,10 @@ export async function pickFolder(): Promise<string | null> {
 
 export async function listBooks(): Promise<BookSummary[]> {
   const api = await getBridgeApi()
-  if (api) return api.list_books()
+  if (api) {
+    const list = await api.list_books()
+    return list.map((item) => normalizeBookSummary(item))
+  }
   return mockListBooks()
 }
 
@@ -1325,13 +1353,18 @@ export async function createBook(
   workspace_root?: string | null,
 ): Promise<Book> {
   const api = await getBridgeApi()
-  if (api) return api.create_book(title, book_type, categories, workspace_root ?? null)
+  if (api) {
+    return normalizeBook(await api.create_book(title, book_type, categories, workspace_root ?? null))
+  }
   return mockCreateBook(title, book_type, categories, workspace_root)
 }
 
 export async function getBook(book_id: string): Promise<Book | null> {
   const api = await getBridgeApi()
-  if (api) return api.get_book(book_id)
+  if (api) {
+    const raw = await api.get_book(book_id)
+    return raw ? normalizeBook(raw) : null
+  }
   return mockGetBook(book_id)
 }
 
@@ -1350,12 +1383,15 @@ export async function saveBook(
 ): Promise<Book | null> {
   const api = await getBridgeApi()
   if (typeof contentOrOptions === 'string') {
-    if (api) return api.save_book(book_id, contentOrOptions, null)
+    if (api) {
+      const raw = await api.save_book(book_id, contentOrOptions, null)
+      return raw ? normalizeBook(raw) : null
+    }
     return mockSaveBook(book_id, { content: contentOrOptions })
   }
   const opts = contentOrOptions ?? {}
   if (api) {
-    return api.save_book(
+    const raw = await api.save_book(
       book_id,
       opts.content ?? null,
       opts.stages ?? null,
@@ -1364,6 +1400,7 @@ export async function saveBook(
       opts.title ?? undefined,
       opts.status ?? undefined,
     )
+    return raw ? normalizeBook(raw) : null
   }
   return mockSaveBook(book_id, opts)
 }

@@ -294,6 +294,19 @@
   padding: 0.75rem 0.85rem 1rem;
 }
 
+.books-completed-section {
+  flex-shrink: 0;
+  border-top: 1px solid var(--border);
+  padding: 0.65rem 0.85rem 0.85rem;
+}
+
+.books-completed-heading {
+  margin: 0 0 0.5rem;
+  font-size: 0.75rem;
+  letter-spacing: 0.1em;
+  font-weight: 500;
+}
+
 .create-form {
   margin: 0.65rem 0.85rem;
   padding: 0.85rem;

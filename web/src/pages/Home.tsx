@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useLocation } from 'react-router-dom'
 import {
   SHORT_GENRE_OPTIONS,
   type AiModelConfig,
@@ -466,6 +466,8 @@ function ModelConfigDialog({
 }
 
 export function Home() {
+  const location = useLocation()
+
   // ==================== 创作空间状态 ====================
   const [books, setBooks] = useState<BookSummary[]>([])
   const [loadingBooks, setLoadingBooks] = useState(true)
@@ -581,7 +583,7 @@ export function Home() {
       cancelled = true
       if (lateTimer != null) window.clearTimeout(lateTimer)
     }
-  }, [loadBookCovers])
+  }, [loadBookCovers, location.pathname])
 
   useEffect(() => {
     let cancelled = false
@@ -821,9 +823,17 @@ export function Home() {
     () => books.filter((book) => book.status !== 'completed'),
     [books],
   )
+  const completedBooks = useMemo(
+    () => books.filter((book) => book.status === 'completed'),
+    [books],
+  )
   const bookCardItems = useMemo(
     () => visibleBooks.map((b) => bookToCardItem(b, bookCovers[b.id])),
     [visibleBooks, bookCovers],
+  )
+  const completedBookCardItems = useMemo(
+    () => completedBooks.map((b) => bookToCardItem(b, bookCovers[b.id])),
+    [completedBooks, bookCovers],
   )
   const materialCardItems = useMemo(() => materials.map(materialToCardItem), [materials])
   const skillCardItems = useMemo(() => skills.map(skillToCardItem), [skills])
@@ -1013,6 +1023,20 @@ export function Home() {
               />
             )}
           </div>
+
+          {!loadingBooks && completedBooks.length > 0 ? (
+            <div className="books-completed-section" aria-label="已完成书籍">
+              <h3 className="books-completed-heading muted">
+                已完成 · {completedBooks.length} 本
+              </h3>
+              <CardGrid
+                items={completedBookCardItems}
+                emptyText="暂无已完成书籍"
+                onDelete={handleDeleteBook}
+                deletingId={deletingBookId}
+              />
+            </div>
+          ) : null}
         </section>
 
         <div className="library-stack" aria-label="素材库和技能库">
