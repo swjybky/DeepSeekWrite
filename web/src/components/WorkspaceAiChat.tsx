@@ -7,9 +7,10 @@ import type {
   StageId,
   MaterialStageId,
   MaterialPromptKind,
+  SkillStageId,
   WorkspaceAgentReadAccessConfig,
 } from '../bridge'
-import { getWorkspaceSystemPrompt, getMaterialSystemPrompt } from '../bridge'
+import { getWorkspaceSystemPrompt, getMaterialSystemPrompt, getSkillSystemPrompt } from '../bridge'
 import { ensurePiAppStorage } from '../pi/setupPiWorkspace'
 import {
   openWorkspaceConfiguredModelSelector,
@@ -55,16 +56,20 @@ type Props = {
    * @default 0
    */
   sessionEpoch?: number
-  /** 素材库提示词目录；创作空间共享提示词时不传。 */
+  /** 素材库提示词目录；创作空间/技能库共享提示词时不传。 */
   promptKind?: MaterialPromptKind
   bookTitle: string
+  /** 素材库智能体可见的素材类型上下文。 */
+  materialType?: string
+  /** 素材库智能体可见的素材分类上下文。 */
+  materialGenre?: string
   /** 创作空间共享模板可见的书籍分类上下文。 */
   bookGenre?: string
-  stageId: StageId | MaterialStageId
+  stageId: StageId | MaterialStageId | SkillStageId
   stageBody: string
   getCurrentStageBody?: () => string
   /** 各阶段全文，用于提示词中的交叉参考 */
-  allStages: Partial<Record<StageId | MaterialStageId, string>>
+  allStages: Partial<Record<StageId | MaterialStageId | SkillStageId, string>>
   /** 当前书籍关联的素材库；前期设计阶段会将其暴露为 AI 工具可读取内容 */
   linkedMaterial?: Material | null
   /** 全局创作空间智能体可读配置（仅书籍短篇工作台） */
@@ -88,11 +93,11 @@ type Props = {
    */
   isPaused?: boolean
   /**
-   * 工作台类型：书籍工作台或素材库工作台。
-   * 素材模式下使用素材提示词管线。
+   * 工作台类型：书籍工作台、素材库工作台或技能库工作台。
+   * 素材/技能模式下使用各自提示词管线。
    * @default 'book'
    */
-  workspaceType?: 'book' | 'material'
+  workspaceType?: 'book' | 'material' | 'skill'
 }
 
 function WorkspaceAiChatInner({
@@ -185,17 +190,29 @@ function WorkspaceAiChatInner({
         })
 
       const systemPromptInitial =
-        workspaceType === 'material'
-          ? await getMaterialSystemPrompt(
+        workspaceType === 'skill'
+          ? await getSkillSystemPrompt(
+              props.stageId as SkillStageId,
+              {
+                skillTitle: props.bookTitle,
+                skillGenre: props.bookGenre,
+                stageBody: props.stageBody,
+                allStages: props.allStages as Partial<Record<SkillStageId, string>>,
+              },
+            )
+          : workspaceType === 'material'
+            ? await getMaterialSystemPrompt(
               props.promptKind as MaterialPromptKind,
               props.stageId as MaterialStageId,
               {
                 materialTitle: props.bookTitle,
+                materialType: props.materialType,
+                materialGenre: props.materialGenre,
                 stageBody: props.stageBody,
                 allStages: props.allStages as Partial<Record<MaterialStageId, string>>,
               },
             )
-          : await getWorkspaceSystemPrompt(
+            : await getWorkspaceSystemPrompt(
               props.stageId as StageId,
               {
                 bookTitle: props.bookTitle,
@@ -213,8 +230,14 @@ function WorkspaceAiChatInner({
       const sessionId = createPiSessionId(
         'workspace',
         props.sessionBookId,
-        workspaceType === 'material' ? props.promptKind : 'shared',
-        props.stageId,
+        workspaceType === 'skill'
+          ? 'skill_manager'
+          : workspaceType === 'material'
+            ? 'material_manager'
+            : 'shared',
+        workspaceType === 'material' || workspaceType === 'skill'
+          ? undefined
+          : props.stageId,
         sessionEpoch > 0 ? sessionEpoch : undefined,
       )
 
@@ -260,7 +283,8 @@ function WorkspaceAiChatInner({
             if (block?.type === 'toolCall') {
               const isWriteTool =
                 block.name === 'write_workspace_editor' ||
-                block.name === 'write_material_editor'
+                block.name === 'write_material_editor' ||
+                block.name === 'write_skill_editor'
               if (isWriteTool) {
                 streamingWriteRef.current = {
                   toolCallId: block.id,
@@ -412,17 +436,29 @@ function WorkspaceAiChatInner({
     ;(async () => {
       const p = propsLatestRef.current
       const nextPrompt =
-        workspaceType === 'material'
-          ? await getMaterialSystemPrompt(
+        workspaceType === 'skill'
+          ? await getSkillSystemPrompt(
+              p.stageId as SkillStageId,
+              {
+                skillTitle: p.bookTitle,
+                skillGenre: p.bookGenre,
+                stageBody: debouncedBody,
+                allStages: p.allStages as Partial<Record<SkillStageId, string>>,
+              },
+            )
+          : workspaceType === 'material'
+            ? await getMaterialSystemPrompt(
               p.promptKind as MaterialPromptKind,
               p.stageId as MaterialStageId,
               {
                 materialTitle: p.bookTitle,
+                materialType: p.materialType,
+                materialGenre: p.materialGenre,
                 stageBody: debouncedBody,
                 allStages: p.allStages as Partial<Record<MaterialStageId, string>>,
               },
             )
-          : await getWorkspaceSystemPrompt(
+            : await getWorkspaceSystemPrompt(
               p.stageId as StageId,
               {
                 bookTitle: p.bookTitle,
@@ -460,6 +496,8 @@ function WorkspaceAiChatInner({
   }, [
     chatReady,
     props.bookTitle,
+    props.materialType,
+    props.materialGenre,
     props.bookGenre,
     props.promptKind,
     props.stageId,
@@ -479,7 +517,7 @@ function WorkspaceAiChatInner({
 
 /**
  * WorkspaceAiChat 使用 React.memo 包装，自定义比较逻辑：
- * - sessionBookId、sessionEpoch、promptKind、stageId 变化时重建
+ * - sessionBookId、sessionEpoch、promptKind 变化时重建；素材库只保留单个管理智能体会话
  * - stageBody 和 allStages 字符串内容变化时更新，但引用变化不触发（流式写入时）
  * - isPaused 变化时更新
  * - promptRevision 变化时更新
@@ -523,6 +561,8 @@ export const WorkspaceAiChat = memo(WorkspaceAiChatInner, (prev, next) => {
 
   // bookTitle 变化需要更新
   if (prev.bookTitle !== next.bookTitle) return false
+  if (prev.materialType !== next.materialType) return false
+  if (prev.materialGenre !== next.materialGenre) return false
   if (prev.bookGenre !== next.bookGenre) return false
   if (prev.workspaceAgentReadAccess !== next.workspaceAgentReadAccess) return false
 

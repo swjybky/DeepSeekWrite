@@ -84,6 +84,11 @@ export async function resolvePreferredWorkspaceChatModel(): Promise<Model<Api>> 
   return model
 }
 
+export async function refreshPreferredWorkspaceChatModel(): Promise<void> {
+  preferredModel = await resolveWorkspaceChatModel()
+  emitPreferenceChange()
+}
+
 export function getPreferredWorkspaceThinkingLevel(): ThinkingLevel {
   return preferredThinkingLevel
 }

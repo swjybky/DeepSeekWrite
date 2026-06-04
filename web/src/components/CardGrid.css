@@ -6,6 +6,11 @@
   padding: 0.5rem 0;
 }
 
+.library-card .card-grid {
+  grid-template-columns: repeat(auto-fill, minmax(80px, 1fr));
+  gap: 0.75rem 0.5rem;
+}
+
 .card-grid-empty {
   text-align: center;
   padding: 2rem;
@@ -62,6 +67,10 @@
   border-right: 1px solid rgba(139, 125, 107, 0.1);
 }
 
+.library-card .card-link::before {
+  width: 8px;
+}
+
 /* 封面顶部光泽 - 淡雅宣纸光感 */
 .card-link::after {
   content: '';
@@ -103,6 +112,11 @@
   background: linear-gradient(135deg, #f9f6f0 0%, #f0ebe0 100%);
 }
 
+/* 技能库 - 温暖浅金色 */
+.card-item[data-type='skill'] .card-link {
+  background: linear-gradient(135deg, #fff8e7 0%, #f4e6c1 100%);
+}
+
 /* 悬停效果 - 书本浮起 */
 .card-item:hover .card-link {
   transform: translateY(-4px);
@@ -129,6 +143,11 @@
   display: flex;
   flex-direction: column;
   gap: 0.35rem;
+}
+
+.library-card .card-content {
+  padding: 0.5rem 0.5rem 0.5rem 0.75rem;
+  gap: 0.25rem;
 }
 
 /* 有封面时增强底部遮罩，确保文字可读 */
@@ -167,6 +186,12 @@
   text-shadow: 0 1px 0 rgba(255, 255, 255, 0.8);
 }
 
+.library-card .card-title {
+  font-size: 0.76rem;
+  line-height: 1.3;
+  -webkit-line-clamp: 2;
+}
+
 /* 元信息区域 */
 .card-meta {
   display: flex;
@@ -184,6 +209,11 @@
   border: 1px solid rgba(139, 125, 107, 0.08);
 }
 
+.library-card .card-type {
+  font-size: 0.62rem;
+  padding: 0.1rem 0.3rem;
+}
+
 /* 路径信息 - 在书本下方显示 */
 .card-path {
   font-size: 0.75rem;
@@ -194,6 +224,11 @@
   margin-top: 0.6rem;
   text-align: center;
   max-width: 100%;
+}
+
+.library-card .card-path {
+  font-size: 0.68rem;
+  margin-top: 0.4rem;
 }
 
 /* 删除按钮 - 右上角悬浮 - 古风圆形 */
@@ -242,6 +277,11 @@
     grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
     gap: 1rem 0.75rem;
   }
+
+  .library-card .card-grid {
+    grid-template-columns: repeat(auto-fill, minmax(73px, 1fr));
+    gap: 0.75rem 0.5rem;
+  }
 }
 
 @media (max-width: 1024px) {
@@ -249,12 +289,22 @@
     grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
     gap: 1rem 0.75rem;
   }
+
+  .library-card .card-grid {
+    grid-template-columns: repeat(auto-fill, minmax(67px, 1fr));
+    gap: 0.75rem 0.5rem;
+  }
 }
 
 @media (max-width: 768px) {
   .card-grid {
     grid-template-columns: repeat(4, 1fr);
     gap: 1rem 0.75rem;
+  }
+
+  .library-card .card-grid {
+    grid-template-columns: repeat(6, 1fr);
+    gap: 0.75rem 0.5rem;
   }
 
   .card-title {
@@ -266,6 +316,11 @@
   .card-grid {
     grid-template-columns: repeat(3, 1fr);
     gap: 1rem 0.75rem;
+  }
+
+  .library-card .card-grid {
+    grid-template-columns: repeat(5, 1fr);
+    gap: 0.75rem 0.5rem;
   }
 
   .card-content {
@@ -301,6 +356,11 @@
     gap: 1rem 0.75rem;
   }
 
+  .library-card .card-grid {
+    grid-template-columns: repeat(3, 1fr);
+    gap: 0.75rem 0.5rem;
+  }
+
   .card-link::before {
     width: 10px;
   }
@@ -324,5 +384,9 @@
   .card-grid {
     grid-template-columns: repeat(2, 1fr);
     gap: 0.75rem 0.5rem;
+  }
+
+  .library-card .card-grid {
+    grid-template-columns: repeat(3, 1fr);
   }
 }

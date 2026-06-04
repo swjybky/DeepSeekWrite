@@ -41,12 +41,12 @@ export function resolveWorkspaceBookGenre(book: BookWorkspaceSlice): string {
 }
 
 // ==================== 素材提示词类型 ====================
-export type MaterialPromptKind =
-  | 'material_long'
-  | 'material_short_shiqing'
-  | 'material_short_qinggan'
-  | 'material_short_kehuan'
-  | 'material_short_xuanyi'
+export const MATERIAL_MANAGER_AGENT_ID = 'material_manager' as const
+export const MATERIAL_MANAGER_PROMPT_KIND = 'material_manager' as const
+export type MaterialPromptKind = typeof MATERIAL_MANAGER_PROMPT_KIND
+export const SKILL_MANAGER_AGENT_ID = 'skill_manager' as const
+export const SKILL_MANAGER_PROMPT_KIND = 'skill_manager' as const
+export type SkillPromptKind = typeof SKILL_MANAGER_PROMPT_KIND
 
 // 统一阶段ID类型
 export type StageId = ShortStageId
@@ -326,7 +326,59 @@ export function normalizeMaterialStages(
   return out
 }
 
-/** 与 app/.env 对应，由桌面壳 get_ai_defaults 注入 */
+// ==================== 技能类型定义 ====================
+
+export type SkillStageId =
+  | 'character_design'
+  | 'plot_design'
+  | 'intro_design'
+  | 'plot_refine'
+  | 'outline'
+  | 'draft'
+  | 'draft_review'
+  | 'format_conversion'
+  | 'expert_draft_coordinator'
+  | 'expert_section_writer'
+
+export const SKILL_STAGE_LABELS: Record<SkillStageId, string> = {
+  character_design: '人物设计技能',
+  plot_design: '剧情设计技能',
+  intro_design: '导语设计技能',
+  plot_refine: '剧情细化技能',
+  outline: '大纲纲要技能',
+  draft: '正文技能',
+  draft_review: '正文审阅技能',
+  format_conversion: '格式转换技能',
+  expert_draft_coordinator: '专家总控技能',
+  expert_section_writer: '分节写手技能',
+}
+
+export const SKILL_STAGE_KEYS = Object.keys(SKILL_STAGE_LABELS) as SkillStageId[]
+
+export interface SkillSummary {
+  id: string
+  title: string
+  genre: string
+  output_dir?: string
+}
+
+export interface Skill extends SkillSummary {
+  stages?: Partial<Record<SkillStageId, string>>
+  created_at?: string
+  updated_at?: string
+}
+
+export function normalizeSkillStages(
+  raw?: Partial<Record<SkillStageId, string>> | null,
+): Record<SkillStageId, string> {
+  const out = {} as Record<SkillStageId, string>
+  for (const k of SKILL_STAGE_KEYS) {
+    out[k] = raw?.[k] ?? ''
+  }
+  return out
+}
+
+/** 本地模型配置，由桌面壳 preferences.json 或浏览器 localStorage 提供。 */
 export interface AiModelConfig {
   /** 配置项 ID，如 deepseekflash / kimi */
   id: string
@@ -344,6 +396,8 @@ export interface AiModelConfig {
   api?: string
   /** 是否支持 Pi 的思考/推理等级选择器 */
   reasoning?: boolean
+  /** 兼容旧 `.env` 的流式开关；当前 Pi 调用链暂不消费。 */
+  stream?: boolean
 }
 
 export interface AiModelDefaults {
@@ -354,6 +408,23 @@ export interface AiModelDefaults {
   models?: AiModelConfig[]
   /** 默认选中的配置项 ID；未设置时使用 models[0] */
   default_model_id?: string
+}
+
+export interface ImageModelConfig {
+  /** 图像模型 ID，如 dall-e-3 或服务商自定义名称 */
+  model: string
+  /** 图像模型 API Key */
+  api_key: string
+  /** 自定义图像 API 地址；未设置时后端使用默认地址 */
+  base_url?: string
+}
+
+export interface AiModelSettings {
+  text: {
+    models: AiModelConfig[]
+    default_model_id: string
+  }
+  image: ImageModelConfig | null
 }
 
 declare global {
@@ -387,8 +458,11 @@ declare global {
         set_workspace_agent_read_access(
           config: Record<string, unknown>,
         ): Promise<void>
-        /** app/.env 中的默认模型与 Key；未配置完整时返回 null */
+        /** 本地配置中的默认文字模型与 Key；未配置完整时返回 null */
         get_ai_defaults(): Promise<AiModelDefaults | null>
+        /** 本地模型配置，首次为空时由 Python 从旧 .env 导入。 */
+        get_ai_model_config(): Promise<AiModelSettings>
+        save_ai_model_config(config: AiModelSettings): Promise<AiModelSettings>
 
         /** 渲染工作台系统提示词（磁盘默认 + `.data/prompt_overrides`，占位符服务端替换）。 */
         get_workspace_system_prompt(
@@ -421,6 +495,21 @@ declare global {
         delete_material(material_id: string): Promise<boolean>
         get_material_genres(): Promise<Record<string, string[]>>
 
+        // ==================== 技能库 API ====================
+        list_skills(): Promise<SkillSummary[]>
+        get_skill(skill_id: string): Promise<Skill | null>
+        create_skill(
+          title: string,
+          genre: string,
+          workspace_root?: string | null,
+        ): Promise<Skill>
+        save_skill(
+          skill_id: string,
+          stages?: Record<string, string> | null,
+          title?: string | null,
+        ): Promise<Skill | null>
+        delete_skill(skill_id: string): Promise<boolean>
+
         // ==================== 素材库提示词 API ====================
         get_material_system_prompt(
           material_kind: string,
@@ -440,6 +529,18 @@ declare global {
           material_kind: string,
           stage_id: string,
         ): Promise<boolean>
+        read_material_agent_prompt_template(): Promise<string>
+        save_material_agent_prompt_override(body: string): Promise<void>
+        reset_material_agent_prompt_override(): Promise<boolean>
+
+        // ==================== 技能库提示词 API ====================
+        get_skill_system_prompt(
+          stage_id: string,
+          context_json: string,
+        ): Promise<string>
+        read_skill_agent_prompt_template(): Promise<string>
+        save_skill_agent_prompt_override(body: string): Promise<void>
+        reset_skill_agent_prompt_override(): Promise<boolean>
 
         // ==================== 封面 API ====================
         get_book_cover(book_id: string): Promise<{ cover_data: string | null }>
@@ -470,6 +571,7 @@ export const WORKSPACE_ROOT_STORAGE_KEY = 'write_claw_workspace_root'
 export const WORKSPACE_AGENT_READ_ACCESS_STORAGE_KEY =
   'write-claw:workspace_agent_read_access'
 const LEGACY_STAGE_READ_ACCESS_STORAGE_KEY = 'write-claw:stage_read_access'
+const AI_MODEL_CONFIG_STORAGE_KEY = 'write-claw:ai_model_config'
 
 /** 与 main.tsx boot 一致：桌面壳加载的打包页（含本机 HTTP + `?pywebview=1`） */
 export function isPywebviewDesktopBundle(): boolean {
@@ -617,6 +719,173 @@ export async function saveWorkspaceAgentReadAccess(
     )
   }
   return normalized
+}
+
+function trimString(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : ''
+}
+
+function normalizeConfigId(raw: string): string {
+  return raw
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+}
+
+function coerceAiBoolean(value: unknown): boolean | undefined {
+  if (typeof value === 'boolean') return value
+  if (typeof value !== 'string') return undefined
+  const normalized = value.trim().toLowerCase()
+  if (['1', 'true', 'yes', 'y', 'on', '支持', '开启'].includes(normalized)) {
+    return true
+  }
+  if (['0', 'false', 'no', 'n', 'off', '不支持', '关闭'].includes(normalized)) {
+    return false
+  }
+  return undefined
+}
+
+function normalizeAiModelEntry(raw: unknown): AiModelConfig | null {
+  if (!raw || typeof raw !== 'object') return null
+  const o = raw as Record<string, unknown>
+  const provider = trimString(o.provider ?? o.model_source).toLowerCase()
+  const model_id = trimString(o.model_id ?? o.modelId ?? o.model_name)
+  const api_key = trimString(o.api_key ?? o.apiKey ?? o.model_key)
+  const rawId = trimString(o.id) || model_id || provider
+  const id = normalizeConfigId(rawId)
+  if (!id || !provider || !model_id || !api_key) return null
+
+  const out: AiModelConfig = {
+    id,
+    label: trimString(o.label ?? o.display_name ?? o.title) || rawId || model_id,
+    provider,
+    model_id,
+    api_key,
+  }
+  const base_url = trimString(o.base_url ?? o.baseUrl ?? o.model_url)
+  const api = trimString(o.api ?? o.model_like ?? o.modelLike)
+  const reasoning = coerceAiBoolean(o.reasoning ?? o.model_reasoning)
+  const stream = coerceAiBoolean(o.stream ?? o.model_stream)
+  if (base_url) out.base_url = base_url
+  if (api) out.api = api
+  if (reasoning !== undefined) out.reasoning = reasoning
+  if (stream !== undefined) out.stream = stream
+  return out
+}
+
+function normalizeImageModelConfig(raw: unknown): ImageModelConfig | null {
+  if (!raw || typeof raw !== 'object') return null
+  const o = raw as Record<string, unknown>
+  const model = trimString(o.model ?? o.image_model)
+  const api_key = trimString(o.api_key ?? o.apiKey ?? o.image_model_key)
+  if (!model || !api_key) return null
+  const out: ImageModelConfig = { model, api_key }
+  const base_url = trimString(
+    o.base_url ?? o.baseUrl ?? o.image_model_url ?? o.image_url ?? o.image_base_url,
+  )
+  if (base_url) out.base_url = base_url
+  return out
+}
+
+export function normalizeAiModelSettings(raw: unknown): AiModelSettings {
+  const source = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {}
+  const text =
+    source.text && typeof source.text === 'object'
+      ? (source.text as Record<string, unknown>)
+      : source
+  const modelsRaw = Array.isArray(text.models) ? text.models : []
+  const models: AiModelConfig[] = []
+  const seen = new Set<string>()
+  for (const item of modelsRaw) {
+    const normalized = normalizeAiModelEntry(item)
+    if (!normalized) continue
+    const baseId = normalized.id
+    let id = baseId
+    let suffix = 2
+    while (seen.has(id)) {
+      id = `${baseId}_${suffix}`
+      suffix += 1
+    }
+    seen.add(id)
+    models.push({ ...normalized, id })
+  }
+  let default_model_id = normalizeConfigId(
+    trimString(
+      text.default_model_id ??
+        text.defaultModelId ??
+        source.default_model_id ??
+        source.default_model,
+    ),
+  )
+  if (!seen.has(default_model_id)) {
+    default_model_id = models[0]?.id ?? ''
+  }
+
+  return {
+    text: { models, default_model_id },
+    image: normalizeImageModelConfig(source.image),
+  }
+}
+
+function storedAiModelConfig(): AiModelSettings {
+  try {
+    const raw = localStorage.getItem(AI_MODEL_CONFIG_STORAGE_KEY)
+    if (!raw?.trim()) return normalizeAiModelSettings(null)
+    return normalizeAiModelSettings(JSON.parse(raw) as unknown)
+  } catch {
+    return normalizeAiModelSettings(null)
+  }
+}
+
+function setStoredAiModelConfig(config: AiModelSettings): void {
+  try {
+    localStorage.setItem(AI_MODEL_CONFIG_STORAGE_KEY, JSON.stringify(config))
+  } catch {
+    /* ignore */
+  }
+}
+
+export async function getAiModelConfig(): Promise<AiModelSettings> {
+  const api = await getBridgeApi()
+  if (api?.get_ai_model_config) {
+    try {
+      const normalized = normalizeAiModelSettings(await api.get_ai_model_config())
+      setStoredAiModelConfig(normalized)
+      return normalized
+    } catch {
+      /* fall through */
+    }
+  }
+  return storedAiModelConfig()
+}
+
+export async function saveAiModelConfig(
+  config: AiModelSettings,
+): Promise<AiModelSettings> {
+  const normalized = normalizeAiModelSettings(config)
+  const api = await getBridgeApi()
+  if (api?.save_ai_model_config) {
+    const saved = normalizeAiModelSettings(await api.save_ai_model_config(normalized))
+    setStoredAiModelConfig(saved)
+    return saved
+  }
+  setStoredAiModelConfig(normalized)
+  return normalized
+}
+
+export async function getAiModelDefaults(): Promise<AiModelDefaults | null> {
+  const settings = await getAiModelConfig()
+  const models = settings.text.models
+  if (!models.length) return null
+  const first = models[0]
+  return {
+    provider: first.provider,
+    model_id: first.model_id,
+    api_key: first.api_key,
+    models,
+    default_model_id: settings.text.default_model_id,
+  }
 }
 
 function loadMock(): Map<string, Book> {
@@ -826,6 +1095,91 @@ async function mockDeleteMaterial(material_id: string): Promise<boolean> {
 
 async function mockGetMaterialGenres(): Promise<Record<string, string[]>> {
   return { ...SHORT_MATERIAL_GENRES }
+}
+
+// ==================== 技能 Mock 数据 ====================
+
+const MOCK_SKILLS_KEY = 'write_claw_dev_skills'
+
+function loadMockSkills(): Map<string, Skill> {
+  try {
+    const raw = localStorage.getItem(MOCK_SKILLS_KEY)
+    if (!raw) return new Map()
+    const arr = JSON.parse(raw) as Skill[]
+    return new Map(arr.map((s) => [s.id, s]))
+  } catch {
+    return new Map()
+  }
+}
+
+function saveMockSkills(map: Map<string, Skill>) {
+  localStorage.setItem(MOCK_SKILLS_KEY, JSON.stringify([...map.values()]))
+}
+
+async function mockListSkills(): Promise<SkillSummary[]> {
+  const map = loadMockSkills()
+  return [...map.values()]
+    .sort((a, b) => (b.updated_at || '').localeCompare(a.updated_at || ''))
+    .map(({ id, title, genre, output_dir }) => ({
+      id,
+      title,
+      genre,
+      output_dir,
+    }))
+}
+
+async function mockGetSkill(skill_id: string): Promise<Skill | null> {
+  return loadMockSkills().get(skill_id) ?? null
+}
+
+async function mockCreateSkill(
+  title: string,
+  genre: string,
+): Promise<Skill> {
+  const map = loadMockSkills()
+  const now = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z')
+  const skill: Skill = {
+    id: randomId(),
+    title: title.trim() || '未命名技能',
+    genre: SHORT_GENRE_OPTIONS.includes(genre as (typeof SHORT_GENRE_OPTIONS)[number])
+      ? genre
+      : SHORT_GENRE_OPTIONS[0],
+    stages: normalizeSkillStages({}),
+    created_at: now,
+    updated_at: now,
+  }
+  map.set(skill.id, skill)
+  saveMockSkills(map)
+  return skill
+}
+
+async function mockSaveSkill(
+  skill_id: string,
+  stages?: Record<string, string> | null,
+  title?: string,
+): Promise<Skill | null> {
+  const map = loadMockSkills()
+  const s = map.get(skill_id)
+  if (!s) return null
+  const now = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z')
+  let next: Skill = { ...s, updated_at: now }
+  if (title != null) {
+    next = { ...next, title: title.trim() }
+  }
+  if (stages != null) {
+    const normalized = normalizeSkillStages(stages as Partial<Record<SkillStageId, string>>)
+    next = { ...next, stages: normalized }
+  }
+  map.set(skill_id, next)
+  saveMockSkills(map)
+  return next
+}
+
+async function mockDeleteSkill(skill_id: string): Promise<boolean> {
+  const map = loadMockSkills()
+  const ok = map.delete(skill_id)
+  if (ok) saveMockSkills(map)
+  return ok
 }
 
 type BridgeApi = NonNullable<typeof window.pywebview>['api']
@@ -1049,6 +1403,55 @@ export async function getMaterialGenres(): Promise<Record<string, string[]>> {
   return mockGetMaterialGenres()
 }
 
+// ==================== 技能 Bridge 函数 ====================
+
+export async function listSkills(): Promise<SkillSummary[]> {
+  const api = await getBridgeApi()
+  if (api?.list_skills) return api.list_skills()
+  return mockListSkills()
+}
+
+export async function getSkill(skill_id: string): Promise<Skill | null> {
+  const api = await getBridgeApi()
+  if (api?.get_skill) return api.get_skill(skill_id)
+  return mockGetSkill(skill_id)
+}
+
+export async function createSkill(
+  title: string,
+  genre: string,
+  workspace_root?: string | null,
+): Promise<Skill> {
+  const api = await getBridgeApi()
+  if (api?.create_skill) {
+    return api.create_skill(title, genre, workspace_root ?? null)
+  }
+  return mockCreateSkill(title, genre)
+}
+
+export type SaveSkillOptions = {
+  stages?: Record<string, string> | null
+  title?: string
+}
+
+export async function saveSkill(
+  skill_id: string,
+  options?: SaveSkillOptions,
+): Promise<Skill | null> {
+  const api = await getBridgeApi()
+  const opts = options ?? {}
+  if (api?.save_skill) {
+    return api.save_skill(skill_id, opts.stages ?? null, opts.title ?? null)
+  }
+  return mockSaveSkill(skill_id, opts.stages, opts.title)
+}
+
+export async function deleteSkill(skill_id: string): Promise<boolean> {
+  const api = await getBridgeApi()
+  if (api?.delete_skill) return api.delete_skill(skill_id)
+  return mockDeleteSkill(skill_id)
+}
+
 // ==================== 素材提示词 Bridge 函数 ====================
 
 export async function getMaterialSystemPrompt(
@@ -1056,6 +1459,8 @@ export async function getMaterialSystemPrompt(
   stageId: MaterialStageId,
   input: {
     materialTitle: string
+    materialType?: string
+    materialGenre?: string
     stageBody: string
     allStages: Partial<Record<MaterialStageId, string>>
   },
@@ -1071,16 +1476,21 @@ export async function getMaterialSystemPrompt(
       promptKind,
       stageId,
       JSON.stringify({
+        material_title: input.materialTitle,
         book_title: input.materialTitle,
+        material_type: input.materialType ?? '',
+        material_genre: input.materialGenre ?? '',
         stage_body: input.stageBody,
         all_stages: stagesObj,
       }),
     )
   }
 
-  const raw = await readMaterialPromptTemplate(promptKind, stageId)
+  const raw = await readMaterialAgentPromptTemplate()
   return renderPromptFromTemplateRaw(raw, {
     bookTitle: input.materialTitle,
+    materialType: input.materialType,
+    materialGenre: input.materialGenre,
     stageBody: input.stageBody,
     allStages: input.allStages,
     promptKind,
@@ -1088,23 +1498,67 @@ export async function getMaterialSystemPrompt(
   })
 }
 
-export async function readMaterialPromptTemplate(
-  promptKind: MaterialPromptKind,
-  stageId: MaterialStageId,
-): Promise<string> {
+export async function readMaterialAgentPromptTemplate(): Promise<string> {
   const api = await getBridgeApi()
-  if (api?.read_material_prompt_template) {
-    const t = await api.read_material_prompt_template(promptKind, stageId)
+  if (api?.read_material_agent_prompt_template) {
+    const t = await api.read_material_agent_prompt_template()
     return t.endsWith('\n') ? t.slice(0, -1) : t
   }
   try {
-    const ls = localStorage.getItem(localPromptLsKey(promptKind, stageId))
+    const ls = localStorage.getItem(
+      localPromptLsKey(MATERIAL_MANAGER_PROMPT_KIND, MATERIAL_MANAGER_AGENT_ID),
+    )
     if (ls != null && ls.trim() !== '')
       return ls.endsWith('\n') ? ls.slice(0, -1) : ls
   } catch {
     /* ignore */
   }
-  return getEmbeddedPromptTemplate(promptKind, stageId)
+  return getEmbeddedPromptTemplate(
+    MATERIAL_MANAGER_PROMPT_KIND,
+    MATERIAL_MANAGER_AGENT_ID,
+  )
+}
+
+export async function saveMaterialAgentPromptOverride(
+  body: string,
+): Promise<void> {
+  const api = await getBridgeApi()
+  if (api?.save_material_agent_prompt_override) {
+    await api.save_material_agent_prompt_override(body)
+    return
+  }
+  try {
+    localStorage.setItem(
+      localPromptLsKey(MATERIAL_MANAGER_PROMPT_KIND, MATERIAL_MANAGER_AGENT_ID),
+      body,
+    )
+  } catch {
+    console.warn('[涌泉] 无法保存素材库智能体提示词覆盖：无桌面桥接且无可用 localStorage')
+  }
+}
+
+export async function resetMaterialAgentPromptOverride(): Promise<boolean> {
+  const api = await getBridgeApi()
+  if (api?.reset_material_agent_prompt_override) {
+    return api.reset_material_agent_prompt_override()
+  }
+  try {
+    const k = localPromptLsKey(MATERIAL_MANAGER_PROMPT_KIND, MATERIAL_MANAGER_AGENT_ID)
+    const had = localStorage.getItem(k) != null
+    localStorage.removeItem(k)
+    return had
+  } catch {
+    return false
+  }
+}
+
+export async function readMaterialPromptTemplate(
+  promptKind: MaterialPromptKind,
+  stageId: MaterialStageId,
+): Promise<string> {
+  void promptKind
+  void stageId
+  return readMaterialAgentPromptTemplate()
 }
 
 export async function saveMaterialPromptOverride(
@@ -1112,28 +1566,107 @@ export async function saveMaterialPromptOverride(
   stageId: MaterialStageId,
   body: string,
 ): Promise<void> {
-  const api = await getBridgeApi()
-  if (api?.save_material_prompt_override) {
-    await api.save_material_prompt_override(promptKind, stageId, body)
-    return
-  }
-  try {
-    localStorage.setItem(localPromptLsKey(promptKind, stageId), body)
-  } catch {
-    console.warn('[涌泉] 无法保存素材提示词覆盖：无桌面桥接且无可用 localStorage')
-  }
+  void promptKind
+  void stageId
+  await saveMaterialAgentPromptOverride(body)
 }
 
 export async function resetMaterialPromptOverride(
   promptKind: MaterialPromptKind,
   stageId: MaterialStageId,
 ): Promise<boolean> {
+  void promptKind
+  void stageId
+  return resetMaterialAgentPromptOverride()
+}
+
+// ==================== 技能提示词 Bridge 函数 ====================
+
+export async function getSkillSystemPrompt(
+  stageId: SkillStageId,
+  input: {
+    skillTitle: string
+    skillGenre?: string
+    stageBody: string
+    allStages: Partial<Record<SkillStageId, string>>
+  },
+): Promise<string> {
+  const stagesObj: Record<string, string> = {}
+  for (const [k, v] of Object.entries(input.allStages ?? {})) {
+    stagesObj[k] = String(v ?? '')
+  }
+
   const api = await getBridgeApi()
-  if (api?.reset_material_prompt_override) {
-    return api.reset_material_prompt_override(promptKind, stageId)
+  if (api?.get_skill_system_prompt) {
+    return api.get_skill_system_prompt(
+      stageId,
+      JSON.stringify({
+        skill_title: input.skillTitle,
+        book_title: input.skillTitle,
+        skill_genre: input.skillGenre ?? '',
+        stage_body: input.stageBody,
+        all_stages: stagesObj,
+      }),
+    )
+  }
+
+  const raw = await readSkillAgentPromptTemplate()
+  return renderPromptFromTemplateRaw(raw, {
+    bookTitle: input.skillTitle,
+    skillGenre: input.skillGenre,
+    stageBody: input.stageBody,
+    allStages: input.allStages,
+    promptKind: SKILL_MANAGER_PROMPT_KIND,
+    stageId,
+  })
+}
+
+export async function readSkillAgentPromptTemplate(): Promise<string> {
+  const api = await getBridgeApi()
+  if (api?.read_skill_agent_prompt_template) {
+    const t = await api.read_skill_agent_prompt_template()
+    return t.endsWith('\n') ? t.slice(0, -1) : t
   }
   try {
-    const k = localPromptLsKey(promptKind, stageId)
+    const ls = localStorage.getItem(
+      localPromptLsKey(SKILL_MANAGER_PROMPT_KIND, SKILL_MANAGER_AGENT_ID),
+    )
+    if (ls != null && ls.trim() !== '')
+      return ls.endsWith('\n') ? ls.slice(0, -1) : ls
+  } catch {
+    /* ignore */
+  }
+  return getEmbeddedPromptTemplate(
+    SKILL_MANAGER_PROMPT_KIND,
+    SKILL_MANAGER_AGENT_ID,
+  )
+}
+
+export async function saveSkillAgentPromptOverride(
+  body: string,
+): Promise<void> {
+  const api = await getBridgeApi()
+  if (api?.save_skill_agent_prompt_override) {
+    await api.save_skill_agent_prompt_override(body)
+    return
+  }
+  try {
+    localStorage.setItem(
+      localPromptLsKey(SKILL_MANAGER_PROMPT_KIND, SKILL_MANAGER_AGENT_ID),
+      body,
+    )
+  } catch {
+    console.warn('[涌泉] 无法保存技能库智能体提示词覆盖：无桌面桥接且无可用 localStorage')
+  }
+}
+
+export async function resetSkillAgentPromptOverride(): Promise<boolean> {
+  const api = await getBridgeApi()
+  if (api?.reset_skill_agent_prompt_override) {
+    return api.reset_skill_agent_prompt_override()
+  }
+  try {
+    const k = localPromptLsKey(SKILL_MANAGER_PROMPT_KIND, SKILL_MANAGER_AGENT_ID)
     const had = localStorage.getItem(k) != null
     localStorage.removeItem(k)
     return had

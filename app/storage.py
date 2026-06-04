@@ -12,21 +12,27 @@ from app.runtime_paths import writable_root
 from app.models import (
     Book,
     Material,
+    Skill,
     SHORT_STAGE_KEYS,
     MATERIAL_STAGE_KEYS,
+    SKILL_STAGE_KEYS,
     apply_stage_patch,
     default_stages,
     default_material_stages,
+    default_skill_stages,
     normalize_expert_draft_from_storage,
     new_book_id,
     new_material_id,
+    new_skill_id,
     primary_draft_stage_key,
     normalize_material_stages_from_storage,
+    normalize_skill_stages_from_storage,
 )
 
 ISO_FMT = "%Y-%m-%dT%H:%M:%SZ"
 
 _WIN_INVALID = '<>:"/\\|?*\n\r\t'
+AI_MODEL_CONFIG_PREF_KEY = "ai_model_config"
 
 
 def _sanitize_book_folder_name(title: str) -> str:
@@ -87,6 +93,13 @@ def default_materials_path() -> Path:
     data_dir = writable_root() / ".data"
     data_dir.mkdir(parents=True, exist_ok=True)
     return data_dir / "materials.json"
+
+
+def default_skills_path() -> Path:
+    """技能数据文件路径"""
+    data_dir = writable_root() / ".data"
+    data_dir.mkdir(parents=True, exist_ok=True)
+    return data_dir / "skills.json"
 
 
 def load_books(path: Path) -> dict[str, Book]:
@@ -206,6 +219,193 @@ def write_workspace_agent_read_access(config: dict[str, Any]) -> None:
     save_preferences_atomic(prefs)
 
 
+def _normalize_config_id(raw: str) -> str:
+    return "".join(ch if ch.isalnum() else "_" for ch in raw.strip().lower()).strip("_")
+
+
+def _read_string(raw: Any) -> str:
+    return raw.strip() if isinstance(raw, str) else ""
+
+
+def _read_bool(raw: Any) -> bool | None:
+    if isinstance(raw, bool):
+        return raw
+    if not isinstance(raw, str):
+        return None
+    normalized = raw.strip().lower()
+    if normalized in ("1", "true", "yes", "y", "on", "支持", "开启"):
+        return True
+    if normalized in ("0", "false", "no", "n", "off", "不支持", "关闭"):
+        return False
+    return None
+
+
+def _normalize_ai_model_entry(raw: Any) -> dict[str, Any] | None:
+    if not isinstance(raw, dict):
+        return None
+    provider = _read_string(raw.get("provider") or raw.get("model_source"))
+    model_id = _read_string(
+        raw.get("model_id") or raw.get("modelId") or raw.get("model_name")
+    )
+    api_key = _read_string(raw.get("api_key") or raw.get("apiKey") or raw.get("model_key"))
+    raw_id = _read_string(raw.get("id")) or model_id or provider
+    config_id = _normalize_config_id(raw_id)
+    if not config_id or not provider or not model_id or not api_key:
+        return None
+
+    label = (
+        _read_string(raw.get("label") or raw.get("display_name") or raw.get("title"))
+        or raw_id
+        or model_id
+    )
+    out: dict[str, Any] = {
+        "id": config_id,
+        "label": label,
+        "provider": provider.lower(),
+        "model_id": model_id,
+        "api_key": api_key,
+    }
+    base_url = _read_string(raw.get("base_url") or raw.get("baseUrl") or raw.get("model_url"))
+    api = _read_string(raw.get("api") or raw.get("model_like") or raw.get("modelLike"))
+    if base_url:
+        out["base_url"] = base_url
+    if api:
+        out["api"] = api
+    reasoning_raw = raw["reasoning"] if "reasoning" in raw else raw.get("model_reasoning")
+    stream_raw = raw["stream"] if "stream" in raw else raw.get("model_stream")
+    reasoning = _read_bool(reasoning_raw)
+    stream = _read_bool(stream_raw)
+    if reasoning is not None:
+        out["reasoning"] = reasoning
+    if stream is not None:
+        out["stream"] = stream
+    return out
+
+
+def _normalize_image_model_config(raw: Any) -> dict[str, str] | None:
+    if not isinstance(raw, dict):
+        return None
+    model = _read_string(raw.get("model") or raw.get("image_model"))
+    api_key = _read_string(raw.get("api_key") or raw.get("apiKey") or raw.get("image_model_key"))
+    if not model or not api_key:
+        return None
+    out = {
+        "model": model,
+        "api_key": api_key,
+    }
+    base_url = _read_string(
+        raw.get("base_url")
+        or raw.get("baseUrl")
+        or raw.get("image_model_url")
+        or raw.get("image_url")
+        or raw.get("image_base_url")
+    )
+    if base_url:
+        out["base_url"] = base_url
+    return out
+
+
+def normalize_ai_model_config(raw: Any) -> dict[str, Any]:
+    source = raw if isinstance(raw, dict) else {}
+    text = source.get("text") if isinstance(source.get("text"), dict) else source
+    text_obj = text if isinstance(text, dict) else {}
+    models_raw = text_obj.get("models")
+    if not isinstance(models_raw, list):
+        models_raw = []
+
+    models: list[dict[str, Any]] = []
+    seen_ids: set[str] = set()
+    for item in models_raw:
+        normalized = _normalize_ai_model_entry(item)
+        if not normalized:
+            continue
+        base_id = normalized["id"]
+        config_id = base_id
+        suffix = 2
+        while config_id in seen_ids:
+            config_id = f"{base_id}_{suffix}"
+            suffix += 1
+        normalized["id"] = config_id
+        seen_ids.add(config_id)
+        models.append(normalized)
+
+    default_model_id = _normalize_config_id(
+        _read_string(
+            text_obj.get("default_model_id")
+            or text_obj.get("defaultModelId")
+            or source.get("default_model_id")
+            or source.get("default_model")
+        )
+    )
+    if default_model_id and default_model_id not in seen_ids:
+        default_model_id = ""
+    if not default_model_id and models:
+        default_model_id = models[0]["id"]
+
+    return {
+        "text": {
+            "models": models,
+            "default_model_id": default_model_id,
+        },
+        "image": _normalize_image_model_config(source.get("image")),
+    }
+
+
+def _ai_model_config_has_values(config: dict[str, Any]) -> bool:
+    text = config.get("text")
+    models = text.get("models") if isinstance(text, dict) else []
+    return bool(models) or config.get("image") is not None
+
+
+def read_ai_model_config() -> dict[str, Any]:
+    prefs = load_preferences()
+    raw = prefs.get(AI_MODEL_CONFIG_PREF_KEY)
+    if isinstance(raw, dict):
+        return normalize_ai_model_config(raw)
+
+    from app.ai_env import load_ai_model_settings_from_env
+
+    imported = normalize_ai_model_config(load_ai_model_settings_from_env())
+    if _ai_model_config_has_values(imported):
+        prefs[AI_MODEL_CONFIG_PREF_KEY] = imported
+        save_preferences_atomic(prefs)
+    return imported
+
+
+def write_ai_model_config(config: dict[str, Any]) -> dict[str, Any]:
+    normalized = normalize_ai_model_config(config)
+    prefs = load_preferences()
+    prefs[AI_MODEL_CONFIG_PREF_KEY] = normalized
+    save_preferences_atomic(prefs)
+    return normalized
+
+
+def read_ai_model_defaults() -> dict[str, Any] | None:
+    settings = read_ai_model_config()
+    text = settings.get("text")
+    if not isinstance(text, dict):
+        return None
+    models = text.get("models")
+    if not isinstance(models, list) or not models:
+        return None
+    default_model_id = _read_string(text.get("default_model_id"))
+    first = models[0]
+    out: dict[str, Any] = {
+        "provider": first["provider"],
+        "model_id": first["model_id"],
+        "api_key": first["api_key"],
+        "models": models,
+    }
+    if default_model_id:
+        out["default_model_id"] = default_model_id
+    return out
+
+
+def read_image_model_config() -> dict[str, str] | None:
+    image = read_ai_model_config().get("image")
+    return image if isinstance(image, dict) else None
+
+
 def _sanitize_material_folder_name(title: str) -> str:
     """清理素材文件夹名称"""
     t = (title or "").strip() or "未命名素材"
@@ -213,6 +413,15 @@ def _sanitize_material_folder_name(title: str) -> str:
         t = t.replace(ch, "_")
     t = t.strip(" .")
     return t or "未命名素材"
+
+
+def _sanitize_skill_folder_name(title: str) -> str:
+    """清理技能文件夹名称"""
+    t = (title or "").strip() or "未命名技能"
+    for ch in _WIN_INVALID:
+        t = t.replace(ch, "_")
+    t = t.strip(" .")
+    return t or "未命名技能"
 
 
 def _write_material_stages_to_disk(material: Material) -> None:
@@ -234,6 +443,25 @@ def _write_material_stages_to_disk(material: Material) -> None:
             pass
 
 
+def _write_skill_stages_to_disk(skill: Skill) -> None:
+    """将技能各阶段内容写入输出目录"""
+    od = (skill.output_dir or "").strip()
+    if not od:
+        return
+    root = Path(od)
+    try:
+        root.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        return
+
+    for key in SKILL_STAGE_KEYS:
+        text = str(skill.stages.get(key, "") or "")
+        try:
+            (root / f"{key}.txt").write_text(text, encoding="utf-8")
+        except OSError:
+            pass
+
+
 def load_materials(path: Path) -> dict[str, Material]:
     """从JSON文件加载素材数据"""
     if not path.exists():
@@ -247,6 +475,21 @@ def load_materials(path: Path) -> dict[str, Material]:
         m = Material.from_dict(item)
         materials[m.id] = m
     return materials
+
+
+def load_skills(path: Path) -> dict[str, Skill]:
+    """从 JSON 文件加载技能数据"""
+    if not path.exists():
+        return {}
+    raw = path.read_text(encoding="utf-8")
+    if not raw.strip():
+        return {}
+    payload = json.loads(raw)
+    skills: dict[str, Skill] = {}
+    for item in payload.get("skills", []):
+        s = Skill.from_dict(item)
+        skills[s.id] = s
+    return skills
 
 
 def save_materials_atomic(path: Path, materials: dict[str, Material]) -> None:
@@ -273,6 +516,30 @@ def save_materials_atomic(path: Path, materials: dict[str, Material]) -> None:
         raise
 
 
+def save_skills_atomic(path: Path, skills: dict[str, Skill]) -> None:
+    """原子化保存技能数据到 JSON 文件"""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload: dict[str, Any] = {
+        "skills": [s.to_dict() for s in skills.values()],
+    }
+    text = json.dumps(payload, ensure_ascii=False, indent=2)
+    fd, tmp = tempfile.mkstemp(
+        dir=str(path.parent),
+        prefix=".skills_",
+        suffix=".json.tmp",
+    )
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(text)
+        os.replace(tmp, path)
+    except Exception:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+
 class BookStore:
     def __init__(self, path: Path | None = None) -> None:
         self._path = path or default_data_path()
@@ -280,6 +547,9 @@ class BookStore:
         # 素材数据存储
         self._materials_path = default_materials_path()
         self._materials = load_materials(self._materials_path)
+        # 技能数据存储
+        self._skills_path = default_skills_path()
+        self._skills = load_skills(self._skills_path)
 
     @property
     def path(self) -> Path:
@@ -495,4 +765,102 @@ class BookStore:
             return False
         del self._materials[mid]
         save_materials_atomic(self._materials_path, self._materials)
+        return True
+
+    # ==================== 技能管理方法 ====================
+
+    def list_skills(self) -> list[dict[str, Any]]:
+        """列出所有技能，按更新时间倒序"""
+        return [
+            {
+                "id": s.id,
+                "title": s.title,
+                "genre": s.genre,
+                "output_dir": s.output_dir,
+            }
+            for s in sorted(
+                self._skills.values(),
+                key=lambda x: (x.updated_at or "", x.title),
+                reverse=True,
+            )
+        ]
+
+    def get_skill(self, skill_id: str) -> dict[str, Any] | None:
+        """获取单个技能详情"""
+        s = self._skills.get(skill_id)
+        if s is None:
+            return None
+        return s.to_dict()
+
+    def create_skill(
+        self,
+        title: str,
+        genre: str,
+        workspace_root: str | None = None,
+    ) -> dict[str, Any]:
+        """创建新技能"""
+        now = _utc_now_iso()
+        g = genre.strip() if genre.strip() else "世情"
+        if g not in ("世情", "追妻", "科幻", "悬疑"):
+            g = "世情"
+        wr = (workspace_root or "").strip()
+        od = ""
+        if wr:
+            try:
+                parent = Path(wr).expanduser()
+                parent.mkdir(parents=True, exist_ok=True)
+                parent = parent.resolve()
+                skills_parent = parent / "技能库"
+                skills_parent.mkdir(parents=True, exist_ok=True)
+                folder_name = _sanitize_skill_folder_name(title.strip() or "未命名技能")
+                skill_dir = _unique_child_dir(skills_parent, folder_name)
+                skill_dir.mkdir(parents=True, exist_ok=False)
+                od = str(skill_dir)
+            except (OSError, ValueError):
+                od = ""
+            if not od:
+                raise RuntimeError(
+                    "无法在选定工作文件夹下创建技能目录，请检查路径是否有效、磁盘空间与写入权限。",
+                )
+        sid = new_skill_id()
+        s = Skill(
+            id=sid,
+            title=title.strip() or "未命名技能",
+            genre=g,
+            stages=default_skill_stages(),
+            output_dir=od,
+            created_at=now,
+            updated_at=now,
+        )
+        self._skills[sid] = s
+        save_skills_atomic(self._skills_path, self._skills)
+        _write_skill_stages_to_disk(s)
+        return s.to_dict()
+
+    def save_skill(
+        self,
+        skill_id: str,
+        stages: dict[str, str] | None = None,
+        title: str | None = None,
+    ) -> dict[str, Any] | None:
+        """保存技能阶段内容"""
+        s = self._skills.get(skill_id)
+        if s is None:
+            return None
+        if stages is not None:
+            s.stages = normalize_skill_stages_from_storage(stages)
+        if title is not None:
+            s.title = title.strip()
+        s.updated_at = _utc_now_iso()
+        save_skills_atomic(self._skills_path, self._skills)
+        _write_skill_stages_to_disk(s)
+        return s.to_dict()
+
+    def delete_skill(self, skill_id: str) -> bool:
+        """删除技能"""
+        sid = (skill_id or "").strip()
+        if not sid or sid not in self._skills:
+            return False
+        del self._skills[sid]
+        save_skills_atomic(self._skills_path, self._skills)
         return True

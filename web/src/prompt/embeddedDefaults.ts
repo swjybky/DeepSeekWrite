@@ -12,11 +12,26 @@ const RAW_MATERIAL = import.meta.glob('../../../app/prompt_defaults/material/*/*
   import: 'default',
 })
 
+const RAW_SKILL = import.meta.glob('../../../app/prompt_defaults/skill/*/*.txt', {
+  eager: true,
+  query: '?raw',
+  import: 'default',
+})
+
 function normalizeGlobKey(importPath: string): string | null {
   const up = importPath.replace(/\\/g, '/')
   // short: prompt_defaults/short/shared/xxx.txt → shared/xxx
   const shortM = up.match(/prompt_defaults\/short\/(.+)\.txt$/i)
   if (shortM) return shortM[1]
+  // material: prompt_defaults/material/shared/material_manager.txt → material_manager/material_manager
+  const materialManagerM = up.match(
+    /prompt_defaults\/material\/shared\/material_manager\.txt$/i,
+  )
+  if (materialManagerM) return 'material_manager/material_manager'
+  const skillManagerM = up.match(
+    /prompt_defaults\/skill\/shared\/skill_manager\.txt$/i,
+  )
+  if (skillManagerM) return 'skill_manager/skill_manager'
   // material: prompt_defaults/material/short_shiqing/xxx.txt → material_short_shiqing/xxx
   const materialM = up.match(/prompt_defaults\/material\/(.+)\.txt$/i)
   if (materialM) return `material_${materialM[1]}`
@@ -24,7 +39,7 @@ function normalizeGlobKey(importPath: string): string | null {
 }
 
 const CACHE = new Map<string, string>()
-for (const [k, v] of Object.entries({ ...RAW_SHORT, ...RAW_MATERIAL })) {
+for (const [k, v] of Object.entries({ ...RAW_SHORT, ...RAW_MATERIAL, ...RAW_SKILL })) {
   const nk = normalizeGlobKey(k)
   if (!nk || typeof v !== 'string') continue
   CACHE.set(nk, v.endsWith('\n') ? v.slice(0, -1) : v)

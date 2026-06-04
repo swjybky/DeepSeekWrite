@@ -3,7 +3,7 @@ import type { Api, KnownProvider, Model } from '@mariozechner/pi-ai'
 import { getAppStorage } from '@mariozechner/pi-web-ui'
 
 import type { AiModelConfig, AiModelDefaults } from '../bridge'
-import { getBridgeApi } from '../bridge'
+import { getAiModelDefaults } from '../bridge'
 
 type ResolvedModelConfig = AiModelConfig & {
   model: Model<Api>
@@ -56,11 +56,13 @@ function coerceModelConfig(raw: unknown): AiModelConfig | null {
   const base_url = trimString(o.base_url ?? o.baseUrl)
   const api = trimString(o.api ?? o.model_like ?? o.modelLike)
   const reasoning = coerceBoolean(o.reasoning ?? o.model_reasoning ?? o.modelReasoning)
+  const stream = coerceBoolean(o.stream ?? o.model_stream ?? o.modelStream)
   if (!id || !provider || !model_id || !api_key) return null
   const out: AiModelConfig = { id, label, provider, model_id, api_key }
   if (base_url) out.base_url = base_url
   if (api) out.api = api
   if (reasoning !== undefined) out.reasoning = reasoning
+  if (stream !== undefined) out.stream = stream
   return out
 }
 
@@ -93,9 +95,7 @@ function coerceDefaults(raw: unknown): AiModelDefaults | null {
 }
 
 async function loadDefaults(): Promise<AiModelDefaults | null> {
-  const api = await getBridgeApi()
-  if (!api?.get_ai_defaults) return null
-  return coerceDefaults(await api.get_ai_defaults())
+  return coerceDefaults(await getAiModelDefaults())
 }
 
 function resolveModel(provider: string, modelId: string): Model<Api> | null {
@@ -192,7 +192,7 @@ function pickDefaultConfig(
 }
 
 /**
- * 获取 provider API Key。固定模型列表存在时只从 `.env` 配置注入；
+ * 获取 provider API Key。固定模型列表存在时只从本地模型配置注入；
  * 旧格式或浏览器开发模式下仍兼容 Pi IndexedDB 中的 provider key。
  */
 export async function resolveWorkspaceProviderApiKey(
@@ -229,7 +229,7 @@ export async function resolveWorkspaceProviderApiKey(
 }
 
 /**
- * 桌面端：从 Python 读取 `.env` 固定模型配置，写入 Pi 的 provider API Key，
+ * 桌面端：从 Python 读取本地固定模型配置，写入 Pi 的 provider API Key，
  * 并解析默认 Model。浏览器开发或未配置时回退 openai / gpt-4o-mini。
  */
 export async function resolveWorkspaceChatModel(): Promise<Model<Api>> {
@@ -253,7 +253,7 @@ export async function resolveWorkspaceChatModel(): Promise<Model<Api>> {
 }
 
 /**
- * 仅展示 `.env` 中声明的固定模型配置。未配置固定列表时返回 false，
+ * 仅展示本地声明的固定模型配置。未配置固定列表时返回 false，
  * 调用方可继续使用 Pi 默认模型选择器。
  */
 export async function openWorkspaceConfiguredModelSelector(

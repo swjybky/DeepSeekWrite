@@ -52,7 +52,10 @@ _WORKSPACE_PLACEHOLDER_RE = re.compile(
     r"\{\{(BOOK_TITLE|BOOK_LINE|BOOK_GENRE|STYLE|STAGE_BODY|OTHER_STAGES_EXCERPT)\}\}"
 )
 _MATERIAL_PLACEHOLDER_RE = re.compile(
-    r"\{\{(BOOK_TITLE|BOOK_LINE|STAGE_BODY|OTHER_STAGES_EXCERPT)\}\}"
+    r"\{\{(BOOK_TITLE|BOOK_LINE|MATERIAL_TITLE|MATERIAL_LINE|MATERIAL_TYPE|MATERIAL_GENRE|STAGE_ID|STAGE_LABEL|STAGE_BODY|OTHER_STAGES_EXCERPT)\}\}"
+)
+_SKILL_PLACEHOLDER_RE = re.compile(
+    r"\{\{(BOOK_TITLE|BOOK_LINE|SKILL_TITLE|SKILL_LINE|SKILL_GENRE|STAGE_ID|STAGE_LABEL|STAGE_BODY|OTHER_STAGES_EXCERPT)\}\}"
 )
 
 
@@ -267,6 +270,9 @@ def read_raw_workspace_agent_prompt_for_editor(agent_id: str) -> str:
 # ==================== 素材库提示词管线 ====================
 
 MATERIAL_PREFIX = Path("material")
+MATERIAL_MANAGER_AGENT_ID = "material_manager"
+MATERIAL_MANAGER_PROMPT_KIND = "material_manager"
+SHARED_MATERIAL_PROMPT_DIR = "shared"
 
 # 素材阶段顺序（人设/导语/梗/剧情细化/节奏/正文片段），对齐 app/models.py MATERIAL_STAGE_KEYS
 MATERIAL_STAGES_ORDER: tuple[str, ...] = (
@@ -287,9 +293,10 @@ MATERIAL_STAGE_LABELS: dict[str, str] = {
     "draft_excerpt": "正文片段",
 }
 
-# 素材提示词目录：long(长篇) / short_*(短篇分类)
+# 新版素材库只保留一个「素材库管理智能体」；旧 kind 仅作为桥接兼容入口。
 VALID_MATERIAL_PROMPT_KINDS: frozenset[str] = frozenset(
     {
+        MATERIAL_MANAGER_PROMPT_KIND,
         "material_long",
         "material_short_shiqing",
         "material_short_qinggan",
@@ -297,13 +304,6 @@ VALID_MATERIAL_PROMPT_KINDS: frozenset[str] = frozenset(
         "material_short_xuanyi",
     }
 )
-
-
-def _material_kind_to_subdir(prompt_kind: str) -> str:
-    """material_long → long、material_short_shiqing → short_shiqing。"""
-    if not prompt_kind.startswith("material_"):
-        return prompt_kind
-    return prompt_kind[len("material_"):]
 
 
 def _peek_material_other_stages(
@@ -342,36 +342,37 @@ def validate_material_slot(prompt_kind: str, stage_id: str) -> None:
         raise ValueError(f"未知的 material stage_id: {stage_id!r}")
 
 
-def material_override_absolute_path(prompt_kind: str, stage_id: str) -> Path:
-    subdir = _material_kind_to_subdir(prompt_kind)
+def material_agent_override_absolute_path() -> Path:
     root = writable_root() / ".data" / "prompt_overrides" / MATERIAL_PREFIX
-    return (root / subdir / f"{stage_id}.txt").resolve()
+    return (
+        root
+        / SHARED_MATERIAL_PROMPT_DIR
+        / f"{MATERIAL_MANAGER_AGENT_ID}.txt"
+    ).resolve()
 
 
-def material_builtin_default_path(prompt_kind: str, stage_id: str) -> Path:
-    subdir = _material_kind_to_subdir(prompt_kind)
+def material_agent_builtin_default_path() -> Path:
     return (
         (bundle_root() / "app" / "prompt_defaults" / MATERIAL_PREFIX)
-        / subdir
-        / f"{stage_id}.txt"
+        / SHARED_MATERIAL_PROMPT_DIR
+        / f"{MATERIAL_MANAGER_AGENT_ID}.txt"
     )
 
 
-def resolve_material_read_path(prompt_kind: str, stage_id: str) -> Path:
+def resolve_material_agent_read_path() -> Path:
     """覆盖优先。"""
-    validate_material_slot(prompt_kind, stage_id)
-    over = material_override_absolute_path(prompt_kind, stage_id)
+    over = material_agent_override_absolute_path()
     if over.is_file():
         return over
-    return material_builtin_default_path(prompt_kind, stage_id)
+    return material_agent_builtin_default_path()
 
 
-def read_material_prompt_template(prompt_kind: str, stage_id: str) -> str:
-    path = resolve_material_read_path(prompt_kind, stage_id)
+def read_material_agent_prompt_template() -> str:
+    path = resolve_material_agent_read_path()
     if not path.is_file():
         return (
             f"[缺少素材默认提示模板文件]\n路径: {path}\n\n"
-            "请补齐 app/prompt_defaults/material 下的同名 .txt。\n"
+            "请补齐 app/prompt_defaults/material/shared/material_manager.txt。\n"
         )
     text = path.read_text(encoding="utf-8")
     if text.endswith("\n"):
@@ -379,20 +380,36 @@ def read_material_prompt_template(prompt_kind: str, stage_id: str) -> str:
     return text
 
 
-def save_material_prompt_override(prompt_kind: str, stage_id: str, body: str) -> None:
-    validate_material_slot(prompt_kind, stage_id)
-    path = material_override_absolute_path(prompt_kind, stage_id)
+def save_material_agent_prompt_override(body: str) -> None:
+    path = material_agent_override_absolute_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(body if body.endswith("\n") else body + "\n", encoding="utf-8")
 
 
-def reset_material_prompt_override(prompt_kind: str, stage_id: str) -> bool:
-    validate_material_slot(prompt_kind, stage_id)
-    path = material_override_absolute_path(prompt_kind, stage_id)
+def reset_material_agent_prompt_override() -> bool:
+    path = material_agent_override_absolute_path()
     if path.is_file():
         path.unlink()
         return True
     return False
+
+
+def read_material_prompt_template(prompt_kind: str, stage_id: str) -> str:
+    """兼容旧 API：素材库不再按 kind/stage 拆分模板。"""
+    validate_material_slot(prompt_kind, stage_id)
+    return read_material_agent_prompt_template()
+
+
+def save_material_prompt_override(prompt_kind: str, stage_id: str, body: str) -> None:
+    """兼容旧 API：写入唯一的素材库管理智能体模板。"""
+    validate_material_slot(prompt_kind, stage_id)
+    save_material_agent_prompt_override(body)
+
+
+def reset_material_prompt_override(prompt_kind: str, stage_id: str) -> bool:
+    """兼容旧 API：重置唯一的素材库管理智能体模板。"""
+    validate_material_slot(prompt_kind, stage_id)
+    return reset_material_agent_prompt_override()
 
 
 def render_material_system_prompt(
@@ -400,12 +417,14 @@ def render_material_system_prompt(
     stage_id: str,
     *,
     book_title: str,
+    material_type: str = "",
+    material_genre: str = "",
     stage_body: str,
     other_stages_excerpt: str | None = None,
     all_stages_for_peek: dict[str, str] | None = None,
 ) -> str:
     validate_material_slot(prompt_kind, stage_id)
-    raw = read_material_prompt_template(prompt_kind, stage_id)
+    raw = read_material_agent_prompt_template()
 
     staged_body = excerpt(stage_body, STAGE_BODY_EXCERPT_CAP)
     if other_stages_excerpt is None:
@@ -416,9 +435,17 @@ def render_material_system_prompt(
     else:
         other = other_stages_excerpt
 
+    title = (book_title or "").strip()
+    stage_label = MATERIAL_STAGE_LABELS.get(stage_id, stage_id)
     replacements = {
-        "BOOK_TITLE": (book_title or "").strip(),
-        "BOOK_LINE": f"素材：《{(book_title or '').strip()}》",
+        "BOOK_TITLE": title,
+        "BOOK_LINE": f"素材：《{title}》",
+        "MATERIAL_TITLE": title,
+        "MATERIAL_LINE": f"素材：《{title}》",
+        "MATERIAL_TYPE": (material_type or "").strip() or "未分类素材",
+        "MATERIAL_GENRE": (material_genre or "").strip() or "未分类",
+        "STAGE_ID": stage_id,
+        "STAGE_LABEL": stage_label,
         "STAGE_BODY": staged_body,
         "OTHER_STAGES_EXCERPT": other,
     }
@@ -434,7 +461,15 @@ def render_material_from_api_context(
     prompt_kind: str, stage_id: str, context_raw: object
 ) -> str:
     ctx = parse_context_payload(context_raw)
-    title = str(ctx.get("book_title") or "")
+    title = str(ctx.get("material_title") or ctx.get("book_title") or "")
+    material_type = str(ctx.get("material_type") or "")
+    material_genre = str(ctx.get("material_genre") or "")
+    if not material_genre:
+        parts = [
+            str(ctx.get("parent_genre") or "").strip(),
+            str(ctx.get("sub_genre") or "").strip(),
+        ]
+        material_genre = " · ".join([part for part in parts if part])
     body = str(ctx.get("stage_body") or "")
     all_stages: dict[str, str] | None = None
     stages_val = ctx.get("all_stages")
@@ -447,6 +482,8 @@ def render_material_from_api_context(
             prompt_kind,
             stage_id,
             book_title=title,
+            material_type=material_type,
+            material_genre=material_genre,
             stage_body=body,
             other_stages_excerpt=str(other_override),
         )
@@ -454,14 +491,205 @@ def render_material_from_api_context(
         prompt_kind,
         stage_id,
         book_title=title,
+        material_type=material_type,
+        material_genre=material_genre,
         stage_body=body,
         all_stages_for_peek=all_stages if all_stages is not None else {},
     )
 
 
+def read_raw_material_agent_prompt_for_editor() -> str:
+    """素材库智能体设置页读取当前生效来源（优先覆盖）的原始模板正文。"""
+    path = resolve_material_agent_read_path()
+    if not path.is_file():
+        return ""
+    text = path.read_text(encoding="utf-8")
+    if text.endswith("\n"):
+        return text[:-1]
+    return text
+
+
 def read_raw_material_prompt_for_editor(prompt_kind: str, stage_id: str) -> str:
-    """素材编辑框：读写当前生效来源（优先覆盖）原始模板正文。"""
-    path = resolve_material_read_path(prompt_kind, stage_id)
+    """兼容旧 API：读取唯一的素材库管理智能体模板。"""
+    validate_material_slot(prompt_kind, stage_id)
+    return read_raw_material_agent_prompt_for_editor()
+
+
+# ==================== 技能库提示词管线 ====================
+
+SKILL_PREFIX = Path("skill")
+SKILL_MANAGER_AGENT_ID = "skill_manager"
+SKILL_MANAGER_PROMPT_KIND = "skill_manager"
+SHARED_SKILL_PROMPT_DIR = "shared"
+
+SKILL_STAGES_ORDER: tuple[str, ...] = (
+    "character_design",
+    "plot_design",
+    "intro_design",
+    "plot_refine",
+    "outline",
+    "draft",
+    "draft_review",
+    "format_conversion",
+    "expert_draft_coordinator",
+    "expert_section_writer",
+)
+
+SKILL_STAGE_LABELS: dict[str, str] = {
+    "character_design": "人物设计技能",
+    "plot_design": "剧情设计技能",
+    "intro_design": "导语设计技能",
+    "plot_refine": "剧情细化技能",
+    "outline": "大纲纲要技能",
+    "draft": "正文技能",
+    "draft_review": "正文审阅技能",
+    "format_conversion": "格式转换技能",
+    "expert_draft_coordinator": "专家总控技能",
+    "expert_section_writer": "分节写手技能",
+}
+
+
+def _peek_skill_other_stages(
+    exclude_stage_id: str,
+    all_stages: dict[str, str],
+    *,
+    peer_max: int | None,
+) -> str:
+    cap = peer_max if peer_max is not None else OTHER_STAGES_PEER_MAX
+    lines: list[str] = []
+    for sid in SKILL_STAGES_ORDER:
+        if sid == exclude_stage_id:
+            continue
+        raw = str(all_stages.get(sid) or "").strip()
+        if not raw:
+            continue
+        lbl = SKILL_STAGE_LABELS.get(sid, sid)
+        excerpted = excerpt(raw, cap)
+        lines.append(f"【{lbl}】\n{excerpted}")
+    return "\n\n".join(lines) if lines else PEEK_EMPTY_MESSAGE
+
+
+def validate_skill_stage_id(stage_id: str) -> None:
+    if stage_id not in SKILL_STAGES_ORDER:
+        raise ValueError(f"未知的 skill stage_id: {stage_id!r}")
+
+
+def skill_agent_override_absolute_path() -> Path:
+    root = writable_root() / ".data" / "prompt_overrides" / SKILL_PREFIX
+    return (
+        root
+        / SHARED_SKILL_PROMPT_DIR
+        / f"{SKILL_MANAGER_AGENT_ID}.txt"
+    ).resolve()
+
+
+def skill_agent_builtin_default_path() -> Path:
+    return (
+        (bundle_root() / "app" / "prompt_defaults" / SKILL_PREFIX)
+        / SHARED_SKILL_PROMPT_DIR
+        / f"{SKILL_MANAGER_AGENT_ID}.txt"
+    )
+
+
+def resolve_skill_agent_read_path() -> Path:
+    """覆盖优先。"""
+    over = skill_agent_override_absolute_path()
+    if over.is_file():
+        return over
+    return skill_agent_builtin_default_path()
+
+
+def read_skill_agent_prompt_template() -> str:
+    path = resolve_skill_agent_read_path()
+    if not path.is_file():
+        return (
+            f"[缺少技能默认提示模板文件]\n路径: {path}\n\n"
+            "请补齐 app/prompt_defaults/skill/shared/skill_manager.txt。\n"
+        )
+    text = path.read_text(encoding="utf-8")
+    if text.endswith("\n"):
+        return text[:-1]
+    return text
+
+
+def save_skill_agent_prompt_override(body: str) -> None:
+    path = skill_agent_override_absolute_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(body if body.endswith("\n") else body + "\n", encoding="utf-8")
+
+
+def reset_skill_agent_prompt_override() -> bool:
+    path = skill_agent_override_absolute_path()
+    if path.is_file():
+        path.unlink()
+        return True
+    return False
+
+
+def render_skill_system_prompt(
+    stage_id: str,
+    *,
+    skill_title: str,
+    skill_genre: str = "",
+    stage_body: str,
+    all_stages_for_peek: dict[str, str] | None = None,
+) -> str:
+    validate_skill_stage_id(stage_id)
+    raw = read_skill_agent_prompt_template()
+
+    staged_body = excerpt(stage_body, STAGE_BODY_EXCERPT_CAP)
+    other = (
+        ""
+        if all_stages_for_peek is None
+        else _peek_skill_other_stages(
+            stage_id,
+            all_stages_for_peek,
+            peer_max=OTHER_STAGES_PEER_MAX,
+        )
+    )
+
+    title = (skill_title or "").strip()
+    stage_label = SKILL_STAGE_LABELS.get(stage_id, stage_id)
+    replacements = {
+        "BOOK_TITLE": title,
+        "BOOK_LINE": f"技能：《{title}》",
+        "SKILL_TITLE": title,
+        "SKILL_LINE": f"技能：《{title}》",
+        "SKILL_GENRE": (skill_genre or "").strip() or "未分类",
+        "STAGE_ID": stage_id,
+        "STAGE_LABEL": stage_label,
+        "STAGE_BODY": staged_body,
+        "OTHER_STAGES_EXCERPT": other,
+    }
+
+    def repl(m: re.Match[str]) -> str:
+        return replacements[m.group(1)]
+
+    return _SKILL_PLACEHOLDER_RE.sub(repl, raw)
+
+
+def render_skill_from_api_context(stage_id: str, context_raw: object) -> str:
+    ctx = parse_context_payload(context_raw)
+    title = str(ctx.get("skill_title") or ctx.get("book_title") or "")
+    genre = str(ctx.get("skill_genre") or ctx.get("genre") or "")
+    body = str(ctx.get("stage_body") or "")
+    all_stages: dict[str, str] | None = None
+    stages_val = ctx.get("all_stages")
+    if isinstance(stages_val, dict):
+        all_stages = {str(k): str(v if v is not None else "") for k, v in stages_val.items()}
+
+    return render_skill_system_prompt(
+        stage_id,
+        skill_title=title,
+        skill_genre=genre,
+        stage_body=body,
+        all_stages_for_peek=all_stages if all_stages is not None else {},
+    )
+
+
+def read_raw_skill_agent_prompt_for_editor() -> str:
+    """技能库智能体设置页读取当前生效来源（优先覆盖）的原始模板正文。"""
+    path = resolve_skill_agent_read_path()
     if not path.is_file():
         return ""
     text = path.read_text(encoding="utf-8")

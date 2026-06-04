@@ -137,22 +137,32 @@ _configure_macos_pywebview_env()
 
 import webview
 
-from app.ai_env import load_ai_model_defaults, load_image_model_defaults
 from app.runtime_paths import bundle_root
 from app.prompt_store import (
     read_raw_material_prompt_for_editor,
+    read_raw_material_agent_prompt_for_editor,
+    read_raw_skill_agent_prompt_for_editor,
     read_raw_workspace_agent_prompt_for_editor,
     render_from_api_context,
     render_material_from_api_context,
+    render_skill_from_api_context,
+    reset_material_agent_prompt_override as _reset_material_agent_prompt_override,
     reset_material_prompt_override as _reset_material_prompt_override,
+    reset_skill_agent_prompt_override as _reset_skill_agent_prompt_override,
     reset_workspace_agent_prompt_override as _reset_workspace_agent_prompt_override,
+    save_material_agent_prompt_override as _save_material_agent_prompt_override,
     save_material_prompt_override as _save_material_prompt_override,
+    save_skill_agent_prompt_override as _save_skill_agent_prompt_override,
     save_workspace_agent_prompt_override as _save_workspace_agent_prompt_override,
 )
 from app.storage import (
     BookStore,
+    read_ai_model_config,
+    read_ai_model_defaults,
+    read_image_model_config,
     read_saved_workspace_root,
     read_workspace_agent_read_access,
+    write_ai_model_config,
     write_saved_workspace_root,
     write_workspace_agent_read_access,
 )
@@ -359,6 +369,38 @@ class Api:
         from app.models import SHORT_MATERIAL_GENRES
         return SHORT_MATERIAL_GENRES
 
+    # ==================== 技能库 API ====================
+
+    def list_skills(self) -> list[dict]:
+        """列出所有技能"""
+        return self._store.list_skills()
+
+    def get_skill(self, skill_id: str) -> dict | None:
+        """获取单个技能详情"""
+        return self._store.get_skill(skill_id)
+
+    def create_skill(
+        self,
+        title: str,
+        genre: str,
+        workspace_root: str | None = None,
+    ) -> dict:
+        """创建新技能"""
+        return self._store.create_skill(title, genre, workspace_root)
+
+    def save_skill(
+        self,
+        skill_id: str,
+        stages: dict | None = None,
+        title: str | None = None,
+    ) -> dict | None:
+        """保存技能阶段内容"""
+        return self._store.save_skill(skill_id, stages, title)
+
+    def delete_skill(self, skill_id: str) -> bool:
+        """删除技能"""
+        return self._store.delete_skill(skill_id)
+
     def get_workspace_root(self) -> str | None:
         return read_saved_workspace_root()
 
@@ -374,9 +416,19 @@ class Api:
             raise ValueError("workspace_agent_read_access 须为对象")
         write_workspace_agent_read_access(config)
 
+    def get_ai_model_config(self) -> dict[str, object]:
+        """读取本地模型配置，首次为空时从旧 `.env` 导入。"""
+        return read_ai_model_config()
+
+    def save_ai_model_config(self, config: dict[str, object]) -> dict[str, object]:
+        """保存模型配置到 `.data/preferences.json`。"""
+        if not isinstance(config, dict):
+            raise ValueError("ai_model_config 须为对象")
+        return write_ai_model_config(config)
+
     def get_ai_defaults(self) -> dict[str, object] | None:
-        """与 app/.env 同步的默认模型与 Key，供前端注入 Pi 存储并跳过首次选模型/填 Key。"""
-        return load_ai_model_defaults()
+        """从界面模型配置派生默认文字模型，供前端注入 Pi 存储。"""
+        return read_ai_model_defaults()
 
     def get_workspace_system_prompt(
         self,
@@ -419,6 +471,33 @@ class Api:
     ) -> bool:
         return _reset_material_prompt_override(material_kind, stage_id)
 
+    def read_material_agent_prompt_template(self) -> str:
+        return read_raw_material_agent_prompt_for_editor()
+
+    def save_material_agent_prompt_override(self, body: str) -> None:
+        _save_material_agent_prompt_override(body)
+
+    def reset_material_agent_prompt_override(self) -> bool:
+        return _reset_material_agent_prompt_override()
+
+    # ==================== 技能库提示词 API ====================
+
+    def get_skill_system_prompt(
+        self,
+        stage_id: str,
+        context_json: str,
+    ) -> str:
+        return render_skill_from_api_context(stage_id, context_json)
+
+    def read_skill_agent_prompt_template(self) -> str:
+        return read_raw_skill_agent_prompt_for_editor()
+
+    def save_skill_agent_prompt_override(self, body: str) -> None:
+        _save_skill_agent_prompt_override(body)
+
+    def reset_skill_agent_prompt_override(self) -> bool:
+        return _reset_skill_agent_prompt_override()
+
     def get_book_cover(self, book_id: str) -> dict:
         """获取书籍封面图片（base64）。
 
@@ -456,6 +535,8 @@ class Api:
         output_dir = book.get("output_dir", "")
         if not output_dir:
             return {"cover_path": None, "success": False, "error": "书籍未设置工作目录"}
+        if not read_image_model_config():
+            return {"cover_path": None, "success": False, "error": "未配置图像模型，请先在首页配置模型"}
         cover_path = generate_image(prompt, output_dir)
         if not cover_path:
             return {"cover_path": None, "success": False, "error": "图片生成失败"}
@@ -627,9 +708,9 @@ def _image_api_request_target(base_url: str) -> tuple[str, str, bool]:
 def generate_image(prompt: str, output_dir: str | Path = ".data/image") -> Path | None:
     """调用图像生成 API，将返回的图片保存为 PNG。"""
     try:
-        image_defaults = load_image_model_defaults()
+        image_defaults = read_image_model_config()
         if not image_defaults:
-            print("未配置图片生成模型，请在 .env 中设置 image_model 和 image_model_key")
+            print("未配置图片生成模型，请先在首页配置图像模型")
             return None
         host, path, use_https = _image_api_request_target(
             image_defaults.get("base_url", "https://sucloud.vip"),

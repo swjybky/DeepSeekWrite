@@ -1,11 +1,11 @@
 import { Link } from 'react-router-dom'
-import type { BookSummary, MaterialSummary } from '../bridge'
+import type { BookSummary, MaterialSummary, SkillSummary } from '../bridge'
 import './CardGrid.css'
 
 export interface CardItem {
   id: string
   title: string
-  type: 'book' | 'material'
+  type: 'book' | 'material' | 'skill'
   subtype?: string
   genre?: string
   subGenre?: string
@@ -53,6 +53,11 @@ export function CardGrid({ items, emptyText = '暂无项目', onDelete, deleting
                 {item.type === 'book' ? (
                   <span className="card-type">
                     {item.subtype === 'short' ? '短篇' : '长篇'}
+                    {item.genre && ` · ${item.genre}`}
+                  </span>
+                ) : item.type === 'skill' ? (
+                  <span className="card-type">
+                    短篇技能
                     {item.genre && ` · ${item.genre}`}
                   </span>
                 ) : (
@@ -125,5 +130,19 @@ export function materialToCardItem(material: MaterialSummary): CardItem {
     subGenre: material.sub_genre,
     outputDir: material.output_dir,
     to: `/material/${material.id}`,
+  }
+}
+
+// 辅助函数：将 SkillSummary 转换为 CardItem
+// eslint-disable-next-line react-refresh/only-export-components
+export function skillToCardItem(skill: SkillSummary): CardItem {
+  return {
+    id: skill.id,
+    title: skill.title,
+    type: 'skill',
+    subtype: 'short',
+    genre: skill.genre,
+    outputDir: skill.output_dir,
+    to: `/skill/${skill.id}`,
   }
 }

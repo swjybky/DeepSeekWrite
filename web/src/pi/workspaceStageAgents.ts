@@ -5,6 +5,7 @@ import type {
   StageId,
   MaterialPromptKind,
   MaterialStageId,
+  SkillStageId,
   WorkspaceAgentReadAccessConfig,
 } from '../bridge'
 import { resolveWorkspaceAgentReadAccess } from '../workspaces/short/stageReadAccess'
@@ -17,6 +18,10 @@ import {
   buildMaterialWorkspaceAdditionalTools,
   type MaterialWorkspaceStageAgentContext,
 } from '../workspaces/material/materialStageAgents'
+import {
+  buildSkillWorkspaceAdditionalTools,
+  type SkillWorkspaceStageAgentContext,
+} from '../workspaces/skill/skillStageAgents'
 
 export type ApplyToStageEditorPayload = {
   text: string
@@ -26,12 +31,12 @@ export type ApplyToStageEditorPayload = {
 
 export type WorkspaceStageAgentContext = {
   bookTitle: string
-  workspaceType?: 'book' | 'material'
+  workspaceType?: 'book' | 'material' | 'skill'
   promptKind?: MaterialPromptKind
-  stageId: StageId | MaterialStageId
+  stageId: StageId | MaterialStageId | SkillStageId
   stageBody: string
   getCurrentStageBody?: () => string
-  allStages: Partial<Record<StageId | MaterialStageId, string>>
+  allStages: Partial<Record<StageId | MaterialStageId | SkillStageId, string>>
   linkedMaterial?: Material | null
   /** 全局创作空间智能体可读配置（短篇创作空间） */
   workspaceAgentReadAccess?: WorkspaceAgentReadAccessConfig | null
@@ -59,6 +64,19 @@ export function getWorkspaceStageAdditionalTools(
       isToolCallStreamed: ctx.isToolCallStreamed,
     }
     return buildMaterialWorkspaceAdditionalTools(materialCtx)
+  }
+
+  // 技能库模式
+  if (ctx.workspaceType === 'skill') {
+    const skillCtx: SkillWorkspaceStageAgentContext = {
+      skillTitle: ctx.bookTitle,
+      stageId: ctx.stageId as SkillStageId,
+      stageBody: ctx.stageBody,
+      allStages: ctx.allStages as Partial<Record<SkillStageId, string>>,
+      applyToStageEditor: ctx.applyToStageEditor,
+      isToolCallStreamed: ctx.isToolCallStreamed,
+    }
+    return buildSkillWorkspaceAdditionalTools(skillCtx)
   }
 
   // 书籍短篇工作台模式

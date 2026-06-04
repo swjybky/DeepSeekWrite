@@ -8,7 +8,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 
-from app.ai_env import load_image_model_defaults
+from app.storage import read_image_model_config
 
 
 def _truncate_response(value: object, max_len: int = 1200) -> str:
@@ -111,9 +111,9 @@ def _image_api_request_target(base_url: str) -> tuple[str, str, bool]:
 
 def generate_image(prompt: str, output_dir: str | Path = ".data/image") -> Path | None:
     """调用图像生成 API，将返回的图片保存为 PNG。"""
-    image_defaults = load_image_model_defaults()
+    image_defaults = read_image_model_config()
     if not image_defaults:
-        print("未配置图片生成模型，请在 .env 中设置 image_model 和 image_model_key")
+        print("未配置图片生成模型，请先在首页配置图像模型")
         return None
 
     host, path, use_https = _image_api_request_target(

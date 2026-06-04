@@ -520,6 +520,9 @@
 }
 
 .workspace-ai-prompt-edit {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   flex-shrink: 0;
   min-width: 5.5rem;
   padding: 0.28rem 0.55rem;
@@ -531,6 +534,7 @@
   background: var(--surface);
   color: var(--text-h);
   cursor: pointer;
+  text-decoration: none;
 }
 
 .workspace-ai-prompt-edit:hover:not(:disabled) {
@@ -854,7 +858,7 @@
   font-size: 0.75rem;
 }
 
-/* 每阶段独立 Pi 会话：保持挂载，仅切换显示，避免切 tab 后对话被清空 */
+/* 多层 Pi 会话容器：创作空间按阶段保活；素材库只挂载一个管理智能体层。 */
 .workspace-ai-chat-stack {
   flex: 1;
   min-height: 0;

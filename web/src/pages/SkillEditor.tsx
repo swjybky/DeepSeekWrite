@@ -2,28 +2,19 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import {
-  MATERIAL_MANAGER_PROMPT_KIND,
-  type Material,
-  type MaterialStageId,
-  MATERIAL_STAGE_LABELS,
-  normalizeMaterialStages,
-  getMaterial,
-  saveMaterial,
+  SKILL_STAGE_KEYS,
+  SKILL_STAGE_LABELS,
+  type Skill,
+  type SkillStageId,
+  getSkill,
+  normalizeSkillStages,
+  saveSkill,
 } from '../bridge'
 import { WorkspaceAiChat } from '../components/WorkspaceAiChat'
 import type { ApplyToStageEditorPayload } from '../pi/workspaceStageAgents'
 import './BookEditor.css'
 
-const MATERIAL_STAGE_KEYS: MaterialStageId[] = [
-  'character',
-  'intro',
-  'gimmick',
-  'plot_refine',
-  'pacing',
-  'draft_excerpt',
-]
-
-const AI_PANEL_WIDTH_KEY = 'write-claw:material-ai-width'
+const AI_PANEL_WIDTH_KEY = 'write-claw:skill-ai-width'
 const AI_PANEL_MIN = 240
 const AI_PANEL_HARD_MAX = 1000
 const WORKSPACE_AI_INCLUDE_PI_ARTIFACTS = false
@@ -79,44 +70,33 @@ function readStoredAiWidth(): number {
   }
 }
 
-export function MaterialEditor() {
+export function SkillEditor() {
   const { id } = useParams<{ id: string }>()
-  const [material, setMaterial] = useState<Material | null>(null)
-  const [stages, setStages] = useState<Record<MaterialStageId, string>>(() =>
-    normalizeMaterialStages({}),
+  const [skill, setSkill] = useState<Skill | null>(null)
+  const [stages, setStages] = useState<Record<SkillStageId, string>>(() =>
+    normalizeSkillStages({}),
   )
-  const [activeStage, setActiveStage] = useState<MaterialStageId>('character')
+  const [activeStage, setActiveStage] = useState<SkillStageId>('character_design')
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [aiPanelWidth, setAiPanelWidth] = useState(readStoredAiWidth)
   const [aiChatEpoch, setAiChatEpoch] = useState(0)
-  const splitDragRef = useRef<{ startX: number; startWidth: number } | null>(null)
-  const saveInFlightRef = useRef(false)
-  const activeStageRef = useRef<MaterialStageId>(activeStage)
-  const textareaRef = useRef<HTMLTextAreaElement | null>(null)
-  const tokenBuffersRef = useRef<Partial<Record<MaterialStageId, string>>>({})
-  const tokenBufferRafRefs = useRef<Partial<Record<MaterialStageId, number>>>({})
-  const stagesRef = useRef<Record<MaterialStageId, string>>(stages)
-  const [streamingStages, setStreamingStages] = useState<
-    Partial<Record<MaterialStageId, boolean>>
-  >({})
-  const streamingStagesRef = useRef<Partial<Record<MaterialStageId, boolean>>>({})
-
-  const setEditorStreaming = useCallback((stageId: MaterialStageId, next: boolean) => {
-    if (Boolean(streamingStagesRef.current[stageId]) === next) return
-    const updated = { ...streamingStagesRef.current }
-    if (next) {
-      updated[stageId] = true
-    } else {
-      delete updated[stageId]
-    }
-    streamingStagesRef.current = updated
-    setStreamingStages(updated)
-  }, [])
   const [editingTitle, setEditingTitle] = useState(false)
   const [titleDraft, setTitleDraft] = useState('')
+
+  const splitDragRef = useRef<{ startX: number; startWidth: number } | null>(null)
+  const saveInFlightRef = useRef(false)
+  const activeStageRef = useRef<SkillStageId>(activeStage)
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null)
+  const stagesRef = useRef<Record<SkillStageId, string>>(stages)
+  const tokenBuffersRef = useRef<Partial<Record<SkillStageId, string>>>({})
+  const tokenBufferRafRefs = useRef<Partial<Record<SkillStageId, number>>>({})
+  const [streamingStages, setStreamingStages] = useState<
+    Partial<Record<SkillStageId, boolean>>
+  >({})
+  const streamingStagesRef = useRef<Partial<Record<SkillStageId, boolean>>>({})
 
   useEffect(() => {
     activeStageRef.current = activeStage
@@ -134,8 +114,17 @@ export function MaterialEditor() {
     }
   }, [])
 
+  const setEditorStreaming = useCallback((stageId: SkillStageId, next: boolean) => {
+    if (Boolean(streamingStagesRef.current[stageId]) === next) return
+    const updated = { ...streamingStagesRef.current }
+    if (next) updated[stageId] = true
+    else delete updated[stageId]
+    streamingStagesRef.current = updated
+    setStreamingStages(updated)
+  }, [])
+
   const updateStage = useCallback(
-    (stageId: MaterialStageId, updater: (current: string) => string) => {
+    (stageId: SkillStageId, updater: (current: string) => string) => {
       setStages((prev) => {
         const current = prev[stageId] ?? ''
         const next = updater(current)
@@ -148,7 +137,7 @@ export function MaterialEditor() {
     [],
   )
 
-  const cancelTokenFlush = useCallback((stageId: MaterialStageId) => {
+  const cancelTokenFlush = useCallback((stageId: SkillStageId) => {
     const rafId = tokenBufferRafRefs.current[stageId]
     if (rafId !== undefined) {
       cancelAnimationFrame(rafId)
@@ -157,7 +146,7 @@ export function MaterialEditor() {
   }, [])
 
   const flushTokenBuffer = useCallback(
-    (stageId: MaterialStageId) => {
+    (stageId: SkillStageId) => {
       delete tokenBufferRafRefs.current[stageId]
       const buffer = tokenBuffersRef.current[stageId] ?? ''
       if (!buffer) return
@@ -177,7 +166,7 @@ export function MaterialEditor() {
     const buffers = tokenBuffersRef.current
     tokenBuffersRef.current = {}
     for (const [stageId, buffer] of Object.entries(buffers) as [
-      MaterialStageId,
+      SkillStageId,
       string | undefined,
     ][]) {
       if (!buffer) continue
@@ -185,7 +174,7 @@ export function MaterialEditor() {
     }
   }, [updateStage])
 
-  const autoScrollTextarea = useCallback((stageId: MaterialStageId) => {
+  const autoScrollTextarea = useCallback((stageId: SkillStageId) => {
     if (activeStageRef.current !== stageId) return
     const textarea = textareaRef.current
     if (!textarea) return
@@ -197,7 +186,7 @@ export function MaterialEditor() {
   }, [])
 
   const applyToStageEditor = useCallback(
-    (stage: MaterialStageId, payload: ApplyToStageEditorPayload) => {
+    (stage: SkillStageId, payload: ApplyToStageEditorPayload) => {
       if (payload.mode === 'replace') {
         cancelTokenFlush(stage)
         delete tokenBuffersRef.current[stage]
@@ -269,17 +258,17 @@ export function MaterialEditor() {
     setLoading(true)
     setError(null)
     try {
-      const m = await getMaterial(id)
-      if (!m) {
-        setMaterial(null)
-        setError('未找到该素材')
+      const s = await getSkill(id)
+      if (!s) {
+        setSkill(null)
+        setError('未找到该技能')
         return
       }
-      setMaterial(m)
-      const normalized = normalizeMaterialStages(m.stages)
+      setSkill(s)
+      const normalized = normalizeSkillStages(s.stages)
       stagesRef.current = normalized
       setStages(normalized)
-      setActiveStage('character')
+      setActiveStage('character_design')
     } catch (e) {
       setError(e instanceof Error ? e.message : '加载失败')
     } finally {
@@ -293,24 +282,23 @@ export function MaterialEditor() {
       hasLoadedRef.current = true
       void load()
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [load])
 
   const handleSave = useCallback(async () => {
-    if (!id || !material || saveInFlightRef.current) return
+    if (!id || !skill || saveInFlightRef.current) return
     saveInFlightRef.current = true
     setSaving(true)
     setMessage(null)
     setError(null)
     try {
       flushAllTokenBuffers()
-      const next = await saveMaterial(id, { stages: stagesRef.current })
+      const next = await saveSkill(id, { stages: stagesRef.current })
       if (!next) {
-        setError('保存失败：素材不存在')
+        setError('保存失败：技能不存在')
         return
       }
-      setMaterial(next)
-      setStages(normalizeMaterialStages(next.stages))
+      setSkill(next)
+      setStages(normalizeSkillStages(next.stages))
       setMessage('已保存')
       window.setTimeout(() => setMessage(null), 2000)
     } catch (e) {
@@ -319,7 +307,7 @@ export function MaterialEditor() {
       saveInFlightRef.current = false
       setSaving(false)
     }
-  }, [id, material, flushAllTokenBuffers])
+  }, [id, skill, flushAllTokenBuffers])
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
@@ -354,7 +342,7 @@ export function MaterialEditor() {
     )
   }
 
-  if (error && !material) {
+  if (error && !skill) {
     return (
       <div className="editor-wrap">
         <p className="editor-error">{error}</p>
@@ -363,10 +351,10 @@ export function MaterialEditor() {
     )
   }
 
-  if (!material) {
+  if (!skill) {
     return (
       <div className="editor-wrap">
-        <p className="muted">暂无素材数据</p>
+        <p className="muted">暂无技能数据</p>
         <Link to="/">返回首页</Link>
       </div>
     )
@@ -374,11 +362,7 @@ export function MaterialEditor() {
 
   const stageBody = stages[activeStage] ?? ''
   const { total: stageCharTotal, nonSpace: stageCharNonSpace } = stageTextCounts(stageBody)
-
-  // 构建素材类型显示文本
-  const materialTypeText = material.material_type === 'short'
-    ? `短篇素材 · ${material.parent_genre || ''} · ${material.sub_genre || ''}`
-    : '长篇素材'
+  const skillTypeText = `短篇技能 · ${skill.genre || '未分类'}`
 
   return (
     <div className="editor-page editor-page--workspace">
@@ -394,19 +378,19 @@ export function MaterialEditor() {
               onChange={(e) => setTitleDraft(e.target.value)}
               onBlur={() => {
                 const trimmed = titleDraft.trim()
-                if (trimmed && trimmed !== material?.title && material) {
+                if (trimmed && trimmed !== skill?.title && skill) {
                   void (async () => {
                     try {
-                      const next = await saveMaterial(material.id, { title: trimmed })
+                      const next = await saveSkill(skill.id, { title: trimmed })
                       if (next) {
-                        setMaterial(next)
-                        setMessage('素材名已修改')
+                        setSkill(next)
+                        setMessage('技能名已修改')
                         window.setTimeout(() => setMessage(null), 2000)
                       } else {
-                        setError('保存素材名失败')
+                        setError('保存技能名失败')
                       }
                     } catch (e) {
-                      setError(e instanceof Error ? e.message : '保存素材名失败')
+                      setError(e instanceof Error ? e.message : '保存技能名失败')
                     }
                   })()
                 }
@@ -427,22 +411,22 @@ export function MaterialEditor() {
             <h1
               className="editor-title editor-title--editable"
               onDoubleClick={() => {
-                setTitleDraft(material?.title ?? '')
+                setTitleDraft(skill?.title ?? '')
                 setEditingTitle(true)
               }}
-              title="双击编辑素材名"
+              title="双击编辑技能名"
             >
-              {material?.title ?? ''}
+              {skill?.title ?? ''}
             </h1>
           )}
           <span className="editor-sub">
-            {materialTypeText}
-            {material.output_dir ? (
-              <span className="editor-path" title={material.output_dir}>
+            {skillTypeText}
+            {skill.output_dir ? (
+              <span className="editor-path" title={skill.output_dir}>
                 {' · '}
-                {material.output_dir.length > 36
-                  ? `${material.output_dir.slice(0, 18)}…${material.output_dir.slice(-14)}`
-                  : material.output_dir}
+                {skill.output_dir.length > 36
+                  ? `${skill.output_dir.slice(0, 18)}…${skill.output_dir.slice(-14)}`
+                  : skill.output_dir}
               </span>
             ) : null}
           </span>
@@ -464,9 +448,9 @@ export function MaterialEditor() {
         className="workspace-grid"
         style={{ '--workspace-ai-width': `${aiPanelWidth}px` } as CSSProperties}
       >
-        <nav className="workspace-rail" aria-label="素材阶段">
+        <nav className="workspace-rail" aria-label="技能阶段">
           <ul className="workspace-rail-list">
-            {MATERIAL_STAGE_KEYS.map((stageId) => (
+            {SKILL_STAGE_KEYS.map((stageId) => (
               <li key={stageId}>
                 <button
                   type="button"
@@ -477,7 +461,7 @@ export function MaterialEditor() {
                   }
                   onClick={() => setActiveStage(stageId)}
                 >
-                  {MATERIAL_STAGE_LABELS[stageId]}
+                  {SKILL_STAGE_LABELS[stageId]}
                 </button>
               </li>
             ))}
@@ -487,7 +471,7 @@ export function MaterialEditor() {
         <div className="workspace-editor-pane">
           <div className="workspace-stage-heading">
             <label className="workspace-stage-label" htmlFor="stage-body">
-              {MATERIAL_STAGE_LABELS[activeStage]}
+              {SKILL_STAGE_LABELS[activeStage]}
             </label>
             <span
               className="workspace-char-count muted"
@@ -509,7 +493,7 @@ export function MaterialEditor() {
             className="editor-body workspace-textarea"
             value={stageBody}
             onChange={(e) => handleStageBodyChange(e.target.value)}
-            placeholder={`在此编辑${MATERIAL_STAGE_LABELS[activeStage]}内容…`}
+            placeholder={`在此编辑${SKILL_STAGE_LABELS[activeStage]}内容…`}
             spellCheck={false}
             readOnly={Boolean(streamingStages[activeStage])}
           />
@@ -567,62 +551,49 @@ export function MaterialEditor() {
 
         <aside className="workspace-ai" aria-label="AI 对话">
           <div className="workspace-ai-header workspace-ai-header-row">
-            <span className="workspace-ai-header-title">素材库管理智能体</span>
-            {material ? (
-              <div className="workspace-ai-header-actions">
-                <Link
-                  className="workspace-ai-prompt-edit"
-                  aria-label="配置素材库管理智能体"
-                  title="配置素材库管理智能体"
-                  to="/material-settings"
-                >
-                  智能体设置
-                </Link>
-                <button
-                  type="button"
-                  className="workspace-ai-new-chat"
-                  aria-label="清空素材库管理智能体对话并开始新会话"
-                  title="清空素材库管理智能体对话并开始新会话"
-                  onClick={() => setAiChatEpoch((epoch) => epoch + 1)}
-                >
-                  新建对话
-                </button>
-              </div>
-            ) : null}
+            <span className="workspace-ai-header-title">技能管理智能体</span>
+            <div className="workspace-ai-header-actions">
+              <Link
+                className="workspace-ai-prompt-edit"
+                aria-label="配置技能管理智能体"
+                title="配置技能管理智能体"
+                to="/skill-settings"
+              >
+                智能体设置
+              </Link>
+              <button
+                type="button"
+                className="workspace-ai-new-chat"
+                aria-label="清空技能管理智能体对话并开始新会话"
+                title="清空技能管理智能体对话并开始新会话"
+                onClick={() => setAiChatEpoch((epoch) => epoch + 1)}
+              >
+                新建对话
+              </button>
+            </div>
           </div>
           <div className="workspace-ai-hint muted">
-            上下文：{materialTypeText} · 当前栏目：{MATERIAL_STAGE_LABELS[activeStage]}
+            上下文：{skillTypeText} · 当前栏目：{SKILL_STAGE_LABELS[activeStage]}
           </div>
-          {material ? (
-            <div className="workspace-ai-chat-stack">
-              <div className="workspace-ai-chat-layer workspace-ai-chat-layer--active">
-                <WorkspaceAiChat
-                  key={`${material.id}-material-manager-${aiChatEpoch}`}
-                  sessionBookId={material.id}
-                  sessionEpoch={aiChatEpoch}
-                  promptKind={MATERIAL_MANAGER_PROMPT_KIND}
-                  bookTitle={material.title}
-                  materialType={material.material_type === 'short' ? '短篇素材' : '长篇素材'}
-                  materialGenre={
-                    material.material_type === 'short'
-                      ? [material.parent_genre, material.sub_genre]
-                          .map((item) => item?.trim())
-                          .filter(Boolean)
-                          .join(' · ')
-                      : '长篇'
-                  }
-                  stageId={activeStage}
-                  stageBody={stageBody}
-                  allStages={stages}
-                  includePiArtifacts={WORKSPACE_AI_INCLUDE_PI_ARTIFACTS}
-                  applyToStageEditor={(payload) =>
-                    applyToStageEditor(activeStageRef.current, payload)
-                  }
-                  workspaceType="material"
-                />
-              </div>
+          <div className="workspace-ai-chat-stack">
+            <div className="workspace-ai-chat-layer workspace-ai-chat-layer--active">
+              <WorkspaceAiChat
+                key={`${skill.id}-skill-manager-${aiChatEpoch}`}
+                sessionBookId={skill.id}
+                sessionEpoch={aiChatEpoch}
+                bookTitle={skill.title}
+                bookGenre={skill.genre}
+                stageId={activeStage}
+                stageBody={stageBody}
+                allStages={stages}
+                includePiArtifacts={WORKSPACE_AI_INCLUDE_PI_ARTIFACTS}
+                applyToStageEditor={(payload) =>
+                  applyToStageEditor(activeStageRef.current, payload)
+                }
+                workspaceType="skill"
+              />
             </div>
-          ) : null}
+          </div>
         </aside>
       </div>
     </div>

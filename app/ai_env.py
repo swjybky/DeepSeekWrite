@@ -150,6 +150,11 @@ def _load_configured_models(data: dict[str, str]) -> list[dict[str, str]]:
             config_id,
             ("model_reasoning", "reasoning", "thinking", "supports_reasoning"),
         )
+        stream_raw = _first_config_value(
+            data,
+            config_id,
+            ("model_stream", "stream", "supports_stream", "streaming"),
+        )
         if not model_name or not api_key or not source:
             continue
         api = ""
@@ -175,8 +180,65 @@ def _load_configured_models(data: dict[str, str]) -> list[dict[str, str]]:
         reasoning = _parse_bool(reasoning_raw)
         if reasoning is not None:
             entry["reasoning"] = "true" if reasoning else "false"
+        stream = _parse_bool(stream_raw)
+        if stream is not None:
+            entry["stream"] = "true" if stream else "false"
         models.append(entry)
     return models
+
+
+def load_ai_model_settings_from_env() -> dict[str, Any]:
+    """
+    将旧 `.env` 配置转换为界面模型配置结构。
+
+    该函数仅用于首次迁移；运行时配置由 `.data/preferences.json` 维护。
+    """
+    data = _load_ai_env_data()
+    models_type = (data.get("models_type") or "pi").strip().lower()
+    models: list[dict[str, str]] = []
+    default_model_id = ""
+
+    if models_type == "owner":
+        models = _load_configured_models(data)
+        default_model_id = (
+            data.get("default_model")
+            or data.get("model_default")
+            or data.get("default_ai_model")
+            or ""
+        ).strip()
+
+    if not models:
+        main_raw = (
+            data.get("model_name_main") or data.get("model_name") or ""
+        ).strip()
+        api_key = (data.get("model_api_key") or "").strip()
+        source = (
+            data.get("model_source") or data.get("mdoel_source") or ""
+        ).strip().lower()
+        if main_raw and api_key and source:
+            models = [
+                {
+                    "id": "default",
+                    "label": main_raw,
+                    "provider": source,
+                    "model_id": _normalize_xiaomi_model_id(source, main_raw),
+                    "api_key": api_key,
+                }
+            ]
+            default_model_id = "default"
+
+    normalized_default_id = _normalize_config_id(default_model_id)
+    if normalized_default_id and not any(m["id"] == normalized_default_id for m in models):
+        normalized_default_id = ""
+
+    image = load_image_model_defaults()
+    return {
+        "text": {
+            "models": models,
+            "default_model_id": normalized_default_id,
+        },
+        "image": image,
+    }
 
 
 def load_ai_model_defaults() -> dict[str, Any] | None:

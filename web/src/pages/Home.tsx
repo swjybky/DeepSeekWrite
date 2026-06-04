@@ -2,26 +2,36 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import {
   SHORT_GENRE_OPTIONS,
+  type AiModelConfig,
+  type AiModelSettings,
   type BookSummary,
   type BookType,
   type MaterialSummary,
   type MaterialType,
+  type SkillSummary,
   createBook,
+  createSkill,
   deleteBook,
+  deleteSkill,
   getBookCover,
+  getAiModelConfig,
   getBridgeApi,
   getStoredWorkspaceRoot,
   isPywebviewDesktopBundle,
   listBooks,
+  listSkills,
   loadPersistedWorkspaceRoot,
   persistWorkspaceRoot,
   pickFolder,
   listMaterials,
   createMaterial,
   deleteMaterial,
+  normalizeAiModelSettings,
+  saveAiModelConfig,
   SHORT_MATERIAL_GENRES,
 } from '../bridge'
-import { CardGrid, bookToCardItem, materialToCardItem } from '../components/CardGrid'
+import { CardGrid, bookToCardItem, materialToCardItem, skillToCardItem } from '../components/CardGrid'
+import { refreshPreferredWorkspaceChatModel } from '../pi/workspaceChatPreferences'
 import './Home.css'
 
 function truncatePath(path: string, max = 42): string {
@@ -29,6 +39,430 @@ function truncatePath(path: string, max = 42): string {
   const head = Math.floor(max / 2) - 1
   const tail = max - head - 1
   return `${path.slice(0, head)}…${path.slice(-tail)}`
+}
+
+function emptyAiModelSettings(): AiModelSettings {
+  return {
+    text: {
+      models: [],
+      default_model_id: '',
+    },
+    image: null,
+  }
+}
+
+function defaultTextModelLabel(settings: AiModelSettings | null): string {
+  const models = settings?.text.models ?? []
+  if (!models.length) return '未配置'
+  const active =
+    models.find((model) => model.id === settings?.text.default_model_id) ?? models[0]
+  return active.label || active.model_id || active.id
+}
+
+function imageModelLabel(settings: AiModelSettings | null): string {
+  return settings?.image?.model || '未配置'
+}
+
+function createDraftModel(index: number): AiModelConfig {
+  return {
+    id: `model_${index}`,
+    label: '',
+    provider: '',
+    model_id: '',
+    api_key: '',
+  }
+}
+
+function cloneAiSettings(settings: AiModelSettings | null): AiModelSettings {
+  const normalized = normalizeAiModelSettings(settings ?? emptyAiModelSettings())
+  return {
+    text: {
+      default_model_id: normalized.text.default_model_id,
+      models: normalized.text.models.map((model) => ({ ...model })),
+    },
+    image: normalized.image ? { ...normalized.image } : null,
+  }
+}
+
+type ModelConfigDialogProps = {
+  initialSettings: AiModelSettings
+  saving: boolean
+  onClose: () => void
+  onSave: (settings: AiModelSettings) => Promise<void>
+}
+
+function ModelConfigDialog({
+  initialSettings,
+  saving,
+  onClose,
+  onSave,
+}: ModelConfigDialogProps) {
+  const [draft, setDraft] = useState<AiModelSettings>(() =>
+    cloneAiSettings(initialSettings),
+  )
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && !saving) {
+        event.preventDefault()
+        onClose()
+      }
+    }
+    document.addEventListener('keydown', onKeyDown)
+    return () => document.removeEventListener('keydown', onKeyDown)
+  }, [onClose, saving])
+
+  const updateModel = useCallback(
+    (index: number, patch: Partial<AiModelConfig>) => {
+      setDraft((prev) => {
+        const previous = prev.text.models[index]
+        const models = prev.text.models.map((model, i) =>
+          i === index ? { ...model, ...patch } : model,
+        )
+        const default_model_id =
+          patch.id != null && previous?.id === prev.text.default_model_id
+            ? patch.id
+            : prev.text.default_model_id
+        return {
+          ...prev,
+          text: {
+            ...prev.text,
+            models,
+            default_model_id,
+          },
+        }
+      })
+    },
+    [],
+  )
+
+  const addModel = useCallback(() => {
+    setDraft((prev) => {
+      const next = createDraftModel(prev.text.models.length + 1)
+      const models = [...prev.text.models, next]
+      return {
+        ...prev,
+        text: {
+          models,
+          default_model_id: prev.text.default_model_id || next.id,
+        },
+      }
+    })
+  }, [])
+
+  const removeModel = useCallback((index: number) => {
+    setDraft((prev) => {
+      const removed = prev.text.models[index]
+      const models = prev.text.models.filter((_, i) => i !== index)
+      const default_model_id =
+        removed?.id === prev.text.default_model_id
+          ? models[0]?.id ?? ''
+          : prev.text.default_model_id
+      return {
+        ...prev,
+        text: {
+          models,
+          default_model_id,
+        },
+      }
+    })
+  }, [])
+
+  const updateImage = useCallback((field: keyof NonNullable<AiModelSettings['image']>, value: string) => {
+    setDraft((prev) => ({
+      ...prev,
+      image: {
+        ...(prev.image ?? { model: '', api_key: '' }),
+        [field]: value,
+      },
+    }))
+  }, [])
+
+  const clearImage = useCallback(() => {
+    setDraft((prev) => ({ ...prev, image: null }))
+  }, [])
+
+  const validateAndSave = async (event: React.FormEvent) => {
+    event.preventDefault()
+    setError(null)
+
+    const models = draft.text.models.map((model) => ({
+      ...model,
+      id: model.id.trim(),
+      label: model.label.trim() || model.id.trim() || model.model_id.trim(),
+      provider: model.provider.trim(),
+      model_id: model.model_id.trim(),
+      api_key: model.api_key.trim(),
+      base_url: model.base_url?.trim() || undefined,
+      api: model.api?.trim() || undefined,
+    }))
+    const incomplete = models.find(
+      (model) => !model.id || !model.provider || !model.model_id || !model.api_key,
+    )
+    if (incomplete) {
+      setError('请补齐文字模型的 ID、来源、模型名和 API Key')
+      return
+    }
+
+    const imageDraft = draft.image
+      ? {
+          model: draft.image.model.trim(),
+          api_key: draft.image.api_key.trim(),
+          base_url: draft.image.base_url?.trim() || undefined,
+        }
+      : null
+    const hasPartialImage =
+      imageDraft &&
+      (imageDraft.model || imageDraft.api_key || imageDraft.base_url) &&
+      (!imageDraft.model || !imageDraft.api_key)
+    if (hasPartialImage) {
+      setError('请补齐图像模型名称和 API Key，或清空图像模型')
+      return
+    }
+
+    const settings = normalizeAiModelSettings({
+      text: {
+        models,
+        default_model_id: draft.text.default_model_id || models[0]?.id || '',
+      },
+      image: imageDraft?.model && imageDraft.api_key ? imageDraft : null,
+    })
+    try {
+      await onSave(settings)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '保存模型配置失败')
+    }
+  }
+
+  return (
+    <div
+      className="model-config-backdrop"
+      role="presentation"
+      onClick={(event) => {
+        if (event.target === event.currentTarget && !saving) onClose()
+      }}
+    >
+      <section
+        className="model-config-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="model-config-title"
+      >
+        <form className="model-config-form" onSubmit={validateAndSave}>
+          <header className="model-config-head">
+            <h2 id="model-config-title">模型配置</h2>
+            <button
+              type="button"
+              className="model-config-close"
+              aria-label="关闭模型配置"
+              disabled={saving}
+              onClick={onClose}
+            >
+              ×
+            </button>
+          </header>
+
+          <div className="model-config-body">
+            <section className="model-config-section">
+              <div className="model-config-section-head">
+                <h3>文字模型</h3>
+                <button type="button" className="btn-secondary btn-small" onClick={addModel}>
+                  添加模型
+                </button>
+              </div>
+
+              {draft.text.models.length === 0 ? (
+                <div className="model-config-empty">未配置文字模型</div>
+              ) : (
+                <div className="model-config-list">
+                  {draft.text.models.map((model, index) => (
+                    <article className="model-config-item" key={`${model.id}-${index}`}>
+                      <div className="model-config-item-head">
+                        <label className="model-config-default">
+                          <input
+                            type="radio"
+                            name="defaultTextModel"
+                            checked={draft.text.default_model_id === model.id}
+                            onChange={() =>
+                              setDraft((prev) => ({
+                                ...prev,
+                                text: { ...prev.text, default_model_id: model.id },
+                              }))
+                            }
+                          />
+                          默认
+                        </label>
+                        <button
+                          type="button"
+                          className="btn-secondary btn-small"
+                          disabled={saving}
+                          onClick={() => removeModel(index)}
+                        >
+                          删除
+                        </button>
+                      </div>
+
+                      <div className="model-config-grid">
+                        <label className="field">
+                          <span className="field-label">配置 ID</span>
+                          <input
+                            type="text"
+                            value={model.id}
+                            onChange={(e) => updateModel(index, { id: e.target.value })}
+                            placeholder="deepseekflash"
+                          />
+                        </label>
+                        <label className="field">
+                          <span className="field-label">显示名称</span>
+                          <input
+                            type="text"
+                            value={model.label}
+                            onChange={(e) => updateModel(index, { label: e.target.value })}
+                            placeholder="DeepSeek Flash"
+                          />
+                        </label>
+                        <label className="field">
+                          <span className="field-label">模型来源</span>
+                          <input
+                            type="text"
+                            value={model.provider}
+                            onChange={(e) => updateModel(index, { provider: e.target.value })}
+                            placeholder="deepseek"
+                          />
+                        </label>
+                        <label className="field">
+                          <span className="field-label">模型名称</span>
+                          <input
+                            type="text"
+                            value={model.model_id}
+                            onChange={(e) => updateModel(index, { model_id: e.target.value })}
+                            placeholder="deepseek-v4-flash"
+                          />
+                        </label>
+                        <label className="field">
+                          <span className="field-label">API Key</span>
+                          <input
+                            type="password"
+                            value={model.api_key}
+                            onChange={(e) => updateModel(index, { api_key: e.target.value })}
+                            placeholder="sk-..."
+                          />
+                        </label>
+                        <label className="field">
+                          <span className="field-label">API 地址</span>
+                          <input
+                            type="text"
+                            value={model.base_url ?? ''}
+                            onChange={(e) => updateModel(index, { base_url: e.target.value })}
+                            placeholder="https://api.example.com/v1"
+                          />
+                        </label>
+                        <label className="field">
+                          <span className="field-label">API 类型</span>
+                          <select
+                            value={model.api ?? ''}
+                            onChange={(e) => updateModel(index, { api: e.target.value })}
+                          >
+                            <option value="">默认</option>
+                            <option value="openai-completions">openai-completions</option>
+                            <option value="openai-responses">openai-responses</option>
+                            <option value="anthropic-messages">anthropic-messages</option>
+                            <option value="google-generative-ai">google-generative-ai</option>
+                          </select>
+                        </label>
+                        <div className="model-config-switches">
+                          <label className="model-config-check">
+                            <input
+                              type="checkbox"
+                              checked={Boolean(model.reasoning)}
+                              onChange={(e) =>
+                                updateModel(index, { reasoning: e.target.checked })
+                              }
+                            />
+                            推理
+                          </label>
+                          <label className="model-config-check">
+                            <input
+                              type="checkbox"
+                              checked={Boolean(model.stream)}
+                              onChange={(e) =>
+                                updateModel(index, { stream: e.target.checked })
+                              }
+                            />
+                            流式
+                          </label>
+                        </div>
+                      </div>
+                    </article>
+                  ))}
+                </div>
+              )}
+            </section>
+
+            <section className="model-config-section">
+              <div className="model-config-section-head">
+                <h3>图像模型</h3>
+                <button
+                  type="button"
+                  className="btn-secondary btn-small"
+                  onClick={clearImage}
+                  disabled={saving || !draft.image}
+                >
+                  清空
+                </button>
+              </div>
+              <div className="model-config-grid model-config-grid--image">
+                <label className="field">
+                  <span className="field-label">模型名称</span>
+                  <input
+                    type="text"
+                    value={draft.image?.model ?? ''}
+                    onChange={(e) => updateImage('model', e.target.value)}
+                    placeholder="image-model"
+                  />
+                </label>
+                <label className="field">
+                  <span className="field-label">API Key</span>
+                  <input
+                    type="password"
+                    value={draft.image?.api_key ?? ''}
+                    onChange={(e) => updateImage('api_key', e.target.value)}
+                    placeholder="sk-..."
+                  />
+                </label>
+                <label className="field model-config-field-wide">
+                  <span className="field-label">API 地址</span>
+                  <input
+                    type="text"
+                    value={draft.image?.base_url ?? ''}
+                    onChange={(e) => updateImage('base_url', e.target.value)}
+                    placeholder="https://sucloud.vip"
+                  />
+                </label>
+              </div>
+            </section>
+
+            {error && <p className="form-error">{error}</p>}
+          </div>
+
+          <footer className="model-config-foot">
+            <button
+              type="button"
+              className="btn-secondary"
+              disabled={saving}
+              onClick={onClose}
+            >
+              取消
+            </button>
+            <button type="submit" className="btn-primary" disabled={saving}>
+              {saving ? '保存中…' : '保存'}
+            </button>
+          </footer>
+        </form>
+      </section>
+    </div>
+  )
 }
 
 export function Home() {
@@ -56,6 +490,23 @@ export function Home() {
   const [submittingMaterial, setSubmittingMaterial] = useState(false)
   const [deletingMaterialId, setDeletingMaterialId] = useState<string | null>(null)
   const [materialError, setMaterialError] = useState<string | null>(null)
+
+  // ==================== 技能库状态 ====================
+  const [skills, setSkills] = useState<SkillSummary[]>([])
+  const [loadingSkills, setLoadingSkills] = useState(true)
+  const [showSkillForm, setShowSkillForm] = useState(false)
+  const [skillTitle, setSkillTitle] = useState('')
+  const [skillGenre, setSkillGenre] = useState<string>(SHORT_GENRE_OPTIONS[0])
+  const [submittingSkill, setSubmittingSkill] = useState(false)
+  const [deletingSkillId, setDeletingSkillId] = useState<string | null>(null)
+  const [skillError, setSkillError] = useState<string | null>(null)
+
+  // ==================== 模型配置状态 ====================
+  const [aiSettings, setAiSettings] = useState<AiModelSettings>(() => emptyAiModelSettings())
+  const [loadingAiSettings, setLoadingAiSettings] = useState(true)
+  const [modelConfigOpen, setModelConfigOpen] = useState(false)
+  const [savingAiSettings, setSavingAiSettings] = useState(false)
+  const [modelConfigError, setModelConfigError] = useState<string | null>(null)
 
   // ==================== 创作空间封面加载 ====================
   const loadBookCovers = useCallback(async (bookList: BookSummary[]) => {
@@ -131,6 +582,27 @@ export function Home() {
     }
   }, [loadBookCovers])
 
+  useEffect(() => {
+    let cancelled = false
+    void (async () => {
+      setLoadingAiSettings(true)
+      setModelConfigError(null)
+      try {
+        const settings = await getAiModelConfig()
+        if (!cancelled) setAiSettings(settings)
+      } catch (e) {
+        if (!cancelled) {
+          setModelConfigError(e instanceof Error ? e.message : '加载模型配置失败')
+        }
+      } finally {
+        if (!cancelled) setLoadingAiSettings(false)
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
   // ==================== 素材库数据加载 ====================
   const refreshMaterials = useCallback(async () => {
     setLoadingMaterials(true)
@@ -145,12 +617,27 @@ export function Home() {
     }
   }, [])
 
-  // 初始加载素材
-  const hasLoadedMaterials = useRef(false)
+  // ==================== 技能库数据加载 ====================
+  const refreshSkills = useCallback(async () => {
+    setLoadingSkills(true)
+    setSkillError(null)
+    try {
+      const list = await listSkills()
+      setSkills(list)
+    } catch (e) {
+      setSkillError(e instanceof Error ? e.message : '加载技能库失败')
+    } finally {
+      setLoadingSkills(false)
+    }
+  }, [])
+
+  // 初始加载素材与技能
+  const hasLoadedLibraries = useRef(false)
   useEffect(() => {
-    if (!hasLoadedMaterials.current) {
-      hasLoadedMaterials.current = true
+    if (!hasLoadedLibraries.current) {
+      hasLoadedLibraries.current = true
       void refreshMaterials()
+      void refreshSkills()
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
@@ -165,9 +652,28 @@ export function Home() {
         await persistWorkspaceRoot(p)
         await refreshBooks()
         await refreshMaterials()
+        await refreshSkills()
       }
     } catch (e) {
       setBookError(e instanceof Error ? e.message : '选择文件夹失败')
+    }
+  }
+
+  const handleSaveAiSettings = async (settings: AiModelSettings) => {
+    setSavingAiSettings(true)
+    setModelConfigError(null)
+    try {
+      const saved = await saveAiModelConfig(settings)
+      setAiSettings(saved)
+      await refreshPreferredWorkspaceChatModel()
+      setModelConfigOpen(false)
+    } catch (e) {
+      const message = e instanceof Error ? e.message : '保存模型配置失败'
+      setModelConfigError(message)
+      if (e instanceof Error) throw e
+      throw new Error(message, { cause: e })
+    } finally {
+      setSavingAiSettings(false)
     }
   }
 
@@ -255,6 +761,45 @@ export function Home() {
     }
   }
 
+  // ==================== 技能操作 ====================
+  const handleCreateSkill = async (e: React.FormEvent) => {
+    e.preventDefault()
+    const ws = workspaceRoot?.trim()
+    if (!ws) {
+      setSkillError('请先在上方选择工作文件夹')
+      return
+    }
+    setSubmittingSkill(true)
+    setSkillError(null)
+    try {
+      await createSkill(skillTitle, skillGenre, ws)
+      setSkillTitle('')
+      setSkillGenre(SHORT_GENRE_OPTIONS[0])
+      setShowSkillForm(false)
+      await refreshSkills()
+    } catch (err) {
+      setSkillError(err instanceof Error ? err.message : '创建技能失败')
+    } finally {
+      setSubmittingSkill(false)
+    }
+  }
+
+  const handleDeleteSkill = async (skillId: string) => {
+    const s = skills.find((item) => item.id === skillId)
+    if (!s) return
+    const ok = window.confirm(`确定删除技能「${s.title}」？\n技能文件夹仍会保留在工作目录中。`)
+    if (!ok) return
+    setDeletingSkillId(skillId)
+    try {
+      await deleteSkill(skillId)
+      await refreshSkills()
+    } catch (err) {
+      setSkillError(err instanceof Error ? err.message : '删除技能失败')
+    } finally {
+      setDeletingSkillId(null)
+    }
+  }
+
   // ==================== 素材类型/分类改变处理 ====================
   const handleMaterialParentGenreChange = useCallback((genre: string) => {
     setMaterialParentGenre(genre)
@@ -276,15 +821,16 @@ export function Home() {
     [books, bookCovers],
   )
   const materialCardItems = useMemo(() => materials.map(materialToCardItem), [materials])
+  const skillCardItems = useMemo(() => skills.map(skillToCardItem), [skills])
 
   return (
     <div className="home">
-      {/* 顶部工作目录栏 */}
-      <section className="workspace-bar" aria-label="工作文件夹">
+      {/* 顶部配置栏 */}
+      <section className="workspace-bar" aria-label="首页配置">
         <div className="workspace-card">
-          <div className="workspace-icon">
+          <div className="workspace-icon" aria-hidden="true">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-              <path d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
+              <path d="M3 7v10a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-6l-2-2H5a2 2 0 0 0-2 2z" />
             </svg>
           </div>
           <div className="workspace-info">
@@ -299,6 +845,39 @@ export function Home() {
             onClick={() => void handlePickWorkspace()}
           >
             {workspaceRoot ? '更改' : '选择文件夹'}
+          </button>
+        </div>
+
+        <div className="workspace-card model-summary-card">
+          <div className="workspace-icon model-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+              <path d="M4 7h7" />
+              <path d="M15 7h5" />
+              <path d="M11 7a2 2 0 1 0 4 0 2 2 0 0 0-4 0z" />
+              <path d="M4 17h3" />
+              <path d="M11 17h9" />
+              <path d="M7 17a2 2 0 1 0 4 0 2 2 0 0 0-4 0z" />
+            </svg>
+          </div>
+          <div className="workspace-info">
+            <span className="workspace-label">模型配置</span>
+            <span className="workspace-path" title={defaultTextModelLabel(aiSettings)}>
+              默认模型：{loadingAiSettings ? '加载中…' : defaultTextModelLabel(aiSettings)}
+            </span>
+            <span className="workspace-subpath" title={imageModelLabel(aiSettings)}>
+              图像模型：{loadingAiSettings ? '加载中…' : imageModelLabel(aiSettings)}
+            </span>
+            {modelConfigError && <span className="workspace-error">{modelConfigError}</span>}
+          </div>
+          <button
+            type="button"
+            className="btn-secondary"
+            onClick={() => {
+              setModelConfigError(null)
+              setModelConfigOpen(true)
+            }}
+          >
+            配置模型
           </button>
         </div>
       </section>
@@ -426,8 +1005,9 @@ export function Home() {
           </div>
         </section>
 
+        <div className="library-stack" aria-label="素材库和技能库">
         {/* 素材卡片 */}
-        <section className="main-card materials-card" aria-label="素材库">
+        <section className="main-card materials-card library-card" aria-label="素材库">
           <header className="card-header">
             <div className="card-header-icon material-icon">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
@@ -438,13 +1018,21 @@ export function Home() {
               <h2 className="card-header-title">素材库</h2>
               <span className="card-header-count">{materials.length} 个素材</span>
             </div>
-            <button
-              type="button"
-              className="btn-primary btn-small"
-              onClick={() => setShowMaterialForm((v) => !v)}
-            >
-              {showMaterialForm ? '收起' : '+ 创建素材'}
-            </button>
+            <div className="card-header-actions">
+              <Link
+                className="btn-secondary btn-small"
+                to="/material-settings"
+              >
+                设置
+              </Link>
+              <button
+                type="button"
+                className="btn-primary btn-small"
+                onClick={() => setShowMaterialForm((v) => !v)}
+              >
+                {showMaterialForm ? '收起' : '+ 创建素材'}
+              </button>
+            </div>
           </header>
 
           {showMaterialForm && (
@@ -557,7 +1145,130 @@ export function Home() {
             )}
           </div>
         </section>
+
+        {/* 技能卡片 */}
+        <section className="main-card skills-card library-card" aria-label="技能库">
+          <header className="card-header">
+            <div className="card-header-icon skill-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+                <path d="M12 3v3" />
+                <path d="M18.5 5.5l-2.1 2.1" />
+                <path d="M21 12h-3" />
+                <path d="M18.5 18.5l-2.1-2.1" />
+                <path d="M12 21v-3" />
+                <path d="M5.5 18.5l2.1-2.1" />
+                <path d="M3 12h3" />
+                <path d="M5.5 5.5l2.1 2.1" />
+                <path d="M9 12a3 3 0 1 0 6 0 3 3 0 0 0-6 0z" />
+              </svg>
+            </div>
+            <div className="card-header-content">
+              <h2 className="card-header-title">技能库</h2>
+              <span className="card-header-count">{skills.length} 个技能</span>
+            </div>
+            <div className="card-header-actions">
+              <Link
+                className="btn-secondary btn-small"
+                to="/skill-settings"
+              >
+                设置
+              </Link>
+              <button
+                type="button"
+                className="btn-primary btn-small"
+                onClick={() => setShowSkillForm((v) => !v)}
+              >
+                {showSkillForm ? '收起' : '+ 创建技能'}
+              </button>
+            </div>
+          </header>
+
+          {showSkillForm && (
+            <form className="create-form" onSubmit={handleCreateSkill}>
+              <label className="field">
+                <span className="field-label">技能标题</span>
+                <input
+                  type="text"
+                  value={skillTitle}
+                  onChange={(e) => setSkillTitle(e.target.value)}
+                  placeholder="请输入技能标题"
+                  required
+                  autoFocus
+                />
+              </label>
+
+              <fieldset className="field">
+                <legend className="field-label">短篇分类</legend>
+                <div className="genre-grid">
+                  {SHORT_GENRE_OPTIONS.map((g) => (
+                    <label key={g} className="radio">
+                      <input
+                        type="radio"
+                        name="skillGenre"
+                        checked={skillGenre === g}
+                        onChange={() => setSkillGenre(g)}
+                      />
+                      {g}
+                    </label>
+                  ))}
+                </div>
+              </fieldset>
+
+              {skillError && <p className="form-error">{skillError}</p>}
+
+              <button type="submit" className="btn-primary" disabled={submittingSkill}>
+                {submittingSkill ? '创建中…' : '创建'}
+              </button>
+            </form>
+          )}
+
+          <div className="card-content-area">
+            {loadingSkills ? (
+              <div className="loading-state">
+                <div className="spinner" />
+                <span>加载中…</span>
+              </div>
+            ) : skills.length === 0 ? (
+              <div className="empty-state">
+                <div className="empty-icon">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+                    <path d="M12 3v3" />
+                    <path d="M18.5 5.5l-2.1 2.1" />
+                    <path d="M21 12h-3" />
+                    <path d="M18.5 18.5l-2.1-2.1" />
+                    <path d="M12 21v-3" />
+                    <path d="M5.5 18.5l2.1-2.1" />
+                    <path d="M3 12h3" />
+                    <path d="M5.5 5.5l2.1 2.1" />
+                    <path d="M9 12a3 3 0 1 0 6 0 3 3 0 0 0-6 0z" />
+                  </svg>
+                </div>
+                <p>暂无技能</p>
+                <span className="empty-hint">点击「创建技能」添加技能</span>
+              </div>
+            ) : (
+              <CardGrid
+                items={skillCardItems}
+                emptyText="暂无技能"
+                onDelete={handleDeleteSkill}
+                deletingId={deletingSkillId}
+              />
+            )}
+          </div>
+        </section>
+        </div>
       </div>
+
+      {modelConfigOpen && (
+        <ModelConfigDialog
+          initialSettings={aiSettings}
+          saving={savingAiSettings}
+          onClose={() => {
+            if (!savingAiSettings) setModelConfigOpen(false)
+          }}
+          onSave={handleSaveAiSettings}
+        />
+      )}
     </div>
   )
 }

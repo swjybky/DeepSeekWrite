@@ -188,6 +188,10 @@
   min-height: calc(100vh - 11rem);
 }
 
+.workspace-settings-grid--single {
+  grid-template-columns: minmax(0, 1fr);
+}
+
 .workspace-settings-prompt-card,
 .workspace-settings-read-card {
   box-sizing: border-box;

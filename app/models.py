@@ -6,6 +6,7 @@ from uuid import uuid4
 
 BookType = Literal["short", "long"]
 MaterialType = Literal["long", "short"]
+SkillGenre = Literal["世情", "追妻", "科幻", "悬疑"]
 
 # 素材分类定义
 SHORT_MATERIAL_GENRES: dict[str, list[str]] = {
@@ -23,6 +24,20 @@ MATERIAL_STAGE_KEYS: tuple[str, ...] = (
     "plot_refine",   # 剧情细化素材
     "pacing",        # 节奏素材
     "draft_excerpt", # 正文片段
+)
+
+# 技能库阶段键：短篇创作空间阶段 + 专家正文两个智能体
+SKILL_STAGE_KEYS: tuple[str, ...] = (
+    "character_design",          # 人物设计技能
+    "plot_design",               # 剧情设计技能
+    "intro_design",              # 导语设计技能
+    "plot_refine",               # 剧情细化技能
+    "outline",                   # 大纲纲要技能
+    "draft",                     # 正文技能
+    "draft_review",              # 正文审阅技能
+    "format_conversion",         # 格式转换技能
+    "expert_draft_coordinator",  # 专家总控技能
+    "expert_section_writer",     # 分节写手技能
 )
 
 # 统一的短篇工作台阶段键（所有短篇分类共用）
@@ -297,6 +312,10 @@ def new_material_id() -> str:
     return str(uuid4())
 
 
+def new_skill_id() -> str:
+    return str(uuid4())
+
+
 def default_material_stages() -> dict[str, str]:
     """创建默认的空素材阶段字典"""
     return {k: "" for k in MATERIAL_STAGE_KEYS}
@@ -308,6 +327,22 @@ def normalize_material_stages_from_storage(raw: dict[str, Any] | None) -> dict[s
     if not raw:
         return out
     for k in MATERIAL_STAGE_KEYS:
+        if k in raw:
+            out[k] = str(raw[k] or "")
+    return out
+
+
+def default_skill_stages() -> dict[str, str]:
+    """创建默认的空技能阶段字典"""
+    return {k: "" for k in SKILL_STAGE_KEYS}
+
+
+def normalize_skill_stages_from_storage(raw: dict[str, Any] | None) -> dict[str, str]:
+    """从 JSON 载入技能阶段：补齐缺失键为 ''"""
+    out = default_skill_stages()
+    if not raw:
+        return out
+    for k in SKILL_STAGE_KEYS:
         if k in raw:
             out[k] = str(raw[k] or "")
     return out
@@ -344,6 +379,37 @@ class Material:
             parent_genre=str(data.get("parent_genre") or ""),
             sub_genre=str(data.get("sub_genre") or ""),
             stages=normalized_stages,
+            output_dir=str(data.get("output_dir") or ""),
+            created_at=str(data.get("created_at") or ""),
+            updated_at=str(data.get("updated_at") or ""),
+        )
+
+
+@dataclass
+class Skill:
+    """技能库数据模型，用于沉淀短篇各阶段写作技能。"""
+
+    id: str
+    title: str
+    genre: str = ""
+    stages: dict[str, str] = field(default_factory=default_skill_stages)
+    output_dir: str = ""
+    created_at: str = ""
+    updated_at: str = ""
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "Skill":
+        genre = str(data.get("genre") or "").strip()
+        if genre not in SHORT_MATERIAL_GENRES:
+            genre = "世情"
+        return cls(
+            id=str(data["id"]),
+            title=str(data["title"]),
+            genre=genre,
+            stages=normalize_skill_stages_from_storage(data.get("stages")),
             output_dir=str(data.get("output_dir") or ""),
             created_at=str(data.get("created_at") or ""),
             updated_at=str(data.get("updated_at") or ""),
