@@ -492,7 +492,7 @@ function WorkspaceAiChatInner({
       agent.state.tools = includePiArtifacts
         ? mergeAgentToolsPreservingArtifacts(agent.state.tools, extras)
         : extras
-    })().catch((e: unknown) => console.warn('[涌泉·工作台提示词]', e))
+    })().catch((e: unknown) => console.warn('[DeepseekWrite·工作台提示词]', e))
   }, [
     chatReady,
     props.bookTitle,

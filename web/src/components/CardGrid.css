@@ -14,8 +14,9 @@
 .card-grid-empty {
   text-align: center;
   padding: 2rem;
-  color: var(--text-muted, #888);
+  color: var(--ink-faint);
   font-size: 0.9rem;
+  letter-spacing: 0.06em;
 }
 
 /* 书本卡片容器 */
@@ -37,7 +38,7 @@
   position: relative;
   border-radius: 2px 8px 8px 2px;
   /* 古风宣纸底色 - 米白色 */
-  background-color: #faf8f3;
+  background-color: var(--paper-elevated, #faf8f3);
   box-shadow:
     -2px 0 4px rgba(0, 0, 0, 0.08),
     2px 2px 8px rgba(0, 0, 0, 0.06),

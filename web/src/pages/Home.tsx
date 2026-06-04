@@ -505,6 +505,7 @@ export function Home() {
   const [aiSettings, setAiSettings] = useState<AiModelSettings>(() => emptyAiModelSettings())
   const [loadingAiSettings, setLoadingAiSettings] = useState(true)
   const [modelConfigOpen, setModelConfigOpen] = useState(false)
+  const [workspaceDrawerOpen, setWorkspaceDrawerOpen] = useState(false)
   const [savingAiSettings, setSavingAiSettings] = useState(false)
   const [modelConfigError, setModelConfigError] = useState<string | null>(null)
 
@@ -825,64 +826,69 @@ export function Home() {
 
   return (
     <div className="home">
-      {/* 顶部配置栏 */}
-      <section className="workspace-bar" aria-label="首页配置">
-        <div className="workspace-card">
-          <div className="workspace-icon" aria-hidden="true">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-              <path d="M3 7v10a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-6l-2-2H5a2 2 0 0 0-2 2z" />
-            </svg>
-          </div>
-          <div className="workspace-info">
-            <span className="workspace-label">工作文件夹</span>
-            <span className="workspace-path" title={workspaceRoot ?? undefined}>
-              {workspaceRoot ? truncatePath(workspaceRoot, 50) : '未选择工作目录'}
-            </span>
-          </div>
-          <button
-            type="button"
-            className="btn-secondary"
-            onClick={() => void handlePickWorkspace()}
-          >
-            {workspaceRoot ? '更改' : '选择文件夹'}
-          </button>
+      <header className="home-header">
+        <div className="home-brand">
+          <h1 className="home-title">DeepseekWrite</h1>
+          <span className="home-tagline muted">简素为骨 · 笔墨为形</span>
         </div>
-
-        <div className="workspace-card model-summary-card">
-          <div className="workspace-icon model-icon" aria-hidden="true">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-              <path d="M4 7h7" />
-              <path d="M15 7h5" />
-              <path d="M11 7a2 2 0 1 0 4 0 2 2 0 0 0-4 0z" />
-              <path d="M4 17h3" />
-              <path d="M11 17h9" />
-              <path d="M7 17a2 2 0 1 0 4 0 2 2 0 0 0-4 0z" />
-            </svg>
-          </div>
-          <div className="workspace-info">
-            <span className="workspace-label">模型配置</span>
-            <span className="workspace-path" title={defaultTextModelLabel(aiSettings)}>
-              默认模型：{loadingAiSettings ? '加载中…' : defaultTextModelLabel(aiSettings)}
-            </span>
-            <span className="workspace-subpath" title={imageModelLabel(aiSettings)}>
-              图像模型：{loadingAiSettings ? '加载中…' : imageModelLabel(aiSettings)}
-            </span>
-            {modelConfigError && <span className="workspace-error">{modelConfigError}</span>}
-          </div>
+        <nav className="home-config-nav" aria-label="系统设置">
           <button
             type="button"
-            className="btn-secondary"
+            className={
+              workspaceDrawerOpen
+                ? 'home-config-trigger home-config-trigger--active'
+                : 'home-config-trigger'
+            }
+            aria-expanded={workspaceDrawerOpen}
+            onClick={() => setWorkspaceDrawerOpen((open) => !open)}
+          >
+            工作目录
+          </button>
+          <button
+            type="button"
+            className="home-config-trigger"
+            title={
+              loadingAiSettings
+                ? '加载模型配置中…'
+                : `默认：${defaultTextModelLabel(aiSettings)} · 图像：${imageModelLabel(aiSettings)}`
+            }
+            disabled={loadingAiSettings}
             onClick={() => {
               setModelConfigError(null)
               setModelConfigOpen(true)
             }}
           >
-            配置模型
+            {loadingAiSettings ? '模型配置…' : '模型配置'}
           </button>
-        </div>
-      </section>
+        </nav>
+      </header>
 
-      {/* 双栏卡片布局 */}
+      {modelConfigError && !modelConfigOpen ? (
+        <p className="home-config-error" role="alert">
+          {modelConfigError}
+        </p>
+      ) : null}
+
+      {workspaceDrawerOpen ? (
+        <section className="home-config-drawer" aria-label="工作目录设置">
+          <div className="home-config-drawer-inner">
+            <div className="home-config-drawer-text">
+              <span className="home-config-drawer-label">当前工作目录</span>
+              <span className="home-config-drawer-path" title={workspaceRoot ?? undefined}>
+                {workspaceRoot ? truncatePath(workspaceRoot, 72) : '尚未选择，创建项目前需指定本机文件夹'}
+              </span>
+            </div>
+            <button
+              type="button"
+              className="btn-secondary"
+              onClick={() => void handlePickWorkspace()}
+            >
+              {workspaceRoot ? '更改目录' : '选择文件夹'}
+            </button>
+          </div>
+        </section>
+      ) : null}
+
       <div className="home-cards-layout">
         {/* 书籍卡片 */}
         <section className="main-card books-card" aria-label="创作空间">
@@ -905,7 +911,7 @@ export function Home() {
               </Link>
               <button
                 type="button"
-                className="btn-primary btn-small"
+                className={showBookForm ? 'btn-secondary btn-small' : 'btn-primary btn-small'}
                 onClick={() => setShowBookForm((v) => !v)}
               >
                 {showBookForm ? '收起' : '+ 创建书籍'}
@@ -1027,7 +1033,7 @@ export function Home() {
               </Link>
               <button
                 type="button"
-                className="btn-primary btn-small"
+                className={showMaterialForm ? 'btn-secondary btn-small' : 'btn-primary btn-small'}
                 onClick={() => setShowMaterialForm((v) => !v)}
               >
                 {showMaterialForm ? '收起' : '+ 创建素材'}
@@ -1175,7 +1181,7 @@ export function Home() {
               </Link>
               <button
                 type="button"
-                className="btn-primary btn-small"
+                className={showSkillForm ? 'btn-secondary btn-small' : 'btn-primary btn-small'}
                 onClick={() => setShowSkillForm((v) => !v)}
               >
                 {showSkillForm ? '收起' : '+ 创建技能'}

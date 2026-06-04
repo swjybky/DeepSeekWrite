@@ -1,0 +1,149 @@
+/* DeepseekWrite — 简约古风设计令牌 */
+:root {
+  --paper: #f4efe4;
+  --paper-deep: #ebe4d6;
+  --paper-elevated: #faf6ee;
+  --ink: #2a241c;
+  --ink-soft: #5c5244;
+  --ink-faint: #8a7f6e;
+  --border: #d5cbb8;
+  --border-strong: #b8aa92;
+  --accent: #9b3b30;
+  --accent-hover: #7f2f26;
+  --accent-soft: color-mix(in oklab, var(--accent) 12%, var(--paper));
+  --jade: #3d5c4a;
+  --gold: #a67c3d;
+  --danger: #a33b32;
+  --shadow-soft: 0 8px 28px rgb(42 36 28 / 8%);
+  --shadow-panel: 0 1px 0 rgb(255 255 255 / 55%) inset,
+    0 12px 32px rgb(42 36 28 / 6%);
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --font-display: 'Noto Serif SC', 'Songti SC', 'STSong', serif;
+  --font-body: 'LXGW WenKai', 'PingFang SC', 'Hiragino Sans GB', sans-serif;
+  --font-ui: var(--font-body);
+
+  --text: var(--ink-soft);
+  --text-h: var(--ink);
+  --bg: var(--paper);
+  --surface: var(--paper-elevated);
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: var(--font-body);
+  font-size: 15px;
+  line-height: 1.6;
+  color: var(--text);
+  background: var(--bg);
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+}
+
+#root {
+  min-height: 100vh;
+}
+
+h1,
+h2,
+h3 {
+  margin: 0;
+  font-family: var(--font-display);
+  font-weight: 600;
+  color: var(--text-h);
+  letter-spacing: 0.04em;
+}
+
+button {
+  font: inherit;
+  cursor: pointer;
+}
+
+input,
+textarea,
+select {
+  font: inherit;
+}
+
+a {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+a:hover {
+  color: var(--accent-hover);
+  text-decoration: underline;
+}
+
+.btn-primary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+  padding: 0.55rem 1rem;
+  border: 1px solid var(--accent-hover);
+  border-radius: var(--radius-sm);
+  background: var(--accent);
+  color: #faf6ee;
+  font-weight: 600;
+  font-size: 0.875rem;
+  letter-spacing: 0.06em;
+  box-shadow: 0 1px 0 rgb(255 255 255 / 18%) inset;
+  transition: background 0.2s ease, border-color 0.2s ease, transform 0.15s ease;
+}
+
+.btn-primary:hover:not(:disabled) {
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
+  color: #faf6ee;
+  text-decoration: none;
+}
+
+.btn-primary:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.btn-primary.btn-small {
+  padding: 0.42rem 0.75rem;
+  font-size: 0.8125rem;
+}
+
+.btn-secondary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.5rem 0.9rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--paper-elevated);
+  color: var(--ink-soft);
+  font-weight: 500;
+  font-size: 0.875rem;
+  letter-spacing: 0.04em;
+  transition: border-color 0.2s ease, background 0.2s ease, color 0.2s ease;
+}
+
+.btn-secondary:hover:not(:disabled) {
+  border-color: var(--border-strong);
+  color: var(--ink);
+  background: var(--paper-deep);
+  text-decoration: none;
+}
+
+.btn-secondary.btn-small {
+  padding: 0.38rem 0.7rem;
+  font-size: 0.8125rem;
+}
+
+.muted {
+  color: var(--ink-faint);
+}

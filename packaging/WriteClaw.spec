@@ -1,5 +1,5 @@
 # -*- mode: python ; coding: utf-8 -*-
-"""涌泉写作 Windows 便携目录包（PyInstaller onedir）。在项目根目录执行:
+"""DeepseekWrite Windows 便携目录包（PyInstaller onedir）。在项目根目录执行:
     pip install pyinstaller
     cd web && npm ci && npm run build
     cd .. && pyinstaller packaging/WriteClaw.spec

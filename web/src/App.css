@@ -1,7 +1,17 @@
 .app-shell {
   min-height: 100vh;
+  height: 100vh;
   display: flex;
   flex-direction: column;
-  color: var(--text);
-  background: var(--bg);
+  overflow: hidden;
+  background:
+    radial-gradient(ellipse 120% 80% at 50% -20%, rgb(166 124 61 / 7%), transparent 55%),
+    linear-gradient(180deg, var(--paper) 0%, color-mix(in oklab, var(--paper-deep) 40%, var(--paper)) 100%);
+}
+
+.app-shell > * {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
 }

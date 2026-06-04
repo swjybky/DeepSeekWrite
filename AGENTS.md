@@ -1,4 +1,4 @@
-# Write Claw（涌泉写作）项目指南
+# Write Claw（DeepseekWrite）项目指南
 
 本文件为 AI 编码代理提供在操作本仓库代码时的指引。读者应被假设为对项目一无所知。
 
@@ -6,7 +6,7 @@
 
 ## 项目概述
 
-Write Claw（涌泉写作）是一款**本地桌面写作应用**，面向网文与短篇小说创作。采用**混合架构**：
+Write Claw（DeepseekWrite）是一款**本地桌面写作应用**，面向网文与短篇小说创作。采用**混合架构**：
 
 - **后端**：Python 3.10+，基于 [pywebview](https://pywebview.flowrl.com/) 提供桌面壳窗口，通过 `js_api` 向前端暴露原生 API。
 - **前端**：React 19 + TypeScript + Vite 构建的静态 SPA。

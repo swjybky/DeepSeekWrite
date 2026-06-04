@@ -764,7 +764,7 @@ def main() -> None:
     api = Api(store)
     _httpd, url = _start_local_dist_server(_dist_dir())
     webview.create_window(
-        "涌泉写作",
+        "DeepseekWrite",
         url,
         js_api=api,
         width=1500,

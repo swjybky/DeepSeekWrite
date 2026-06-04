@@ -12,6 +12,7 @@ import {
 } from '../bridge'
 import { WorkspaceAiChat } from '../components/WorkspaceAiChat'
 import type { ApplyToStageEditorPayload } from '../pi/workspaceStageAgents'
+import { WorkspaceTreeNav } from '../components/WorkspaceTreeNav'
 import './BookEditor.css'
 
 const AI_PANEL_WIDTH_KEY = 'write-claw:skill-ai-width'
@@ -366,71 +367,11 @@ export function SkillEditor() {
 
   return (
     <div className="editor-page editor-page--workspace">
-      <header className="editor-header">
+      <header className="editor-header editor-header--agent">
         <Link className="back-link" to="/">
-          ← 首页
+          ← 返架
         </Link>
-        <div className="editor-title-block">
-          {editingTitle ? (
-            <input
-              className="editor-title-input"
-              value={titleDraft}
-              onChange={(e) => setTitleDraft(e.target.value)}
-              onBlur={() => {
-                const trimmed = titleDraft.trim()
-                if (trimmed && trimmed !== skill?.title && skill) {
-                  void (async () => {
-                    try {
-                      const next = await saveSkill(skill.id, { title: trimmed })
-                      if (next) {
-                        setSkill(next)
-                        setMessage('技能名已修改')
-                        window.setTimeout(() => setMessage(null), 2000)
-                      } else {
-                        setError('保存技能名失败')
-                      }
-                    } catch (e) {
-                      setError(e instanceof Error ? e.message : '保存技能名失败')
-                    }
-                  })()
-                }
-                setEditingTitle(false)
-                setTitleDraft('')
-              }}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') {
-                  e.currentTarget.blur()
-                } else if (e.key === 'Escape') {
-                  setEditingTitle(false)
-                  setTitleDraft('')
-                }
-              }}
-              autoFocus
-            />
-          ) : (
-            <h1
-              className="editor-title editor-title--editable"
-              onDoubleClick={() => {
-                setTitleDraft(skill?.title ?? '')
-                setEditingTitle(true)
-              }}
-              title="双击编辑技能名"
-            >
-              {skill?.title ?? ''}
-            </h1>
-          )}
-          <span className="editor-sub">
-            {skillTypeText}
-            {skill.output_dir ? (
-              <span className="editor-path" title={skill.output_dir}>
-                {' · '}
-                {skill.output_dir.length > 36
-                  ? `${skill.output_dir.slice(0, 18)}…${skill.output_dir.slice(-14)}`
-                  : skill.output_dir}
-              </span>
-            ) : null}
-          </span>
-        </div>
+        <div className="editor-header-meta muted">{skillTypeText}</div>
         <button
           type="button"
           className="btn-save"
@@ -448,27 +389,148 @@ export function SkillEditor() {
         className="workspace-grid"
         style={{ '--workspace-ai-width': `${aiPanelWidth}px` } as CSSProperties}
       >
-        <nav className="workspace-rail" aria-label="技能阶段">
-          <ul className="workspace-rail-list">
-            {SKILL_STAGE_KEYS.map((stageId) => (
-              <li key={stageId}>
-                <button
-                  type="button"
-                  className={
-                    activeStage === stageId
-                      ? 'rail-item rail-item--active'
-                      : 'rail-item'
+        <aside className="workspace-rail workspace-rail--tree">
+          <WorkspaceTreeNav
+            rootLabel={skill.title}
+            stages={SKILL_STAGE_KEYS.map((stageId) => ({
+              id: stageId,
+              label: SKILL_STAGE_LABELS[stageId],
+            }))}
+            activeStageId={activeStage}
+            onStageSelect={(stageId) => setActiveStage(stageId as SkillStageId)}
+            editingTitle={editingTitle}
+            titleDraft={titleDraft}
+            onTitleDraftChange={setTitleDraft}
+            onTitleEditStart={() => {
+              setTitleDraft(skill.title)
+              setEditingTitle(true)
+            }}
+            onTitleEditEnd={() => {
+              const trimmed = titleDraft.trim()
+              if (trimmed && trimmed !== skill.title) {
+                void (async () => {
+                  try {
+                    const next = await saveSkill(skill.id, { title: trimmed })
+                    if (next) {
+                      setSkill(next)
+                      setMessage('技能名已修改')
+                      window.setTimeout(() => setMessage(null), 2000)
+                    } else {
+                      setError('保存技能名失败')
+                    }
+                  } catch (e) {
+                    setError(e instanceof Error ? e.message : '保存技能名失败')
                   }
-                  onClick={() => setActiveStage(stageId)}
-                >
-                  {SKILL_STAGE_LABELS[stageId]}
-                </button>
-              </li>
-            ))}
-          </ul>
-        </nav>
+                })()
+              }
+              setEditingTitle(false)
+              setTitleDraft('')
+            }}
+            onTitleEditCancel={() => {
+              setEditingTitle(false)
+              setTitleDraft('')
+            }}
+          />
+        </aside>
 
-        <div className="workspace-editor-pane">
+        <aside className="workspace-ai workspace-ai--center" aria-label="AI 对话">
+          <div className="workspace-ai-header workspace-ai-header-row">
+            <span className="workspace-ai-header-title">技能智能体</span>
+            <div className="workspace-ai-header-actions">
+              <Link
+                className="workspace-ai-prompt-edit"
+                aria-label="配置技能管理智能体"
+                title="配置技能管理智能体"
+                to="/skill-settings"
+              >
+                设置
+              </Link>
+              <button
+                type="button"
+                className="workspace-ai-new-chat"
+                aria-label="清空技能管理智能体对话并开始新会话"
+                title="清空技能管理智能体对话并开始新会话"
+                onClick={() => setAiChatEpoch((epoch) => epoch + 1)}
+              >
+                新建对话
+              </button>
+            </div>
+          </div>
+          <div className="workspace-ai-hint muted">
+            {skillTypeText} · {SKILL_STAGE_LABELS[activeStage]}
+          </div>
+          <div className="workspace-ai-chat-stack">
+            <div className="workspace-ai-chat-layer workspace-ai-chat-layer--active">
+              <WorkspaceAiChat
+                key={`${skill.id}-skill-manager-${aiChatEpoch}`}
+                sessionBookId={skill.id}
+                sessionEpoch={aiChatEpoch}
+                bookTitle={skill.title}
+                bookGenre={skill.genre}
+                stageId={activeStage}
+                stageBody={stageBody}
+                allStages={stages}
+                includePiArtifacts={WORKSPACE_AI_INCLUDE_PI_ARTIFACTS}
+                applyToStageEditor={(payload) =>
+                  applyToStageEditor(activeStageRef.current, payload)
+                }
+                workspaceType="skill"
+              />
+            </div>
+          </div>
+        </aside>
+
+        <div
+          className="workspace-splitter"
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="调整对话区宽度"
+          tabIndex={0}
+          onPointerDown={(e) => {
+            if (e.button !== 0) return
+            e.preventDefault()
+            splitDragRef.current = {
+              startX: e.clientX,
+              startWidth: aiPanelWidth,
+            }
+            ;(e.currentTarget as HTMLDivElement).setPointerCapture(e.pointerId)
+          }}
+          onPointerMove={(e) => {
+            const drag = splitDragRef.current
+            if (!drag) return
+            const delta = e.clientX - drag.startX
+            const next = drag.startWidth + delta
+            setAiPanelWidth(clampAiPanelWidth(next, window.innerWidth))
+          }}
+          onPointerUp={(e) => {
+            splitDragRef.current = null
+            try {
+              ;(e.currentTarget as HTMLDivElement).releasePointerCapture(e.pointerId)
+            } catch {
+              /* ignore */
+            }
+          }}
+          onPointerCancel={(e) => {
+            splitDragRef.current = null
+            try {
+              ;(e.currentTarget as HTMLDivElement).releasePointerCapture(e.pointerId)
+            } catch {
+              /* ignore */
+            }
+          }}
+          onKeyDown={(e) => {
+            const step = 16
+            if (e.key === 'ArrowLeft') {
+              e.preventDefault()
+              setAiPanelWidth((w) => clampAiPanelWidth(w - step, window.innerWidth))
+            } else if (e.key === 'ArrowRight') {
+              e.preventDefault()
+              setAiPanelWidth((w) => clampAiPanelWidth(w + step, window.innerWidth))
+            }
+          }}
+        />
+
+        <div className="workspace-editor-pane workspace-editor-pane--primary">
           <div className="workspace-stage-heading">
             <label className="workspace-stage-label" htmlFor="stage-body">
               {SKILL_STAGE_LABELS[activeStage]}
@@ -498,103 +560,6 @@ export function SkillEditor() {
             readOnly={Boolean(streamingStages[activeStage])}
           />
         </div>
-
-        <div
-          className="workspace-splitter"
-          role="separator"
-          aria-orientation="vertical"
-          aria-label="调整 AI 侧栏宽度"
-          tabIndex={0}
-          onPointerDown={(e) => {
-            if (e.button !== 0) return
-            e.preventDefault()
-            splitDragRef.current = {
-              startX: e.clientX,
-              startWidth: aiPanelWidth,
-            }
-            ;(e.currentTarget as HTMLDivElement).setPointerCapture(e.pointerId)
-          }}
-          onPointerMove={(e) => {
-            const drag = splitDragRef.current
-            if (!drag) return
-            const delta = e.clientX - drag.startX
-            const next = drag.startWidth - delta
-            setAiPanelWidth(clampAiPanelWidth(next, window.innerWidth))
-          }}
-          onPointerUp={(e) => {
-            splitDragRef.current = null
-            try {
-              ;(e.currentTarget as HTMLDivElement).releasePointerCapture(e.pointerId)
-            } catch {
-              /* ignore */
-            }
-          }}
-          onPointerCancel={(e) => {
-            splitDragRef.current = null
-            try {
-              ;(e.currentTarget as HTMLDivElement).releasePointerCapture(e.pointerId)
-            } catch {
-              /* ignore */
-            }
-          }}
-          onKeyDown={(e) => {
-            const step = 16
-            if (e.key === 'ArrowLeft') {
-              e.preventDefault()
-              setAiPanelWidth((w) => clampAiPanelWidth(w + step, window.innerWidth))
-            } else if (e.key === 'ArrowRight') {
-              e.preventDefault()
-              setAiPanelWidth((w) => clampAiPanelWidth(w - step, window.innerWidth))
-            }
-          }}
-        />
-
-        <aside className="workspace-ai" aria-label="AI 对话">
-          <div className="workspace-ai-header workspace-ai-header-row">
-            <span className="workspace-ai-header-title">技能管理智能体</span>
-            <div className="workspace-ai-header-actions">
-              <Link
-                className="workspace-ai-prompt-edit"
-                aria-label="配置技能管理智能体"
-                title="配置技能管理智能体"
-                to="/skill-settings"
-              >
-                智能体设置
-              </Link>
-              <button
-                type="button"
-                className="workspace-ai-new-chat"
-                aria-label="清空技能管理智能体对话并开始新会话"
-                title="清空技能管理智能体对话并开始新会话"
-                onClick={() => setAiChatEpoch((epoch) => epoch + 1)}
-              >
-                新建对话
-              </button>
-            </div>
-          </div>
-          <div className="workspace-ai-hint muted">
-            上下文：{skillTypeText} · 当前栏目：{SKILL_STAGE_LABELS[activeStage]}
-          </div>
-          <div className="workspace-ai-chat-stack">
-            <div className="workspace-ai-chat-layer workspace-ai-chat-layer--active">
-              <WorkspaceAiChat
-                key={`${skill.id}-skill-manager-${aiChatEpoch}`}
-                sessionBookId={skill.id}
-                sessionEpoch={aiChatEpoch}
-                bookTitle={skill.title}
-                bookGenre={skill.genre}
-                stageId={activeStage}
-                stageBody={stageBody}
-                allStages={stages}
-                includePiArtifacts={WORKSPACE_AI_INCLUDE_PI_ARTIFACTS}
-                applyToStageEditor={(payload) =>
-                  applyToStageEditor(activeStageRef.current, payload)
-                }
-                workspaceType="skill"
-              />
-            </div>
-          </div>
-        </aside>
       </div>
     </div>
   )

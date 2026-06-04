@@ -1533,7 +1533,7 @@ export async function saveMaterialAgentPromptOverride(
       body,
     )
   } catch {
-    console.warn('[涌泉] 无法保存素材库智能体提示词覆盖：无桌面桥接且无可用 localStorage')
+    console.warn('[DeepseekWrite] 无法保存素材库智能体提示词覆盖：无桌面桥接且无可用 localStorage')
   }
 }
 
@@ -1656,7 +1656,7 @@ export async function saveSkillAgentPromptOverride(
       body,
     )
   } catch {
-    console.warn('[涌泉] 无法保存技能库智能体提示词覆盖：无桌面桥接且无可用 localStorage')
+    console.warn('[DeepseekWrite] 无法保存技能库智能体提示词覆盖：无桌面桥接且无可用 localStorage')
   }
 }
 
@@ -1739,7 +1739,7 @@ export async function saveWorkspaceAgentPromptOverride(
       body,
     )
   } catch {
-    console.warn('[涌泉] 无法保存创作空间提示词覆盖：无桌面桥接且无可用 localStorage')
+    console.warn('[DeepseekWrite] 无法保存创作空间提示词覆盖：无桌面桥接且无可用 localStorage')
   }
 }
 
@@ -1778,7 +1778,7 @@ export async function generateBookCover(
     return api.generate_book_cover(book_id, prompt)
   }
   // 浏览器开发模式：模拟成功
-  console.warn('[涌泉] 浏览器开发模式：封面生成 API 不可用，返回模拟数据')
+  console.warn('[DeepseekWrite] 浏览器开发模式：封面生成 API 不可用，返回模拟数据')
   return { cover_path: null, success: false, error: '浏览器开发模式暂不支持封面生成' }
 }
 

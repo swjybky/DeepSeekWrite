@@ -1,7 +1,7 @@
 ---
 name: add-material-stage
 description: >
-  在 Write Claw（涌泉写作）项目的素材库中新增一个阶段。当用户需要为素材库
+  在 Write Claw（DeepseekWrite）项目的素材库中新增一个阶段。当用户需要为素材库
   （人设/导语/梗/节奏等之外）增加新的素材阶段时使用。涉及后端 Python 模型定义、
   提示词管线、默认模板文件，以及前端 TypeScript 类型、标签、编辑器导航和 AI 工具
   的联动修改。

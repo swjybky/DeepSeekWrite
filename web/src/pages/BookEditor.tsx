@@ -44,6 +44,7 @@ import {
   getDefaultWorkspaceAgentReadAccess,
   resolveWorkspaceAgentReadAccess,
 } from '../workspaces/short/stageReadAccess'
+import { WorkspaceTreeNav } from '../components/WorkspaceTreeNav'
 import './BookEditor.css'
 
 /** 空 stages 对象，用于非激活阶段的稳定引用，避免不必要的重渲染 */
@@ -760,73 +761,15 @@ export function BookEditor() {
 
   return (
     <div className="editor-page editor-page--workspace">
-      <header className="editor-header">
+      <header className="editor-header editor-header--agent">
         <Link className="back-link" to="/">
-          ← 书架
+          ← 返架
         </Link>
-        <div className="editor-title-block">
-          {editingTitle ? (
-            <input
-              className="editor-title-input"
-              value={titleDraft}
-              onChange={(e) => setTitleDraft(e.target.value)}
-              onBlur={() => {
-                const trimmed = titleDraft.trim()
-                if (trimmed && trimmed !== book?.title && book) {
-                  void (async () => {
-                    try {
-                      const next = await saveBook(book.id, { title: trimmed })
-                      if (next) {
-                        setBook(next)
-                        setMessage('书名已修改')
-                        window.setTimeout(() => setMessage(null), 2000)
-                      } else {
-                        setError('保存书名失败')
-                      }
-                    } catch (e) {
-                      setError(e instanceof Error ? e.message : '保存书名失败')
-                    }
-                  })()
-                }
-                setEditingTitle(false)
-                setTitleDraft('')
-              }}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') {
-                  e.currentTarget.blur()
-                } else if (e.key === 'Escape') {
-                  setEditingTitle(false)
-                  setTitleDraft('')
-                }
-              }}
-              autoFocus
-            />
-          ) : (
-            <h1
-              className="editor-title editor-title--editable"
-              onDoubleClick={() => {
-                setTitleDraft(book?.title ?? '')
-                setEditingTitle(true)
-              }}
-              title="双击编辑书名"
-            >
-              {book?.title ?? ''}
-            </h1>
-          )}
-          <span className="editor-sub">
-            {book?.book_type === 'short' ? '短篇' : '长篇'}
-            {book?.book_type === 'short' && book.categories.length > 0
-              ? ` · ${book.categories.join('、')}`
-              : ''}
-            {book?.output_dir ? (
-              <span className="editor-path" title={book.output_dir}>
-                {' '}
-                · {book.output_dir.length > 36
-                  ? `${book.output_dir.slice(0, 18)}…${book.output_dir.slice(-14)}`
-                  : book.output_dir}
-              </span>
-            ) : null}
-          </span>
+        <div className="editor-header-meta muted">
+          {book?.book_type === 'short' ? '短篇' : '长篇'}
+          {book?.book_type === 'short' && book.categories.length > 0
+            ? ` · ${book.categories.join('、')}`
+            : ''}
         </div>
         <div className="editor-header-actions">
           {coverData ? (
@@ -897,27 +840,257 @@ export function BookEditor() {
           } as CSSProperties
         }
       >
-        <nav className="workspace-rail" aria-label="写作阶段">
-          <ul className="workspace-rail-list">
-            {railStages.map((s) => (
-              <li key={s.id}>
+        <aside className="workspace-rail workspace-rail--tree">
+          <WorkspaceTreeNav
+            rootLabel={book?.title ?? ''}
+            stages={railStages.map((s) => ({ id: s.id, label: s.label }))}
+            activeStageId={activeStage}
+            onStageSelect={(stageId) => setActiveStage(stageId as StageId)}
+            editingTitle={editingTitle}
+            titleDraft={titleDraft}
+            onTitleDraftChange={setTitleDraft}
+            onTitleEditStart={() => {
+              setTitleDraft(book?.title ?? '')
+              setEditingTitle(true)
+            }}
+            onTitleEditEnd={() => {
+              const trimmed = titleDraft.trim()
+              if (trimmed && trimmed !== book?.title && book) {
+                void (async () => {
+                  try {
+                    const next = await saveBook(book.id, { title: trimmed })
+                    if (next) {
+                      setBook(next)
+                      setMessage('书名已修改')
+                      window.setTimeout(() => setMessage(null), 2000)
+                    } else {
+                      setError('保存书名失败')
+                    }
+                  } catch (e) {
+                    setError(e instanceof Error ? e.message : '保存书名失败')
+                  }
+                })()
+              }
+              setEditingTitle(false)
+              setTitleDraft('')
+            }}
+            onTitleEditCancel={() => {
+              setEditingTitle(false)
+              setTitleDraft('')
+            }}
+          />
+        </aside>
+
+        <aside className="workspace-ai workspace-ai--center" aria-label="AI 对话">
+          <div className="workspace-ai-header workspace-ai-header-row">
+            <span className="workspace-ai-header-title">智能体</span>
+            {book ? (
+              <div className="workspace-ai-header-actions">
+                {activeStage === 'draft' ? (
+                  <button
+                    type="button"
+                    className={
+                      expertMode
+                        ? 'workspace-ai-expert-mode workspace-ai-expert-mode--active'
+                        : 'workspace-ai-expert-mode'
+                    }
+                    aria-label={expertMode ? '退出专家模式' : '进入专家模式'}
+                    title="切换正文专家模式"
+                    onClick={() => setExpertMode((v) => !v)}
+                  >
+                    专家模式
+                  </button>
+                ) : null}
                 <button
                   type="button"
-                  className={
-                    activeStage === s.id
-                      ? 'rail-item rail-item--active'
-                      : 'rail-item'
+                  className="workspace-ai-new-chat"
+                  aria-label={
+                    expertDraftActive
+                      ? '清空专家模式主智能体对话并开始新会话'
+                      : '清空当前阶段 AI 对话并开始新会话'
                   }
-                  onClick={() => setActiveStage(s.id)}
+                  title={
+                    expertDraftActive
+                      ? '仅清空专家模式右侧主智能体上下文，不影响后台小节编写任务'
+                      : '仅影响当前左侧阶段对应的助手会话，其他阶段各有一份独立历史'
+                  }
+                  disabled={expertDraftActive && expertDraft.running}
+                  onClick={() => {
+                    if (expertDraftActive) {
+                      setExpertAiChatEpoch((epoch) => epoch + 1)
+                      return
+                    }
+                    setAiChatEpochByStage((prev) => ({
+                      ...prev,
+                      [activeStage]: (prev[activeStage] ?? 0) + 1,
+                    }))
+                  }}
                 >
-                  {s.label}
+                  新建对话
                 </button>
-              </li>
-            ))}
-          </ul>
-        </nav>
+              </div>
+            ) : null}
+          </div>
+          <div className="workspace-ai-hint muted">
+            {railStages.find((s) => s.id === activeStage)?.label}
+            {expertDraftActive ? ' · 专家模式' : ''}
+            {' · '}
+            {book?.categories.join('、') || '未分类'}
+            {linkedMaterial ? ` · 素材：${linkedMaterial.title}` : ''}
+          </div>
+          {book ? (
+            <div className="workspace-ai-chat-stack">
+              {railStages.map((s) => {
+                const epoch = aiChatEpochByStage[s.id] ?? 0
+                const layerKey =
+                  epoch > 0
+                    ? `${book.id}-shared-${s.id}-${epoch}`
+                    : `${book.id}-shared-${s.id}`
+                const isActive = activeStage === s.id && !expertDraftActive
+                return (
+                  <div
+                    key={layerKey}
+                    className={
+                      isActive
+                        ? 'workspace-ai-chat-layer workspace-ai-chat-layer--active'
+                        : 'workspace-ai-chat-layer'
+                    }
+                    aria-hidden={!isActive}
+                    style={
+                      isActive
+                        ? undefined
+                        : {
+                            position: 'absolute',
+                            opacity: 0,
+                            pointerEvents: 'none',
+                            width: 0,
+                            height: 0,
+                            overflow: 'hidden',
+                          }
+                    }
+                  >
+                    <WorkspaceAiChat
+                      sessionBookId={book.id}
+                      sessionEpoch={epoch}
+                      bookTitle={book.title}
+                      bookGenre={bookGenre}
+                      stageId={s.id}
+                      stageBody={stages[s.id] ?? ''}
+                      getCurrentStageBody={() => stagesRef.current[s.id] ?? ''}
+                      allStages={isActive ? stages : EMPTY_STAGES}
+                      linkedMaterial={isActive ? linkedMaterial : null}
+                      workspaceAgentReadAccess={workspaceAgentReadAccess}
+                      includePiArtifacts={WORKSPACE_AI_INCLUDE_PI_ARTIFACTS}
+                      applyToStageEditor={(payload) =>
+                        applyToStageEditor(s.id, payload)
+                      }
+                      onRequestSave={handleSave}
+                      isPaused={!isActive}
+                    />
+                  </div>
+                )
+              })}
+              <div
+                key={`${book.id}-expert-draft`}
+                className={
+                  expertDraftActive
+                    ? 'workspace-ai-chat-layer workspace-ai-chat-layer--active'
+                    : 'workspace-ai-chat-layer'
+                }
+                aria-hidden={!expertDraftActive}
+                style={
+                  expertDraftActive
+                    ? undefined
+                    : {
+                        position: 'absolute',
+                        opacity: 0,
+                        pointerEvents: 'none',
+                        width: 0,
+                        height: 0,
+                        overflow: 'hidden',
+                      }
+                }
+              >
+                <ExpertDraftAiChat
+                  key={`${book.id}-shared-expert-draft-${expertAiChatEpoch}`}
+                  bookId={book.id}
+                  bookTitle={book.title}
+                  bookGenre={bookGenre}
+                  sessionEpoch={expertAiChatEpoch}
+                  stages={stages}
+                  linkedMaterial={linkedMaterial}
+                  readAccess={resolveWorkspaceAgentReadAccess(
+                    workspaceAgentReadAccess,
+                    EXPERT_DRAFT_COORDINATOR_AGENT_ID,
+                  )}
+                  expertDraft={expertDraft}
+                  updateDraft={updateExpertDraft}
+                  startWriting={startExpertWriting}
+                />
+              </div>
+            </div>
+          ) : null}
+        </aside>
 
-        <div className="workspace-editor-pane">
+        <div
+          className="workspace-splitter"
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="调整对话区宽度"
+          tabIndex={0}
+          onPointerDown={(e) => {
+            if (e.button !== 0) return
+            e.preventDefault()
+            splitDragRef.current = {
+              startX: e.clientX,
+              startWidth: aiPanelWidth,
+            }
+            ;(e.currentTarget as HTMLDivElement).setPointerCapture(e.pointerId)
+          }}
+          onPointerMove={(e) => {
+            const drag = splitDragRef.current
+            if (!drag) return
+            const delta = e.clientX - drag.startX
+            const next = drag.startWidth + delta
+            setAiPanelWidth(clampAiPanelWidth(next, window.innerWidth))
+          }}
+          onPointerUp={(e) => {
+            splitDragRef.current = null
+            try {
+              ;(e.currentTarget as HTMLDivElement).releasePointerCapture(
+                e.pointerId,
+              )
+            } catch {
+              /* ignore */
+            }
+          }}
+          onPointerCancel={(e) => {
+            splitDragRef.current = null
+            try {
+              ;(e.currentTarget as HTMLDivElement).releasePointerCapture(
+                e.pointerId,
+              )
+            } catch {
+              /* ignore */
+            }
+          }}
+          onKeyDown={(e) => {
+            const step = 16
+            if (e.key === 'ArrowLeft') {
+              e.preventDefault()
+              setAiPanelWidth((w) =>
+                clampAiPanelWidth(w - step, window.innerWidth),
+              )
+            } else if (e.key === 'ArrowRight') {
+              e.preventDefault()
+              setAiPanelWidth((w) =>
+                clampAiPanelWidth(w + step, window.innerWidth),
+              )
+            }
+          }}
+        />
+
+        <div className="workspace-editor-pane workspace-editor-pane--primary">
           {expertDraftActive ? (
             <ExpertDraftEditor
               draft={expertDraft}
@@ -981,224 +1154,6 @@ export function BookEditor() {
             </>
           )}
         </div>
-
-        <div
-          className="workspace-splitter"
-          role="separator"
-          aria-orientation="vertical"
-          aria-label="调整 AI 侧栏宽度"
-          tabIndex={0}
-          onPointerDown={(e) => {
-            if (e.button !== 0) return
-            e.preventDefault()
-            splitDragRef.current = {
-              startX: e.clientX,
-              startWidth: aiPanelWidth,
-            }
-            ;(e.currentTarget as HTMLDivElement).setPointerCapture(e.pointerId)
-          }}
-          onPointerMove={(e) => {
-            const drag = splitDragRef.current
-            if (!drag) return
-            const delta = e.clientX - drag.startX
-            // 向右拖：中间编辑区变宽，AI 栏变窄（与常见分割条方向一致）
-            const next = drag.startWidth - delta
-            setAiPanelWidth(
-              clampAiPanelWidth(next, window.innerWidth),
-            )
-          }}
-          onPointerUp={(e) => {
-            splitDragRef.current = null
-            try {
-              ;(e.currentTarget as HTMLDivElement).releasePointerCapture(
-                e.pointerId,
-              )
-            } catch {
-              /* ignore */
-            }
-          }}
-          onPointerCancel={(e) => {
-            splitDragRef.current = null
-            try {
-              ;(e.currentTarget as HTMLDivElement).releasePointerCapture(
-                e.pointerId,
-              )
-            } catch {
-              /* ignore */
-            }
-          }}
-          onKeyDown={(e) => {
-            const step = 16
-            if (e.key === 'ArrowLeft') {
-              e.preventDefault()
-              setAiPanelWidth((w) =>
-                clampAiPanelWidth(w + step, window.innerWidth),
-              )
-            } else if (e.key === 'ArrowRight') {
-              e.preventDefault()
-              setAiPanelWidth((w) =>
-                clampAiPanelWidth(w - step, window.innerWidth),
-              )
-            }
-          }}
-        />
-
-        <aside className="workspace-ai" aria-label="AI 对话">
-          <div className="workspace-ai-header workspace-ai-header-row">
-            <span className="workspace-ai-header-title">AI 助手</span>
-            {book ? (
-              <div className="workspace-ai-header-actions">
-                {activeStage === 'draft' ? (
-                  <button
-                    type="button"
-                    className={
-                      expertMode
-                        ? 'workspace-ai-expert-mode workspace-ai-expert-mode--active'
-                        : 'workspace-ai-expert-mode'
-                    }
-                    aria-label={expertMode ? '退出专家模式' : '进入专家模式'}
-                    title="切换正文专家模式"
-                    onClick={() => setExpertMode((v) => !v)}
-                  >
-                    专家模式
-                  </button>
-                ) : null}
-                <button
-                  type="button"
-                  className="workspace-ai-new-chat"
-                  aria-label={
-                    expertDraftActive
-                      ? '清空专家模式主智能体对话并开始新会话'
-                      : '清空当前阶段 AI 对话并开始新会话'
-                  }
-                  title={
-                    expertDraftActive
-                      ? '仅清空专家模式右侧主智能体上下文，不影响后台小节编写任务'
-                      : '仅影响当前左侧阶段对应的助手会话，其他阶段各有一份独立历史'
-                  }
-                  disabled={expertDraftActive && expertDraft.running}
-                  onClick={() => {
-                    if (expertDraftActive) {
-                      setExpertAiChatEpoch((epoch) => epoch + 1)
-                      return
-                    }
-                    setAiChatEpochByStage((prev) => ({
-                      ...prev,
-                      [activeStage]: (prev[activeStage] ?? 0) + 1,
-                    }))
-                  }}
-                >
-                  新建对话
-                </button>
-              </div>
-            ) : null}
-          </div>
-          <div className="workspace-ai-hint muted">
-            上下文：本书 ·{' '}
-            {railStages.find((s) => s.id === activeStage)?.label}
-            {expertDraftActive ? ' · 专家模式' : ''}
-            {' · '}
-            类型：{book?.categories.join('、') || '未分类'}
-            {linkedMaterial ? ` · 素材：${linkedMaterial.title}` : ' · 未关联素材'}
-            {' · '}
-            使用 Pi（pi-ai / pi-web-ui）连接真实模型；首次可在对话内配置 API Key 与模型。
-          </div>
-          {book ? (
-            <div className="workspace-ai-chat-stack">
-              {railStages.map((s) => {
-                const epoch = aiChatEpochByStage[s.id] ?? 0
-                const layerKey =
-                  epoch > 0
-                    ? `${book.id}-shared-${s.id}-${epoch}`
-                    : `${book.id}-shared-${s.id}`
-                const isActive = activeStage === s.id && !expertDraftActive
-                return (
-                  <div
-                    key={layerKey}
-                    className={
-                      isActive
-                        ? 'workspace-ai-chat-layer workspace-ai-chat-layer--active'
-                        : 'workspace-ai-chat-layer'
-                    }
-                    aria-hidden={!isActive}
-                    // 使用 CSS 隐藏非激活阶段，保留组件状态（对话记录）
-                    style={
-                      isActive
-                        ? undefined
-                        : {
-                            position: 'absolute',
-                            opacity: 0,
-                            pointerEvents: 'none',
-                            width: 0,
-                            height: 0,
-                            overflow: 'hidden',
-                          }
-                    }
-                  >
-                    <WorkspaceAiChat
-                      sessionBookId={book.id}
-                      sessionEpoch={epoch}
-                      bookTitle={book.title}
-                      bookGenre={bookGenre}
-                      stageId={s.id}
-                      stageBody={stages[s.id] ?? ''}
-                      getCurrentStageBody={() => stagesRef.current[s.id] ?? ''}
-                      // 非激活阶段使用 stable 空对象引用，避免 allStages 变化触发重渲染
-                      allStages={isActive ? stages : EMPTY_STAGES}
-                      linkedMaterial={isActive ? linkedMaterial : null}
-                      workspaceAgentReadAccess={workspaceAgentReadAccess}
-                      includePiArtifacts={WORKSPACE_AI_INCLUDE_PI_ARTIFACTS}
-                      applyToStageEditor={(payload) =>
-                        applyToStageEditor(s.id, payload)
-                      }
-                      onRequestSave={handleSave}
-                      // 非激活阶段暂停实时更新，减少后台计算
-                      isPaused={!isActive}
-                    />
-                  </div>
-                )
-              })}
-              <div
-                key={`${book.id}-expert-draft`}
-                className={
-                  expertDraftActive
-                    ? 'workspace-ai-chat-layer workspace-ai-chat-layer--active'
-                    : 'workspace-ai-chat-layer'
-                }
-                aria-hidden={!expertDraftActive}
-                style={
-                  expertDraftActive
-                    ? undefined
-                    : {
-                        position: 'absolute',
-                        opacity: 0,
-                        pointerEvents: 'none',
-                        width: 0,
-                        height: 0,
-                        overflow: 'hidden',
-                      }
-                }
-              >
-                <ExpertDraftAiChat
-                  key={`${book.id}-shared-expert-draft-${expertAiChatEpoch}`}
-                  bookId={book.id}
-                  bookTitle={book.title}
-                  bookGenre={bookGenre}
-                  sessionEpoch={expertAiChatEpoch}
-                  stages={stages}
-                  linkedMaterial={linkedMaterial}
-                  readAccess={resolveWorkspaceAgentReadAccess(
-                    workspaceAgentReadAccess,
-                    EXPERT_DRAFT_COORDINATOR_AGENT_ID,
-                  )}
-                  expertDraft={expertDraft}
-                  updateDraft={updateExpertDraft}
-                  startWriting={startExpertWriting}
-                />
-              </div>
-            </div>
-          ) : null}
-        </aside>
 
         {materialSelectorOpen ? (
           <div
