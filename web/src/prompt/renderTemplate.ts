@@ -93,18 +93,17 @@ export function peekAllowedWorkspaceStagesExcerpt(
 }
 
 const WORKSPACE_TAG =
-  /\{\{(BOOK_TITLE|BOOK_LINE|BOOK_GENRE|STYLE|STAGE_BODY|OTHER_STAGES_EXCERPT)\}\}/g
+  /\{\{(BOOK_TITLE|BOOK_GENRE)\}\}/g
 const MATERIAL_TAG =
   /\{\{(BOOK_TITLE|BOOK_LINE|MATERIAL_TITLE|MATERIAL_LINE|MATERIAL_TYPE|MATERIAL_GENRE|STAGE_ID|STAGE_LABEL|STAGE_BODY|OTHER_STAGES_EXCERPT)\}\}/g
 const SKILL_TAG =
-  /\{\{(BOOK_TITLE|BOOK_LINE|SKILL_TITLE|SKILL_LINE|SKILL_GENRE|STAGE_ID|STAGE_LABEL|STAGE_BODY|OTHER_STAGES_EXCERPT)\}\}/g
+  /\{\{(BOOK_TITLE|BOOK_LINE|SKILL_TITLE|SKILL_LINE|STAGE_ID|STAGE_LABEL|STAGE_BODY|OTHER_STAGES_EXCERPT)\}\}/g
 
 export type PromptSubstitutePayload = {
   bookTitle: string
   bookGenre?: string
   materialType?: string
   materialGenre?: string
-  skillGenre?: string
   stageId?: StageId | MaterialStageId | SkillStageId
   stageLabel?: string
   stageBody: string
@@ -117,7 +116,6 @@ export type PromptRenderPayload = {
   bookGenre?: string
   materialType?: string
   materialGenre?: string
-  skillGenre?: string
   stageBody: string
   otherStagesExcerpt?: string | null
   promptKind: PromptRenderKind
@@ -143,14 +141,12 @@ export function substitutePromptPlaceholders(
     BOOK_TITLE: bt,
     BOOK_LINE: bookLine,
     BOOK_GENRE: genre,
-    STYLE: genre,
     MATERIAL_TITLE: bt,
     MATERIAL_LINE: materialLine,
     MATERIAL_TYPE: input.materialType?.trim() || '未分类素材',
     MATERIAL_GENRE: input.materialGenre?.trim() || '未分类',
     SKILL_TITLE: bt,
     SKILL_LINE: skillLine,
-    SKILL_GENRE: input.skillGenre?.trim() || '未分类',
     STAGE_ID: input.stageId ? String(input.stageId) : '',
     STAGE_LABEL: input.stageLabel ?? '',
     STAGE_BODY: excerptText(input.stageBody),
@@ -170,18 +166,19 @@ export function renderPromptFromTemplateRaw(
   payload: PromptRenderPayload,
 ): string {
   const other =
-    payload.otherStagesExcerpt ??
-    peekOtherStagesExcerpt(
-      payload.promptKind,
-      payload.stageId,
-      payload.allStages ?? {},
-    )
+    payload.promptKind === 'workspace'
+      ? (payload.otherStagesExcerpt ?? '')
+      : payload.otherStagesExcerpt ??
+        peekOtherStagesExcerpt(
+          payload.promptKind,
+          payload.stageId,
+          payload.allStages ?? {},
+        )
   return substitutePromptPlaceholders(templateRaw, {
     bookTitle: payload.bookTitle,
     bookGenre: payload.bookGenre,
     materialType: payload.materialType,
     materialGenre: payload.materialGenre,
-    skillGenre: payload.skillGenre,
     stageId: payload.stageId,
     stageLabel: rowsForPromptKind(payload.promptKind)?.find(
       (row) => row.id === payload.stageId,

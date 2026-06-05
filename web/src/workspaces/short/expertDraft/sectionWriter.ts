@@ -1,6 +1,6 @@
-import { Agent } from '@mariozechner/pi-agent-core'
-import type { AgentMessage, AgentTool } from '@mariozechner/pi-agent-core'
-import { ApiKeyPromptDialog } from '@mariozechner/pi-web-ui'
+import { Agent } from '@earendil-works/pi-agent-core'
+import type { AgentMessage, AgentTool } from '@earendil-works/pi-agent-core'
+import { ApiKeyPromptDialog } from '@earendil-works/pi-web-ui'
 import { Type } from 'typebox'
 
 import {

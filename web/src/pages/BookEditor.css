@@ -487,6 +487,23 @@
 }
 
 .workspace-ai {
+  --background: var(--paper);
+  --foreground: var(--ink);
+  --card: var(--paper-elevated);
+  --card-foreground: var(--ink);
+  --popover: var(--paper-elevated);
+  --popover-foreground: var(--ink);
+  --primary: var(--accent);
+  --primary-foreground: #faf6ee;
+  --secondary: var(--paper-deep);
+  --secondary-foreground: var(--ink);
+  --muted: var(--paper-deep);
+  --muted-foreground: var(--ink-faint);
+  --destructive: var(--danger);
+  --destructive-foreground: #faf6ee;
+  --input: color-mix(in oklab, var(--border) 78%, var(--paper-deep));
+  --ring: color-mix(in oklab, var(--accent) 56%, transparent);
+  --radius: var(--radius-md);
   flex: 0 0 var(--workspace-ai-width, 28rem);
   width: var(--workspace-ai-width, 28rem);
   min-width: 0;
@@ -1201,6 +1218,190 @@
 
 .workspace-ai streaming-message-container {
   contain: layout paint style;
+}
+
+.workspace-ai chat-panel,
+.workspace-ai agent-interface {
+  min-width: 0;
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-body);
+}
+
+.workspace-ai agent-interface > .bg-background {
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in oklab, var(--paper-elevated) 42%, transparent),
+      transparent 32%
+    ),
+    var(--background);
+}
+
+.workspace-ai agent-interface .overflow-y-auto {
+  scrollbar-color: color-mix(in oklab, var(--border-strong) 72%, transparent)
+    transparent;
+}
+
+.workspace-ai agent-interface .max-w-3xl {
+  max-width: 100%;
+}
+
+.workspace-ai message-list,
+.workspace-ai streaming-message-container,
+.workspace-ai assistant-message,
+.workspace-ai user-message,
+.workspace-ai markdown-block,
+.workspace-ai thinking-block,
+.workspace-ai tool-message {
+  color: var(--foreground);
+  font-family: var(--font-body);
+}
+
+.workspace-ai assistant-message markdown-block,
+.workspace-ai streaming-message-container markdown-block {
+  display: block;
+  padding: 0.05rem 0.2rem;
+  color: var(--text-h);
+  line-height: 1.68;
+}
+
+.workspace-ai assistant-message markdown-block p,
+.workspace-ai user-message markdown-block p {
+  margin-block: 0.35rem;
+}
+
+.workspace-ai user-message > .flex {
+  justify-content: flex-end;
+}
+
+.workspace-ai user-message .user-message-container {
+  max-width: min(100%, 34rem);
+  border: 1px solid color-mix(in oklab, var(--accent) 34%, var(--border));
+  border-radius: 8px;
+  background:
+    linear-gradient(
+      135deg,
+      color-mix(in oklab, var(--accent) 16%, var(--paper-elevated)),
+      color-mix(in oklab, var(--gold) 12%, var(--paper-elevated))
+    );
+  box-shadow: 0 1px 0 rgb(255 255 255 / 38%) inset;
+  color: var(--ink);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+
+.workspace-ai user-message .user-message-container markdown-block {
+  color: var(--ink);
+}
+
+.workspace-ai thinking-block .thinking-block {
+  margin: 0.1rem 0.2rem;
+  padding: 0.35rem 0.5rem;
+  border-left: 2px solid color-mix(in oklab, var(--accent) 38%, var(--border));
+  background: color-mix(in oklab, var(--paper-deep) 48%, transparent);
+}
+
+.workspace-ai thinking-block .thinking-header {
+  color: var(--ink-faint);
+}
+
+.workspace-ai thinking-block .thinking-header:hover {
+  color: var(--ink);
+}
+
+.workspace-ai message-editor {
+  display: block;
+  padding-bottom: 0.15rem;
+}
+
+.workspace-ai message-editor > .bg-card {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in oklab, var(--paper-elevated) 88%, white),
+      var(--paper-elevated)
+    );
+  box-shadow: 0 1px 0 rgb(255 255 255 / 46%) inset,
+    0 8px 18px rgb(42 36 28 / 6%);
+}
+
+.workspace-ai message-editor textarea {
+  color: var(--ink);
+  caret-color: var(--accent);
+  line-height: 1.6;
+}
+
+.workspace-ai message-editor textarea::placeholder {
+  color: var(--ink-faint);
+}
+
+.workspace-ai message-editor button,
+.workspace-ai message-editor [role='button'] {
+  border-radius: 6px;
+  color: var(--ink-soft);
+}
+
+.workspace-ai message-editor button:hover:not(:disabled),
+.workspace-ai message-editor [role='button']:hover {
+  background: color-mix(in oklab, var(--accent) 10%, var(--paper-deep));
+  color: var(--ink);
+}
+
+.workspace-ai message-editor button:disabled {
+  opacity: 0.42;
+}
+
+.workspace-ai tool-message > .bg-card {
+  border-color: color-mix(in oklab, var(--border-strong) 66%, var(--border));
+  border-radius: 8px;
+  background: color-mix(in oklab, var(--paper-elevated) 82%, var(--paper));
+  box-shadow: 0 1px 0 rgb(255 255 255 / 36%) inset;
+}
+
+.workspace-ai console-block > div,
+.workspace-ai code-block {
+  border-color: color-mix(in oklab, var(--border-strong) 58%, var(--border));
+  border-radius: 8px;
+  background: color-mix(in oklab, var(--paper-deep) 70%, var(--paper));
+  color: var(--ink);
+}
+
+.workspace-ai console-block .bg-muted {
+  background: color-mix(in oklab, var(--paper-deep) 76%, var(--paper-elevated));
+}
+
+.workspace-ai console-block pre,
+.workspace-ai code-block pre {
+  background: transparent !important;
+  color: var(--ink) !important;
+}
+
+.workspace-ai expandable-section button,
+.workspace-ai tool-message button,
+.workspace-ai .text-muted-foreground {
+  color: var(--ink-faint);
+}
+
+.workspace-ai expandable-section button:hover,
+.workspace-ai tool-message button:hover,
+.workspace-ai .hover\:text-foreground:hover {
+  color: var(--ink);
+}
+
+.workspace-ai .bg-muted,
+.workspace-ai .hover\:bg-muted:hover {
+  background-color: var(--muted);
+}
+
+.workspace-ai .border-border {
+  border-color: var(--border);
+}
+
+.workspace-ai .text-foreground {
+  color: var(--foreground);
 }
 
 /*
@@ -2090,101 +2291,89 @@
   box-shadow: 0 8px 32px rgb(0 0 0 / 0.3);
 }
 
-.skill-editor-meta-panel {
-  display: flex;
-  flex-direction: column;
-  gap: 0.9rem;
-  padding: 0.9rem;
-}
-
-.skill-editor-meta-panel h2 {
-  margin: 0 0 0.2rem;
-  font-size: 0.95rem;
-  color: var(--text-h);
-}
-
-.skill-editor-meta-panel .field {
-  display: flex;
-  flex-direction: column;
-  gap: 0.35rem;
-}
-
-.skill-editor-meta-panel .field-label {
-  font-size: 0.74rem;
-  font-weight: 600;
-  color: var(--muted);
-}
-
-.skill-editor-meta-panel input,
-.skill-editor-meta-panel select {
-  width: 100%;
-  min-height: 2.25rem;
-  padding: 0.45rem 0.55rem;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--surface);
-  color: var(--text);
-  font: inherit;
-}
-
-.workspace-stage-skills {
+.skill-stage-items {
+  flex-shrink: 0;
   margin-bottom: 0.75rem;
-  padding: 0.65rem 0.75rem;
+  padding: 0.75rem;
   border: 1px solid var(--border);
   border-radius: 8px;
   background: color-mix(in oklab, var(--surface) 94%, var(--accent) 6%);
 }
 
-.workspace-stage-skills-head {
+.skill-entry-editor {
+  flex: 1 1 0%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.skill-stage-items-head,
+.skill-entry-toolbar {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 0.75rem;
+}
+
+.skill-stage-items-head {
+  margin-bottom: 0.55rem;
+  font-size: 0.84rem;
+  font-weight: 600;
+  color: var(--text-h);
+}
+
+.skill-stage-items-empty {
+  margin: 0;
   font-size: 0.82rem;
 }
 
-.workspace-stage-skills-head span {
+.skill-stage-item-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+
+.skill-stage-item {
+  max-width: 13rem;
+  min-height: 2rem;
+  padding: 0.35rem 0.6rem;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: 0.82rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.skill-stage-item--active {
+  border-color: color-mix(in oklab, var(--accent) 65%, var(--border));
+  background: color-mix(in oklab, var(--accent) 12%, var(--surface));
   color: var(--text-h);
   font-weight: 600;
 }
 
-.workspace-stage-skills-head strong {
-  font-size: 0.78rem;
-  color: var(--muted);
+.skill-entry-toolbar {
+  flex-shrink: 0;
 }
 
-.workspace-stage-skills-empty {
-  margin: 0.45rem 0 0;
-  font-size: 0.78rem;
+.skill-entry-title-field {
+  flex: 1;
+  min-width: 0;
 }
 
-.workspace-stage-skill-list {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.45rem;
-  margin: 0.55rem 0 0;
-  padding: 0;
-  list-style: none;
-}
-
-.workspace-stage-skill-list li {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.4rem;
-  max-width: 100%;
-  padding: 0.28rem 0.5rem;
+.skill-entry-title-field input {
+  width: 100%;
+  min-height: 2.25rem;
+  padding: 0.45rem 0.6rem;
   border: 1px solid var(--border);
   border-radius: 8px;
   background: var(--surface);
-  font-size: 0.78rem;
-}
-
-.workspace-stage-skill-list a {
-  max-width: 14rem;
-  overflow: hidden;
-  color: var(--accent);
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  color: var(--text-h);
+  font: inherit;
 }
 
 @media (prefers-reduced-motion: reduce) {

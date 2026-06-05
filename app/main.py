@@ -373,9 +373,9 @@ class Api:
 
     # ==================== 技能库 API ====================
 
-    def list_skills(self, stage_id: str | None = None) -> list[dict]:
-        """列出所有技能"""
-        return self._store.list_skills(stage_id)
+    def list_skills(self) -> list[dict]:
+        """列出所有技能集合"""
+        return self._store.list_skills()
 
     def get_skill(self, skill_id: str) -> dict | None:
         """获取单个技能详情"""
@@ -384,26 +384,22 @@ class Api:
     def create_skill(
         self,
         title: str,
-        genre: str,
-        stage_id: str,
         workspace_root: str | None = None,
     ) -> dict:
-        """创建新技能"""
-        return self._store.create_skill(title, genre, stage_id, workspace_root)
+        """创建新技能集合"""
+        return self._store.create_skill(title, workspace_root)
 
     def save_skill(
         self,
         skill_id: str,
         payload: dict | None = None,
     ) -> dict | None:
-        """保存单阶段技能内容。"""
+        """保存技能集合及阶段技能列表。"""
         data = payload if isinstance(payload, dict) else {}
         return self._store.save_skill(
             skill_id,
             title=data.get("title") if "title" in data else None,
-            genre=data.get("genre") if "genre" in data else None,
-            stage_id=data.get("stage_id") if "stage_id" in data else None,
-            body=data.get("body") if "body" in data else None,
+            stages=data.get("stages") if "stages" in data else None,
         )
 
     def delete_skill(self, skill_id: str) -> bool:

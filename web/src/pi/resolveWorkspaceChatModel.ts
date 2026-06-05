@@ -1,6 +1,6 @@
-import { getModel } from '@mariozechner/pi-ai'
-import type { Api, KnownProvider, Model } from '@mariozechner/pi-ai'
-import { getAppStorage } from '@mariozechner/pi-web-ui'
+import { getModel } from '@earendil-works/pi-ai'
+import type { Api, KnownProvider, Model } from '@earendil-works/pi-ai'
+import { getAppStorage } from '@earendil-works/pi-web-ui'
 
 import type { AiModelConfig, AiModelDefaults } from '../bridge'
 import { getAiModelDefaults } from '../bridge'

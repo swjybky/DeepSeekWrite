@@ -2,8 +2,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 import {
   SHORT_GENRE_OPTIONS,
-  SKILL_STAGE_KEYS,
-  SKILL_STAGE_LABELS,
   type AiModelConfig,
   type AiModelSettings,
   type BookSummary,
@@ -11,7 +9,6 @@ import {
   type MaterialSummary,
   type MaterialType,
   type SkillSummary,
-  type SkillStageId,
   createBook,
   createSkill,
   deleteBook,
@@ -501,8 +498,6 @@ export function Home() {
   const [loadingSkills, setLoadingSkills] = useState(true)
   const [showSkillForm, setShowSkillForm] = useState(false)
   const [skillTitle, setSkillTitle] = useState('')
-  const [skillGenre, setSkillGenre] = useState<string>(SHORT_GENRE_OPTIONS[0])
-  const [skillStageId, setSkillStageId] = useState<SkillStageId>('character_design')
   const [submittingSkill, setSubmittingSkill] = useState(false)
   const [deletingSkillId, setDeletingSkillId] = useState<string | null>(null)
   const [skillError, setSkillError] = useState<string | null>(null)
@@ -779,10 +774,8 @@ export function Home() {
     setSubmittingSkill(true)
     setSkillError(null)
     try {
-      await createSkill(skillTitle, skillGenre, skillStageId, ws)
+      await createSkill(skillTitle, ws)
       setSkillTitle('')
-      setSkillGenre(SHORT_GENRE_OPTIONS[0])
-      setSkillStageId('character_design')
       setShowSkillForm(false)
       await refreshSkills()
     } catch (err) {
@@ -1235,40 +1228,6 @@ export function Home() {
                   autoFocus
                 />
               </label>
-
-              <fieldset className="field">
-                <legend className="field-label">短篇分类</legend>
-                <div className="genre-grid">
-                  {SHORT_GENRE_OPTIONS.map((g) => (
-                    <label key={g} className="radio">
-                      <input
-                        type="radio"
-                        name="skillGenre"
-                        checked={skillGenre === g}
-                        onChange={() => setSkillGenre(g)}
-                      />
-                      {g}
-                    </label>
-                  ))}
-                </div>
-              </fieldset>
-
-              <fieldset className="field">
-                <legend className="field-label">适用阶段</legend>
-                <div className="genre-grid">
-                  {SKILL_STAGE_KEYS.map((stageId) => (
-                    <label key={stageId} className="radio">
-                      <input
-                        type="radio"
-                        name="skillStage"
-                        checked={skillStageId === stageId}
-                        onChange={() => setSkillStageId(stageId)}
-                      />
-                      {SKILL_STAGE_LABELS[stageId]}
-                    </label>
-                  ))}
-                </div>
-              </fieldset>
 
               {skillError && <p className="form-error">{skillError}</p>}
 

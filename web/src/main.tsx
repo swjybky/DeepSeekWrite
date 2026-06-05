@@ -1,12 +1,25 @@
 import './process-polyfill'
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
-import '@mariozechner/pi-web-ui/app.css'
+import '@earendil-works/pi-web-ui/app.css'
 import './index.css'
 import App from './App.tsx'
 import './bridge'
 
 const rootEl = document.getElementById('root')
+
+function showBootFatalError(message: string) {
+  if (!rootEl) return
+  rootEl.innerHTML = `
+    <div class="boot-splash" role="alert">
+      <p class="boot-splash-title">DeepseekWrite</p>
+      <p class="boot-splash-hint" style="max-width: 28rem; text-align: center; white-space: pre-wrap;">
+        ${message.replace(/</g, '&lt;')}
+      </p>
+      <p class="boot-splash-hint">可在终端设置 WRITECLAW_DEBUG=1 后重启，用开发者工具查看详细错误。</p>
+    </div>
+  `
+}
 
 function mount() {
   if (!rootEl) return
@@ -23,46 +36,24 @@ function mount() {
  * index.html 内 boot-splash 在挂载前提供可见反馈。
  */
 function boot() {
-  const params = new URLSearchParams(window.location.search)
-  const fromPywebviewBundle =
-    window.location.protocol === 'file:' || params.get('pywebview') === '1'
+  window.addEventListener('error', (event) => {
+    const detail =
+      event.error instanceof Error
+        ? `${event.error.message}\n${event.error.stack ?? ''}`
+        : String(event.message || '未知脚本错误')
+    showBootFatalError(`界面脚本加载失败：\n${detail}`)
+  })
+  window.addEventListener('unhandledrejection', (event) => {
+    const reason = event.reason
+    const detail =
+      reason instanceof Error
+        ? `${reason.message}\n${reason.stack ?? ''}`
+        : String(reason ?? '未知 Promise 错误')
+    showBootFatalError(`界面初始化失败：\n${detail}`)
+  })
 
-  if (!fromPywebviewBundle) {
-    mount()
-    return
-  }
-
-  let mounted = false
-  const mountOnce = () => {
-    if (mounted) return
-    mounted = true
-    mount()
-  }
-
-  if (window.pywebview?.api !== undefined) {
-    mountOnce()
-    return
-  }
-
-  window.addEventListener('pywebviewready', () => mountOnce(), { once: true })
-
-  /** pywebview 对象或 api 就绪即挂载；上限 2.5s 避免壳异常时永久白屏 */
-  const deadline = Date.now() + 2_500
-  const poll = () => {
-    if (
-      window.pywebview?.api !== undefined ||
-      typeof window.pywebview !== 'undefined'
-    ) {
-      mountOnce()
-      return
-    }
-    if (Date.now() >= deadline) {
-      mountOnce()
-      return
-    }
-    requestAnimationFrame(poll)
-  }
-  requestAnimationFrame(poll)
+  // 立即挂载；桌面端 API 由 bridge.getBridgeApi() 单例等待，勿在此阻塞。
+  mount()
 }
 
 boot()

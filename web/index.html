@@ -43,6 +43,22 @@
         color: #8a7f6e;
       }
     </style>
+    <script>
+      window.addEventListener(
+        'error',
+        function (event) {
+          var root = document.getElementById('root')
+          if (!root || event.filename === location.href) return
+          var msg = event.message || '脚本加载失败'
+          root.innerHTML =
+            '<div class="boot-splash" role="alert"><p class="boot-splash-title">DeepseekWrite</p>' +
+            '<p class="boot-splash-hint" style="max-width:28rem;text-align:center;">' +
+            msg +
+            '</p></div>'
+        },
+        true,
+      )
+    </script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

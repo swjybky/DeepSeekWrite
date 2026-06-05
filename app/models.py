@@ -7,7 +7,6 @@ from uuid import uuid4
 BookType = Literal["short", "long"]
 BookStatus = Literal["editing", "completed"]
 MaterialType = Literal["long", "short"]
-SkillGenre = Literal["世情", "追妻", "科幻", "悬疑"]
 
 # 素材分类定义
 SHORT_MATERIAL_GENRES: dict[str, list[str]] = {
@@ -40,6 +39,19 @@ SKILL_STAGE_KEYS: tuple[str, ...] = (
     "expert_draft_coordinator",  # 专家总控技能
     "expert_section_writer",     # 分节写手技能
 )
+
+SKILL_STAGE_LABELS: dict[str, str] = {
+    "character_design": "人物设计技能",
+    "plot_design": "剧情设计技能",
+    "intro_design": "导语设计技能",
+    "plot_refine": "剧情细化技能",
+    "outline": "大纲纲要技能",
+    "draft": "正文技能",
+    "draft_review": "正文审阅技能",
+    "format_conversion": "格式转换技能",
+    "expert_draft_coordinator": "专家总控技能",
+    "expert_section_writer": "分节写手技能",
+}
 
 # 统一的短篇工作台阶段键（所有短篇分类共用）
 # 对应 web/src/workspaces/short/stages.ts 中的 SHORT_WORKSPACE_STAGES
@@ -271,13 +283,6 @@ def normalize_book_status(raw: Any | None) -> BookStatus:
     return "completed" if raw == "completed" else "editing"
 
 
-def normalize_skill_library_enabled(raw: Any | None, book_type: BookType) -> bool:
-    """旧书缺字段时：短篇默认启用技能库，长篇默认关闭。"""
-    if isinstance(raw, bool):
-        return raw
-    return book_type == "short"
-
-
 @dataclass
 class Book:
     id: str
@@ -287,7 +292,6 @@ class Book:
     content: str = ""
     output_dir: str = ""
     linked_material_id: str = ""
-    skill_library_enabled: bool = False
     status: BookStatus = "editing"
     stages: dict[str, str] = field(default_factory=default_stages)
     expert_draft: dict[str, Any] = field(default_factory=default_expert_draft)
@@ -312,10 +316,6 @@ class Book:
             content=str(data.get("content") or ""),
             output_dir=str(data.get("output_dir") or ""),
             linked_material_id=str(data.get("linked_material_id") or ""),
-            skill_library_enabled=normalize_skill_library_enabled(
-                data.get("skill_library_enabled"),
-                bt,  # type: ignore[arg-type]
-            ),
             status=normalize_book_status(data.get("status")),
             stages=migrated_stages,
             expert_draft=normalize_expert_draft_from_storage(data.get("expert_draft")),
@@ -336,6 +336,10 @@ def new_skill_id() -> str:
     return str(uuid4())
 
 
+def new_skill_stage_item_id() -> str:
+    return str(uuid4())
+
+
 def default_material_stages() -> dict[str, str]:
     """创建默认的空素材阶段字典"""
     return {k: "" for k in MATERIAL_STAGE_KEYS}
@@ -352,37 +356,82 @@ def normalize_material_stages_from_storage(raw: dict[str, Any] | None) -> dict[s
     return out
 
 
-def default_skill_stages() -> dict[str, str]:
-    """创建默认的空技能阶段字典"""
-    return {k: "" for k in SKILL_STAGE_KEYS}
+def default_skill_stages() -> dict[str, list[dict[str, str]]]:
+    """创建默认的空技能阶段字典：每个阶段是一组技能条目。"""
+    return {k: [] for k in SKILL_STAGE_KEYS}
 
 
-def normalize_skill_stages_from_storage(raw: dict[str, Any] | None) -> dict[str, str]:
-    """从 JSON 载入技能阶段：补齐缺失键为 ''"""
+def _skill_stage_item(
+    *,
+    title: str,
+    body: str,
+    item_id: Any | None = None,
+    created_at: Any | None = None,
+    updated_at: Any | None = None,
+) -> dict[str, str]:
+    return {
+        "id": str(item_id or new_skill_stage_item_id()),
+        "title": str(title or "未命名技能").strip() or "未命名技能",
+        "body": str(body or ""),
+        "created_at": str(created_at or ""),
+        "updated_at": str(updated_at or ""),
+    }
+
+
+def normalize_skill_stage_items(stage_id: str, raw: Any) -> list[dict[str, str]]:
+    """从 JSON 载入单个阶段的技能条目列表，兼容旧版阶段字符串。"""
+    label = SKILL_STAGE_LABELS.get(stage_id, "阶段技能")
+    if raw is None:
+        return []
+    if isinstance(raw, str):
+        return [_skill_stage_item(title=label, body=raw)] if raw.strip() else []
+    if isinstance(raw, list):
+        out: list[dict[str, str]] = []
+        for index, item in enumerate(raw, start=1):
+            if isinstance(item, dict):
+                body = str(item.get("body") or "")
+                title = str(item.get("title") or "").strip() or f"{label} {index}"
+                out.append(
+                    _skill_stage_item(
+                        title=title,
+                        body=body,
+                        item_id=item.get("id"),
+                        created_at=item.get("created_at"),
+                        updated_at=item.get("updated_at"),
+                    ),
+                )
+            elif isinstance(item, str) and item.strip():
+                out.append(_skill_stage_item(title=f"{label} {index}", body=item))
+        return out
+    if isinstance(raw, dict):
+        body = str(raw.get("body") or "")
+        if body.strip() or raw.get("title"):
+            return [
+                _skill_stage_item(
+                    title=str(raw.get("title") or label),
+                    body=body,
+                    item_id=raw.get("id"),
+                    created_at=raw.get("created_at"),
+                    updated_at=raw.get("updated_at"),
+                ),
+            ]
+    return []
+
+
+def normalize_skill_stages_from_storage(raw: dict[str, Any] | None) -> dict[str, list[dict[str, str]]]:
+    """从 JSON 载入技能阶段：补齐缺失键为 []，并兼容旧版阶段字符串。"""
     out = default_skill_stages()
     if not raw:
         return out
     for k in SKILL_STAGE_KEYS:
         if k in raw:
-            out[k] = str(raw[k] or "")
+            out[k] = normalize_skill_stage_items(k, raw[k])
     return out
 
 
 def normalize_skill_stage_id(raw: Any | None) -> str:
     sid = str(raw or "").strip()
     return sid if sid in SKILL_STAGE_KEYS else "character_design"
-
-
-def first_legacy_skill_stage(raw: Any | None) -> tuple[str, str]:
-    """旧技能含 10 个阶段；升级时只保留第一个非空阶段内容。"""
-    if not isinstance(raw, dict):
-        return "character_design", ""
-    normalized = normalize_skill_stages_from_storage(raw)
-    for stage_id in SKILL_STAGE_KEYS:
-        body = normalized.get(stage_id, "")
-        if body.strip():
-            return stage_id, body
-    return "character_design", ""
 
 
 @dataclass
@@ -424,13 +473,11 @@ class Material:
 
 @dataclass
 class Skill:
-    """技能库数据模型：单条技能只属于一个短篇创作阶段。"""
+    """技能库数据模型：保留阶段工作台；每个阶段可管理多条技能。"""
 
     id: str
     title: str
-    genre: str = ""
-    stage_id: str = "character_design"
-    body: str = ""
+    stages: dict[str, list[dict[str, str]]] = field(default_factory=default_skill_stages)
     output_dir: str = ""
     created_at: str = ""
     updated_at: str = ""
@@ -440,23 +487,23 @@ class Skill:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "Skill":
-        genre = str(data.get("genre") or "").strip()
-        if genre not in SHORT_MATERIAL_GENRES:
-            genre = "世情"
-        raw_stage_id = str(data.get("stage_id") or "").strip()
-        if raw_stage_id in SKILL_STAGE_KEYS:
-            stage_id = raw_stage_id
-            body = str(data.get("body") or "")
-        else:
-            stage_id, body = first_legacy_skill_stage(data.get("stages"))
-            if not body and data.get("body") is not None:
-                body = str(data.get("body") or "")
+        stages = normalize_skill_stages_from_storage(data.get("stages"))
+
+        # 兼容误拆成单阶段技能的数据：把 stage_id/body 还原为该阶段下的一条技能。
+        raw_stage_id = normalize_skill_stage_id(data.get("stage_id"))
+        if data.get("stage_id") is not None and not stages[raw_stage_id]:
+            stages[raw_stage_id] = [
+                _skill_stage_item(
+                    title=str(data.get("title") or SKILL_STAGE_LABELS[raw_stage_id]),
+                    body=str(data.get("body") or ""),
+                    created_at=data.get("created_at"),
+                    updated_at=data.get("updated_at"),
+                ),
+            ]
         return cls(
             id=str(data["id"]),
             title=str(data["title"]),
-            genre=genre,
-            stage_id=stage_id,
-            body=body,
+            stages=stages,
             output_dir=str(data.get("output_dir") or ""),
             created_at=str(data.get("created_at") or ""),
             updated_at=str(data.get("updated_at") or ""),

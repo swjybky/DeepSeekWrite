@@ -1,6 +1,5 @@
 import { Link } from 'react-router-dom'
 import type { BookSummary, MaterialSummary, SkillSummary } from '../bridge'
-import { SKILL_STAGE_LABELS } from '../bridge'
 import defaultMaterialCover from '../assets/default-material-cover.png'
 import defaultSkillCover from '../assets/default-skill-cover.png'
 import './CardGrid.css'
@@ -63,8 +62,7 @@ export function CardGrid({ items, emptyText = '暂无项目', onDelete, deleting
                     </span>
                   ) : item.type === 'skill' ? (
                     <span className="card-type">
-                      短篇技能
-                      {item.genre && ` · ${item.genre}`}
+                      技能库
                       {item.meta && ` · ${item.meta}`}
                     </span>
                   ) : (
@@ -151,13 +149,13 @@ export function materialToCardItem(material: MaterialSummary): CardItem {
 // 辅助函数：将 SkillSummary 转换为 CardItem
 // eslint-disable-next-line react-refresh/only-export-components
 export function skillToCardItem(skill: SkillSummary): CardItem {
+  const count = skill.stage_skill_count ?? 0
   return {
     id: skill.id,
     title: skill.title,
     type: 'skill',
     subtype: 'short',
-    genre: skill.genre,
-    meta: SKILL_STAGE_LABELS[skill.stage_id],
+    meta: count > 0 ? `${count} 个阶段技能` : '暂无阶段技能',
     outputDir: skill.output_dir,
     to: `/skill/${skill.id}`,
   }

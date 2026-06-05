@@ -10,7 +10,7 @@ import './WorkspaceSettings.css'
 type SaveStatus = 'idle' | 'saving' | 'saved' | 'error'
 
 const PLACEHOLDER_HINT =
-  '{{SKILL_TITLE}}  {{SKILL_LINE}}  {{SKILL_GENRE}}  {{STAGE_ID}}  {{STAGE_LABEL}}  {{STAGE_BODY}}  {{OTHER_STAGES_EXCERPT}}'
+  '{{SKILL_TITLE}}  {{SKILL_LINE}}  {{STAGE_ID}}  {{STAGE_LABEL}}  {{STAGE_BODY}}  {{OTHER_STAGES_EXCERPT}}'
 
 function statusLabel(status: SaveStatus): string {
   if (status === 'saving') return '保存中…'

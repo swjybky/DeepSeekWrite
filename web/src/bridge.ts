@@ -242,8 +242,6 @@ export interface BookSummary {
   output_dir?: string
   /** 写书工作台关联的素材库 id，空表示未关联 */
   linked_material_id?: string
-  /** 短篇书籍是否动态关联整个技能库 */
-  skill_library_enabled: boolean
 }
 
 export interface Book extends BookSummary {
@@ -363,23 +361,35 @@ export const SKILL_STAGE_KEYS = Object.keys(SKILL_STAGE_LABELS) as SkillStageId[
 export interface SkillSummary {
   id: string
   title: string
-  genre: string
-  stage_id: SkillStageId
+  stage_counts?: Partial<Record<SkillStageId, number>>
+  stage_skill_count?: number
   output_dir?: string
 }
 
 export interface Skill extends SkillSummary {
+  stages: Record<SkillStageId, SkillStageEntry[]>
+  created_at?: string
+  updated_at?: string
+}
+
+export interface SkillStageEntry {
+  id: string
+  title: string
   body: string
   created_at?: string
   updated_at?: string
 }
 
+function newLocalSkillStageEntryId(): string {
+  return globalThis.crypto?.randomUUID?.() ?? Math.random().toString(36).slice(2)
+}
+
 export function normalizeSkillStages(
-  raw?: Partial<Record<SkillStageId, string>> | null,
-): Record<SkillStageId, string> {
-  const out = {} as Record<SkillStageId, string>
+  raw?: Partial<Record<SkillStageId, unknown>> | null,
+): Record<SkillStageId, SkillStageEntry[]> {
+  const out = {} as Record<SkillStageId, SkillStageEntry[]>
   for (const k of SKILL_STAGE_KEYS) {
-    out[k] = raw?.[k] ?? ''
+    out[k] = normalizeSkillStageEntries(k, raw?.[k])
   }
   return out
 }
@@ -390,16 +400,50 @@ export function normalizeSkillStageId(raw: unknown): SkillStageId {
     : 'character_design'
 }
 
-function firstLegacySkillStage(raw: unknown): { stage_id: SkillStageId; body: string } {
-  if (!raw || typeof raw !== 'object') {
-    return { stage_id: 'character_design', body: '' }
+function normalizeSkillStageEntries(
+  stageId: SkillStageId,
+  raw: unknown,
+): SkillStageEntry[] {
+  const fallbackTitle = SKILL_STAGE_LABELS[stageId]
+  if (raw == null) return []
+  if (typeof raw === 'string') {
+    return raw.trim()
+      ? [{ id: newLocalSkillStageEntryId(), title: fallbackTitle, body: raw }]
+      : []
   }
-  const normalized = normalizeSkillStages(raw as Partial<Record<SkillStageId, string>>)
-  for (const stageId of SKILL_STAGE_KEYS) {
-    const body = normalized[stageId] ?? ''
-    if (body.trim()) return { stage_id: stageId, body }
+  if (Array.isArray(raw)) {
+    return raw.flatMap((item, index) => normalizeSkillStageEntry(stageId, item, index))
   }
-  return { stage_id: 'character_design', body: '' }
+  return normalizeSkillStageEntry(stageId, raw, 0)
+}
+
+function normalizeSkillStageEntry(
+  stageId: SkillStageId,
+  raw: unknown,
+  index: number,
+): SkillStageEntry[] {
+  const fallbackTitle =
+    index > 0 ? `${SKILL_STAGE_LABELS[stageId]} ${index + 1}` : SKILL_STAGE_LABELS[stageId]
+  if (typeof raw === 'string') {
+    return raw.trim()
+      ? [{ id: newLocalSkillStageEntryId(), title: fallbackTitle, body: raw }]
+      : []
+  }
+  if (!raw || typeof raw !== 'object') return []
+  const item = raw as Partial<SkillStageEntry>
+  const body = typeof item.body === 'string' ? item.body : ''
+  const explicitTitle = typeof item.title === 'string' ? item.title.trim() : ''
+  if (!body.trim() && !explicitTitle && !item.id) return []
+  const title = explicitTitle || fallbackTitle
+  return [
+    {
+      id: typeof item.id === 'string' && item.id ? item.id : newLocalSkillStageEntryId(),
+      title,
+      body,
+      created_at: typeof item.created_at === 'string' ? item.created_at : undefined,
+      updated_at: typeof item.updated_at === 'string' ? item.updated_at : undefined,
+    },
+  ]
 }
 
 /** 本地模型配置，由桌面壳 preferences.json 或浏览器 localStorage 提供。 */
@@ -521,12 +565,10 @@ declare global {
         get_material_genres(): Promise<Record<string, string[]>>
 
         // ==================== 技能库 API ====================
-        list_skills(stage_id?: string | null): Promise<SkillSummary[]>
+        list_skills(): Promise<SkillSummary[]>
         get_skill(skill_id: string): Promise<Skill | null>
         create_skill(
           title: string,
-          genre: string,
-          stage_id: string,
           workspace_root?: string | null,
         ): Promise<Skill>
         save_skill(
@@ -947,10 +989,6 @@ function normalizeBookSummary(raw: Partial<BookSummary> & { id: string }): BookS
     output_dir: typeof raw.output_dir === 'string' ? raw.output_dir : undefined,
     linked_material_id:
       typeof raw.linked_material_id === 'string' ? raw.linked_material_id : undefined,
-    skill_library_enabled:
-      typeof raw.skill_library_enabled === 'boolean'
-        ? raw.skill_library_enabled
-        : book_type === 'short',
   }
 }
 
@@ -967,29 +1005,58 @@ function normalizeBook(raw: Partial<Book> & { id: string }): Book {
 }
 
 function normalizeSkillSummary(raw: Partial<SkillSummary> & { id: string }): SkillSummary {
+  const stage_counts: Partial<Record<SkillStageId, number>> = {}
+  if (raw.stage_counts && typeof raw.stage_counts === 'object') {
+    for (const stageId of SKILL_STAGE_KEYS) {
+      const count = Number(raw.stage_counts[stageId])
+      if (Number.isFinite(count) && count > 0) stage_counts[stageId] = count
+    }
+  }
+  const stage_skill_count =
+    typeof raw.stage_skill_count === 'number'
+      ? raw.stage_skill_count
+      : SKILL_STAGE_KEYS.reduce((sum, stageId) => sum + (stage_counts[stageId] ?? 0), 0)
   return {
     id: raw.id,
     title: typeof raw.title === 'string' ? raw.title : '未命名技能',
-    genre: typeof raw.genre === 'string' ? raw.genre : SHORT_GENRE_OPTIONS[0],
-    stage_id: normalizeSkillStageId(raw.stage_id),
+    stage_counts,
+    stage_skill_count,
     output_dir: typeof raw.output_dir === 'string' ? raw.output_dir : undefined,
   }
 }
 
-function normalizeSkill(raw: Partial<Skill> & { id: string } & { stages?: unknown }): Skill {
-  const legacy = firstLegacySkillStage(raw.stages)
-  const stage_id =
-    raw.stage_id != null ? normalizeSkillStageId(raw.stage_id) : legacy.stage_id
-  const summary = normalizeSkillSummary({ ...raw, stage_id })
-  const body =
-    typeof raw.body === 'string'
-      ? raw.body
-      : stage_id === legacy.stage_id
-        ? legacy.body
-        : ''
+function normalizeSkill(
+  raw: Partial<Skill> & { id: string } & { stages?: unknown; stage_id?: unknown; body?: unknown },
+): Skill {
+  const stages = normalizeSkillStages(raw.stages as Partial<Record<SkillStageId, unknown>>)
+  if (raw.stage_id != null) {
+    const stageId = normalizeSkillStageId(raw.stage_id)
+    if (stages[stageId].length === 0) {
+      stages[stageId] = [
+        {
+          id: newLocalSkillStageEntryId(),
+          title: typeof raw.title === 'string' && raw.title.trim() ? raw.title.trim() : SKILL_STAGE_LABELS[stageId],
+          body: typeof raw.body === 'string' ? raw.body : '',
+          created_at: typeof raw.created_at === 'string' ? raw.created_at : undefined,
+          updated_at: typeof raw.updated_at === 'string' ? raw.updated_at : undefined,
+        },
+      ]
+    }
+  }
+  const stage_counts = Object.fromEntries(
+    SKILL_STAGE_KEYS.map((stageId) => [stageId, stages[stageId].length]),
+  ) as Partial<Record<SkillStageId, number>>
+  const summary = normalizeSkillSummary({
+    ...raw,
+    stage_counts,
+    stage_skill_count: SKILL_STAGE_KEYS.reduce(
+      (sum, stageId) => sum + stages[stageId].length,
+      0,
+    ),
+  })
   return {
     ...summary,
-    body,
+    stages,
     created_at: typeof raw.created_at === 'string' ? raw.created_at : undefined,
     updated_at: typeof raw.updated_at === 'string' ? raw.updated_at : undefined,
   }
@@ -999,7 +1066,7 @@ async function mockListBooks(): Promise<BookSummary[]> {
   const map = loadMock()
   return [...map.values()]
     .sort((a, b) => (b.updated_at || '').localeCompare(a.updated_at || ''))
-    .map(({ id, title, book_type, categories, status, output_dir, linked_material_id, skill_library_enabled }) => ({
+    .map(({ id, title, book_type, categories, status, output_dir, linked_material_id }) => ({
       id,
       title,
       book_type,
@@ -1007,7 +1074,6 @@ async function mockListBooks(): Promise<BookSummary[]> {
       status: normalizeBookStatus(status),
       output_dir,
       linked_material_id,
-      skill_library_enabled,
     }))
 }
 
@@ -1035,7 +1101,6 @@ async function mockCreateBook(
     content: '',
     output_dir,
     linked_material_id: '',
-    skill_library_enabled: bt === 'short',
     stages: normalizeAllBookStages({}),
     expert_draft: defaultExpertDraft(),
     created_at: now,
@@ -1216,17 +1281,20 @@ function saveMockSkills(map: Map<string, Skill>) {
   localStorage.setItem(MOCK_SKILLS_KEY, JSON.stringify([...map.values()]))
 }
 
-async function mockListSkills(stage_id?: SkillStageId | null): Promise<SkillSummary[]> {
+async function mockListSkills(): Promise<SkillSummary[]> {
   const map = loadMockSkills()
-  const sid = stage_id ? normalizeSkillStageId(stage_id) : null
   return [...map.values()]
-    .filter((skill) => !sid || skill.stage_id === sid)
     .sort((a, b) => (b.updated_at || '').localeCompare(a.updated_at || ''))
-    .map(({ id, title, genre, stage_id: skillStageId, output_dir }) => ({
+    .map(({ id, title, stages, output_dir }) => ({
       id,
       title,
-      genre,
-      stage_id: skillStageId,
+      stage_counts: Object.fromEntries(
+        SKILL_STAGE_KEYS.map((stageId) => [stageId, stages[stageId]?.length ?? 0]),
+      ) as Partial<Record<SkillStageId, number>>,
+      stage_skill_count: SKILL_STAGE_KEYS.reduce(
+        (sum, stageId) => sum + (stages[stageId]?.length ?? 0),
+        0,
+      ),
       output_dir,
     }))
 }
@@ -1237,19 +1305,15 @@ async function mockGetSkill(skill_id: string): Promise<Skill | null> {
 
 async function mockCreateSkill(
   title: string,
-  genre: string,
-  stage_id: SkillStageId,
 ): Promise<Skill> {
   const map = loadMockSkills()
   const now = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z')
   const skill: Skill = {
     id: randomId(),
     title: title.trim() || '未命名技能',
-    genre: SHORT_GENRE_OPTIONS.includes(genre as (typeof SHORT_GENRE_OPTIONS)[number])
-      ? genre
-      : SHORT_GENRE_OPTIONS[0],
-    stage_id: normalizeSkillStageId(stage_id),
-    body: '',
+    stages: normalizeSkillStages({}),
+    stage_counts: {},
+    stage_skill_count: 0,
     created_at: now,
     updated_at: now,
   }
@@ -1270,20 +1334,21 @@ async function mockSaveSkill(
   if (options?.title != null) {
     next = { ...next, title: options.title.trim() || '未命名技能' }
   }
-  if (options?.genre != null) {
-    const genre = options.genre.trim()
+  if (options?.stages != null) {
+    const stages = normalizeSkillStages(
+      options.stages as Partial<Record<SkillStageId, unknown>>,
+    )
     next = {
       ...next,
-      genre: SHORT_GENRE_OPTIONS.includes(genre as (typeof SHORT_GENRE_OPTIONS)[number])
-        ? genre
-        : SHORT_GENRE_OPTIONS[0],
+      stages,
+      stage_counts: Object.fromEntries(
+        SKILL_STAGE_KEYS.map((stageId) => [stageId, stages[stageId]?.length ?? 0]),
+      ) as Partial<Record<SkillStageId, number>>,
+      stage_skill_count: SKILL_STAGE_KEYS.reduce(
+        (sum, stageId) => sum + (stages[stageId]?.length ?? 0),
+        0,
+      ),
     }
-  }
-  if (options?.stage_id != null) {
-    next = { ...next, stage_id: normalizeSkillStageId(options.stage_id) }
-  }
-  if (options?.body != null) {
-    next = { ...next, body: String(options.body) }
   }
   map.set(skill_id, next)
   saveMockSkills(map)
@@ -1534,13 +1599,13 @@ export async function getMaterialGenres(): Promise<Record<string, string[]>> {
 
 // ==================== 技能 Bridge 函数 ====================
 
-export async function listSkills(stage_id?: SkillStageId | null): Promise<SkillSummary[]> {
+export async function listSkills(): Promise<SkillSummary[]> {
   const api = await getBridgeApi()
   if (api?.list_skills) {
-    const list = await api.list_skills(stage_id ?? null)
+    const list = await api.list_skills()
     return list.map((item) => normalizeSkillSummary(item))
   }
-  return mockListSkills(stage_id)
+  return mockListSkills()
 }
 
 export async function getSkill(skill_id: string): Promise<Skill | null> {
@@ -1554,24 +1619,20 @@ export async function getSkill(skill_id: string): Promise<Skill | null> {
 
 export async function createSkill(
   title: string,
-  genre: string,
-  stage_id: SkillStageId,
   workspace_root?: string | null,
 ): Promise<Skill> {
   const api = await getBridgeApi()
   if (api?.create_skill) {
     return normalizeSkill(
-      await api.create_skill(title, genre, normalizeSkillStageId(stage_id), workspace_root ?? null),
+      await api.create_skill(title, workspace_root ?? null),
     )
   }
-  return mockCreateSkill(title, genre, stage_id)
+  return mockCreateSkill(title)
 }
 
 export type SaveSkillOptions = {
   title?: string
-  genre?: string
-  stage_id?: SkillStageId
-  body?: string
+  stages?: Partial<Record<SkillStageId, SkillStageEntry[]>> | null
 }
 
 export async function saveSkill(
@@ -1727,7 +1788,6 @@ export async function getSkillSystemPrompt(
   stageId: SkillStageId,
   input: {
     skillTitle: string
-    skillGenre?: string
     stageBody: string
     allStages: Partial<Record<SkillStageId, string>>
   },
@@ -1744,7 +1804,6 @@ export async function getSkillSystemPrompt(
       JSON.stringify({
         skill_title: input.skillTitle,
         book_title: input.skillTitle,
-        skill_genre: input.skillGenre ?? '',
         stage_body: input.stageBody,
         all_stages: stagesObj,
       }),
@@ -1754,7 +1813,6 @@ export async function getSkillSystemPrompt(
   const raw = await readSkillAgentPromptTemplate()
   return renderPromptFromTemplateRaw(raw, {
     bookTitle: input.skillTitle,
-    skillGenre: input.skillGenre,
     stageBody: input.stageBody,
     allStages: input.allStages,
     promptKind: SKILL_MANAGER_PROMPT_KIND,

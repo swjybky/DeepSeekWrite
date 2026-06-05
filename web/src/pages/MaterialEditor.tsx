@@ -429,6 +429,7 @@ export function MaterialEditor() {
               id: stageId,
               label: MATERIAL_STAGE_LABELS[stageId],
             }))}
+            defaultExpanded
             activeStageId={activeStage}
             onStageSelect={(stageId) => setActiveStage(stageId as MaterialStageId)}
             editingTitle={editingTitle}
@@ -468,7 +469,7 @@ export function MaterialEditor() {
 
         <aside className="workspace-ai workspace-ai--center" aria-label="AI 对话">
           <div className="workspace-ai-header workspace-ai-header-row">
-            <span className="workspace-ai-header-title">素材智能体</span>
+            <span className="workspace-ai-header-title">素材管理智能体</span>
             <div className="workspace-ai-header-actions">
               <Link
                 className="workspace-ai-prompt-edit"

@@ -33,7 +33,7 @@ function safariRegexCompatPlugin(): Plugin {
         )
       }
 
-      if (id.includes('/node_modules/@mariozechner/pi-ai/dist/utils/sanitize-unicode.js')) {
+      if (id.includes('/node_modules/@earendil-works/pi-ai/dist/utils/sanitize-unicode.js')) {
         next = next.replace(
           /export function sanitizeSurrogates\(text\) \{[\s\S]*?return text\.replace\([^;]+;\n\}/,
           `export function sanitizeSurrogates(text) {
@@ -57,13 +57,12 @@ function safariRegexCompatPlugin(): Plugin {
       }
 
       if (id.includes('/node_modules/formdata-polyfill/')) {
+        const normalizeLineBreakReplacer =
+          "(_match, prefix) => prefix === undefined ? '\\r\\n' : `${prefix}\\r\\n`"
         next = next.replace(
-          /value\.replace\(\/\\r\(\?!\\n\)\|\(\?<!\\r\)\\n\/g, '([^']*)'\)/g,
-          "value.replace(/\\r(?!\\n)|(^|[^\\r])\\n/g, (_match, prefix) => `${prefix}$1`)",
-        )
-        next = next.replace(
-          /v\.replace\(\/\\r\(\?!\\n\)\|\(\?<!\\r\)\\n\/g,'([^']*)'\)/g,
-          "v.replace(/\\r(?!\\n)|(^|[^\\r])\\n/g,(_match,prefix)=>`${prefix}$1`)",
+          /(\b(?:value|v)\.replace\()\/\\r\(\?!\\n\)\|\(\?<!\\r\)\\n\/g\s*,\s*(['"])\\r\\n\2\)/g,
+          (_match, prefix: string) =>
+            `${prefix}/\\r(?!\\n)|(^|[^\\r])\\n/g, ${normalizeLineBreakReplacer})`,
         )
       }
 
@@ -85,7 +84,7 @@ export default defineConfig({
       '@lmstudio/sdk': path.resolve(webRoot, 'src/vendor/lmstudio-sdk-browser.ts'),
       marked: path.resolve(
         webRoot,
-        'node_modules/@mariozechner/pi-tui/node_modules/marked/lib/marked.esm.js',
+        'node_modules/@earendil-works/pi-tui/node_modules/marked/lib/marked.esm.js',
       ),
     },
   },

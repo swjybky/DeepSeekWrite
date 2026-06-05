@@ -2,7 +2,7 @@
  * Pi Web UI 全局存储（API Key、会话元数据等），与 pi-web-ui 示例一致。
  * @mariozechner/pi-coding-agent 为终端 CLI，不在此桌面壳内嵌；需在系统终端单独运行。
  */
-import '@mariozechner/pi-ai'
+import '@earendil-works/pi-ai'
 
 import {
   AppStorage,
@@ -12,7 +12,7 @@ import {
   SessionsStore,
   SettingsStore,
   setAppStorage,
-} from '@mariozechner/pi-web-ui'
+} from '@earendil-works/pi-web-ui'
 
 let ready: Promise<void> | null = null
 

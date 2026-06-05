@@ -1,6 +1,6 @@
-import { Agent } from '@mariozechner/pi-agent-core'
-import type { AgentMessage, AgentTool } from '@mariozechner/pi-agent-core'
-import { ApiKeyPromptDialog, ChatPanel, ModelSelector } from '@mariozechner/pi-web-ui'
+import { Agent } from '@earendil-works/pi-agent-core'
+import type { AgentMessage, AgentTool } from '@earendil-works/pi-agent-core'
+import { ApiKeyPromptDialog, ChatPanel, ModelSelector } from '@earendil-works/pi-web-ui'
 import { useCallback, useEffect, useRef, useState } from 'react'
 
 import {

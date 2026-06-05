@@ -1,5 +1,5 @@
-import type { Api, Model } from '@mariozechner/pi-ai'
-import type { Agent, ThinkingLevel } from '@mariozechner/pi-agent-core'
+import type { Api, Model } from '@earendil-works/pi-ai'
+import type { Agent, ThinkingLevel } from '@earendil-works/pi-agent-core'
 
 import { resolveWorkspaceChatModel } from './resolveWorkspaceChatModel'
 

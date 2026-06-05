@@ -26,17 +26,6 @@ SHORT_STAGES_ORDER: tuple[str, ...] = (
     "format_conversion",
 )
 
-SHORT_STAGE_LABELS: dict[str, str] = {
-    "character_design": "人物设计",
-    "plot_design": "剧情设计",
-    "intro_design": "导语设计",
-    "plot_refine": "剧情细化",
-    "outline": "大纲纲要",
-    "draft": "正文编写",
-    "draft_review": "正文审阅",
-    "format_conversion": "格式转换",
-}
-
 EXPERT_DRAFT_COORDINATOR_AGENT_ID = "expert_draft_coordinator"
 EXPERT_SECTION_WRITER_AGENT_ID = "expert_section_writer"
 WORKSPACE_AGENT_IDS: tuple[str, ...] = SHORT_STAGES_ORDER + (
@@ -49,50 +38,19 @@ OTHER_STAGES_PEER_MAX = 2000
 STAGE_BODY_EXCERPT_CAP = 12000
 
 _WORKSPACE_PLACEHOLDER_RE = re.compile(
-    r"\{\{(BOOK_TITLE|BOOK_LINE|BOOK_GENRE|STYLE|STAGE_BODY|OTHER_STAGES_EXCERPT)\}\}"
+    r"\{\{(BOOK_TITLE|BOOK_GENRE)\}\}"
 )
 _MATERIAL_PLACEHOLDER_RE = re.compile(
     r"\{\{(BOOK_TITLE|BOOK_LINE|MATERIAL_TITLE|MATERIAL_LINE|MATERIAL_TYPE|MATERIAL_GENRE|STAGE_ID|STAGE_LABEL|STAGE_BODY|OTHER_STAGES_EXCERPT)\}\}"
 )
 _SKILL_PLACEHOLDER_RE = re.compile(
-    r"\{\{(BOOK_TITLE|BOOK_LINE|SKILL_TITLE|SKILL_LINE|SKILL_GENRE|STAGE_ID|STAGE_LABEL|STAGE_BODY|OTHER_STAGES_EXCERPT)\}\}"
+    r"\{\{(BOOK_TITLE|BOOK_LINE|SKILL_TITLE|SKILL_LINE|STAGE_ID|STAGE_LABEL|STAGE_BODY|OTHER_STAGES_EXCERPT)\}\}"
 )
 
 
 def excerpt(text: str, _max_len: int = STAGE_BODY_EXCERPT_CAP) -> str:
     stripped = text.strip()
     return stripped if stripped else "（暂无）"
-
-
-def _peek_other_stages(
-    exclude_stage_id: str,
-    all_stages: dict[str, str],
-    *,
-    peer_max: int | None,
-) -> str:
-    cap = peer_max if peer_max is not None else OTHER_STAGES_PEER_MAX
-    lines: list[str] = []
-    for sid in SHORT_STAGES_ORDER:
-        if sid == exclude_stage_id:
-            continue
-        raw = str(all_stages.get(sid) or "").strip()
-        if not raw:
-            continue
-        excerpted = excerpt(raw, cap)
-        lines.append(f"【{SHORT_STAGE_LABELS.get(sid, sid)}】\n{excerpted}")
-    return "\n\n".join(lines) if lines else PEEK_EMPTY_MESSAGE
-
-
-def peek_other_for_render(
-    exclude_stage_id: str,
-    all_stages: dict[str, str],
-) -> str:
-    """渲染当前阶段允许读取的其它创作阶段摘录。"""
-    return _peek_other_stages(
-        exclude_stage_id,
-        all_stages,
-        peer_max=OTHER_STAGES_PEER_MAX,
-    )
 
 
 def validate_workspace_agent_id(agent_id: str) -> None:
@@ -198,22 +156,11 @@ def render_workspace_system_prompt(
     validate_workspace_stage_id(stage_id)
     raw = read_workspace_agent_prompt_template(stage_id)
 
-    staged_body = excerpt(stage_body, STAGE_BODY_EXCERPT_CAP)
-    other = (
-        ""
-        if all_stages_for_peek is None
-        else peek_other_for_render(stage_id, all_stages_for_peek)
-    )
-
     title = (book_title or "").strip()
     genre = (book_genre or "").strip() or "未分类"
     replacements = {
         "BOOK_TITLE": title,
-        "BOOK_LINE": f"书名：《{title}》",
         "BOOK_GENRE": genre,
-        "STYLE": genre,
-        "STAGE_BODY": staged_body,
-        "OTHER_STAGES_EXCERPT": other,
     }
 
     def repl(m: re.Match[str]) -> str:
@@ -239,22 +186,13 @@ def render_from_api_context(stage_id: str, context_raw: object) -> str:
     ctx = parse_context_payload(context_raw)
     title = str(ctx.get("book_title") or "")
     genre = str(ctx.get("book_genre") or "")
-    body = str(ctx.get("stage_body") or "")
-    all_stages: dict[str, str] | None = None
-    stages_val = ctx.get("all_stages")
-    if isinstance(stages_val, dict):
-        all_stages = {str(k): str(v if v is not None else "") for k, v in stages_val.items()}
-    allowed_val = ctx.get("allowed_workspace_stages")
-    if all_stages is not None:
-        allowed = {str(v) for v in allowed_val} if isinstance(allowed_val, list) else set()
-        all_stages = {k: v for k, v in all_stages.items() if k in allowed}
 
     return render_workspace_system_prompt(
         stage_id,
         book_title=title,
         book_genre=genre,
-        stage_body=body,
-        all_stages_for_peek=all_stages if all_stages is not None else {},
+        stage_body="",
+        all_stages_for_peek=None,
     )
 
 
@@ -630,7 +568,6 @@ def render_skill_system_prompt(
     stage_id: str,
     *,
     skill_title: str,
-    skill_genre: str = "",
     stage_body: str,
     all_stages_for_peek: dict[str, str] | None = None,
 ) -> str:
@@ -655,7 +592,6 @@ def render_skill_system_prompt(
         "BOOK_LINE": f"技能：《{title}》",
         "SKILL_TITLE": title,
         "SKILL_LINE": f"技能：《{title}》",
-        "SKILL_GENRE": (skill_genre or "").strip() or "未分类",
         "STAGE_ID": stage_id,
         "STAGE_LABEL": stage_label,
         "STAGE_BODY": staged_body,
@@ -671,7 +607,6 @@ def render_skill_system_prompt(
 def render_skill_from_api_context(stage_id: str, context_raw: object) -> str:
     ctx = parse_context_payload(context_raw)
     title = str(ctx.get("skill_title") or ctx.get("book_title") or "")
-    genre = str(ctx.get("skill_genre") or ctx.get("genre") or "")
     body = str(ctx.get("stage_body") or "")
     all_stages: dict[str, str] | None = None
     stages_val = ctx.get("all_stages")
@@ -681,7 +616,6 @@ def render_skill_from_api_context(stage_id: str, context_raw: object) -> str:
     return render_skill_system_prompt(
         stage_id,
         skill_title=title,
-        skill_genre=genre,
         stage_body=body,
         all_stages_for_peek=all_stages if all_stages is not None else {},
     )

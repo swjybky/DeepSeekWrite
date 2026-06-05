@@ -1,17 +1,18 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import {
-  SHORT_GENRE_OPTIONS,
   SKILL_STAGE_KEYS,
   SKILL_STAGE_LABELS,
   type Skill,
+  type SkillStageEntry,
   type SkillStageId,
   getSkill,
-  normalizeSkillStageId,
+  normalizeSkillStages,
   saveSkill,
 } from '../bridge'
 import { WorkspaceAiChat } from '../components/WorkspaceAiChat'
+import { WorkspaceTreeNav } from '../components/WorkspaceTreeNav'
 import type { ApplyToStageEditorPayload } from '../pi/workspaceStageAgents'
 import './BookEditor.css'
 
@@ -24,6 +25,8 @@ const WORKSPACE_COL_L = 18
 const WORKSPACE_COL_R = 36
 const WORKSPACE_COL_SUM = 18 + 36 + 36
 const EDITOR_MIN_FOR_LAYOUT = 160
+
+type SkillStages = Record<SkillStageId, SkillStageEntry[]>
 
 function usableWidthLessSplitter(viewportWidth: number): number {
   return Math.max(0, viewportWidth - WORKSPACE_SPLITTER_W)
@@ -71,13 +74,45 @@ function readStoredAiWidth(): number {
   }
 }
 
+function newStageSkillEntry(stageId: SkillStageId): SkillStageEntry {
+  const now = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z')
+  return {
+    id: globalThis.crypto?.randomUUID?.() ?? Math.random().toString(36).slice(2),
+    title: SKILL_STAGE_LABELS[stageId],
+    body: '',
+    created_at: now,
+    updated_at: now,
+  }
+}
+
+function selectedIdsFromStages(stages: SkillStages): Partial<Record<SkillStageId, string>> {
+  const out: Partial<Record<SkillStageId, string>> = {}
+  for (const stageId of SKILL_STAGE_KEYS) {
+    const first = stages[stageId]?.[0]
+    if (first) out[stageId] = first.id
+  }
+  return out
+}
+
+function stagesToPromptText(stages: SkillStages): Record<SkillStageId, string> {
+  const out = {} as Record<SkillStageId, string>
+  for (const stageId of SKILL_STAGE_KEYS) {
+    out[stageId] = (stages[stageId] ?? [])
+      .map((entry) => `## ${entry.title || '未命名技能'}\n\n${entry.body || ''}`.trim())
+      .filter(Boolean)
+      .join('\n\n---\n\n')
+  }
+  return out
+}
+
 export function SkillEditor() {
   const { id } = useParams<{ id: string }>()
   const [skill, setSkill] = useState<Skill | null>(null)
-  const [titleDraft, setTitleDraft] = useState('')
-  const [genreDraft, setGenreDraft] = useState<string>(SHORT_GENRE_OPTIONS[0])
-  const [stageDraft, setStageDraft] = useState<SkillStageId>('character_design')
-  const [body, setBody] = useState('')
+  const [stages, setStages] = useState<SkillStages>(() => normalizeSkillStages({}))
+  const [activeStage, setActiveStage] = useState<SkillStageId>('character_design')
+  const [selectedEntryIds, setSelectedEntryIds] = useState<
+    Partial<Record<SkillStageId, string>>
+  >({})
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
@@ -89,13 +124,23 @@ export function SkillEditor() {
   const splitDragRef = useRef<{ startX: number; startWidth: number } | null>(null)
   const saveInFlightRef = useRef(false)
   const textareaRef = useRef<HTMLTextAreaElement | null>(null)
-  const bodyRef = useRef(body)
+  const stagesRef = useRef<SkillStages>(stages)
+  const activeStageRef = useRef<SkillStageId>(activeStage)
+  const selectedEntryIdsRef = useRef<Partial<Record<SkillStageId, string>>>({})
   const tokenBufferRef = useRef('')
   const tokenBufferRafRef = useRef<number | undefined>(undefined)
 
   useEffect(() => {
-    bodyRef.current = body
-  }, [body])
+    stagesRef.current = stages
+  }, [stages])
+
+  useEffect(() => {
+    activeStageRef.current = activeStage
+  }, [activeStage])
+
+  useEffect(() => {
+    selectedEntryIdsRef.current = selectedEntryIds
+  }, [selectedEntryIds])
 
   useEffect(() => {
     return () => {
@@ -105,13 +150,39 @@ export function SkillEditor() {
     }
   }, [])
 
-  const updateBody = useCallback((updater: (current: string) => string) => {
-    setBody((prev) => {
+  const setStagesAndRef = useCallback((updater: (current: SkillStages) => SkillStages) => {
+    setStages((prev) => {
       const next = updater(prev)
-      bodyRef.current = next
+      stagesRef.current = next
       return next
     })
   }, [])
+
+  const setSelectedIdsAndRef = useCallback(
+    (updater: (current: Partial<Record<SkillStageId, string>>) => Partial<Record<SkillStageId, string>>) => {
+      setSelectedEntryIds((prev) => {
+        const next = updater(prev)
+        selectedEntryIdsRef.current = next
+        return next
+      })
+    },
+    [],
+  )
+
+  const updateSelectedEntry = useCallback(
+    (updater: (current: SkillStageEntry) => SkillStageEntry) => {
+      const stageId = activeStageRef.current
+      const entryId = selectedEntryIdsRef.current[stageId]
+      if (!entryId) return
+      setStagesAndRef((prev) => ({
+        ...prev,
+        [stageId]: (prev[stageId] ?? []).map((entry) =>
+          entry.id === entryId ? updater(entry) : entry,
+        ),
+      }))
+    },
+    [setStagesAndRef],
+  )
 
   const cancelTokenFlush = useCallback(() => {
     if (tokenBufferRafRef.current !== undefined) {
@@ -125,8 +196,8 @@ export function SkillEditor() {
     const buffer = tokenBufferRef.current
     if (!buffer) return
     tokenBufferRef.current = ''
-    updateBody((cur) => cur + buffer)
-  }, [updateBody])
+    updateSelectedEntry((entry) => ({ ...entry, body: entry.body + buffer }))
+  }, [updateSelectedEntry])
 
   const flushAllTokenBuffers = useCallback(() => {
     cancelTokenFlush()
@@ -147,7 +218,7 @@ export function SkillEditor() {
         cancelTokenFlush()
         tokenBufferRef.current = ''
         setEditorStreaming(false)
-        updateBody(() => payload.text.trim())
+        updateSelectedEntry((entry) => ({ ...entry, body: payload.text.trim() }))
         requestAnimationFrame(autoScrollTextarea)
         return
       }
@@ -177,13 +248,13 @@ export function SkillEditor() {
       setEditorStreaming(false)
       const trimmed = payload.text.trim()
       if (!trimmed) return
-      updateBody((cur) => {
-        const sep = cur.length === 0 ? '' : cur.endsWith('\n') ? '\n' : '\n\n'
-        return cur + sep + trimmed
+      updateSelectedEntry((entry) => {
+        const sep = entry.body.length === 0 ? '' : entry.body.endsWith('\n') ? '\n' : '\n\n'
+        return { ...entry, body: entry.body + sep + trimmed }
       })
       requestAnimationFrame(autoScrollTextarea)
     },
-    [autoScrollTextarea, cancelTokenFlush, flushTokenBuffer, updateBody],
+    [autoScrollTextarea, cancelTokenFlush, flushTokenBuffer, updateSelectedEntry],
   )
 
   useEffect(() => {
@@ -203,13 +274,14 @@ export function SkillEditor() {
   }, [])
 
   const syncSkillState = useCallback((next: Skill) => {
-    const stageId = normalizeSkillStageId(next.stage_id)
-    setSkill({ ...next, stage_id: stageId })
-    setTitleDraft(next.title || '未命名技能')
-    setGenreDraft(next.genre || SHORT_GENRE_OPTIONS[0])
-    setStageDraft(stageId)
-    bodyRef.current = next.body ?? ''
-    setBody(next.body ?? '')
+    const normalized = normalizeSkillStages(next.stages)
+    setSkill({ ...next, stages: normalized })
+    stagesRef.current = normalized
+    setStages(normalized)
+    const ids = selectedIdsFromStages(normalized)
+    selectedEntryIdsRef.current = ids
+    setSelectedEntryIds(ids)
+    setActiveStage('character_design')
   }, [])
 
   const load = useCallback(async () => {
@@ -248,10 +320,7 @@ export function SkillEditor() {
     try {
       flushAllTokenBuffers()
       const next = await saveSkill(id, {
-        title: titleDraft,
-        genre: genreDraft,
-        stage_id: stageDraft,
-        body: bodyRef.current,
+        stages: stagesRef.current,
       })
       if (!next) {
         setError('保存失败：技能不存在')
@@ -266,15 +335,7 @@ export function SkillEditor() {
       saveInFlightRef.current = false
       setSaving(false)
     }
-  }, [
-    id,
-    skill,
-    titleDraft,
-    genreDraft,
-    stageDraft,
-    flushAllTokenBuffers,
-    syncSkillState,
-  ])
+  }, [flushAllTokenBuffers, id, skill, syncSkillState])
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
@@ -285,6 +346,37 @@ export function SkillEditor() {
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [handleSave])
+
+  const stagePromptBodies = useMemo(() => stagesToPromptText(stages), [stages])
+
+  const handleStageSelect = (stageId: SkillStageId) => {
+    setActiveStage(stageId)
+    const entries = stagesRef.current[stageId] ?? []
+    if (!selectedEntryIdsRef.current[stageId] && entries[0]) {
+      setSelectedIdsAndRef((prev) => ({ ...prev, [stageId]: entries[0].id }))
+    }
+  }
+
+  const handleAddEntry = () => {
+    const stageId = activeStageRef.current
+    const entry = newStageSkillEntry(stageId)
+    setStagesAndRef((prev) => ({
+      ...prev,
+      [stageId]: [...(prev[stageId] ?? []), entry],
+    }))
+    setSelectedIdsAndRef((prev) => ({ ...prev, [stageId]: entry.id }))
+    requestAnimationFrame(() => textareaRef.current?.focus())
+  }
+
+  const handleDeleteEntry = (entryId: string) => {
+    const stageId = activeStageRef.current
+    const entries = stagesRef.current[stageId] ?? []
+    const index = entries.findIndex((entry) => entry.id === entryId)
+    const nextEntries = entries.filter((entry) => entry.id !== entryId)
+    const nextSelected = nextEntries[Math.max(0, Math.min(index, nextEntries.length - 1))]
+    setStagesAndRef((prev) => ({ ...prev, [stageId]: nextEntries }))
+    setSelectedIdsAndRef((prev) => ({ ...prev, [stageId]: nextSelected?.id ?? '' }))
+  }
 
   if (!id) {
     return (
@@ -321,9 +413,12 @@ export function SkillEditor() {
     )
   }
 
-  const { total: stageCharTotal, nonSpace: stageCharNonSpace } = stageTextCounts(body)
-  const stageLabel = SKILL_STAGE_LABELS[stageDraft]
-  const allStages = { [stageDraft]: body }
+  const activeEntries = stages[activeStage] ?? []
+  const selectedEntryId = selectedEntryIds[activeStage] ?? ''
+  const activeEntry = activeEntries.find((entry) => entry.id === selectedEntryId) ?? null
+  const stageBody = activeEntry?.body ?? ''
+  const { total: stageCharTotal, nonSpace: stageCharNonSpace } = stageTextCounts(stageBody)
+  const stageLabel = SKILL_STAGE_LABELS[activeStage]
 
   return (
     <div className="editor-page editor-page--workspace">
@@ -334,9 +429,7 @@ export function SkillEditor() {
         <div className="editor-header-meta muted">
           <span className="editor-header-meta-inner">
             <span className="editor-header-meta-text">
-              {titleDraft || '未命名技能'}
-              {' · '}
-              {genreDraft || '未分类'}
+              {skill.title || '未命名技能库'}
               {' · '}
               {stageLabel}
             </span>
@@ -369,49 +462,21 @@ export function SkillEditor() {
         style={{ '--workspace-ai-width': `${aiPanelWidth}px` } as CSSProperties}
       >
         <aside className="workspace-rail workspace-rail--tree">
-          <div className="skill-editor-meta-panel">
-            <h2>技能信息</h2>
-            <label className="field">
-              <span className="field-label">技能标题</span>
-              <input
-                type="text"
-                value={titleDraft}
-                onChange={(e) => setTitleDraft(e.target.value)}
-                placeholder="未命名技能"
-              />
-            </label>
-            <label className="field">
-              <span className="field-label">短篇分类</span>
-              <select
-                value={genreDraft}
-                onChange={(e) => setGenreDraft(e.target.value)}
-              >
-                {SHORT_GENRE_OPTIONS.map((genre) => (
-                  <option key={genre} value={genre}>
-                    {genre}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="field">
-              <span className="field-label">适用阶段</span>
-              <select
-                value={stageDraft}
-                onChange={(e) => setStageDraft(normalizeSkillStageId(e.target.value))}
-              >
-                {SKILL_STAGE_KEYS.map((stageId) => (
-                  <option key={stageId} value={stageId}>
-                    {SKILL_STAGE_LABELS[stageId]}
-                  </option>
-                ))}
-              </select>
-            </label>
-          </div>
+          <WorkspaceTreeNav
+            rootLabel="阶段技能"
+            stages={SKILL_STAGE_KEYS.map((stageId) => ({
+              id: stageId,
+              label: `${SKILL_STAGE_LABELS[stageId]}（${stages[stageId]?.length ?? 0}）`,
+            }))}
+            defaultExpanded
+            activeStageId={activeStage}
+            onStageSelect={(stageId) => handleStageSelect(stageId as SkillStageId)}
+          />
         </aside>
 
         <aside className="workspace-ai workspace-ai--center" aria-label="AI 对话">
           <div className="workspace-ai-header workspace-ai-header-row">
-            <span className="workspace-ai-header-title">技能智能体</span>
+            <span className="workspace-ai-header-title">技能管理智能体</span>
             <div className="workspace-ai-header-actions">
               <Link
                 className="workspace-ai-prompt-edit"
@@ -433,7 +498,8 @@ export function SkillEditor() {
             </div>
           </div>
           <div className="workspace-ai-hint muted">
-            短篇技能 · {genreDraft || '未分类'} · {stageLabel}
+            技能库 · {stageLabel}
+            {activeEntry ? ` · ${activeEntry.title}` : ''}
           </div>
           <div className="workspace-ai-chat-stack">
             <div className="workspace-ai-chat-layer workspace-ai-chat-layer--active">
@@ -441,11 +507,10 @@ export function SkillEditor() {
                 key={`${skill.id}-skill-manager-${aiChatEpoch}`}
                 sessionBookId={skill.id}
                 sessionEpoch={aiChatEpoch}
-                bookTitle={titleDraft || skill.title}
-                bookGenre={genreDraft}
-                stageId={stageDraft}
-                stageBody={body}
-                allStages={allStages}
+                bookTitle={skill.title}
+                stageId={activeStage}
+                stageBody={stageBody}
+                allStages={stagePromptBodies}
                 includePiArtifacts={WORKSPACE_AI_INCLUDE_PI_ARTIFACTS}
                 applyToStageEditor={applyToStageEditor}
                 workspaceType="skill"
@@ -473,8 +538,7 @@ export function SkillEditor() {
             const drag = splitDragRef.current
             if (!drag) return
             const delta = e.clientX - drag.startX
-            const next = drag.startWidth + delta
-            setAiPanelWidth(clampAiPanelWidth(next, window.innerWidth))
+            setAiPanelWidth(clampAiPanelWidth(drag.startWidth + delta, window.innerWidth))
           }}
           onPointerUp={(e) => {
             splitDragRef.current = null
@@ -523,20 +587,86 @@ export function SkillEditor() {
               </span>
             </span>
           </div>
-          <textarea
-            id="stage-body"
-            ref={textareaRef}
-            className="editor-body workspace-textarea"
-            value={body}
-            onChange={(e) => {
-              cancelTokenFlush()
-              tokenBufferRef.current = ''
-              updateBody(() => e.target.value)
-            }}
-            placeholder={`在此编辑${stageLabel}内容…`}
-            spellCheck={false}
-            readOnly={editorStreaming}
-          />
+
+          <section className="skill-stage-items" aria-label="阶段技能列表">
+            <div className="skill-stage-items-head">
+              <span>{activeEntries.length} 个阶段技能</span>
+              <button type="button" className="btn-secondary btn-small" onClick={handleAddEntry}>
+                新增技能
+              </button>
+            </div>
+            {activeEntries.length === 0 ? (
+              <p className="skill-stage-items-empty muted">
+                当前阶段还没有技能，点击“新增技能”开始沉淀。
+              </p>
+            ) : (
+              <div className="skill-stage-item-list">
+                {activeEntries.map((entry) => (
+                  <button
+                    key={entry.id}
+                    type="button"
+                    className={
+                      entry.id === selectedEntryId
+                        ? 'skill-stage-item skill-stage-item--active'
+                        : 'skill-stage-item'
+                    }
+                    onClick={() =>
+                      setSelectedIdsAndRef((prev) => ({ ...prev, [activeStage]: entry.id }))
+                    }
+                  >
+                    {entry.title || '未命名技能'}
+                  </button>
+                ))}
+              </div>
+            )}
+          </section>
+
+          {activeEntry ? (
+            <div className="skill-entry-editor">
+              <div className="skill-entry-toolbar">
+                <label className="field skill-entry-title-field">
+                  <span className="field-label">技能名称</span>
+                  <input
+                    type="text"
+                    value={activeEntry.title}
+                    onChange={(e) =>
+                      updateSelectedEntry((entry) => ({
+                        ...entry,
+                        title: e.target.value,
+                      }))
+                    }
+                    placeholder="请输入技能名称"
+                  />
+                </label>
+                <button
+                  type="button"
+                  className="btn-secondary btn-small"
+                  onClick={() => handleDeleteEntry(activeEntry.id)}
+                >
+                  删除技能
+                </button>
+              </div>
+              <textarea
+                id="stage-body"
+                ref={textareaRef}
+                className="editor-body workspace-textarea"
+                value={activeEntry.body}
+                onChange={(e) =>
+                  updateSelectedEntry((entry) => ({
+                    ...entry,
+                    body: e.target.value,
+                  }))
+                }
+                spellCheck={false}
+                readOnly={editorStreaming}
+                placeholder={`沉淀「${activeEntry.title || stageLabel}」的写作技能、规则、示例或注意事项…`}
+              />
+            </div>
+          ) : (
+            <div className="workspace-stage-empty">
+              <p className="muted">请选择或新增一个阶段技能。</p>
+            </div>
+          )}
         </div>
       </div>
     </div>

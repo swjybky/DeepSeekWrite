@@ -1,7 +1,6 @@
 import {
   useCallback,
   useEffect,
-  useMemo,
   useRef,
   useState,
 } from 'react'
@@ -48,6 +47,8 @@ const AGENT_LABELS: Record<WorkspaceAgentId, string> = {
 const EMPTY_PROMPTS = Object.fromEntries(
   WORKSPACE_AGENT_IDS.map((agentId) => [agentId, '']),
 ) as PromptDrafts
+const WORKSPACE_PLACEHOLDER_HINT =
+  '当前书籍：《{{BOOK_TITLE}}》  当前短篇分类：{{BOOK_GENRE}}'
 
 function statusLabel(status: SaveStatus): string {
   if (status === 'saving') return '保存中…'
@@ -207,16 +208,6 @@ export function WorkspaceSettings() {
   const activeIsExpert =
     activeAgentId === EXPERT_DRAFT_COORDINATOR_AGENT_ID ||
     activeAgentId === EXPERT_SECTION_WRITER_AGENT_ID
-
-  const placeholderHint = useMemo(() => {
-    if (activeAgentId === EXPERT_DRAFT_COORDINATOR_AGENT_ID) {
-      return '{{BOOK_TITLE}}  {{BOOK_LINE}}  {{BOOK_GENRE}}  {{STYLE}}  {{STAGE_BODY}}  {{OTHER_STAGES_EXCERPT}}  {{EXPERT_DRAFT_CONTEXT}}'
-    }
-    if (activeAgentId === EXPERT_SECTION_WRITER_AGENT_ID) {
-      return '{{BOOK_TITLE}}  {{BOOK_LINE}}  {{BOOK_GENRE}}  {{STYLE}}  {{STAGE_BODY}}  {{OTHER_STAGES_EXCERPT}}'
-    }
-    return '{{BOOK_TITLE}}  {{BOOK_LINE}}  {{BOOK_GENRE}}  {{STAGE_BODY}}  {{OTHER_STAGES_EXCERPT}}'
-  }, [activeAgentId])
 
   const switchAgent = useCallback(
     async (next: WorkspaceAgentId) => {
@@ -399,7 +390,7 @@ export function WorkspaceSettings() {
                     <p>停止输入 500ms 后自动保存，切换配置项或返回首页前会立即刷新。</p>
                   </div>
                   <p className="workspace-settings-placeholder-hint">
-                    可用占位符：<code>{placeholderHint}</code>
+                    可用占位符：<code>{WORKSPACE_PLACEHOLDER_HINT}</code>
                   </p>
                   <textarea
                     value={promptDrafts[activeAgentId]}

@@ -1,4 +1,4 @@
-import type { AgentTool } from '@mariozechner/pi-agent-core'
+import type { AgentTool } from '@earendil-works/pi-agent-core'
 
 import type {
   Material,
@@ -35,7 +35,9 @@ export type WorkspaceStageAgentContext = {
   promptKind?: MaterialPromptKind
   stageId: StageId | MaterialStageId | SkillStageId
   stageBody: string
-  getCurrentStageBody?: () => string
+  getCurrentStageBody?: (
+    stageId?: StageId | MaterialStageId | SkillStageId,
+  ) => string | undefined
   allStages: Partial<Record<StageId | MaterialStageId | SkillStageId, string>>
   linkedMaterial?: Material | null
   /** 全局创作空间智能体可读配置（短篇创作空间） */
@@ -88,7 +90,7 @@ export function getWorkspaceStageAdditionalTools(
     bookTitle: ctx.bookTitle,
     stageId: shortStageId,
     stageBody: ctx.stageBody,
-    getCurrentStageBody: ctx.getCurrentStageBody,
+    getCurrentStageBody: (stageId) => ctx.getCurrentStageBody?.(stageId),
     allStages: ctx.allStages as Partial<Record<ShortWorkspaceStageAgentContext['stageId'], string>>,
     linkedMaterial: ctx.linkedMaterial,
     workspaceAgentReadAccess: ctx.workspaceAgentReadAccess,
