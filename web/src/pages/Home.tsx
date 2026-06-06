@@ -477,6 +477,7 @@ export function Home() {
   const [bookTitle, setBookTitle] = useState('')
   const [bookType, setBookType] = useState<BookType>('short')
   const [shortGenre, setShortGenre] = useState<string>(SHORT_GENRE_OPTIONS[0])
+  const [bookLinkedSkillId, setBookLinkedSkillId] = useState('')
   const [workspaceRoot, setWorkspaceRoot] = useState<string | null>(() => getStoredWorkspaceRoot())
   const [submittingBook, setSubmittingBook] = useState(false)
   const [deletingBookId, setDeletingBookId] = useState<string | null>(null)
@@ -700,10 +701,12 @@ export function Home() {
     setBookError(null)
     try {
       const cats = bookType === 'short' ? [shortGenre] : []
-      await createBook(bookTitle, bookType, cats, ws)
+      const linkedSkillId = bookType === 'short' ? bookLinkedSkillId : ''
+      await createBook(bookTitle, bookType, cats, ws, linkedSkillId || null)
       setBookTitle('')
       setBookType('short')
       setShortGenre(SHORT_GENRE_OPTIONS[0])
+      setBookLinkedSkillId('')
       setShowBookForm(false)
       await refreshBooks()
     } catch (err) {
@@ -1040,7 +1043,10 @@ export function Home() {
                       type="radio"
                       name="bookType"
                       checked={bookType === 'long'}
-                      onChange={() => setBookType('long')}
+                      onChange={() => {
+                        setBookType('long')
+                        setBookLinkedSkillId('')
+                      }}
                     />
                     长篇
                   </label>
@@ -1048,22 +1054,40 @@ export function Home() {
               </fieldset>
 
               {bookType === 'short' && (
-                <fieldset className="field">
-                  <legend className="field-label">短篇分类</legend>
-                  <div className="genre-grid">
-                    {SHORT_GENRE_OPTIONS.map((g) => (
-                      <label key={g} className="radio">
-                        <input
-                          type="radio"
-                          name="shortGenre"
-                          checked={shortGenre === g}
-                          onChange={() => setShortGenre(g)}
-                        />
-                        {g}
-                      </label>
-                    ))}
-                  </div>
-                </fieldset>
+                <>
+                  <fieldset className="field">
+                    <legend className="field-label">短篇分类</legend>
+                    <div className="genre-grid">
+                      {SHORT_GENRE_OPTIONS.map((g) => (
+                        <label key={g} className="radio">
+                          <input
+                            type="radio"
+                            name="shortGenre"
+                            checked={shortGenre === g}
+                            onChange={() => setShortGenre(g)}
+                          />
+                          {g}
+                        </label>
+                      ))}
+                    </div>
+                  </fieldset>
+
+                  <label className="field">
+                    <span className="field-label">绑定技能库</span>
+                    <select
+                      value={bookLinkedSkillId}
+                      onChange={(e) => setBookLinkedSkillId(e.target.value)}
+                      disabled={loadingSkills}
+                    >
+                      <option value="">不绑定</option>
+                      {skills.map((skill) => (
+                        <option key={skill.id} value={skill.id}>
+                          {skill.title}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                </>
               )}
 
               {bookError && <p className="form-error">{bookError}</p>}
@@ -1115,7 +1139,10 @@ export function Home() {
           ) : null}
         </section>
 
-        <div className="library-stack" aria-label="素材库和技能库">
+        <div
+          className={showMaterialForm ? 'library-stack library-stack--material-form-open' : 'library-stack'}
+          aria-label="素材库和技能库"
+        >
         {/* 素材卡片 */}
         <section className="main-card materials-card library-card" aria-label="素材库">
           <header className="card-header">

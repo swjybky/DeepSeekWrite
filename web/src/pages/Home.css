@@ -153,6 +153,12 @@
   min-height: 0;
 }
 
+.library-stack--material-form-open {
+  grid-template-rows: minmax(27rem, 1.45fr) minmax(12rem, 0.55fr);
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+}
+
 .library-card {
   min-height: 0;
 }
@@ -314,6 +320,14 @@
   border-radius: var(--radius-md);
   background: color-mix(in oklab, var(--paper) 60%, var(--paper-elevated));
   animation: slideDown 0.25s ease;
+}
+
+.materials-card .create-form {
+  flex: 0 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
 }
 
 @keyframes slideDown {
@@ -669,6 +683,10 @@
 
   .library-stack {
     grid-template-rows: auto auto;
+  }
+
+  .library-stack--material-form-open {
+    overflow-y: visible;
   }
 }
 

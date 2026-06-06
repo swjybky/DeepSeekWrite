@@ -7,6 +7,7 @@ import {
   readWorkspaceAgentPromptTemplate,
   type ExpertDraft,
   type Material,
+  type Skill,
   type StageId,
 } from '../../../bridge'
 import {
@@ -37,6 +38,7 @@ type Props = {
   sessionEpoch?: number
   stages: Partial<Record<StageId, string>>
   linkedMaterial?: Material | null
+  linkedSkill?: Skill | null
   readAccess: WorkspaceAgentReadAccessEntry
   expertDraft: ExpertDraft
   updateDraft: (updater: (draft: ExpertDraft) => ExpertDraft) => void
@@ -100,6 +102,9 @@ function toolStatus(toolName: string, done = false): string {
   }
   if (toolName === 'read_linked_material_content') {
     return done ? '已读取关联素材' : '正在读取关联素材'
+  }
+  if (toolName === 'load_skill') {
+    return done ? '已加载技能' : '正在加载技能'
   }
   return done ? '工具调用完成' : '正在调用工具'
 }
@@ -208,6 +213,7 @@ export function ExpertDraftAiChat(props: Props) {
         bookTitle: propsLatestRef.current.bookTitle,
         allStages: propsLatestRef.current.stages,
         linkedMaterial: propsLatestRef.current.linkedMaterial,
+        linkedSkill: propsLatestRef.current.linkedSkill,
         readAccess: propsLatestRef.current.readAccess,
         getDraft: () => propsLatestRef.current.expertDraft,
         updateDraft: propsLatestRef.current.updateDraft,
@@ -270,6 +276,7 @@ export function ExpertDraftAiChat(props: Props) {
             workspaceStages: props.stages,
             allowedWorkspaceStages: props.readAccess.workspace,
             template: promptTemplate,
+            linkedSkill: props.linkedSkill,
           }),
           model: initialModel,
           thinkingLevel: getPreferredWorkspaceThinkingLevel(),
@@ -406,12 +413,14 @@ export function ExpertDraftAiChat(props: Props) {
       workspaceStages: p.stages,
       allowedWorkspaceStages: p.readAccess.workspace,
       template: promptTemplateRef.current,
+      linkedSkill: p.linkedSkill,
     })
     agent.state.tools = stripArtifacts(
       buildExpertDraftCoordinatorTools({
         bookTitle: p.bookTitle,
         allStages: p.stages,
         linkedMaterial: p.linkedMaterial,
+        linkedSkill: p.linkedSkill,
         readAccess: p.readAccess,
         getDraft: () => propsLatestRef.current.expertDraft,
         updateDraft: propsLatestRef.current.updateDraft,
@@ -428,6 +437,7 @@ export function ExpertDraftAiChat(props: Props) {
     props.bookGenre,
     props.stages,
     props.linkedMaterial,
+    props.linkedSkill,
     props.readAccess,
     debouncedDraft,
     watchWriterAgent,

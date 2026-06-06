@@ -17,6 +17,7 @@ import {
   type WorkspaceAgentId,
   type WorkspaceAgentReadAccessConfig,
 } from './workspaces/short/stageReadAccess'
+import { appendLoadableSkillsToPrompt } from './workspaces/short/loadSkill'
 
 export type {
   WorkspaceAgentId,
@@ -242,6 +243,8 @@ export interface BookSummary {
   output_dir?: string
   /** 写书工作台关联的素材库 id，空表示未关联 */
   linked_material_id?: string
+  /** 写书工作台绑定的技能库 id，空表示未绑定 */
+  linked_skill_id?: string
 }
 
 export interface Book extends BookSummary {
@@ -507,6 +510,7 @@ declare global {
           book_type: string,
           categories: string[],
           workspace_root?: string | null,
+          linked_skill_id?: string | null,
         ): Promise<Book>
         get_book(book_id: string): Promise<Book | null>
         save_book(
@@ -517,6 +521,7 @@ declare global {
           expert_draft?: ExpertDraft | null,
           title?: string | null,
           status?: BookStatus | null,
+          linked_skill_id?: string | null,
         ): Promise<Book | null>
         delete_book(book_id: string): Promise<boolean>
         /** 上次选定的工作文件夹（持久化在应用 .data/preferences.json） */
@@ -999,6 +1004,8 @@ function normalizeBookSummary(raw: Partial<BookSummary> & { id: string }): BookS
     output_dir: typeof raw.output_dir === 'string' ? raw.output_dir : undefined,
     linked_material_id:
       typeof raw.linked_material_id === 'string' ? raw.linked_material_id : undefined,
+    linked_skill_id:
+      typeof raw.linked_skill_id === 'string' ? raw.linked_skill_id : undefined,
   }
 }
 
@@ -1076,7 +1083,7 @@ async function mockListBooks(): Promise<BookSummary[]> {
   const map = loadMock()
   return [...map.values()]
     .sort((a, b) => (b.updated_at || '').localeCompare(a.updated_at || ''))
-    .map(({ id, title, book_type, categories, status, output_dir, linked_material_id }) => ({
+    .map(({ id, title, book_type, categories, status, output_dir, linked_material_id, linked_skill_id }) => ({
       id,
       title,
       book_type,
@@ -1084,6 +1091,7 @@ async function mockListBooks(): Promise<BookSummary[]> {
       status: normalizeBookStatus(status),
       output_dir,
       linked_material_id,
+      linked_skill_id,
     }))
 }
 
@@ -1092,6 +1100,7 @@ async function mockCreateBook(
   book_type: string,
   categories: string[],
   workspace_root?: string | null,
+  linked_skill_id?: string | null,
 ): Promise<Book> {
   const map = loadMock()
   const now = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z')
@@ -1111,6 +1120,10 @@ async function mockCreateBook(
     content: '',
     output_dir,
     linked_material_id: '',
+    linked_skill_id:
+      bt === 'short' && linked_skill_id && loadMockSkills().has(linked_skill_id)
+        ? linked_skill_id
+        : '',
     stages: normalizeAllBookStages({}),
     expert_draft: defaultExpertDraft(),
     created_at: now,
@@ -1137,6 +1150,7 @@ async function mockSaveBook(
     content?: string | null
     stages?: Record<string, string> | null
     linked_material_id?: string | null
+    linked_skill_id?: string | null
     expert_draft?: ExpertDraft | null
     title?: string | null
     status?: BookStatus | null
@@ -1159,6 +1173,14 @@ async function mockSaveBook(
   if (options.linked_material_id !== undefined) {
     const mid = options.linked_material_id?.trim() ?? ''
     next = { ...next, linked_material_id: mid && loadMockMaterials().has(mid) ? mid : '' }
+  }
+  if (options.linked_skill_id !== undefined) {
+    const sid = options.linked_skill_id?.trim() ?? ''
+    next = {
+      ...next,
+      linked_skill_id:
+        next.book_type === 'short' && sid && loadMockSkills().has(sid) ? sid : '',
+    }
   }
   if (options.expert_draft != null) {
     next = { ...next, expert_draft: normalizeExpertDraft(options.expert_draft) }
@@ -1368,7 +1390,18 @@ async function mockSaveSkill(
 async function mockDeleteSkill(skill_id: string): Promise<boolean> {
   const map = loadMockSkills()
   const ok = map.delete(skill_id)
-  if (ok) saveMockSkills(map)
+  if (ok) {
+    saveMockSkills(map)
+    const books = loadMock()
+    let changed = false
+    for (const [bookId, book] of books) {
+      if (book.linked_skill_id === skill_id) {
+        books.set(bookId, { ...book, linked_skill_id: '' })
+        changed = true
+      }
+    }
+    if (changed) saveMock(books)
+  }
   return ok
 }
 
@@ -1490,12 +1523,21 @@ export async function createBook(
   book_type: BookType,
   categories: string[],
   workspace_root?: string | null,
+  linked_skill_id?: string | null,
 ): Promise<Book> {
   const api = await getBridgeApi()
   if (api) {
-    return normalizeBook(await api.create_book(title, book_type, categories, workspace_root ?? null))
+    return normalizeBook(
+      await api.create_book(
+        title,
+        book_type,
+        categories,
+        workspace_root ?? null,
+        linked_skill_id ?? null,
+      ),
+    )
   }
-  return mockCreateBook(title, book_type, categories, workspace_root)
+  return mockCreateBook(title, book_type, categories, workspace_root, linked_skill_id)
 }
 
 export async function getBook(book_id: string): Promise<Book | null> {
@@ -1511,6 +1553,7 @@ export type SaveBookOptions = {
   content?: string | null
   stages?: Record<string, string> | null
   linked_material_id?: string | null
+  linked_skill_id?: string | null
   expert_draft?: ExpertDraft | null
   title?: string | null
   status?: BookStatus | null
@@ -1538,6 +1581,7 @@ export async function saveBook(
       opts.expert_draft ?? undefined,
       opts.title ?? undefined,
       opts.status ?? undefined,
+      opts.linked_skill_id ?? undefined,
     )
     return raw ? normalizeBook(raw) : null
   }
@@ -2050,6 +2094,7 @@ export async function getWorkspaceSystemPrompt(
     stageBody: string
     allStages: Partial<Record<StageId, string>>
     allowedWorkspaceStages: readonly StageId[]
+    linkedSkill?: Skill | null
   },
 ): Promise<string> {
   const stagesObj: Record<string, string> = {}
@@ -2059,7 +2104,7 @@ export async function getWorkspaceSystemPrompt(
 
   const api = await getBridgeApi()
   if (api?.get_workspace_system_prompt) {
-    return api.get_workspace_system_prompt(
+    const prompt = await api.get_workspace_system_prompt(
       stageId,
       JSON.stringify({
         book_title: input.bookTitle,
@@ -2069,6 +2114,7 @@ export async function getWorkspaceSystemPrompt(
         allowed_workspace_stages: input.allowedWorkspaceStages,
       }),
     )
+    return appendLoadableSkillsToPrompt(prompt, input.linkedSkill, stageId)
   }
 
   const allowed = new Set(input.allowedWorkspaceStages)
@@ -2076,7 +2122,7 @@ export async function getWorkspaceSystemPrompt(
     Object.entries(input.allStages).filter(([id]) => allowed.has(id as StageId)),
   ) as Partial<Record<StageId, string>>
   const raw = await readWorkspaceAgentPromptTemplate(stageId)
-  return renderPromptFromTemplateRaw(raw, {
+  const prompt = renderPromptFromTemplateRaw(raw, {
     bookTitle: input.bookTitle,
     bookGenre: input.bookGenre,
     stageBody: input.stageBody,
@@ -2084,4 +2130,5 @@ export async function getWorkspaceSystemPrompt(
     promptKind: 'workspace',
     stageId,
   })
+  return appendLoadableSkillsToPrompt(prompt, input.linkedSkill, stageId)
 }

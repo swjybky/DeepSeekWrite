@@ -292,6 +292,7 @@ class Book:
     content: str = ""
     output_dir: str = ""
     linked_material_id: str = ""
+    linked_skill_id: str = ""
     status: BookStatus = "editing"
     stages: dict[str, str] = field(default_factory=default_stages)
     expert_draft: dict[str, Any] = field(default_factory=default_expert_draft)
@@ -316,6 +317,7 @@ class Book:
             content=str(data.get("content") or ""),
             output_dir=str(data.get("output_dir") or ""),
             linked_material_id=str(data.get("linked_material_id") or ""),
+            linked_skill_id=str(data.get("linked_skill_id") or ""),
             status=normalize_book_status(data.get("status")),
             stages=migrated_stages,
             expert_draft=normalize_expert_draft_from_storage(data.get("expert_draft")),

@@ -22,12 +22,16 @@ import {
   MATERIAL_STAGE_LABELS,
   type Material,
   type MaterialSummary,
+  type Skill,
+  type SkillSummary,
   generateBookCover,
   getBookCover,
   pickFolder,
   exportDocx,
   getWorkspaceAgentReadAccess,
   type WorkspaceAgentReadAccessConfig,
+  listSkills,
+  getSkill,
 } from '../bridge'
 import {
   DraftStageEditor,
@@ -183,6 +187,7 @@ export function BookEditor() {
   /** 专家模式开关 */
   const [expertMode, setExpertMode] = useState(false)
   const [linkedMaterial, setLinkedMaterial] = useState<Material | null>(null)
+  const [linkedSkill, setLinkedSkill] = useState<Skill | null>(null)
   const [workspaceAgentReadAccess, setWorkspaceAgentReadAccess] =
     useState<WorkspaceAgentReadAccessConfig>(
       () => getDefaultWorkspaceAgentReadAccess(),
@@ -191,6 +196,10 @@ export function BookEditor() {
   const [materialSummaries, setMaterialSummaries] = useState<MaterialSummary[]>([])
   const [materialSelectorLoading, setMaterialSelectorLoading] = useState(false)
   const [materialSelectorSaving, setMaterialSelectorSaving] = useState(false)
+  const [skillSelectorOpen, setSkillSelectorOpen] = useState(false)
+  const [skillSummaries, setSkillSummaries] = useState<SkillSummary[]>([])
+  const [skillSelectorLoading, setSkillSelectorLoading] = useState(false)
+  const [skillSelectorSaving, setSkillSelectorSaving] = useState(false)
   const [editingTitle, setEditingTitle] = useState(false)
   const [titleDraft, setTitleDraft] = useState('')
   const [aiChatEpochByStage, setAiChatEpochByStage] = useState<
@@ -450,6 +459,7 @@ export function BookEditor() {
       status: next.status,
       output_dir: next.output_dir,
       linked_material_id: next.linked_material_id,
+      linked_skill_id: next.linked_skill_id,
     }
     setWorkspaceBooks((prev) => {
       const index = prev.findIndex((item) => item.id === summary.id)
@@ -504,6 +514,12 @@ export function BookEditor() {
         setLinkedMaterial(material)
       } else {
         setLinkedMaterial(null)
+      }
+      if (b.linked_skill_id) {
+        const skill = await getSkill(b.linked_skill_id)
+        setLinkedSkill(skill)
+      } else {
+        setLinkedSkill(null)
       }
       const rows = resolveWorkspaceStagesForBook(b)
       syncBookEditorState(b, true)
@@ -722,6 +738,7 @@ export function BookEditor() {
         getDraft: () => expertDraftRef.current,
         getWorkspaceStages: () => stagesRef.current,
         linkedMaterial,
+        linkedSkill,
         readAccess: resolveWorkspaceAgentReadAccess(
           workspaceAgentReadAccess,
           EXPERT_SECTION_WRITER_AGENT_ID,
@@ -756,6 +773,7 @@ export function BookEditor() {
       book,
       bookGenre,
       linkedMaterial,
+      linkedSkill,
       workspaceAgentReadAccess,
       updateExpertDraft,
     ],
@@ -956,6 +974,41 @@ export function BookEditor() {
     }
   }
 
+  const openSkillSelector = async () => {
+    setSkillSelectorOpen(true)
+    setSkillSelectorLoading(true)
+    setError(null)
+    try {
+      setSkillSummaries(await listSkills())
+    } catch (e) {
+      setError(e instanceof Error ? e.message : '无法加载技能库列表')
+    } finally {
+      setSkillSelectorLoading(false)
+    }
+  }
+
+  const saveLinkedSkill = async (skillId: string | null) => {
+    if (!id || !book) return
+    setSkillSelectorSaving(true)
+    setError(null)
+    try {
+      const next = await saveBook(id, { linked_skill_id: skillId ?? '' })
+      if (!next) {
+        setError('绑定技能库失败：书籍不存在')
+        return
+      }
+      const skill = next.linked_skill_id ? await getSkill(next.linked_skill_id) : null
+      setBook(next)
+      syncWorkspaceBookSummary(next)
+      setLinkedSkill(skill)
+      setSkillSelectorOpen(false)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : '绑定技能库失败')
+    } finally {
+      setSkillSelectorSaving(false)
+    }
+  }
+
   const { total: stageCharTotal, nonSpace: stageCharNonSpace } =
     activeStage === 'draft'
       ? draftMetrics
@@ -1038,6 +1091,25 @@ export function BookEditor() {
             onClick={() => void openMaterialSelector()}
           >
             素材库选择
+          </button>
+          <span
+            className="editor-header-material-name"
+            title={linkedSkill ? `已绑定：${linkedSkill.title}` : '未绑定技能库'}
+          >
+            {linkedSkill ? linkedSkill.title : '未绑定技能'}
+          </span>
+          <button
+            type="button"
+            className={
+              linkedSkill
+                ? 'editor-header-material-select editor-header-material-select--active'
+                : 'editor-header-material-select'
+            }
+            aria-label="选择绑定技能库"
+            title={linkedSkill ? `已绑定：${linkedSkill.title}` : '选择绑定技能库'}
+            onClick={() => void openSkillSelector()}
+          >
+            技能库选择
           </button>
           <button
             type="button"
@@ -1225,6 +1297,7 @@ export function BookEditor() {
             {' · '}
             {book?.categories.join('、') || '未分类'}
             {linkedMaterial ? ` · 素材：${linkedMaterial.title}` : ''}
+            {linkedSkill ? ` · 技能：${linkedSkill.title}` : ''}
           </div>
           {book ? (
             <div className="workspace-ai-chat-stack">
@@ -1269,6 +1342,7 @@ export function BookEditor() {
                       }
                       allStages={isActive ? stages : EMPTY_STAGES}
                       linkedMaterial={isActive ? linkedMaterial : null}
+                      linkedSkill={isActive ? linkedSkill : null}
                       workspaceAgentReadAccess={workspaceAgentReadAccess}
                       includePiArtifacts={WORKSPACE_AI_INCLUDE_PI_ARTIFACTS}
                       applyToStageEditor={(payload) =>
@@ -1309,6 +1383,7 @@ export function BookEditor() {
                   sessionEpoch={expertAiChatEpoch}
                   stages={stages}
                   linkedMaterial={linkedMaterial}
+                  linkedSkill={linkedSkill}
                   readAccess={resolveWorkspaceAgentReadAccess(
                     workspaceAgentReadAccess,
                     EXPERT_DRAFT_COORDINATOR_AGENT_ID,
@@ -1532,6 +1607,99 @@ export function BookEditor() {
                   className="btn-material-close"
                   disabled={materialSelectorSaving}
                   onClick={() => setMaterialSelectorOpen(false)}
+                >
+                  关闭
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : null}
+
+        {skillSelectorOpen ? (
+          <div
+            className="workspace-material-selector-backdrop"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="wc-skill-selector-title"
+          >
+            <div className="workspace-material-selector-panel">
+              <div className="workspace-material-selector-head">
+                <h2 id="wc-skill-selector-title" className="workspace-material-selector-title">
+                  选择绑定技能库
+                </h2>
+                <button
+                  type="button"
+                  className="workspace-material-selector-close"
+                  aria-label="关闭"
+                  disabled={skillSelectorSaving}
+                  onClick={() => setSkillSelectorOpen(false)}
+                >
+                  ×
+                </button>
+              </div>
+              <div className="workspace-material-current">
+                当前绑定：
+                <strong>{linkedSkill ? linkedSkill.title : '未绑定'}</strong>
+                {linkedSkill?.output_dir ? (
+                  <span title={linkedSkill.output_dir}>
+                    {` · ${linkedSkill.output_dir.length > 42
+                      ? `${linkedSkill.output_dir.slice(0, 22)}…${linkedSkill.output_dir.slice(-16)}`
+                      : linkedSkill.output_dir}`}
+                  </span>
+                ) : null}
+              </div>
+              <div className="workspace-material-stage-note">
+                AI 会按当前阶段展示可加载技能，并通过 load_skill 读取完整技能内容。
+              </div>
+              <div className="workspace-material-list">
+                {skillSelectorLoading ? (
+                  <p className="muted workspace-material-empty">加载中…</p>
+                ) : skillSummaries.length === 0 ? (
+                  <p className="muted workspace-material-empty">暂无技能库</p>
+                ) : (
+                  skillSummaries.map((skill) => {
+                    const selected = skill.id === book.linked_skill_id
+                    const count = skill.stage_skill_count ?? 0
+                    return (
+                      <button
+                        key={skill.id}
+                        type="button"
+                        className={
+                          selected
+                            ? 'workspace-material-item workspace-material-item--selected'
+                            : 'workspace-material-item'
+                        }
+                        disabled={skillSelectorSaving}
+                        onClick={() => void saveLinkedSkill(skill.id)}
+                      >
+                        <span className="workspace-material-item-main">
+                          <span className="workspace-material-item-title">{skill.title}</span>
+                          <span className="workspace-material-item-meta">
+                            {count > 0 ? `${count} 条阶段技能` : '暂无阶段技能'}
+                          </span>
+                        </span>
+                        <span className="workspace-material-item-state">
+                          {selected ? '已绑定' : '绑定'}
+                        </span>
+                      </button>
+                    )
+                  })
+                )}
+              </div>
+              <div className="workspace-material-selector-foot">
+                <button
+                  type="button"
+                  className="btn-material-clear"
+                  disabled={skillSelectorSaving || !book.linked_skill_id}
+                  onClick={() => void saveLinkedSkill(null)}
+                >
+                  取消绑定
+                </button>
+                <button
+                  type="button"
+                  className="btn-material-close"
+                  disabled={skillSelectorSaving}
+                  onClick={() => setSkillSelectorOpen(false)}
                 >
                   关闭
                 </button>

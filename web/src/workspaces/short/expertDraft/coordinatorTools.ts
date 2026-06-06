@@ -6,6 +6,7 @@ import type {
   ExpertDraftCharacterState,
   ExpertDraftSection,
   Material,
+  Skill,
   StageId,
 } from '../../../bridge'
 import { defineTool, textBlock } from '../../shared/piToolkit'
@@ -13,6 +14,7 @@ import {
   buildReadLinkedMaterialContentTool,
   buildReadWorkspaceContentTool,
 } from '../stageAgents'
+import { buildLoadSkillTool } from '../loadSkill'
 import type { WorkspaceAgentReadAccessEntry } from '../stageReadAccess'
 
 type ExpertDraftUpdater = (updater: (draft: ExpertDraft) => ExpertDraft) => void
@@ -21,6 +23,7 @@ export type ExpertDraftCoordinatorToolContext = {
   bookTitle: string
   allStages: Partial<Record<StageId, string>>
   linkedMaterial?: Material | null
+  linkedSkill?: Skill | null
   readAccess: WorkspaceAgentReadAccessEntry
   getDraft: () => ExpertDraft
   updateDraft: ExpertDraftUpdater
@@ -87,6 +90,12 @@ export function buildExpertDraftCoordinatorTools(
       buildReadLinkedMaterialContentTool(toolCtx, ctx.readAccess.material),
     )
   }
+  readTools.push(
+    buildLoadSkillTool({
+      linkedSkill: ctx.linkedSkill,
+      currentStageId: 'expert_draft_coordinator',
+    }),
+  )
 
   return [
     ...readTools,

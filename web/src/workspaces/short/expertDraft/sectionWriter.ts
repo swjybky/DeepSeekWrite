@@ -7,12 +7,14 @@ import {
   readWorkspaceAgentPromptTemplate,
   type ExpertDraft,
   type Material,
+  type Skill,
   type StageId,
 } from '../../../bridge'
 import {
   buildReadLinkedMaterialContentTool,
   buildReadWorkspaceContentTool,
 } from '../stageAgents'
+import { buildLoadSkillTool } from '../loadSkill'
 import {
   EXPERT_SECTION_WRITER_AGENT_ID,
   type WorkspaceAgentReadAccessEntry,
@@ -43,6 +45,8 @@ export type RunExpertDraftSectionWriterOptions = {
   getWorkspaceStages: () => Partial<Record<StageId, string>>
   /** 书籍关联的素材库 */
   linkedMaterial?: Material | null
+  /** 书籍绑定的技能库 */
+  linkedSkill?: Skill | null
   /** 后台小节编写智能体的全局可读配置 */
   readAccess: WorkspaceAgentReadAccessEntry
   updateDraft: ExpertDraftUpdater
@@ -155,6 +159,7 @@ function buildSectionWriterTools(input: {
   sectionTitle: string
   allStages: Partial<Record<StageId, string>>
   linkedMaterial?: Material | null
+  linkedSkill?: Skill | null
   readAccess: WorkspaceAgentReadAccessEntry
   updateDraft: ExpertDraftUpdater
   onSectionBodyWritten?: (text: string) => void
@@ -189,6 +194,12 @@ function buildSectionWriterTools(input: {
       buildReadLinkedMaterialContentTool(toolCtx, readAccess.material),
     )
   }
+  readTools.push(
+    buildLoadSkillTool({
+      linkedSkill: input.linkedSkill,
+      currentStageId: EXPERT_SECTION_WRITER_AGENT_ID,
+    }),
+  )
 
   return [
     ...readTools,
@@ -299,6 +310,7 @@ export async function runExpertDraftSectionWriter(
             workspaceStages: opts.getWorkspaceStages(),
             allowedWorkspaceStages: opts.readAccess.workspace,
             template: systemPromptTemplate,
+            linkedSkill: opts.linkedSkill,
           }),
           model,
           thinkingLevel: getPreferredWorkspaceThinkingLevel(),
@@ -309,6 +321,7 @@ export async function runExpertDraftSectionWriter(
             sectionTitle: section.title,
             allStages: opts.getWorkspaceStages(),
             linkedMaterial: opts.linkedMaterial,
+            linkedSkill: opts.linkedSkill,
             readAccess: opts.readAccess,
             updateDraft: opts.updateDraft,
             onSectionBodyWritten: (text) => {

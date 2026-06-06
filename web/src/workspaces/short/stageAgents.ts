@@ -1,10 +1,11 @@
 import type { AgentTool } from '@earendil-works/pi-agent-core'
 import { Type } from 'typebox'
 
-import type { Material, MaterialStageId } from '../../bridge'
+import type { Material, MaterialStageId, Skill } from '../../bridge'
 import { MATERIAL_STAGE_LABELS, normalizeMaterialStages } from '../../bridge'
 import type { ShortStageId } from './stages'
 import { SHORT_STAGE_LABELS } from './stages'
+import { buildLoadSkillTool } from './loadSkill'
 import {
   resolveWorkspaceAgentReadAccess,
   type WorkspaceAgentReadAccessConfig,
@@ -22,6 +23,7 @@ export type ShortWorkspaceStageAgentContext = {
   getCurrentStageBody?: (stageId: ShortStageId) => string | undefined
   allStages: Partial<Record<ShortStageId, string>>
   linkedMaterial?: Material | null
+  linkedSkill?: Skill | null
   /** 全局配置解析后：当前阶段允许读取的创作空间阶段 */
   allowedWorkspaceStages?: readonly ShortStageId[]
   /** 全局配置解析后：当前阶段允许读取的素材库阶段 */
@@ -504,6 +506,10 @@ export function buildShortWorkspaceAdditionalTools(
 
   const readSaved = readWorkspaceTools(ctx, allowedWorkspace)
   const readMaterial = readMaterialTools(ctx, allowedMaterial)
+  const loadSkill = buildLoadSkillTool({
+    linkedSkill: ctx.linkedSkill,
+    currentStageId: ctx.stageId,
+  })
 
   const writeWorkspace = buildWriteWorkspaceEditorTool(ctx)
   const replaceCurrentStageText = buildReplaceCurrentStageTextTool(ctx)
@@ -511,28 +517,29 @@ export function buildShortWorkspaceAdditionalTools(
     case 'character_design':
     case 'plot_design':
     case 'intro_design':
-      return [...readSaved, ...readMaterial, writeWorkspace, replaceCurrentStageText]
+      return [...readSaved, ...readMaterial, loadSkill, writeWorkspace, replaceCurrentStageText]
 
     case 'plot_refine':
-      return [...readSaved, ...readMaterial, writeWorkspace, replaceCurrentStageText]
+      return [...readSaved, ...readMaterial, loadSkill, writeWorkspace, replaceCurrentStageText]
 
     case 'outline':
     case 'draft_review':
-      return [...readSaved, ...readMaterial, writeWorkspace, replaceCurrentStageText]
+      return [...readSaved, ...readMaterial, loadSkill, writeWorkspace, replaceCurrentStageText]
 
     case 'draft':
-      return [...readSaved, ...readMaterial, replaceCurrentStageText]
+      return [...readSaved, ...readMaterial, loadSkill, replaceCurrentStageText]
 
     case 'format_conversion':
       return [
         ...readSaved,
         ...readMaterial,
+        loadSkill,
         buildCopyStageToFormatTool(ctx),
         buildGlobalReplaceTool(ctx),
         replaceCurrentStageText,
       ]
 
     default:
-      return [...readSaved, replaceCurrentStageText]
+      return [...readSaved, loadSkill, replaceCurrentStageText]
   }
 }

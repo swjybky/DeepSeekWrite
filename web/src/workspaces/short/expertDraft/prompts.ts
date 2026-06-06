@@ -1,4 +1,5 @@
-import type { ExpertDraft, StageId } from '../../../bridge'
+import type { ExpertDraft, Skill, StageId } from '../../../bridge'
+import { appendLoadableSkillsToPrompt } from '../loadSkill'
 
 const EXCERPT_LIMIT = 8000
 const RECENT_PREVIOUS_SECTION_LIMIT = 3
@@ -55,12 +56,18 @@ export function buildExpertDraftCoordinatorSystemPrompt(input: {
   workspaceStages: Partial<Record<StageId, string>>
   allowedWorkspaceStages: readonly StageId[]
   template?: string
+  linkedSkill?: Skill | null
 }): string {
   const template = input.template ?? DEFAULT_COORDINATOR_SYSTEM_PROMPT
-  return renderExpertTemplate(template, {
+  const prompt = renderExpertTemplate(template, {
     bookTitle: input.bookTitle,
     bookGenre: input.bookGenre,
   })
+  return appendLoadableSkillsToPrompt(
+    prompt,
+    input.linkedSkill,
+    'expert_draft_coordinator',
+  )
 }
 
 export function buildSectionWriterSystemPrompt(input: {
@@ -70,12 +77,18 @@ export function buildSectionWriterSystemPrompt(input: {
   workspaceStages: Partial<Record<StageId, string>>
   allowedWorkspaceStages: readonly StageId[]
   template?: string
+  linkedSkill?: Skill | null
 }): string {
   const template = input.template ?? DEFAULT_SECTION_WRITER_SYSTEM_PROMPT
-  return renderExpertTemplate(template, {
+  const prompt = renderExpertTemplate(template, {
     bookTitle: input.bookTitle,
     bookGenre: input.bookGenre,
   })
+  return appendLoadableSkillsToPrompt(
+    prompt,
+    input.linkedSkill,
+    'expert_section_writer',
+  )
 }
 
 function renderExpertTemplate(

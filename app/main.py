@@ -287,8 +287,15 @@ class Api:
         book_type: str,
         categories: list[str],
         workspace_root: str | None = None,
+        linked_skill_id: str | None = None,
     ) -> dict:
-        return self._store.create_book(title, book_type, categories, workspace_root)
+        return self._store.create_book(
+            title,
+            book_type,
+            categories,
+            workspace_root,
+            linked_skill_id,
+        )
 
     def get_book(self, book_id: str) -> dict | None:
         return self._store.get_book(book_id)
@@ -302,6 +309,7 @@ class Api:
         expert_draft: dict | None = None,
         title: str | None = None,
         status: str | None = None,
+        linked_skill_id: str | None = None,
     ) -> dict | None:
         return self._store.save_book(
             book_id,
@@ -311,6 +319,7 @@ class Api:
             expert_draft=expert_draft,
             title=title,
             status=status,
+            linked_skill_id=linked_skill_id,
         )
 
     def delete_book(self, book_id: str) -> bool:

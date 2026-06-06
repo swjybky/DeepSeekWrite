@@ -5,6 +5,7 @@ import type {
   StageId,
   MaterialPromptKind,
   MaterialStageId,
+  Skill,
   SkillStageId,
   WorkspaceAgentReadAccessConfig,
 } from '../bridge'
@@ -40,6 +41,7 @@ export type WorkspaceStageAgentContext = {
   ) => string | undefined
   allStages: Partial<Record<StageId | MaterialStageId | SkillStageId, string>>
   linkedMaterial?: Material | null
+  linkedSkill?: Skill | null
   /** 全局创作空间智能体可读配置（短篇创作空间） */
   workspaceAgentReadAccess?: WorkspaceAgentReadAccessConfig | null
   applyToStageEditor?: (payload: ApplyToStageEditorPayload) => void
@@ -93,6 +95,7 @@ export function getWorkspaceStageAdditionalTools(
     getCurrentStageBody: (stageId) => ctx.getCurrentStageBody?.(stageId),
     allStages: ctx.allStages as Partial<Record<ShortWorkspaceStageAgentContext['stageId'], string>>,
     linkedMaterial: ctx.linkedMaterial,
+    linkedSkill: ctx.linkedSkill,
     workspaceAgentReadAccess: ctx.workspaceAgentReadAccess,
     allowedWorkspaceStages: readAccess?.workspace,
     allowedMaterialStages: readAccess?.material,

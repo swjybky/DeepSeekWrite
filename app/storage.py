@@ -572,6 +572,7 @@ class BookStore:
                 "categories": b.categories,
                 "output_dir": b.output_dir,
                 "linked_material_id": b.linked_material_id,
+                "linked_skill_id": b.linked_skill_id,
                 "status": b.status,
             }
             for b in sorted(
@@ -593,10 +594,13 @@ class BookStore:
         book_type: str,
         categories: list[str] | None,
         workspace_root: str | None = None,
+        linked_skill_id: str | None = None,
     ) -> dict[str, Any]:
         now = _utc_now_iso()
         bt: str = book_type if book_type in ("short", "long") else "long"
         cats = list(categories or []) if bt == "short" else []
+        sid = (linked_skill_id or "").strip()
+        linked_sid = sid if bt == "short" and sid in self._skills else ""
         wr = (workspace_root or "").strip()
         od = ""
         if wr:
@@ -623,6 +627,7 @@ class BookStore:
             content="",
             output_dir=od,
             linked_material_id="",
+            linked_skill_id=linked_sid,
             stages=default_stages(),
             expert_draft=normalize_expert_draft_from_storage(None),
             created_at=now,
@@ -642,6 +647,7 @@ class BookStore:
         expert_draft: dict[str, Any] | None = None,
         title: str | None = None,
         status: str | None = None,
+        linked_skill_id: str | None = None,
     ) -> dict[str, Any] | None:
         b = self._books.get(book_id)
         if b is None:
@@ -651,6 +657,9 @@ class BookStore:
         if linked_material_id is not None:
             mid = linked_material_id.strip()
             b.linked_material_id = mid if mid in self._materials else ""
+        if linked_skill_id is not None:
+            sid = linked_skill_id.strip()
+            b.linked_skill_id = sid if b.book_type == "short" and sid in self._skills else ""
         if stages is not None:
             b.stages = apply_stage_patch(b.stages, stages)
             dk = primary_draft_stage_key(b)
@@ -876,4 +885,12 @@ class BookStore:
             return False
         del self._skills[sid]
         save_skills_atomic(self._skills_path, self._skills)
+        changed_books = False
+        for book in self._books.values():
+            if book.linked_skill_id == sid:
+                book.linked_skill_id = ""
+                book.updated_at = _utc_now_iso()
+                changed_books = True
+        if changed_books:
+            save_books_atomic(self._path, self._books)
         return True

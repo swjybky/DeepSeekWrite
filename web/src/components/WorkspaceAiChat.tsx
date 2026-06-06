@@ -7,6 +7,7 @@ import type {
   StageId,
   MaterialStageId,
   MaterialPromptKind,
+  Skill,
   SkillStageId,
   WorkspaceAgentReadAccessConfig,
 } from '../bridge'
@@ -89,6 +90,8 @@ type Props = {
   allStages: Partial<Record<StageId | MaterialStageId | SkillStageId, string>>
   /** 当前书籍关联的素材库；前期设计阶段会将其暴露为 AI 工具可读取内容 */
   linkedMaterial?: Material | null
+  /** 当前书籍绑定的技能库；书籍工作台智能体可按阶段加载技能 */
+  linkedSkill?: Skill | null
   /** 全局创作空间智能体可读配置（仅书籍短篇工作台） */
   workspaceAgentReadAccess?: WorkspaceAgentReadAccessConfig | null
   /**
@@ -199,6 +202,7 @@ function WorkspaceAiChatInner({
             latest.getCurrentStageBody?.(stageId ?? latest.stageId),
           allStages: mergeCurrentStageIntoAllStages(latest),
           linkedMaterial: latest.linkedMaterial,
+          linkedSkill: latest.linkedSkill,
           workspaceAgentReadAccess: latest.workspaceAgentReadAccess,
           applyToStageEditor: latest.applyToStageEditor,
           onRequestSave: latest.onRequestSave,
@@ -239,6 +243,7 @@ function WorkspaceAiChatInner({
                   props.workspaceAgentReadAccess,
                   props.stageId as StageId,
                 ).workspace,
+                linkedSkill: props.linkedSkill,
               },
             )
       if (cancelled || !hostRef.current) return
@@ -490,6 +495,7 @@ function WorkspaceAiChatInner({
                   p.workspaceAgentReadAccess,
                   p.stageId as StageId,
                 ).workspace,
+                linkedSkill: p.linkedSkill,
               },
             )
       if (!agentRef.current || seq !== promptPullSeqRef.current) return
@@ -505,6 +511,7 @@ function WorkspaceAiChatInner({
           p.getCurrentStageBody?.(stageId ?? p.stageId),
         allStages: latestAllStages,
         linkedMaterial: p.linkedMaterial,
+        linkedSkill: p.linkedSkill,
         workspaceAgentReadAccess: p.workspaceAgentReadAccess,
         applyToStageEditor: p.applyToStageEditor,
         onRequestSave: p.onRequestSave,
@@ -525,6 +532,7 @@ function WorkspaceAiChatInner({
     debouncedBody,
     props.allStages,
     props.linkedMaterial,
+    props.linkedSkill,
     props.workspaceAgentReadAccess,
     props.applyToStageEditor,
     includePiArtifacts,
@@ -566,6 +574,9 @@ export const WorkspaceAiChat = memo(WorkspaceAiChatInner, (prev, next) => {
   if (prev.linkedMaterial?.id !== next.linkedMaterial?.id) return false
   if (prev.linkedMaterial?.updated_at !== next.linkedMaterial?.updated_at) return false
   if (prev.linkedMaterial?.stages !== next.linkedMaterial?.stages) return false
+  if (prev.linkedSkill?.id !== next.linkedSkill?.id) return false
+  if (prev.linkedSkill?.updated_at !== next.linkedSkill?.updated_at) return false
+  if (prev.linkedSkill?.stages !== next.linkedSkill?.stages) return false
 
   // stageBody 内容变化需要更新（比较字符串值而非引用）
   if (prev.stageBody !== next.stageBody) return false
