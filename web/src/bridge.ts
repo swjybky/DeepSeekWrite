@@ -616,6 +616,16 @@ declare global {
           prompt: string,
         ): Promise<{ cover_path: string | null; success: boolean; error: string | null }>
 
+        // ==================== 素材/技能导入导出 API ====================
+        export_library(
+          library_type: string,
+          item_id: string,
+        ): Promise<{ success: boolean; error: string | null; path: string | null }>
+        import_library(
+          library_type: string,
+          workspace_root: string | null,
+        ): Promise<{ success: boolean; error: string | null; item: Record<string, unknown> | null }>
+
         // ==================== 导出 API ====================
         export_docx(
           book_id: string,
@@ -2006,6 +2016,30 @@ export async function exportDocx(
   } catch (e) {
     return { success: false, error: e instanceof Error ? e.message : '导出失败', path: null }
   }
+}
+
+// ==================== 导入导出 Bridge 函数 ====================
+
+export async function exportLibrary(
+  libraryType: 'material' | 'skill',
+  itemId: string,
+): Promise<{ success: boolean; error: string | null; path: string | null }> {
+  const api = await getBridgeApi()
+  if (api?.export_library) {
+    return api.export_library(libraryType, itemId)
+  }
+  return { success: false, error: '浏览器开发模式暂不支持导出', path: null }
+}
+
+export async function importLibrary(
+  libraryType: 'material' | 'skill',
+  workspaceRoot: string | null,
+): Promise<{ success: boolean; error: string | null; item: Record<string, unknown> | null }> {
+  const api = await getBridgeApi()
+  if (api?.import_library) {
+    return api.import_library(libraryType, workspaceRoot)
+  }
+  return { success: false, error: '浏览器开发模式暂不支持导入', item: null }
 }
 
 export async function getWorkspaceSystemPrompt(

@@ -547,6 +547,162 @@ class Api:
             return {"cover_path": None, "success": False, "error": "图片生成失败"}
         return {"cover_path": str(cover_path), "success": True, "error": None}
 
+    # ==================== 素材/技能 导入导出 API ====================
+
+    def export_library(self, library_type: str, item_id: str) -> dict:
+        """将素材或技能导出为 zip 压缩包，弹出保存对话框。
+
+        Args:
+            library_type: 'material' 或 'skill'
+            item_id: 素材或技能 ID
+
+        Returns:
+            {"success": bool, "error": str | None, "path": str | None}
+        """
+        import zipfile as _zipfile
+
+        try:
+            if library_type == "material":
+                item = self._store.get_material(item_id)
+                if not item:
+                    return {"success": False, "error": "素材不存在", "path": None}
+                default_name = f"{item.get('title', '素材')}.zip"
+            elif library_type == "skill":
+                item = self._store.get_skill(item_id)
+                if not item:
+                    return {"success": False, "error": "技能不存在", "path": None}
+                default_name = f"{item.get('title', '技能')}.zip"
+            else:
+                return {"success": False, "error": "无效的库类型", "path": None}
+
+            if not webview.windows:
+                return {"success": False, "error": "窗口未就绪", "path": None}
+            win = webview.windows[0]
+            result = win.create_file_dialog(
+                webview.FileDialog.SAVE_DIALOG,
+                save_filename=default_name,
+                file_types=("Zip 压缩包 (*.zip)",),
+            )
+            if not result:
+                return {"success": False, "error": None, "path": None}
+            save_path = str(result) if not isinstance(result, (list, tuple)) else str(result[0])
+            if not save_path:
+                return {"success": False, "error": None, "path": None}
+            if not save_path.lower().endswith(".zip"):
+                save_path += ".zip"
+
+            metadata = {
+                "library_type": library_type,
+                "data": item,
+            }
+
+            with _zipfile.ZipFile(save_path, "w", _zipfile.ZIP_DEFLATED) as zf:
+                zf.writestr(
+                    "metadata.json",
+                    json.dumps(metadata, ensure_ascii=False, indent=2),
+                )
+                output_dir = item.get("output_dir", "")
+                if output_dir and Path(output_dir).is_dir():
+                    for file in Path(output_dir).iterdir():
+                        if file.is_file():
+                            zf.write(file, f"files/{file.name}")
+
+            return {"success": True, "error": None, "path": save_path}
+        except Exception as e:
+            return {"success": False, "error": str(e), "path": None}
+
+    def import_library(self, library_type: str, workspace_root: str | None = None) -> dict:
+        """从 zip 压缩包导入素材或技能，弹出打开对话框。
+
+        Args:
+            library_type: 期望导入的类型 'material' 或 'skill'，若 zip 中有 metadata 则以 metadata 为准
+            workspace_root: 工作目录
+
+        Returns:
+            {"success": bool, "error": str | None, "item": dict | None}
+        """
+        import zipfile as _zipfile
+
+        try:
+            if not webview.windows:
+                return {"success": False, "error": "窗口未就绪", "item": None}
+            win = webview.windows[0]
+            result = win.create_file_dialog(
+                webview.FileDialog.OPEN_DIALOG,
+                file_types=("Zip 压缩包 (*.zip)",),
+            )
+            if not result:
+                return {"success": False, "error": None, "item": None}
+            zip_path = str(result[0]) if isinstance(result, (list, tuple)) else str(result)
+            if not zip_path:
+                return {"success": False, "error": None, "item": None}
+
+            if not Path(zip_path).is_file():
+                return {"success": False, "error": "文件不存在", "item": None}
+
+            with _zipfile.ZipFile(zip_path, "r") as zf:
+                if "metadata.json" not in zf.namelist():
+                    return {"success": False, "error": "无效的压缩包（缺少 metadata.json）", "item": None}
+                meta_raw = zf.read("metadata.json").decode("utf-8")
+                metadata = json.loads(meta_raw)
+
+                actual_type = metadata.get("library_type", library_type)
+                data = metadata.get("data", {})
+
+                ws = (workspace_root or "").strip()
+                if actual_type == "material":
+                    title = data.get("title", "导入素材")
+                    material_type = data.get("material_type", "short")
+                    parent_genre = data.get("parent_genre")
+                    sub_genre = data.get("sub_genre")
+                    created = self._store.create_material(
+                        title, material_type, parent_genre, sub_genre, ws or None
+                    )
+                    stages = data.get("stages")
+                    if stages:
+                        self._store.save_material(created["id"], stages=stages)
+
+                    output_dir = created.get("output_dir", "")
+                    if output_dir:
+                        dest = Path(output_dir)
+                        dest.mkdir(parents=True, exist_ok=True)
+                        for name in zf.namelist():
+                            if name.startswith("files/") and not name.endswith("/"):
+                                fname = name[len("files/"):]
+                                if fname:
+                                    (dest / fname).write_bytes(zf.read(name))
+
+                    final = self._store.get_material(created["id"])
+                    return {"success": True, "error": None, "item": final}
+
+                elif actual_type == "skill":
+                    title = data.get("title", "导入技能")
+                    created = self._store.create_skill(title, ws or None)
+                    stages = data.get("stages")
+                    if stages:
+                        self._store.save_skill(created["id"], stages=stages)
+
+                    output_dir = created.get("output_dir", "")
+                    if output_dir:
+                        dest = Path(output_dir)
+                        dest.mkdir(parents=True, exist_ok=True)
+                        for name in zf.namelist():
+                            if name.startswith("files/") and not name.endswith("/"):
+                                fname = name[len("files/"):]
+                                if fname:
+                                    (dest / fname).write_bytes(zf.read(name))
+
+                    final = self._store.get_skill(created["id"])
+                    return {"success": True, "error": None, "item": final}
+
+                else:
+                    return {"success": False, "error": f"不支持的库类型: {actual_type}", "item": None}
+
+        except _zipfile.BadZipFile:
+            return {"success": False, "error": "无效的 zip 文件", "item": None}
+        except Exception as e:
+            return {"success": False, "error": str(e), "item": None}
+
     def export_docx(
         self,
         book_id: str,

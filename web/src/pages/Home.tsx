@@ -29,6 +29,8 @@ import {
   normalizeAiModelSettings,
   saveAiModelConfig,
   SHORT_MATERIAL_GENRES,
+  exportLibrary,
+  importLibrary,
 } from '../bridge'
 import { CardGrid, bookToCardItem, materialToCardItem, skillToCardItem } from '../components/CardGrid'
 import { refreshPreferredWorkspaceChatModel } from '../pi/workspaceChatPreferences'
@@ -502,6 +504,13 @@ export function Home() {
   const [deletingSkillId, setDeletingSkillId] = useState<string | null>(null)
   const [skillError, setSkillError] = useState<string | null>(null)
 
+  // ==================== 导入/导出状态 ====================
+  const [exportMaterialOpen, setExportMaterialOpen] = useState(false)
+  const [exportSkillOpen, setExportSkillOpen] = useState(false)
+  const [exportingId, setExportingId] = useState<string | null>(null)
+  const [importingMaterial, setImportingMaterial] = useState(false)
+  const [importingSkill, setImportingSkill] = useState(false)
+
   // ==================== 模型配置状态 ====================
   const [aiSettings, setAiSettings] = useState<AiModelSettings>(() => emptyAiModelSettings())
   const [loadingAiSettings, setLoadingAiSettings] = useState(true)
@@ -801,6 +810,75 @@ export function Home() {
     }
   }
 
+  // ==================== 导入/导出操作 ====================
+  const handleExportMaterial = async (materialId: string) => {
+    setExportingId(materialId)
+    setMaterialError(null)
+    try {
+      const result = await exportLibrary('material', materialId)
+      if (result.error) {
+        setMaterialError(result.error)
+      }
+    } catch (err) {
+      setMaterialError(err instanceof Error ? err.message : '导出失败')
+    } finally {
+      setExportingId(null)
+      setExportMaterialOpen(false)
+    }
+  }
+
+  const handleExportSkill = async (skillId: string) => {
+    setExportingId(skillId)
+    setSkillError(null)
+    try {
+      const result = await exportLibrary('skill', skillId)
+      if (result.error) {
+        setSkillError(result.error)
+      }
+    } catch (err) {
+      setSkillError(err instanceof Error ? err.message : '导出失败')
+    } finally {
+      setExportingId(null)
+      setExportSkillOpen(false)
+    }
+  }
+
+  const handleImportMaterial = async () => {
+    setImportingMaterial(true)
+    setMaterialError(null)
+    try {
+      const result = await importLibrary('material', workspaceRoot)
+      if (result.error) {
+        setMaterialError(result.error)
+      } else if (result.success) {
+        await refreshMaterials()
+        await refreshSkills()
+      }
+    } catch (err) {
+      setMaterialError(err instanceof Error ? err.message : '导入失败')
+    } finally {
+      setImportingMaterial(false)
+    }
+  }
+
+  const handleImportSkill = async () => {
+    setImportingSkill(true)
+    setSkillError(null)
+    try {
+      const result = await importLibrary('skill', workspaceRoot)
+      if (result.error) {
+        setSkillError(result.error)
+      } else if (result.success) {
+        await refreshMaterials()
+        await refreshSkills()
+      }
+    } catch (err) {
+      setSkillError(err instanceof Error ? err.message : '导入失败')
+    } finally {
+      setImportingSkill(false)
+    }
+  }
+
   // ==================== 素材类型/分类改变处理 ====================
   const handleMaterialParentGenreChange = useCallback((genre: string) => {
     setMaterialParentGenre(genre)
@@ -1051,6 +1129,22 @@ export function Home() {
               <span className="card-header-count">{materials.length} 个素材</span>
             </div>
             <div className="card-header-actions">
+              <button
+                type="button"
+                className="btn-secondary btn-small"
+                disabled={importingMaterial}
+                onClick={() => void handleImportMaterial()}
+              >
+                {importingMaterial ? '导入中…' : '导入'}
+              </button>
+              <button
+                type="button"
+                className="btn-secondary btn-small"
+                disabled={materials.length === 0}
+                onClick={() => setExportMaterialOpen(true)}
+              >
+                导出
+              </button>
               <Link
                 className="btn-secondary btn-small"
                 to="/material-settings"
@@ -1066,6 +1160,39 @@ export function Home() {
               </button>
             </div>
           </header>
+
+          {exportMaterialOpen && (
+            <div className="export-picker">
+              <div className="export-picker-header">
+                <span className="export-picker-title">选择要导出的素材</span>
+                <button
+                  type="button"
+                  className="btn-secondary btn-small"
+                  onClick={() => setExportMaterialOpen(false)}
+                >
+                  取消
+                </button>
+              </div>
+              <ul className="export-picker-list">
+                {materials.map((m) => (
+                  <li key={m.id}>
+                    <button
+                      type="button"
+                      className="export-picker-item"
+                      disabled={exportingId === m.id}
+                      onClick={() => void handleExportMaterial(m.id)}
+                    >
+                      <span className="export-picker-item-title">{m.title}</span>
+                      <span className="export-picker-item-meta">
+                        {m.material_type === 'short' ? `${m.parent_genre || ''}${m.sub_genre ? ' · ' + m.sub_genre : ''}` : '长篇'}
+                      </span>
+                      {exportingId === m.id && <span className="export-picker-item-loading">导出中…</span>}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
 
           {showMaterialForm && (
             <form className="create-form" onSubmit={handleCreateMaterial}>
@@ -1199,6 +1326,22 @@ export function Home() {
               <span className="card-header-count">{skills.length} 个技能</span>
             </div>
             <div className="card-header-actions">
+              <button
+                type="button"
+                className="btn-secondary btn-small"
+                disabled={importingSkill}
+                onClick={() => void handleImportSkill()}
+              >
+                {importingSkill ? '导入中…' : '导入'}
+              </button>
+              <button
+                type="button"
+                className="btn-secondary btn-small"
+                disabled={skills.length === 0}
+                onClick={() => setExportSkillOpen(true)}
+              >
+                导出
+              </button>
               <Link
                 className="btn-secondary btn-small"
                 to="/skill-settings"
@@ -1214,6 +1357,39 @@ export function Home() {
               </button>
             </div>
           </header>
+
+          {exportSkillOpen && (
+            <div className="export-picker">
+              <div className="export-picker-header">
+                <span className="export-picker-title">选择要导出的技能</span>
+                <button
+                  type="button"
+                  className="btn-secondary btn-small"
+                  onClick={() => setExportSkillOpen(false)}
+                >
+                  取消
+                </button>
+              </div>
+              <ul className="export-picker-list">
+                {skills.map((s) => (
+                  <li key={s.id}>
+                    <button
+                      type="button"
+                      className="export-picker-item"
+                      disabled={exportingId === s.id}
+                      onClick={() => void handleExportSkill(s.id)}
+                    >
+                      <span className="export-picker-item-title">{s.title}</span>
+                      <span className="export-picker-item-meta">
+                        {s.stage_skill_count ?? 0} 条技能
+                      </span>
+                      {exportingId === s.id && <span className="export-picker-item-loading">导出中…</span>}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
 
           {showSkillForm && (
             <form className="create-form" onSubmit={handleCreateSkill}>
