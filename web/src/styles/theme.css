@@ -28,6 +28,49 @@
   --text-h: var(--ink);
   --bg: var(--paper);
   --surface: var(--paper-elevated);
+  --bg-elevated: var(--paper-elevated);
+  --bg-hover: var(--paper-deep);
+  --text-primary: var(--ink);
+  --text-secondary: var(--ink-soft);
+  --app-shell-bg:
+    radial-gradient(ellipse 120% 80% at 50% -20%, rgb(166 124 61 / 7%), transparent 55%),
+    linear-gradient(180deg, var(--paper) 0%, color-mix(in oklab, var(--paper-deep) 40%, var(--paper)) 100%);
+}
+
+:root[data-appearance='modern'] {
+  --paper: #f6f8fb;
+  --paper-deep: #eef2f7;
+  --paper-elevated: #ffffff;
+  --ink: #111827;
+  --ink-soft: #475569;
+  --ink-faint: #64748b;
+  --border: #dbe3ef;
+  --border-strong: #b8c5d8;
+  --accent: #2563eb;
+  --accent-hover: #1d4ed8;
+  --accent-soft: color-mix(in oklab, var(--accent) 9%, #ffffff);
+  --jade: #0f766e;
+  --gold: #b7791f;
+  --danger: #dc2626;
+  --shadow-soft: 0 10px 30px rgb(15 23 42 / 8%);
+  --shadow-panel: 0 1px 2px rgb(15 23 42 / 5%),
+    0 12px 30px rgb(15 23 42 / 6%);
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 10px;
+  --font-display: 'PingFang SC', 'Microsoft YaHei', 'Inter', sans-serif;
+  --font-body: 'PingFang SC', 'Microsoft YaHei', 'Inter', sans-serif;
+  --font-ui: var(--font-body);
+
+  --text: var(--ink-soft);
+  --text-h: var(--ink);
+  --bg: var(--paper);
+  --surface: var(--paper-elevated);
+  --bg-elevated: #ffffff;
+  --bg-hover: #f1f5f9;
+  --text-primary: var(--ink);
+  --text-secondary: var(--ink-faint);
+  --app-shell-bg: linear-gradient(180deg, #f8fafc 0%, #eef2f7 100%);
 }
 
 *,
@@ -60,6 +103,14 @@ h3 {
   font-weight: 600;
   color: var(--text-h);
   letter-spacing: 0.04em;
+}
+
+:root[data-appearance='modern'] h1,
+:root[data-appearance='modern'] h2,
+:root[data-appearance='modern'] h3,
+:root[data-appearance='modern'] .btn-primary,
+:root[data-appearance='modern'] .btn-secondary {
+  letter-spacing: 0;
 }
 
 button {

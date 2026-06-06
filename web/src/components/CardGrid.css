@@ -391,3 +391,100 @@
     grid-template-columns: repeat(3, 1fr);
   }
 }
+
+/* ==================== 现代白色风格覆盖 ==================== */
+:root[data-appearance='modern'] .card-grid-empty {
+  letter-spacing: 0;
+}
+
+:root[data-appearance='modern'] .card-link {
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: #ffffff;
+  box-shadow:
+    0 1px 2px rgb(15 23 42 / 6%),
+    0 12px 28px rgb(15 23 42 / 8%);
+}
+
+:root[data-appearance='modern'] .card-link::before,
+:root[data-appearance='modern'] .card-link::after {
+  display: none;
+}
+
+:root[data-appearance='modern'] .card-cover {
+  border-radius: 10px;
+}
+
+:root[data-appearance='modern'] .card-item[data-type='book'] .card-link {
+  background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+}
+
+:root[data-appearance='modern'] .card-item[data-type='material'] .card-link {
+  background: linear-gradient(180deg, #ffffff 0%, #f6fbfa 100%);
+}
+
+:root[data-appearance='modern'] .card-item[data-type='skill'] .card-link {
+  background: linear-gradient(180deg, #ffffff 0%, #fffbeb 100%);
+}
+
+:root[data-appearance='modern'] .card-item:hover .card-link {
+  transform: translateY(-3px);
+  border-color: color-mix(in oklab, var(--accent) 38%, var(--border));
+  box-shadow:
+    0 2px 6px rgb(15 23 42 / 7%),
+    0 16px 34px rgb(15 23 42 / 10%);
+}
+
+:root[data-appearance='modern'] .card-content {
+  padding: 0.75rem;
+  background: linear-gradient(
+    0deg,
+    rgb(255 255 255 / 96%) 0%,
+    rgb(255 255 255 / 86%) 58%,
+    transparent 100%
+  );
+}
+
+:root[data-appearance='modern'] .library-card .card-content {
+  padding: 0.55rem;
+}
+
+:root[data-appearance='modern'] .card-item[data-has-cover='true'] .card-content {
+  background: linear-gradient(
+    0deg,
+    rgb(15 23 42 / 82%) 0%,
+    rgb(15 23 42 / 42%) 62%,
+    transparent 100%
+  );
+}
+
+:root[data-appearance='modern'] .card-title {
+  color: var(--ink);
+  text-shadow: none;
+  letter-spacing: 0;
+}
+
+:root[data-appearance='modern'] .card-type {
+  border-color: color-mix(in oklab, var(--accent) 18%, var(--border));
+  border-radius: 999px;
+  background: color-mix(in oklab, var(--accent) 8%, #ffffff);
+  color: var(--accent);
+  letter-spacing: 0;
+}
+
+:root[data-appearance='modern'] .card-path {
+  color: var(--ink-faint);
+}
+
+:root[data-appearance='modern'] .card-delete-btn {
+  background: #ffffff;
+  border-color: var(--border);
+  color: var(--ink-faint);
+  box-shadow: 0 6px 18px rgb(15 23 42 / 14%);
+}
+
+:root[data-appearance='modern'] .card-delete-btn:hover {
+  background: #fef2f2;
+  border-color: color-mix(in oklab, var(--danger) 35%, var(--border));
+  color: var(--danger);
+}

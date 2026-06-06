@@ -498,6 +498,8 @@ export interface AiModelSettings {
   image: ImageModelConfig | null
 }
 
+export type AppearanceStyle = 'classic' | 'modern'
+
 declare global {
   interface Window {
     /** API 在 pywebviewready 之后才可用 */
@@ -527,6 +529,9 @@ declare global {
         /** 上次选定的工作文件夹（持久化在应用 .data/preferences.json） */
         get_workspace_root(): Promise<string | null>
         set_workspace_root(path: string | null): Promise<void>
+        /** 全软件外观风格（持久化在应用 .data/preferences.json） */
+        get_appearance_style(): Promise<AppearanceStyle | string>
+        set_appearance_style(style: AppearanceStyle): Promise<AppearanceStyle | string>
         /** 全局创作空间智能体可读配置 */
         get_workspace_agent_read_access(): Promise<Record<string, unknown>>
         set_workspace_agent_read_access(
@@ -654,6 +659,7 @@ export const WORKSPACE_AGENT_READ_ACCESS_STORAGE_KEY =
   'write-claw:workspace_agent_read_access'
 const LEGACY_STAGE_READ_ACCESS_STORAGE_KEY = 'write-claw:stage_read_access'
 const AI_MODEL_CONFIG_STORAGE_KEY = 'write-claw:ai_model_config'
+export const APPEARANCE_STYLE_STORAGE_KEY = 'write-claw:appearance_style'
 
 /** 与 main.tsx boot 一致：桌面壳加载的打包页（含本机 HTTP + `?pywebview=1`） */
 export function isPywebviewDesktopBundle(): boolean {
@@ -678,6 +684,57 @@ export function setStoredWorkspaceRoot(path: string | null): void {
   } catch {
     /* ignore */
   }
+}
+
+export function normalizeAppearanceStyle(raw: unknown): AppearanceStyle {
+  return raw === 'modern' ? 'modern' : 'classic'
+}
+
+export function getStoredAppearanceStyle(): AppearanceStyle {
+  try {
+    return normalizeAppearanceStyle(localStorage.getItem(APPEARANCE_STYLE_STORAGE_KEY))
+  } catch {
+    return 'classic'
+  }
+}
+
+export function setStoredAppearanceStyle(style: AppearanceStyle): void {
+  try {
+    localStorage.setItem(
+      APPEARANCE_STYLE_STORAGE_KEY,
+      normalizeAppearanceStyle(style),
+    )
+  } catch {
+    /* ignore */
+  }
+}
+
+export async function getAppearanceStyle(): Promise<AppearanceStyle> {
+  const api = await getBridgeApi()
+  if (api?.get_appearance_style) {
+    try {
+      const style = normalizeAppearanceStyle(await api.get_appearance_style())
+      setStoredAppearanceStyle(style)
+      return style
+    } catch {
+      /* fall through */
+    }
+  }
+  return getStoredAppearanceStyle()
+}
+
+export async function saveAppearanceStyle(
+  style: AppearanceStyle,
+): Promise<AppearanceStyle> {
+  const normalized = normalizeAppearanceStyle(style)
+  const api = await getBridgeApi()
+  if (api?.set_appearance_style) {
+    const saved = normalizeAppearanceStyle(await api.set_appearance_style(normalized))
+    setStoredAppearanceStyle(saved)
+    return saved
+  }
+  setStoredAppearanceStyle(normalized)
+  return normalized
 }
 
 /**

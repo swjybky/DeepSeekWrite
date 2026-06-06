@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 import {
   SHORT_GENRE_OPTIONS,
+  type AppearanceStyle,
   type AiModelConfig,
   type AiModelSettings,
   type BookSummary,
@@ -32,6 +33,7 @@ import {
   exportLibrary,
   importLibrary,
 } from '../bridge'
+import { APPEARANCE_STYLE_LABELS, useAppearance } from '../appearance'
 import { CardGrid, bookToCardItem, materialToCardItem, skillToCardItem } from '../components/CardGrid'
 import { refreshPreferredWorkspaceChatModel } from '../pi/workspaceChatPreferences'
 import './Home.css'
@@ -467,8 +469,108 @@ function ModelConfigDialog({
   )
 }
 
+type AppearanceStyleDialogProps = {
+  currentStyle: AppearanceStyle
+  saving: boolean
+  error: string | null
+  onClose: () => void
+  onSelect: (style: AppearanceStyle) => Promise<void>
+}
+
+const APPEARANCE_OPTIONS: Array<{
+  id: AppearanceStyle
+  label: string
+  tone: string
+}> = [
+  { id: 'classic', label: APPEARANCE_STYLE_LABELS.classic, tone: '宣纸暖色' },
+  { id: 'modern', label: APPEARANCE_STYLE_LABELS.modern, tone: '白色清爽' },
+]
+
+function AppearanceStyleDialog({
+  currentStyle,
+  saving,
+  error,
+  onClose,
+  onSelect,
+}: AppearanceStyleDialogProps) {
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && !saving) {
+        event.preventDefault()
+        onClose()
+      }
+    }
+    document.addEventListener('keydown', onKeyDown)
+    return () => document.removeEventListener('keydown', onKeyDown)
+  }, [onClose, saving])
+
+  return (
+    <div
+      className="style-config-backdrop"
+      role="presentation"
+      onClick={(event) => {
+        if (event.target === event.currentTarget && !saving) onClose()
+      }}
+    >
+      <section
+        className="style-config-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="style-config-title"
+      >
+        <header className="style-config-head">
+          <h2 id="style-config-title">风格配置</h2>
+          <button
+            type="button"
+            className="model-config-close"
+            aria-label="关闭风格配置"
+            disabled={saving}
+            onClick={onClose}
+          >
+            ×
+          </button>
+        </header>
+
+        <div className="style-config-body">
+          <div className="style-config-options" role="radiogroup" aria-label="软件风格">
+            {APPEARANCE_OPTIONS.map((option) => (
+              <button
+                key={option.id}
+                type="button"
+                className={
+                  currentStyle === option.id
+                    ? 'style-config-option style-config-option--active'
+                    : 'style-config-option'
+                }
+                role="radio"
+                aria-checked={currentStyle === option.id}
+                disabled={saving}
+                onClick={() => void onSelect(option.id)}
+              >
+                <span className="style-config-option-mark" aria-hidden="true" />
+                <span>
+                  <strong>{option.label}</strong>
+                  <em>{option.tone}</em>
+                </span>
+              </button>
+            ))}
+          </div>
+          {saving ? <p className="style-config-status">保存中…</p> : null}
+          {error ? <p className="form-error">{error}</p> : null}
+        </div>
+      </section>
+    </div>
+  )
+}
+
 export function Home() {
   const location = useLocation()
+  const {
+    appearanceStyle,
+    savingAppearance,
+    appearanceError,
+    setAppearanceStyle,
+  } = useAppearance()
 
   // ==================== 创作空间状态 ====================
   const [books, setBooks] = useState<BookSummary[]>([])
@@ -516,9 +618,11 @@ export function Home() {
   const [aiSettings, setAiSettings] = useState<AiModelSettings>(() => emptyAiModelSettings())
   const [loadingAiSettings, setLoadingAiSettings] = useState(true)
   const [modelConfigOpen, setModelConfigOpen] = useState(false)
+  const [styleConfigOpen, setStyleConfigOpen] = useState(false)
   const [workspaceDrawerOpen, setWorkspaceDrawerOpen] = useState(false)
   const [savingAiSettings, setSavingAiSettings] = useState(false)
   const [modelConfigError, setModelConfigError] = useState<string | null>(null)
+  const [styleConfigError, setStyleConfigError] = useState<string | null>(null)
 
   // ==================== 创作空间封面加载 ====================
   const loadBookCovers = useCallback(async (bookList: BookSummary[]) => {
@@ -686,6 +790,15 @@ export function Home() {
       throw new Error(message, { cause: e })
     } finally {
       setSavingAiSettings(false)
+    }
+  }
+
+  const handleSaveAppearanceStyle = async (style: AppearanceStyle) => {
+    setStyleConfigError(null)
+    try {
+      await setAppearanceStyle(style)
+    } catch (e) {
+      setStyleConfigError(e instanceof Error ? e.message : '保存风格配置失败')
     }
   }
 
@@ -953,12 +1066,35 @@ export function Home() {
           >
             {loadingAiSettings ? '模型配置…' : '模型配置'}
           </button>
+          <button
+            type="button"
+            className={
+              styleConfigOpen
+                ? 'home-config-trigger home-config-trigger--active'
+                : 'home-config-trigger'
+            }
+            title={`当前：${APPEARANCE_STYLE_LABELS[appearanceStyle]}`}
+            aria-expanded={styleConfigOpen}
+            disabled={savingAppearance}
+            onClick={() => {
+              setStyleConfigError(null)
+              setStyleConfigOpen(true)
+            }}
+          >
+            风格配置
+          </button>
         </nav>
       </header>
 
       {modelConfigError && !modelConfigOpen ? (
         <p className="home-config-error" role="alert">
           {modelConfigError}
+        </p>
+      ) : null}
+
+      {(styleConfigError || appearanceError) && !styleConfigOpen ? (
+        <p className="home-config-error" role="alert">
+          {styleConfigError || appearanceError}
         </p>
       ) : null}
 
@@ -1485,6 +1621,16 @@ export function Home() {
             if (!savingAiSettings) setModelConfigOpen(false)
           }}
           onSave={handleSaveAiSettings}
+        />
+      )}
+
+      {styleConfigOpen && (
+        <AppearanceStyleDialog
+          currentStyle={appearanceStyle}
+          saving={savingAppearance}
+          error={styleConfigError || appearanceError}
+          onClose={() => setStyleConfigOpen(false)}
+          onSelect={handleSaveAppearanceStyle}
         />
       )}
     </div>

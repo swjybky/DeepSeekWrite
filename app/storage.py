@@ -33,6 +33,8 @@ ISO_FMT = "%Y-%m-%dT%H:%M:%SZ"
 
 _WIN_INVALID = '<>:"/\\|?*\n\r\t'
 AI_MODEL_CONFIG_PREF_KEY = "ai_model_config"
+APPEARANCE_STYLE_PREF_KEY = "appearance_style"
+APPEARANCE_STYLES = {"classic", "modern"}
 
 
 def _sanitize_book_folder_name(title: str) -> str:
@@ -192,6 +194,24 @@ def write_saved_workspace_root(path: str | None) -> None:
     else:
         prefs.pop("workspace_root", None)
     save_preferences_atomic(prefs)
+
+
+def normalize_appearance_style(raw: Any) -> str:
+    if isinstance(raw, str) and raw.strip() in APPEARANCE_STYLES:
+        return raw.strip()
+    return "classic"
+
+
+def read_appearance_style() -> str:
+    return normalize_appearance_style(load_preferences().get(APPEARANCE_STYLE_PREF_KEY))
+
+
+def write_appearance_style(style: str) -> str:
+    normalized = normalize_appearance_style(style)
+    prefs = load_preferences()
+    prefs[APPEARANCE_STYLE_PREF_KEY] = normalized
+    save_preferences_atomic(prefs)
+    return normalized
 
 
 def read_workspace_agent_read_access() -> dict[str, Any]:

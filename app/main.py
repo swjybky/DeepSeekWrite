@@ -157,11 +157,13 @@ from app.prompt_store import (
 )
 from app.storage import (
     BookStore,
+    read_appearance_style,
     read_ai_model_config,
     read_ai_model_defaults,
     read_image_model_config,
     read_saved_workspace_root,
     read_workspace_agent_read_access,
+    write_appearance_style,
     write_ai_model_config,
     write_saved_workspace_root,
     write_workspace_agent_read_access,
@@ -420,6 +422,12 @@ class Api:
 
     def set_workspace_root(self, path: str | None) -> None:
         write_saved_workspace_root(path)
+
+    def get_appearance_style(self) -> str:
+        return read_appearance_style()
+
+    def set_appearance_style(self, style: str) -> str:
+        return write_appearance_style(style)
 
     def get_workspace_agent_read_access(self) -> dict[str, object]:
         """全局创作空间智能体可读的 workspace/material 阶段列表。"""
