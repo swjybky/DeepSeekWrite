@@ -579,7 +579,7 @@ class Api:
                 return {"success": False, "error": "窗口未就绪", "path": None}
             win = webview.windows[0]
             result = win.create_file_dialog(
-                webview.FileDialog.SAVE_DIALOG,
+                webview.FileDialog.SAVE,
                 save_filename=default_name,
                 file_types=("Zip 压缩包 (*.zip)",),
             )
@@ -628,7 +628,7 @@ class Api:
                 return {"success": False, "error": "窗口未就绪", "item": None}
             win = webview.windows[0]
             result = win.create_file_dialog(
-                webview.FileDialog.OPEN_DIALOG,
+                webview.FileDialog.OPEN,
                 file_types=("Zip 压缩包 (*.zip)",),
             )
             if not result:
