@@ -273,16 +273,38 @@ export function SkillEditor() {
     return () => window.removeEventListener('resize', onResize)
   }, [])
 
-  const syncSkillState = useCallback((next: Skill) => {
-    const normalized = normalizeSkillStages(next.stages)
-    setSkill({ ...next, stages: normalized })
-    stagesRef.current = normalized
-    setStages(normalized)
-    const ids = selectedIdsFromStages(normalized)
-    selectedEntryIdsRef.current = ids
-    setSelectedEntryIds(ids)
-    setActiveStage('character_design')
-  }, [])
+  const syncSkillState = useCallback(
+    (next: Skill, options?: { resetNavigation?: boolean }) => {
+      const normalized = normalizeSkillStages(next.stages)
+      setSkill({ ...next, stages: normalized })
+      stagesRef.current = normalized
+      setStages(normalized)
+
+      if (options?.resetNavigation) {
+        const ids = selectedIdsFromStages(normalized)
+        selectedEntryIdsRef.current = ids
+        setSelectedEntryIds(ids)
+        setActiveStage('character_design')
+        return
+      }
+
+      setSelectedEntryIds((prev) => {
+        const merged: Partial<Record<SkillStageId, string>> = {}
+        for (const stageId of SKILL_STAGE_KEYS) {
+          const entries = normalized[stageId] ?? []
+          const currentId = prev[stageId]
+          if (currentId && entries.some((entry) => entry.id === currentId)) {
+            merged[stageId] = currentId
+          } else if (entries[0]) {
+            merged[stageId] = entries[0].id
+          }
+        }
+        selectedEntryIdsRef.current = merged
+        return merged
+      })
+    },
+    [],
+  )
 
   const load = useCallback(async () => {
     if (!id) return
@@ -295,7 +317,7 @@ export function SkillEditor() {
         setError('未找到该技能')
         return
       }
-      syncSkillState(s)
+      syncSkillState(s, { resetNavigation: true })
     } catch (e) {
       setError(e instanceof Error ? e.message : '加载失败')
     } finally {

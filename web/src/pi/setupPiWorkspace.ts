@@ -14,6 +14,8 @@ import {
   setAppStorage,
 } from '@earendil-works/pi-web-ui'
 
+import { warmupWorkspaceModelStorage } from './resolveWorkspaceChatModel'
+
 let ready: Promise<void> | null = null
 
 export function ensurePiAppStorage(): Promise<void> {
@@ -51,6 +53,7 @@ export function ensurePiAppStorage(): Promise<void> {
         backend,
       )
       setAppStorage(storage)
+      await warmupWorkspaceModelStorage()
     })()
   }
   return ready

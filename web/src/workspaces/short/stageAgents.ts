@@ -15,6 +15,11 @@ import {
   excerptFn as excerpt,
   textBlock,
 } from '../shared/piToolkit'
+import {
+  applyTextSpanReplacement,
+  normalizeNewlines,
+  resolveReplacementSpan,
+} from '../shared/textReplaceMatch'
 
 export type ShortWorkspaceStageAgentContext = {
   bookTitle: string
@@ -308,30 +313,14 @@ type CurrentStageTextReplacement = {
   new_text: string
 }
 
-function normalizeNewlines(text: string): string {
-  return text.replace(/\r\n/g, '\n').replace(/\r/g, '\n')
-}
-
-function countExactOccurrences(haystack: string, needle: string): number {
-  if (!needle) return 0
-  let count = 0
-  let pos = 0
-  while (pos <= haystack.length) {
-    const found = haystack.indexOf(needle, pos)
-    if (found === -1) break
-    count += 1
-    pos = found + needle.length
-  }
-  return count
-}
-
 function replaceCurrentStageText(input: {
   currentBody: string
   replacements: CurrentStageTextReplacement[]
-}): { next: string; count: number } | { error: string } {
+}): { next: string; count: number; flexibleCount: number } | { error: string } {
   if (input.replacements.length === 0) return { error: 'replacements 不能为空。' }
 
   let next = normalizeNewlines(input.currentBody)
+  let flexibleCount = 0
   for (const [index, replacement] of input.replacements.entries()) {
     const itemName = `第 ${index + 1} 个片段`
     const originalText = normalizeNewlines(replacement.original_text)
@@ -352,24 +341,18 @@ function replaceCurrentStageText(input: {
       }
     }
 
-    const occurrenceCount = countExactOccurrences(next, originalText)
-    if (occurrenceCount === 0) {
-      return {
-        error:
-          `${itemName}的 original_text 未在当前阶段文本中找到。请先读取当前阶段内容，传入完全一致的原文片段。`,
-      }
+    const resolved = resolveReplacementSpan(next, originalText, itemName)
+    if (resolved.kind === 'error') {
+      return { error: resolved.message }
     }
-    if (occurrenceCount > 1) {
-      return {
-        error:
-          `${itemName}的 original_text 在当前阶段文本中出现了 ${occurrenceCount} 次。请扩大原文片段，使其唯一后再替换。`,
-      }
+    if (resolved.usedFlexibleMatch) {
+      flexibleCount += 1
     }
 
-    next = next.replace(originalText, newText)
+    next = applyTextSpanReplacement(next, resolved.span, newText)
   }
 
-  return { next, count: input.replacements.length }
+  return { next, count: input.replacements.length, flexibleCount }
 }
 
 export function buildReplaceCurrentStageTextTool(
@@ -379,17 +362,18 @@ export function buildReplaceCurrentStageTextTool(
     name: 'replace_current_stage_text',
     label: '替换当前阶段文本',
     description:
-      '根据“当前阶段编辑器中渲染出来的精确原文片段”替换成新文本，不使用行号。'
-      + '\n必须先读取当前阶段内容，再把需要修改的小段原文完整放入 original_text，把改写后内容放入 new_text。'
-      + '\noriginal_text 必须在当前阶段文本中精确且唯一匹配；找不到或出现多次都会拒绝，避免误改。'
-      + '\n需要多处修改时，传 replacements 数组；每个 replacement 只放一个小段，不要把整篇内容作为 original_text 或 new_text。',
+      '根据当前阶段编辑区中的原文片段替换成新文本，不使用行号。'
+      + '\n【必做】先调用 read_workspace_content 读取当前阶段，从工具返回正文中原样复制待改片段到 original_text；不要从对话摘要、系统提示词或旧回复中抄写。'
+      + '\noriginal_text 须在正文中唯一匹配；系统会自动容忍直引号"与弯引号“”、全角/半角逗号分号、破折号等常见差异，但语义内容必须一致。'
+      + '\n匹配失败时会返回编辑区中最接近的片段与可能差异；请据此修正后重试。'
+      + '\n需要多处修改时传 replacements 数组；每项只替换一个小段，不要把整篇作为 original_text 或 new_text。',
     parameters: Type.Object({
       replacements: Type.Array(
         Type.Object({
           original_text: Type.String({
             maxLength: MAX_CURRENT_STAGE_TEXT_REPLACE_CHARS,
             description:
-              '当前阶段文本中要被替换的精确原文片段。必须完整照抄，包含标点、空格和换行，并且只出现一次。',
+              '要被替换的原文片段。须来自 read_workspace_content 的返回正文；包含足够上下文以唯一定位。引号/常见标点可与编辑区略有差异，但字词须一致且只出现一次。',
           }),
           new_text: Type.String({
             maxLength: MAX_CURRENT_STAGE_TEXT_REPLACE_CHARS,
@@ -423,8 +407,12 @@ export function buildReplaceCurrentStageTextTool(
       if ('error' in result) return textBlock(`未替换：${result.error}`)
 
       apply({ text: result.next, mode: 'replace' })
+      const flexibleNote =
+        result.flexibleCount > 0
+          ? `（其中 ${result.flexibleCount} 处经引号/标点归一化后定位）`
+          : ''
       return textBlock(
-        `已按原文精确替换「${label}」编辑区 ${result.count} 个片段。`,
+        `已替换「${label}」编辑区 ${result.count} 个片段${flexibleNote}。`,
       )
     },
   })

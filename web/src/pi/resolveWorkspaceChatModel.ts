@@ -5,6 +5,10 @@ import { getAppStorage } from '@earendil-works/pi-web-ui'
 import type { AiModelConfig, AiModelDefaults } from '../bridge'
 import { getAiModelDefaults } from '../bridge'
 import '../components/WorkspaceModelDialog.css'
+import {
+  withIndexedDbRetry,
+  withPiStorageLock,
+} from './piStorageLock'
 
 type ResolvedModelConfig = AiModelConfig & {
   model: Model<Api>
@@ -119,55 +123,96 @@ function createOwnerModel(config: AiModelConfig): Model<Api> {
   }
 }
 
+type ConfiguredModelsPayload = {
+  defaults: AiModelDefaults
+  configs: ResolvedModelConfig[]
+}
+
+let configuredModelsCache: ConfiguredModelsPayload | null | undefined
+let configuredModelsInflight: Promise<ConfiguredModelsPayload | null> | null =
+  null
+let syncedModelConfigFingerprint = ''
+
+function fingerprintModelDefaults(defaults: AiModelDefaults): string {
+  return JSON.stringify({
+    default_model_id: defaults.default_model_id ?? '',
+    models: (defaults.models ?? []).map((config) => ({
+      id: config.id,
+      provider: config.provider,
+      model_id: config.model_id,
+      api_key: config.api_key,
+      base_url: config.base_url ?? '',
+      api: config.api ?? '',
+    })),
+  })
+}
+
 async function syncOwnerModelsToCustomProvidersStore(
   configs: AiModelConfig[],
 ): Promise<void> {
-  const storage = getAppStorage()
-  try {
-    const existing = await storage.customProviders.getAll()
-    for (const p of existing) {
-      if (p.id.startsWith('writeclaw-owner-')) {
-        await storage.customProviders.delete(p.id)
+  await withIndexedDbRetry(async () => {
+    const storage = getAppStorage()
+    try {
+      const existing = await storage.customProviders.getAll()
+      for (const p of existing) {
+        if (p.id.startsWith('writeclaw-owner-')) {
+          await storage.customProviders.delete(p.id)
+        }
       }
+    } catch {
+      // ignore cleanup errors
     }
-  } catch {
-    // ignore cleanup errors
-  }
-  for (const config of configs) {
-    if (!config.base_url) continue
-    const api = (config.api || 'openai-completions') as Api
-    if (!canStoreCustomProvider(api)) continue
-    const providerId = `writeclaw-owner-${config.id}`
-    const model = createOwnerModel(config)
-    await storage.customProviders.set({
-      id: providerId,
-      name: config.id,
-      type: api,
-      baseUrl: config.base_url,
-      apiKey: config.api_key,
-      models: [model],
-    })
-  }
+    for (const config of configs) {
+      if (!config.base_url) continue
+      const api = (config.api || 'openai-completions') as Api
+      if (!canStoreCustomProvider(api)) continue
+      const providerId = `writeclaw-owner-${config.id}`
+      const model = createOwnerModel(config)
+      await storage.customProviders.set({
+        id: providerId,
+        name: config.id,
+        type: api,
+        baseUrl: config.base_url,
+        apiKey: config.api_key,
+        models: [model],
+      })
+    }
+  })
 }
 
 async function writeConfiguredKeys(configs: AiModelConfig[]): Promise<void> {
-  for (const config of configs) {
-    const keyProvider = config.base_url ? config.id : config.provider
-    await getAppStorage().providerKeys.set(keyProvider, config.api_key)
-  }
+  await withIndexedDbRetry(async () => {
+    for (const config of configs) {
+      const keyProvider = config.base_url ? config.id : config.provider
+      await getAppStorage().providerKeys.set(keyProvider, config.api_key)
+    }
+  })
 }
 
-async function loadConfiguredModels(): Promise<{
-  defaults: AiModelDefaults
-  configs: ResolvedModelConfig[]
-} | null> {
-  const defaults = await loadDefaults()
-  if (!defaults?.models?.length) return null
+async function syncConfiguredModelsToPiStorage(
+  defaults: AiModelDefaults,
+): Promise<void> {
+  const fingerprint = fingerprintModelDefaults(defaults)
+  if (fingerprint === syncedModelConfigFingerprint) return
 
-  const ownerConfigs = defaults.models.filter((c) => c.base_url)
-  if (ownerConfigs.length) {
-    await syncOwnerModelsToCustomProvidersStore(ownerConfigs)
-  }
+  await withPiStorageLock(async () => {
+    if (fingerprint === syncedModelConfigFingerprint) return
+
+    const ownerConfigs = (defaults.models ?? []).filter((c) => c.base_url)
+    if (ownerConfigs.length) {
+      await syncOwnerModelsToCustomProvidersStore(ownerConfigs)
+    }
+    await writeConfiguredKeys(defaults.models ?? [])
+    syncedModelConfigFingerprint = fingerprint
+  })
+}
+
+async function buildConfiguredModels(
+  defaults: AiModelDefaults,
+): Promise<ConfiguredModelsPayload | null> {
+  if (!defaults.models?.length) return null
+
+  await syncConfiguredModelsToPiStorage(defaults)
 
   const configs: ResolvedModelConfig[] = []
   for (const config of defaults.models) {
@@ -180,8 +225,33 @@ async function loadConfiguredModels(): Promise<{
     }
   }
   if (!configs.length) return null
-  await writeConfiguredKeys(configs)
   return { defaults, configs }
+}
+
+async function loadConfiguredModels(): Promise<ConfiguredModelsPayload | null> {
+  if (configuredModelsCache !== undefined) {
+    return configuredModelsCache
+  }
+  if (!configuredModelsInflight) {
+    configuredModelsInflight = (async () => {
+      const defaults = await loadDefaults()
+      if (!defaults?.models?.length) {
+        configuredModelsCache = null
+        return null
+      }
+      const payload = await buildConfiguredModels(defaults)
+      configuredModelsCache = payload
+      return payload
+    })().finally(() => {
+      configuredModelsInflight = null
+    })
+  }
+  return configuredModelsInflight
+}
+
+/** 在首个 ChatPanel 挂载前预热模型配置，避免多面板并发写 IndexedDB。 */
+export async function warmupWorkspaceModelStorage(): Promise<void> {
+  await loadConfiguredModels()
 }
 
 function pickDefaultConfig(
@@ -222,7 +292,11 @@ export async function resolveWorkspaceProviderApiKey(
     ) {
       return undefined
     }
-    await getAppStorage().providerKeys.set(d.provider, d.api_key.trim())
+    await withPiStorageLock(() =>
+      withIndexedDbRetry(() =>
+        getAppStorage().providerKeys.set(d.provider, d.api_key.trim()),
+      ),
+    )
     return d.api_key.trim()
   } catch {
     return undefined
@@ -246,7 +320,11 @@ export async function resolveWorkspaceChatModel(): Promise<Model<Api>> {
 
     const d = await loadDefaults()
     if (!d) return fallback
-    await getAppStorage().providerKeys.set(d.provider, d.api_key)
+    await withPiStorageLock(() =>
+      withIndexedDbRetry(() =>
+        getAppStorage().providerKeys.set(d.provider, d.api_key),
+      ),
+    )
     return resolveModel(d.provider, d.model_id) ?? fallback
   } catch {
     return fallback
