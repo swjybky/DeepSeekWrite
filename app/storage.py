@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
@@ -463,6 +464,20 @@ def _write_material_stages_to_disk(material: Material) -> None:
             pass
 
 
+def _remove_output_dir(output_dir: str) -> None:
+    """删除输出目录及其内容（忽略删除失败）。"""
+    od = (output_dir or "").strip()
+    if not od:
+        return
+    root = Path(od)
+    if not root.is_dir():
+        return
+    try:
+        shutil.rmtree(root)
+    except OSError:
+        pass
+
+
 def _write_skill_stages_to_disk(skill: Skill) -> None:
     """将单阶段技能内容写入输出目录。"""
     od = (skill.output_dir or "").strip()
@@ -800,12 +815,23 @@ class BookStore:
         return m.to_dict()
 
     def delete_material(self, material_id: str) -> bool:
-        """删除素材"""
+        """删除素材及其本地输出目录"""
         mid = (material_id or "").strip()
         if not mid or mid not in self._materials:
             return False
+        m = self._materials[mid]
+        output_dir = m.output_dir
         del self._materials[mid]
         save_materials_atomic(self._materials_path, self._materials)
+        changed_books = False
+        for book in self._books.values():
+            if book.linked_material_id == mid:
+                book.linked_material_id = ""
+                book.updated_at = _utc_now_iso()
+                changed_books = True
+        if changed_books:
+            save_books_atomic(self._path, self._books)
+        _remove_output_dir(output_dir)
         return True
 
     # ==================== 技能管理方法 ====================
@@ -899,10 +925,12 @@ class BookStore:
         return s.to_dict()
 
     def delete_skill(self, skill_id: str) -> bool:
-        """删除技能"""
+        """删除技能及其本地输出目录"""
         sid = (skill_id or "").strip()
         if not sid or sid not in self._skills:
             return False
+        s = self._skills[sid]
+        output_dir = s.output_dir
         del self._skills[sid]
         save_skills_atomic(self._skills_path, self._skills)
         changed_books = False
@@ -913,4 +941,5 @@ class BookStore:
                 changed_books = True
         if changed_books:
             save_books_atomic(self._path, self._books)
+        _remove_output_dir(output_dir)
         return True

@@ -1343,7 +1343,18 @@ async function mockSaveMaterial(
 async function mockDeleteMaterial(material_id: string): Promise<boolean> {
   const map = loadMockMaterials()
   const ok = map.delete(material_id)
-  if (ok) saveMockMaterials(map)
+  if (ok) {
+    saveMockMaterials(map)
+    const books = loadMock()
+    let changed = false
+    for (const [bookId, book] of books) {
+      if (book.linked_material_id === material_id) {
+        books.set(bookId, { ...book, linked_material_id: '' })
+        changed = true
+      }
+    }
+    if (changed) saveMock(books)
+  }
   return ok
 }
 

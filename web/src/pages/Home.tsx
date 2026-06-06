@@ -875,7 +875,7 @@ export function Home() {
   const handleDeleteMaterial = async (materialId: string) => {
     const m = materials.find((mat) => mat.id === materialId)
     if (!m) return
-    const ok = window.confirm(`确定删除素材「${m.title}」？\n素材文件夹仍会保留在工作目录中。`)
+    const ok = window.confirm(`确定删除素材「${m.title}」？\n本地素材文件夹也将一并删除，此操作不可恢复。`)
     if (!ok) return
     setDeletingMaterialId(materialId)
     try {
@@ -913,7 +913,7 @@ export function Home() {
   const handleDeleteSkill = async (skillId: string) => {
     const s = skills.find((item) => item.id === skillId)
     if (!s) return
-    const ok = window.confirm(`确定删除技能「${s.title}」？\n技能文件夹仍会保留在工作目录中。`)
+    const ok = window.confirm(`确定删除技能「${s.title}」？\n本地技能文件夹也将一并删除，此操作不可恢复。`)
     if (!ok) return
     setDeletingSkillId(skillId)
     try {
