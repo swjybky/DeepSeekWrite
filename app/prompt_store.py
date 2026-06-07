@@ -212,7 +212,7 @@ MATERIAL_MANAGER_AGENT_ID = "material_manager"
 MATERIAL_MANAGER_PROMPT_KIND = "material_manager"
 SHARED_MATERIAL_PROMPT_DIR = "shared"
 
-# 素材阶段顺序（人设/导语/梗/剧情细化/节奏/正文片段），对齐 app/models.py MATERIAL_STAGE_KEYS
+# 素材阶段顺序（人设/导语/梗/剧情细化/剧情设计/正文片段），对齐 app/models.py MATERIAL_STAGE_KEYS
 MATERIAL_STAGES_ORDER: tuple[str, ...] = (
     "character",
     "intro",
@@ -227,7 +227,7 @@ MATERIAL_STAGE_LABELS: dict[str, str] = {
     "intro": "导语素材",
     "gimmick": "梗素材",
     "plot_refine": "剧情细化素材",
-    "pacing": "节奏素材",
+    "pacing": "剧情设计素材",
     "draft_excerpt": "正文片段",
 }
 

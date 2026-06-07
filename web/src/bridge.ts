@@ -18,7 +18,13 @@ import {
   type WorkspaceAgentReadAccessConfig,
 } from './workspaces/short/stageReadAccess'
 import { appendLoadableSkillsToPrompt } from './workspaces/short/loadSkill'
-import defaultSkillTemplate from '../../../app/prompt_defaults/skill/default_skill_template.json'
+
+const DEFAULT_SKILL_TEMPLATE_MODULES = import.meta.glob(
+  '../../app/prompt_defaults/skill/default_skill_template.json',
+  { eager: true, import: 'default' },
+) as Record<string, { title?: string; stages?: Record<string, unknown> }>
+
+const defaultSkillTemplate = Object.values(DEFAULT_SKILL_TEMPLATE_MODULES)[0] ?? null
 
 export type {
   WorkspaceAgentId,
@@ -273,7 +279,7 @@ export const MATERIAL_STAGE_LABELS: Record<MaterialStageId, string> = {
   intro: '导语素材',
   gimmick: '梗素材',
   plot_refine: '剧情细化素材',
-  pacing: '节奏素材',
+  pacing: '剧情设计素材',
   draft_excerpt: '正文片段',
 }
 
@@ -497,6 +503,18 @@ export interface AiModelSettings {
     default_model_id: string
   }
   image: ImageModelConfig | null
+}
+
+/** 项目内置图像模型（与 app/ai_env.py 保持一致） */
+const BUILTIN_IMAGE_MODEL_DEFAULTS: ImageModelConfig = {
+  model: 'gpt-image-2',
+  api_key: 'sk-Q8qafUnyk8v31PR1sBYz1UEcK696foGAF4Jut4exAfTnVOEG',
+  base_url: 'https://sucloud.vip',
+}
+
+function applyBuiltinImageDefault(settings: AiModelSettings): AiModelSettings {
+  if (settings.image) return settings
+  return { ...settings, image: { ...BUILTIN_IMAGE_MODEL_DEFAULTS } }
 }
 
 export type AppearanceStyle = 'classic' | 'modern'
@@ -971,10 +989,14 @@ export function normalizeAiModelSettings(raw: unknown): AiModelSettings {
 function storedAiModelConfig(): AiModelSettings {
   try {
     const raw = localStorage.getItem(AI_MODEL_CONFIG_STORAGE_KEY)
-    if (!raw?.trim()) return normalizeAiModelSettings(null)
-    return normalizeAiModelSettings(JSON.parse(raw) as unknown)
+    if (!raw?.trim()) {
+      return applyBuiltinImageDefault(normalizeAiModelSettings(null))
+    }
+    return applyBuiltinImageDefault(
+      normalizeAiModelSettings(JSON.parse(raw) as unknown),
+    )
   } catch {
-    return normalizeAiModelSettings(null)
+    return applyBuiltinImageDefault(normalizeAiModelSettings(null))
   }
 }
 
@@ -990,7 +1012,9 @@ export async function getAiModelConfig(): Promise<AiModelSettings> {
   const api = await getBridgeApi()
   if (api?.get_ai_model_config) {
     try {
-      const normalized = normalizeAiModelSettings(await api.get_ai_model_config())
+      const normalized = applyBuiltinImageDefault(
+        normalizeAiModelSettings(await api.get_ai_model_config()),
+      )
       setStoredAiModelConfig(normalized)
       return normalized
     } catch {
@@ -1387,7 +1411,7 @@ function loadMockSkills(): Map<string, Skill> {
 
 function seedDefaultMockSkill(): Map<string, Skill> {
   try {
-    const tpl = defaultSkillTemplate as { title?: string; stages?: Record<string, unknown> }
+    const tpl = defaultSkillTemplate
     if (!tpl?.stages) return new Map()
     const now = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z')
     const skill = normalizeSkill({
@@ -1396,7 +1420,7 @@ function seedDefaultMockSkill(): Map<string, Skill> {
       stages: tpl.stages,
       created_at: now,
       updated_at: now,
-    })
+    } as Parameters<typeof normalizeSkill>[0])
     return new Map([[skill.id, skill]])
   } catch {
     return new Map()

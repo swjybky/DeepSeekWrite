@@ -47,7 +47,7 @@ export function buildReadMaterialContentTool(
         ],
         {
           description:
-            '素材阶段键名：character=人设素材，intro=导语素材，gimmick=梗素材，plot_refine=剧情细化素材，pacing=节奏素材，draft_excerpt=正文片段；单次只读取该阶段',
+            '素材阶段键名：character=人设素材，intro=导语素材，gimmick=梗素材，plot_refine=剧情细化素材，pacing=剧情设计素材，draft_excerpt=正文片段；单次只读取该阶段',
         },
       ),
     }),
@@ -113,7 +113,7 @@ export function buildWriteMaterialEditorTool(
 
 /**
  * 素材库工作台系统提示词由后端磁盘模板提供；此处仅附加 Pi 工具。
- * 所有素材阶段（人设/导语/梗/剧情细化/节奏/正文片段）共用同一套工具：读取 + 写入。
+ * 所有素材阶段（人设/导语/梗/剧情细化/剧情设计/正文片段）共用同一套工具：读取 + 写入。
  */
 export function buildMaterialWorkspaceAdditionalTools(
   ctx: MaterialWorkspaceStageAgentContext,

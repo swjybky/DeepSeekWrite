@@ -5,6 +5,13 @@ from typing import Any
 
 from app.runtime_paths import bundle_root, writable_root
 
+# 项目内置图像模型（公用 Key，新用户未单独配置时自动使用）
+BUILTIN_IMAGE_MODEL_DEFAULTS: dict[str, str] = {
+    "model": "gpt-image-2",
+    "api_key": "sk-Q8qafUnyk8v31PR1sBYz1UEcK696foGAF4Jut4exAfTnVOEG",
+    "base_url": "https://sucloud.vip",
+}
+
 
 def _parse_env_file(path: Path) -> dict[str, str]:
     out: dict[str, str] = {}
@@ -298,8 +305,8 @@ def load_ai_model_defaults() -> dict[str, Any] | None:
     return out
 
 
-def load_image_model_defaults() -> dict[str, str] | None:
-    """读取图片生成模型配置。"""
+def load_image_model_defaults() -> dict[str, str]:
+    """读取图片生成模型配置；未在 .env 中配置时使用项目内置默认值。"""
     data = _load_ai_env_data()
     model = (data.get("image_model") or "").strip()
     api_key = (data.get("image_model_key") or "").strip()
@@ -309,12 +316,12 @@ def load_image_model_defaults() -> dict[str, str] | None:
         or data.get("image_base_url")
         or ""
     ).strip()
-    if not model or not api_key:
-        return None
-    out = {
-        "model": model,
-        "api_key": api_key,
-    }
-    if base_url:
-        out["base_url"] = base_url
-    return out
+    if model and api_key:
+        out = {
+            "model": model,
+            "api_key": api_key,
+        }
+        if base_url:
+            out["base_url"] = base_url
+        return out
+    return dict(BUILTIN_IMAGE_MODEL_DEFAULTS)

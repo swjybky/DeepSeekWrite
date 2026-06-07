@@ -16,7 +16,7 @@
 
 ### 素材库
 
-管理可复用的写作素材，按大类（世情 / 追妻 / 科幻 / 悬疑）与子分类组织，包含 **6 个阶段**：人设、导语、梗、剧情细化、节奏、正文片段。支持导入 / 导出单个素材包。
+管理可复用的写作素材，按大类（世情 / 追妻 / 科幻 / 悬疑）与子分类组织，包含 **6 个阶段**：人设、导语、梗、剧情细化、剧情设计、正文片段。支持导入 / 导出单个素材包。
 
 ### 技能库
 
@@ -274,13 +274,13 @@ model_source=deepseek
 
 #### 图像模型（封面生成）
 
-```ini
-image_model=dall-e-3
-image_model_key=sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
-image_model_url=https://api.openai.com/v1   # 可选
-```
+项目已内置公用图像模型（`gpt-image-2`，sucloud 代理），新用户无需配置即可生成封面。如需覆盖，可在 `.env` 或应用内「模型配置」中填写：
 
-也可在应用内「模型配置」中填写，无需环境文件。
+```ini
+image_model=gpt-image-2
+image_model_key=sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+image_model_url=https://sucloud.vip   # 可选
+```
 
 ### 安全提醒
 

@@ -16,13 +16,13 @@ SHORT_MATERIAL_GENRES: dict[str, list[str]] = {
     "悬疑": ["刑侦", "推理", "惊悚", "密室", "民俗", "心理", "反转"],
 }
 
-# 素材阶段键（人设、导语、梗、剧情细化、节奏、正文片段）
+# 素材阶段键（人设、导语、梗、剧情细化、剧情设计、正文片段）
 MATERIAL_STAGE_KEYS: tuple[str, ...] = (
     "character",     # 人设素材
     "intro",         # 导语素材
     "gimmick",       # 梗素材
     "plot_refine",   # 剧情细化素材
-    "pacing",        # 节奏素材
+    "pacing",        # 剧情设计素材
     "draft_excerpt", # 正文片段
 )
 
@@ -438,7 +438,7 @@ def normalize_skill_stage_id(raw: Any | None) -> str:
 
 @dataclass
 class Material:
-    """素材数据模型，用于存储人设、导语、梗、节奏等素材"""
+    """素材数据模型，用于存储人设、导语、梗、剧情设计等素材"""
 
     id: str
     title: str

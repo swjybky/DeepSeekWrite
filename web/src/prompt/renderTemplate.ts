@@ -27,7 +27,7 @@ const MATERIAL_ORDER: Record<string, readonly { id: string; label: string }[]> =
     { id: 'intro', label: '导语素材' },
     { id: 'gimmick', label: '梗素材' },
     { id: 'plot_refine', label: '剧情细化素材' },
-    { id: 'pacing', label: '节奏素材' },
+    { id: 'pacing', label: '剧情设计素材' },
     { id: 'draft_excerpt', label: '正文片段' },
   ],
 }

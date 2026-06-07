@@ -430,16 +430,29 @@ def _ai_model_config_has_values(config: dict[str, Any]) -> bool:
     return bool(models) or config.get("image") is not None
 
 
+def _apply_builtin_image_default(config: dict[str, Any]) -> dict[str, Any]:
+    if config.get("image") is not None:
+        return config
+    from app.ai_env import load_image_model_defaults
+
+    image = load_image_model_defaults()
+    if not image:
+        return config
+    return {**config, "image": image}
+
+
 def read_ai_model_config() -> dict[str, Any]:
     with _data_file_lock():
         prefs = _load_preferences_unlocked()
         raw = prefs.get(AI_MODEL_CONFIG_PREF_KEY)
         if isinstance(raw, dict):
-            return normalize_ai_model_config(raw)
+            return _apply_builtin_image_default(normalize_ai_model_config(raw))
 
         from app.ai_env import load_ai_model_settings_from_env
 
-        imported = normalize_ai_model_config(load_ai_model_settings_from_env())
+        imported = _apply_builtin_image_default(
+            normalize_ai_model_config(load_ai_model_settings_from_env())
+        )
         if _ai_model_config_has_values(imported):
             prefs[AI_MODEL_CONFIG_PREF_KEY] = imported
             _save_preferences_atomic_unlocked(prefs)
