@@ -3,7 +3,9 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import sys
 import tempfile
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -36,6 +38,37 @@ _WIN_INVALID = '<>:"/\\|?*\n\r\t'
 AI_MODEL_CONFIG_PREF_KEY = "ai_model_config"
 APPEARANCE_STYLE_PREF_KEY = "appearance_style"
 APPEARANCE_STYLES = {"classic", "modern"}
+
+
+@contextmanager
+def _data_file_lock():
+    """跨进程串行化 `.data` 下 JSON 的读改写。
+
+    JSON 写入本身已经是 os.replace 原子替换；这里额外锁住读改写窗口，避免两个
+    桌面进程各自基于旧内存快照保存，后写的一方覆盖先写的一方。
+    """
+    data_dir = writable_root() / ".data"
+    data_dir.mkdir(parents=True, exist_ok=True)
+    lock_path = data_dir / ".write_claw.lock"
+    with lock_path.open("a+b") as f:
+        if sys.platform.startswith("win"):
+            import msvcrt  # noqa: PLC0415
+
+            f.seek(0)
+            msvcrt.locking(f.fileno(), msvcrt.LK_LOCK, 1)
+            try:
+                yield
+            finally:
+                f.seek(0)
+                msvcrt.locking(f.fileno(), msvcrt.LK_UNLCK, 1)
+        else:
+            import fcntl  # noqa: PLC0415
+
+            fcntl.flock(f.fileno(), fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                fcntl.flock(f.fileno(), fcntl.LOCK_UN)
 
 
 def _sanitize_book_folder_name(title: str) -> str:
@@ -146,7 +179,7 @@ def preferences_path() -> Path:
     return default_data_path().parent / "preferences.json"
 
 
-def load_preferences() -> dict[str, Any]:
+def _load_preferences_unlocked() -> dict[str, Any]:
     path = preferences_path()
     if not path.exists():
         return {}
@@ -160,7 +193,12 @@ def load_preferences() -> dict[str, Any]:
         return {}
 
 
-def save_preferences_atomic(prefs: dict[str, Any]) -> None:
+def load_preferences() -> dict[str, Any]:
+    with _data_file_lock():
+        return _load_preferences_unlocked()
+
+
+def _save_preferences_atomic_unlocked(prefs: dict[str, Any]) -> None:
     path = preferences_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     text = json.dumps(prefs, ensure_ascii=False, indent=2)
@@ -181,20 +219,27 @@ def save_preferences_atomic(prefs: dict[str, Any]) -> None:
         raise
 
 
+def save_preferences_atomic(prefs: dict[str, Any]) -> None:
+    with _data_file_lock():
+        _save_preferences_atomic_unlocked(prefs)
+
+
 def read_saved_workspace_root() -> str | None:
-    w = load_preferences().get("workspace_root")
+    with _data_file_lock():
+        w = _load_preferences_unlocked().get("workspace_root")
     if isinstance(w, str) and w.strip():
         return w.strip()
     return None
 
 
 def write_saved_workspace_root(path: str | None) -> None:
-    prefs = load_preferences()
-    if path and str(path).strip():
-        prefs["workspace_root"] = str(path).strip()
-    else:
-        prefs.pop("workspace_root", None)
-    save_preferences_atomic(prefs)
+    with _data_file_lock():
+        prefs = _load_preferences_unlocked()
+        if path and str(path).strip():
+            prefs["workspace_root"] = str(path).strip()
+        else:
+            prefs.pop("workspace_root", None)
+        _save_preferences_atomic_unlocked(prefs)
 
 
 def normalize_appearance_style(raw: Any) -> str:
@@ -204,40 +249,46 @@ def normalize_appearance_style(raw: Any) -> str:
 
 
 def read_appearance_style() -> str:
-    return normalize_appearance_style(load_preferences().get(APPEARANCE_STYLE_PREF_KEY))
+    with _data_file_lock():
+        return normalize_appearance_style(
+            _load_preferences_unlocked().get(APPEARANCE_STYLE_PREF_KEY)
+        )
 
 
 def write_appearance_style(style: str) -> str:
     normalized = normalize_appearance_style(style)
-    prefs = load_preferences()
-    prefs[APPEARANCE_STYLE_PREF_KEY] = normalized
-    save_preferences_atomic(prefs)
+    with _data_file_lock():
+        prefs = _load_preferences_unlocked()
+        prefs[APPEARANCE_STYLE_PREF_KEY] = normalized
+        _save_preferences_atomic_unlocked(prefs)
     return normalized
 
 
 def read_workspace_agent_read_access() -> dict[str, Any]:
     """全局创作空间智能体读取配置，首次读取时兼容旧阶段配置。"""
-    prefs = load_preferences()
-    raw = prefs.get("workspace_agent_read_access")
-    if isinstance(raw, dict):
-        return raw
+    with _data_file_lock():
+        prefs = _load_preferences_unlocked()
+        raw = prefs.get("workspace_agent_read_access")
+        if isinstance(raw, dict):
+            return raw
 
-    legacy = prefs.get("stage_read_access")
-    if not isinstance(legacy, dict):
-        return {}
+        legacy = prefs.get("stage_read_access")
+        if not isinstance(legacy, dict):
+            return {}
 
-    prefs["workspace_agent_read_access"] = legacy
-    save_preferences_atomic(prefs)
-    return legacy
+        prefs["workspace_agent_read_access"] = legacy
+        _save_preferences_atomic_unlocked(prefs)
+        return legacy
 
 
 def write_workspace_agent_read_access(config: dict[str, Any]) -> None:
-    prefs = load_preferences()
-    if config:
-        prefs["workspace_agent_read_access"] = config
-    else:
-        prefs.pop("workspace_agent_read_access", None)
-    save_preferences_atomic(prefs)
+    with _data_file_lock():
+        prefs = _load_preferences_unlocked()
+        if config:
+            prefs["workspace_agent_read_access"] = config
+        else:
+            prefs.pop("workspace_agent_read_access", None)
+        _save_preferences_atomic_unlocked(prefs)
 
 
 def _normalize_config_id(raw: str) -> str:
@@ -379,25 +430,27 @@ def _ai_model_config_has_values(config: dict[str, Any]) -> bool:
 
 
 def read_ai_model_config() -> dict[str, Any]:
-    prefs = load_preferences()
-    raw = prefs.get(AI_MODEL_CONFIG_PREF_KEY)
-    if isinstance(raw, dict):
-        return normalize_ai_model_config(raw)
+    with _data_file_lock():
+        prefs = _load_preferences_unlocked()
+        raw = prefs.get(AI_MODEL_CONFIG_PREF_KEY)
+        if isinstance(raw, dict):
+            return normalize_ai_model_config(raw)
 
-    from app.ai_env import load_ai_model_settings_from_env
+        from app.ai_env import load_ai_model_settings_from_env
 
-    imported = normalize_ai_model_config(load_ai_model_settings_from_env())
-    if _ai_model_config_has_values(imported):
-        prefs[AI_MODEL_CONFIG_PREF_KEY] = imported
-        save_preferences_atomic(prefs)
-    return imported
+        imported = normalize_ai_model_config(load_ai_model_settings_from_env())
+        if _ai_model_config_has_values(imported):
+            prefs[AI_MODEL_CONFIG_PREF_KEY] = imported
+            _save_preferences_atomic_unlocked(prefs)
+        return imported
 
 
 def write_ai_model_config(config: dict[str, Any]) -> dict[str, Any]:
     normalized = normalize_ai_model_config(config)
-    prefs = load_preferences()
-    prefs[AI_MODEL_CONFIG_PREF_KEY] = normalized
-    save_preferences_atomic(prefs)
+    with _data_file_lock():
+        prefs = _load_preferences_unlocked()
+        prefs[AI_MODEL_CONFIG_PREF_KEY] = normalized
+        _save_preferences_atomic_unlocked(prefs)
     return normalized
 
 
@@ -586,12 +639,25 @@ def save_skills_atomic(path: Path, skills: dict[str, Skill]) -> None:
 class BookStore:
     def __init__(self, path: Path | None = None) -> None:
         self._path = path or default_data_path()
-        self._books = load_books(self._path)
         # 素材数据存储
         self._materials_path = default_materials_path()
-        self._materials = load_materials(self._materials_path)
         # 技能数据存储
         self._skills_path = default_skills_path()
+        with _data_file_lock():
+            self._reload_all_unlocked()
+
+    def _reload_all_unlocked(self) -> None:
+        self._books = load_books(self._path)
+        self._materials = load_materials(self._materials_path)
+        self._skills = load_skills(self._skills_path)
+
+    def _reload_books_unlocked(self) -> None:
+        self._books = load_books(self._path)
+
+    def _reload_materials_unlocked(self) -> None:
+        self._materials = load_materials(self._materials_path)
+
+    def _reload_skills_unlocked(self) -> None:
         self._skills = load_skills(self._skills_path)
 
     @property
@@ -599,29 +665,33 @@ class BookStore:
         return self._path
 
     def list_books(self) -> list[dict[str, Any]]:
-        return [
-            {
-                "id": b.id,
-                "title": b.title,
-                "book_type": b.book_type,
-                "categories": b.categories,
-                "output_dir": b.output_dir,
-                "linked_material_id": b.linked_material_id,
-                "linked_skill_id": b.linked_skill_id,
-                "status": b.status,
-            }
-            for b in sorted(
-                self._books.values(),
-                key=lambda x: (x.updated_at or "", x.title),
-                reverse=True,
-            )
-        ]
+        with _data_file_lock():
+            self._reload_books_unlocked()
+            return [
+                {
+                    "id": b.id,
+                    "title": b.title,
+                    "book_type": b.book_type,
+                    "categories": b.categories,
+                    "output_dir": b.output_dir,
+                    "linked_material_id": b.linked_material_id,
+                    "linked_skill_id": b.linked_skill_id,
+                    "status": b.status,
+                }
+                for b in sorted(
+                    self._books.values(),
+                    key=lambda x: (x.updated_at or "", x.title),
+                    reverse=True,
+                )
+            ]
 
     def get_book(self, book_id: str) -> dict[str, Any] | None:
-        b = self._books.get(book_id)
-        if b is None:
-            return None
-        return b.to_dict()
+        with _data_file_lock():
+            self._reload_books_unlocked()
+            b = self._books.get(book_id)
+            if b is None:
+                return None
+            return b.to_dict()
 
     def create_book(
         self,
@@ -631,47 +701,49 @@ class BookStore:
         workspace_root: str | None = None,
         linked_skill_id: str | None = None,
     ) -> dict[str, Any]:
-        now = _utc_now_iso()
-        bt: str = book_type if book_type in ("short", "long") else "long"
-        cats = list(categories or []) if bt == "short" else []
-        sid = (linked_skill_id or "").strip()
-        linked_sid = sid if bt == "short" and sid in self._skills else ""
-        wr = (workspace_root or "").strip()
-        od = ""
-        if wr:
-            try:
-                parent = Path(wr).expanduser()
-                parent.mkdir(parents=True, exist_ok=True)
-                parent = parent.resolve()
-                folder_name = _sanitize_book_folder_name(title.strip() or "未命名")
-                book_dir = _unique_child_dir(parent, folder_name)
-                book_dir.mkdir(parents=True, exist_ok=False)
-                od = str(book_dir)
-            except (OSError, ValueError):
-                od = ""
-            if not od:
-                raise RuntimeError(
-                    "无法在选定工作文件夹下创建书本目录，请检查路径是否有效、磁盘空间与写入权限。",
-                )
-        bid = new_book_id()
-        b = Book(
-            id=bid,
-            title=title.strip() or "未命名",
-            book_type=bt,  # type: ignore[arg-type]
-            categories=cats,
-            content="",
-            output_dir=od,
-            linked_material_id="",
-            linked_skill_id=linked_sid,
-            stages=default_stages(),
-            expert_draft=normalize_expert_draft_from_storage(None),
-            created_at=now,
-            updated_at=now,
-        )
-        self._books[bid] = b
-        save_books_atomic(self._path, self._books)
-        _write_stages_to_disk(b)
-        return b.to_dict()
+        with _data_file_lock():
+            self._reload_all_unlocked()
+            now = _utc_now_iso()
+            bt: str = book_type if book_type in ("short", "long") else "long"
+            cats = list(categories or []) if bt == "short" else []
+            sid = (linked_skill_id or "").strip()
+            linked_sid = sid if bt == "short" and sid in self._skills else ""
+            wr = (workspace_root or "").strip()
+            od = ""
+            if wr:
+                try:
+                    parent = Path(wr).expanduser()
+                    parent.mkdir(parents=True, exist_ok=True)
+                    parent = parent.resolve()
+                    folder_name = _sanitize_book_folder_name(title.strip() or "未命名")
+                    book_dir = _unique_child_dir(parent, folder_name)
+                    book_dir.mkdir(parents=True, exist_ok=False)
+                    od = str(book_dir)
+                except (OSError, ValueError):
+                    od = ""
+                if not od:
+                    raise RuntimeError(
+                        "无法在选定工作文件夹下创建书本目录，请检查路径是否有效、磁盘空间与写入权限。",
+                    )
+            bid = new_book_id()
+            b = Book(
+                id=bid,
+                title=title.strip() or "未命名",
+                book_type=bt,  # type: ignore[arg-type]
+                categories=cats,
+                content="",
+                output_dir=od,
+                linked_material_id="",
+                linked_skill_id=linked_sid,
+                stages=default_stages(),
+                expert_draft=normalize_expert_draft_from_storage(None),
+                created_at=now,
+                updated_at=now,
+            )
+            self._books[bid] = b
+            save_books_atomic(self._path, self._books)
+            _write_stages_to_disk(b)
+            return b.to_dict()
 
     def save_book(
         self,
@@ -684,67 +756,75 @@ class BookStore:
         status: str | None = None,
         linked_skill_id: str | None = None,
     ) -> dict[str, Any] | None:
-        b = self._books.get(book_id)
-        if b is None:
-            return None
-        if title is not None:
-            b.title = title.strip()
-        if linked_material_id is not None:
-            mid = linked_material_id.strip()
-            b.linked_material_id = mid if mid in self._materials else ""
-        if linked_skill_id is not None:
-            sid = linked_skill_id.strip()
-            b.linked_skill_id = sid if b.book_type == "short" and sid in self._skills else ""
-        if stages is not None:
-            b.stages = apply_stage_patch(b.stages, stages)
-            dk = primary_draft_stage_key(b)
-            b.content = str(b.stages.get(dk, "") or "")
-        elif content is not None:
-            b.content = content
-        if expert_draft is not None:
-            b.expert_draft = normalize_expert_draft_from_storage(expert_draft)
-        if status is not None:
-            b.status = normalize_book_status(status)
-        b.updated_at = _utc_now_iso()
-        save_books_atomic(self._path, self._books)
-        _write_stages_to_disk(b)
-        return b.to_dict()
+        with _data_file_lock():
+            self._reload_all_unlocked()
+            b = self._books.get(book_id)
+            if b is None:
+                return None
+            if title is not None:
+                b.title = title.strip()
+            if linked_material_id is not None:
+                mid = linked_material_id.strip()
+                b.linked_material_id = mid if mid in self._materials else ""
+            if linked_skill_id is not None:
+                sid = linked_skill_id.strip()
+                b.linked_skill_id = sid if b.book_type == "short" and sid in self._skills else ""
+            if stages is not None:
+                b.stages = apply_stage_patch(b.stages, stages)
+                dk = primary_draft_stage_key(b)
+                b.content = str(b.stages.get(dk, "") or "")
+            elif content is not None:
+                b.content = content
+            if expert_draft is not None:
+                b.expert_draft = normalize_expert_draft_from_storage(expert_draft)
+            if status is not None:
+                b.status = normalize_book_status(status)
+            b.updated_at = _utc_now_iso()
+            save_books_atomic(self._path, self._books)
+            _write_stages_to_disk(b)
+            return b.to_dict()
 
     def delete_book(self, book_id: str) -> bool:
         """从书架移除该书（不写磁盘目录）。若 id 不存在则返回 False。"""
-        bid = (book_id or "").strip()
-        if not bid or bid not in self._books:
-            return False
-        del self._books[bid]
-        save_books_atomic(self._path, self._books)
-        return True
+        with _data_file_lock():
+            self._reload_books_unlocked()
+            bid = (book_id or "").strip()
+            if not bid or bid not in self._books:
+                return False
+            del self._books[bid]
+            save_books_atomic(self._path, self._books)
+            return True
 
     # ==================== 素材管理方法 ====================
 
     def list_materials(self) -> list[dict[str, Any]]:
         """列出所有素材，按更新时间倒序"""
-        return [
-            {
-                "id": m.id,
-                "title": m.title,
-                "material_type": m.material_type,
-                "parent_genre": m.parent_genre,
-                "sub_genre": m.sub_genre,
-                "output_dir": m.output_dir,
-            }
-            for m in sorted(
-                self._materials.values(),
-                key=lambda x: (x.updated_at or "", x.title),
-                reverse=True,
-            )
-        ]
+        with _data_file_lock():
+            self._reload_materials_unlocked()
+            return [
+                {
+                    "id": m.id,
+                    "title": m.title,
+                    "material_type": m.material_type,
+                    "parent_genre": m.parent_genre,
+                    "sub_genre": m.sub_genre,
+                    "output_dir": m.output_dir,
+                }
+                for m in sorted(
+                    self._materials.values(),
+                    key=lambda x: (x.updated_at or "", x.title),
+                    reverse=True,
+                )
+            ]
 
     def get_material(self, material_id: str) -> dict[str, Any] | None:
         """获取单个素材详情"""
-        m = self._materials.get(material_id)
-        if m is None:
-            return None
-        return m.to_dict()
+        with _data_file_lock():
+            self._reload_materials_unlocked()
+            m = self._materials.get(material_id)
+            if m is None:
+                return None
+            return m.to_dict()
 
     def create_material(
         self,
@@ -755,44 +835,45 @@ class BookStore:
         workspace_root: str | None = None,
     ) -> dict[str, Any]:
         """创建新素材"""
-        now = _utc_now_iso()
-        mt: str = material_type if material_type in ("long", "short") else "short"
-        wr = (workspace_root or "").strip()
-        od = ""
-        if wr:
-            try:
-                parent = Path(wr).expanduser()
-                parent.mkdir(parents=True, exist_ok=True)
-                parent = parent.resolve()
-                folder_name = _sanitize_material_folder_name(title.strip() or "未命名素材")
-                # 使用 materials 子目录存放素材
-                materials_parent = _unique_child_dir(parent, "素材库")
-                materials_parent.mkdir(parents=True, exist_ok=True)
-                material_dir = _unique_child_dir(materials_parent, folder_name)
-                material_dir.mkdir(parents=True, exist_ok=False)
-                od = str(material_dir)
-            except (OSError, ValueError):
-                od = ""
-            if not od:
-                raise RuntimeError(
-                    "无法在选定工作文件夹下创建素材目录，请检查路径是否有效、磁盘空间与写入权限。",
-                )
-        mid = new_material_id()
-        m = Material(
-            id=mid,
-            title=title.strip() or "未命名素材",
-            material_type=mt,  # type: ignore[arg-type]
-            parent_genre=str(parent_genre or ""),
-            sub_genre=str(sub_genre or ""),
-            stages=default_material_stages(),
-            output_dir=od,
-            created_at=now,
-            updated_at=now,
-        )
-        self._materials[mid] = m
-        save_materials_atomic(self._materials_path, self._materials)
-        _write_material_stages_to_disk(m)
-        return m.to_dict()
+        with _data_file_lock():
+            self._reload_materials_unlocked()
+            now = _utc_now_iso()
+            mt: str = material_type if material_type in ("long", "short") else "short"
+            wr = (workspace_root or "").strip()
+            od = ""
+            if wr:
+                try:
+                    parent = Path(wr).expanduser()
+                    parent.mkdir(parents=True, exist_ok=True)
+                    parent = parent.resolve()
+                    folder_name = _sanitize_material_folder_name(title.strip() or "未命名素材")
+                    materials_parent = _unique_child_dir(parent, "素材库")
+                    materials_parent.mkdir(parents=True, exist_ok=True)
+                    material_dir = _unique_child_dir(materials_parent, folder_name)
+                    material_dir.mkdir(parents=True, exist_ok=False)
+                    od = str(material_dir)
+                except (OSError, ValueError):
+                    od = ""
+                if not od:
+                    raise RuntimeError(
+                        "无法在选定工作文件夹下创建素材目录，请检查路径是否有效、磁盘空间与写入权限。",
+                    )
+            mid = new_material_id()
+            m = Material(
+                id=mid,
+                title=title.strip() or "未命名素材",
+                material_type=mt,  # type: ignore[arg-type]
+                parent_genre=str(parent_genre or ""),
+                sub_genre=str(sub_genre or ""),
+                stages=default_material_stages(),
+                output_dir=od,
+                created_at=now,
+                updated_at=now,
+            )
+            self._materials[mid] = m
+            save_materials_atomic(self._materials_path, self._materials)
+            _write_material_stages_to_disk(m)
+            return m.to_dict()
 
     def save_material(
         self,
@@ -801,69 +882,76 @@ class BookStore:
         title: str | None = None,
     ) -> dict[str, Any] | None:
         """保存素材阶段内容"""
-        m = self._materials.get(material_id)
-        if m is None:
-            return None
-        if stages is not None:
-            # 归一化阶段数据
-            m.stages = normalize_material_stages_from_storage(stages)
-        if title is not None:
-            m.title = title.strip()
-        m.updated_at = _utc_now_iso()
-        save_materials_atomic(self._materials_path, self._materials)
-        _write_material_stages_to_disk(m)
-        return m.to_dict()
+        with _data_file_lock():
+            self._reload_materials_unlocked()
+            m = self._materials.get(material_id)
+            if m is None:
+                return None
+            if stages is not None:
+                m.stages = normalize_material_stages_from_storage(stages)
+            if title is not None:
+                m.title = title.strip()
+            m.updated_at = _utc_now_iso()
+            save_materials_atomic(self._materials_path, self._materials)
+            _write_material_stages_to_disk(m)
+            return m.to_dict()
 
     def delete_material(self, material_id: str) -> bool:
         """删除素材及其本地输出目录"""
-        mid = (material_id or "").strip()
-        if not mid or mid not in self._materials:
-            return False
-        m = self._materials[mid]
-        output_dir = m.output_dir
-        del self._materials[mid]
-        save_materials_atomic(self._materials_path, self._materials)
-        changed_books = False
-        for book in self._books.values():
-            if book.linked_material_id == mid:
-                book.linked_material_id = ""
-                book.updated_at = _utc_now_iso()
-                changed_books = True
-        if changed_books:
-            save_books_atomic(self._path, self._books)
-        _remove_output_dir(output_dir)
-        return True
+        with _data_file_lock():
+            self._reload_all_unlocked()
+            mid = (material_id or "").strip()
+            if not mid or mid not in self._materials:
+                return False
+            m = self._materials[mid]
+            output_dir = m.output_dir
+            del self._materials[mid]
+            save_materials_atomic(self._materials_path, self._materials)
+            changed_books = False
+            for book in self._books.values():
+                if book.linked_material_id == mid:
+                    book.linked_material_id = ""
+                    book.updated_at = _utc_now_iso()
+                    changed_books = True
+            if changed_books:
+                save_books_atomic(self._path, self._books)
+            _remove_output_dir(output_dir)
+            return True
 
     # ==================== 技能管理方法 ====================
 
     def list_skills(self) -> list[dict[str, Any]]:
         """列出所有技能集合，按更新时间倒序"""
-        return [
-            {
-                "id": s.id,
-                "title": s.title,
-                "stage_counts": {
-                    stage_id: len(s.stages.get(stage_id, []))
-                    for stage_id in SKILL_STAGE_KEYS
-                },
-                "stage_skill_count": sum(
-                    len(s.stages.get(stage_id, [])) for stage_id in SKILL_STAGE_KEYS
-                ),
-                "output_dir": s.output_dir,
-            }
-            for s in sorted(
-                self._skills.values(),
-                key=lambda x: (x.updated_at or "", x.title),
-                reverse=True,
-            )
-        ]
+        with _data_file_lock():
+            self._reload_skills_unlocked()
+            return [
+                {
+                    "id": s.id,
+                    "title": s.title,
+                    "stage_counts": {
+                        stage_id: len(s.stages.get(stage_id, []))
+                        for stage_id in SKILL_STAGE_KEYS
+                    },
+                    "stage_skill_count": sum(
+                        len(s.stages.get(stage_id, [])) for stage_id in SKILL_STAGE_KEYS
+                    ),
+                    "output_dir": s.output_dir,
+                }
+                for s in sorted(
+                    self._skills.values(),
+                    key=lambda x: (x.updated_at or "", x.title),
+                    reverse=True,
+                )
+            ]
 
     def get_skill(self, skill_id: str) -> dict[str, Any] | None:
         """获取单个技能详情"""
-        s = self._skills.get(skill_id)
-        if s is None:
-            return None
-        return s.to_dict()
+        with _data_file_lock():
+            self._reload_skills_unlocked()
+            s = self._skills.get(skill_id)
+            if s is None:
+                return None
+            return s.to_dict()
 
     def create_skill(
         self,
@@ -871,39 +959,41 @@ class BookStore:
         workspace_root: str | None = None,
     ) -> dict[str, Any]:
         """创建新技能集合"""
-        now = _utc_now_iso()
-        wr = (workspace_root or "").strip()
-        od = ""
-        if wr:
-            try:
-                parent = Path(wr).expanduser()
-                parent.mkdir(parents=True, exist_ok=True)
-                parent = parent.resolve()
-                skills_parent = parent / "技能库"
-                skills_parent.mkdir(parents=True, exist_ok=True)
-                folder_name = _sanitize_skill_folder_name(title.strip() or "未命名技能")
-                skill_dir = _unique_child_dir(skills_parent, folder_name)
-                skill_dir.mkdir(parents=True, exist_ok=False)
-                od = str(skill_dir)
-            except (OSError, ValueError):
-                od = ""
-            if not od:
-                raise RuntimeError(
-                    "无法在选定工作文件夹下创建技能目录，请检查路径是否有效、磁盘空间与写入权限。",
-                )
-        sid = new_skill_id()
-        s = Skill(
-            id=sid,
-            title=title.strip() or "未命名技能",
-            stages=normalize_skill_stages_from_storage(None),
-            output_dir=od,
-            created_at=now,
-            updated_at=now,
-        )
-        self._skills[sid] = s
-        save_skills_atomic(self._skills_path, self._skills)
-        _write_skill_stages_to_disk(s)
-        return s.to_dict()
+        with _data_file_lock():
+            self._reload_skills_unlocked()
+            now = _utc_now_iso()
+            wr = (workspace_root or "").strip()
+            od = ""
+            if wr:
+                try:
+                    parent = Path(wr).expanduser()
+                    parent.mkdir(parents=True, exist_ok=True)
+                    parent = parent.resolve()
+                    skills_parent = parent / "技能库"
+                    skills_parent.mkdir(parents=True, exist_ok=True)
+                    folder_name = _sanitize_skill_folder_name(title.strip() or "未命名技能")
+                    skill_dir = _unique_child_dir(skills_parent, folder_name)
+                    skill_dir.mkdir(parents=True, exist_ok=False)
+                    od = str(skill_dir)
+                except (OSError, ValueError):
+                    od = ""
+                if not od:
+                    raise RuntimeError(
+                        "无法在选定工作文件夹下创建技能目录，请检查路径是否有效、磁盘空间与写入权限。",
+                    )
+            sid = new_skill_id()
+            s = Skill(
+                id=sid,
+                title=title.strip() or "未命名技能",
+                stages=normalize_skill_stages_from_storage(None),
+                output_dir=od,
+                created_at=now,
+                updated_at=now,
+            )
+            self._skills[sid] = s
+            save_skills_atomic(self._skills_path, self._skills)
+            _write_skill_stages_to_disk(s)
+            return s.to_dict()
 
     def save_skill(
         self,
@@ -912,34 +1002,38 @@ class BookStore:
         stages: dict[str, Any] | None = None,
     ) -> dict[str, Any] | None:
         """保存技能集合及各阶段技能条目"""
-        s = self._skills.get(skill_id)
-        if s is None:
-            return None
-        if title is not None:
-            s.title = title.strip()
-        if stages is not None:
-            s.stages = normalize_skill_stages_from_storage(stages)
-        s.updated_at = _utc_now_iso()
-        save_skills_atomic(self._skills_path, self._skills)
-        _write_skill_stages_to_disk(s)
-        return s.to_dict()
+        with _data_file_lock():
+            self._reload_skills_unlocked()
+            s = self._skills.get(skill_id)
+            if s is None:
+                return None
+            if title is not None:
+                s.title = title.strip()
+            if stages is not None:
+                s.stages = normalize_skill_stages_from_storage(stages)
+            s.updated_at = _utc_now_iso()
+            save_skills_atomic(self._skills_path, self._skills)
+            _write_skill_stages_to_disk(s)
+            return s.to_dict()
 
     def delete_skill(self, skill_id: str) -> bool:
         """删除技能及其本地输出目录"""
-        sid = (skill_id or "").strip()
-        if not sid or sid not in self._skills:
-            return False
-        s = self._skills[sid]
-        output_dir = s.output_dir
-        del self._skills[sid]
-        save_skills_atomic(self._skills_path, self._skills)
-        changed_books = False
-        for book in self._books.values():
-            if book.linked_skill_id == sid:
-                book.linked_skill_id = ""
-                book.updated_at = _utc_now_iso()
-                changed_books = True
-        if changed_books:
-            save_books_atomic(self._path, self._books)
-        _remove_output_dir(output_dir)
-        return True
+        with _data_file_lock():
+            self._reload_all_unlocked()
+            sid = (skill_id or "").strip()
+            if not sid or sid not in self._skills:
+                return False
+            s = self._skills[sid]
+            output_dir = s.output_dir
+            del self._skills[sid]
+            save_skills_atomic(self._skills_path, self._skills)
+            changed_books = False
+            for book in self._books.values():
+                if book.linked_skill_id == sid:
+                    book.linked_skill_id = ""
+                    book.updated_at = _utc_now_iso()
+                    changed_books = True
+            if changed_books:
+                save_books_atomic(self._path, self._books)
+            _remove_output_dir(output_dir)
+            return True

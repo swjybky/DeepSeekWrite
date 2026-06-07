@@ -1540,7 +1540,7 @@ async function resolveBridgeApiOnce(): Promise<BridgeApi | undefined> {
     return api
   }
 
-  if (typeof window.pywebview === 'undefined') {
+  if (!isPywebviewDesktopBundle() && typeof window.pywebview === 'undefined') {
     memoBrowserOnly = true
   }
   return undefined
@@ -1562,6 +1562,11 @@ export async function getBridgeApi(): Promise<BridgeApi | undefined> {
     const resolved = await bridgeWaitSingleton
     if (memoApi) return memoApi
     if (memoBrowserOnly) return undefined
+    if (!resolved && isPywebviewDesktopBundle()) {
+      throw new Error(
+        '桌面桥接不可用：pywebview.api 未在限定时间内注入。请重启应用；若仍复现，请设置 WRITECLAW_DEBUG=1 查看控制台。',
+      )
+    }
     return resolved
   } finally {
     bridgeWaitSingleton = null

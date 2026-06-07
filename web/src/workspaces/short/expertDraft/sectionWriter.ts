@@ -22,6 +22,7 @@ import {
 import {
   resolveWorkspaceProviderApiKey,
 } from '../../../pi/resolveWorkspaceChatModel'
+import { convertToLlmWithSkillAsUser } from '../../../pi/skillMessageTransform'
 import { createPiSessionId } from '../../../pi/sessionId'
 import { ensurePiAppStorage } from '../../../pi/setupPiWorkspace'
 import {
@@ -300,6 +301,7 @@ export async function runExpertDraftSectionWriter(
           sectionId,
           Date.now(),
         ),
+        convertToLlm: convertToLlmWithSkillAsUser,
         getApiKey: resolveWorkspaceProviderApiKey,
         toolExecution: 'sequential',
         initialState: {

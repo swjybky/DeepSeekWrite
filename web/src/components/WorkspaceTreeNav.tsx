@@ -19,6 +19,7 @@ type WorkspaceTreeNavProps = {
   activeBookId?: string
   activeStageId: string
   onStageSelect: (stageId: string) => void
+  onBookSelect?: (bookId: string) => void
   onBookStageSelect?: (bookId: string, stageId: string) => void
   defaultExpanded?: boolean
   ariaLabel?: string
@@ -37,6 +38,7 @@ export function WorkspaceTreeNav({
   activeBookId,
   activeStageId,
   onStageSelect,
+  onBookSelect,
   onBookStageSelect,
   defaultExpanded = false,
   ariaLabel = '项目结构',
@@ -118,8 +120,12 @@ export function WorkspaceTreeNav({
                         }
                         title={isActiveBook ? '双击编辑名称' : '点击打开书籍'}
                         onClick={() => {
-                          if (!isActiveBook && firstStageId) {
-                            onBookStageSelect?.(treeBook.id, firstStageId)
+                          if (!isActiveBook) {
+                            if (onBookSelect) {
+                              onBookSelect(treeBook.id)
+                            } else if (firstStageId) {
+                              onBookStageSelect?.(treeBook.id, firstStageId)
+                            }
                           }
                         }}
                         onDoubleClick={() => {

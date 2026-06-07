@@ -14,6 +14,7 @@ import {
   openWorkspaceConfiguredModelSelector,
   resolveWorkspaceProviderApiKey,
 } from '../../../pi/resolveWorkspaceChatModel'
+import { convertToLlmWithSkillAsUser } from '../../../pi/skillMessageTransform'
 import { createPiSessionId } from '../../../pi/sessionId'
 import { ensurePiAppStorage } from '../../../pi/setupPiWorkspace'
 import {
@@ -266,6 +267,7 @@ export function ExpertDraftAiChat(props: Props) {
             ? props.sessionEpoch
             : undefined,
         ),
+        convertToLlm: convertToLlmWithSkillAsUser,
         getApiKey: resolveWorkspaceProviderApiKey,
         toolExecution: 'sequential',
         initialState: {

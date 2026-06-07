@@ -26,6 +26,7 @@ import {
   getPreferredWorkspaceThinkingLevel,
   resolvePreferredWorkspaceChatModel,
 } from '../pi/workspaceChatPreferences'
+import { convertToLlmWithSkillAsUser } from '../pi/skillMessageTransform'
 import { resolveWorkspaceAgentReadAccess } from '../workspaces/short/stageReadAccess'
 
 const ARTIFACTS_TOOL_NAME = 'artifacts'
@@ -264,6 +265,7 @@ function WorkspaceAiChatInner({
 
       const agent = new Agent({
         sessionId,
+        convertToLlm: convertToLlmWithSkillAsUser,
         initialState: {
           systemPrompt: systemPromptInitial,
           model: initialModel,
