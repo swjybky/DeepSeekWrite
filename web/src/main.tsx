@@ -45,6 +45,16 @@ function boot() {
   })
   window.addEventListener('unhandledrejection', (event) => {
     const reason = event.reason
+    const msg = reason instanceof Error ? reason.message : String(reason ?? '')
+    if (
+      msg.includes('object store') ||
+      msg.includes('key range') ||
+      msg.includes('IndexedDB')
+    ) {
+      event.preventDefault()
+      console.warn('[DeepseekWrite] IndexedDB 瞬态错误（多窗口并发），已忽略:', msg)
+      return
+    }
     const detail =
       reason instanceof Error
         ? `${reason.message}\n${reason.stack ?? ''}`

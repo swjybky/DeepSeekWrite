@@ -160,7 +160,20 @@ function WorkspaceAiChatInner({
     let resizeObserver: ResizeObserver | undefined
 
     ;(async () => {
-      await ensurePiAppStorage()
+      try {
+        await ensurePiAppStorage()
+      } catch (e) {
+        console.warn('[DeepseekWrite·AI面板] Pi 存储初始化失败，将重试:', e)
+        await new Promise((r) => window.setTimeout(r, 500))
+        if (cancelled) return
+        try {
+          await ensurePiAppStorage()
+        } catch (e2) {
+          console.error('[DeepseekWrite·AI面板] Pi 存储初始化最终失败:', e2)
+          return
+        }
+      }
+      if (cancelled) return
       const initialModel = await resolvePreferredWorkspaceChatModel()
       const root = hostRef.current
       if (cancelled || !root) return
@@ -327,7 +340,7 @@ function WorkspaceAiChatInner({
             ) {
               const args = (block.arguments || {}) as Record<string, unknown>
               const text = String(args.text ?? '')
-              const mode = (args.mode as 'replace' | 'append') || 'replace'
+              const mode = args.mode as 'replace' | 'append' | undefined
 
               if (mode === 'replace' && !streamingWriteRef.current.hasCleared) {
                 streamingWriteRef.current.hasCleared = true

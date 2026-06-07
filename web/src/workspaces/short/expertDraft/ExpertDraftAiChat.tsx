@@ -226,7 +226,20 @@ export function ExpertDraftAiChat(props: Props) {
       })
 
     ;(async () => {
-      await ensurePiAppStorage()
+      try {
+        await ensurePiAppStorage()
+      } catch (e) {
+        console.warn('[DeepseekWrite·专家面板] Pi 存储初始化失败，将重试:', e)
+        await new Promise((r) => window.setTimeout(r, 500))
+        if (cancelled) return
+        try {
+          await ensurePiAppStorage()
+        } catch (e2) {
+          console.error('[DeepseekWrite·专家面板] Pi 存储初始化最终失败:', e2)
+          return
+        }
+      }
+      if (cancelled) return
       const initialModel = await resolvePreferredWorkspaceChatModel()
       const promptTemplate = await readWorkspaceAgentPromptTemplate(
         EXPERT_DRAFT_COORDINATOR_AGENT_ID,
