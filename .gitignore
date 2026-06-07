@@ -11,6 +11,7 @@ venv/
 
 build/
 dist/
+packaging/vendor/
 
 web/node_modules/
 web/dist/

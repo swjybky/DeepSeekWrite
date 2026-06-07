@@ -1,4 +1,5 @@
 pywebview>=4.4
+platformdirs>=4.0
 pyobjc>=10; sys_platform == "darwin"
 qtpy>=2.4; sys_platform == "linux"
 PySide6>=6.6; sys_platform == "linux"

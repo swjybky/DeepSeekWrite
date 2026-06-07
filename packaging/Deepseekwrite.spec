@@ -2,12 +2,31 @@
 """DeepseekWrite Windows 便携目录包（PyInstaller onedir）。在项目根目录执行:
     pip install pyinstaller
     cd web && npm ci && npm run build
-    cd .. && pyinstaller packaging/WriteClaw.spec
-产出: dist/deepseekwrite/（见 packaging/Deepseekwrite.spec）。
+    python packaging/prepare_webview2.py
+    pyinstaller packaging/Deepseekwrite.spec
+产出: dist/deepseekwrite/（含 deepseekwrite.exe，双击即可运行）。
 """
+import sys
 from pathlib import Path
 
-from PyInstaller.utils.hooks import collect_submodules
+from PyInstaller.utils.hooks import collect_all, collect_submodules
+
+
+def _conda_runtime_dlls() -> list[tuple[str, str]]:
+    """Miniconda/Anaconda 的 OpenSSL 等 DLL 不会自动被 PyInstaller 收集。"""
+    lib_bin = Path(sys.prefix) / "Library" / "bin"
+    names = (
+        "libssl-3-x64.dll",
+        "libcrypto-3-x64.dll",
+        "liblzma.dll",
+        "libbz2.dll",
+        "ffi.dll",
+    )
+    return [
+        (str(lib_bin / name), ".")
+        for name in names
+        if (lib_bin / name).is_file()
+    ]
 
 
 spec_dir = Path(SPECPATH).resolve()
@@ -17,6 +36,7 @@ dist_web = project_root / "web" / "dist"
 assets_dir = project_root / "app" / "assets"
 prompt_defaults = project_root / "app" / "prompt_defaults"
 ico_path = assets_dir / "app-icon.ico"
+webview2_runtime = project_root / "packaging" / "webview2_runtime"
 
 if not dist_web.is_dir() or not (dist_web / "index.html").is_file():
     raise SystemExit(
@@ -29,11 +49,18 @@ datas = [
 ]
 if assets_dir.is_dir():
     datas.append((str(assets_dir), "app/assets"))
+if webview2_runtime.is_dir() and (webview2_runtime / "msedgewebview2.exe").is_file():
+    datas.append((str(webview2_runtime), "webview2_runtime"))
+
+_platformdirs_datas, _platformdirs_binaries, _platformdirs_hidden = collect_all(
+    "platformdirs"
+)
 
 hiddenimports = list(
     dict.fromkeys(
         collect_submodules("webview")
         + collect_submodules("platformdirs")
+        + _platformdirs_hidden
         + [
             "http.server",
             "socketserver",
@@ -44,18 +71,25 @@ hiddenimports = list(
     )
 )
 
+datas += _platformdirs_datas
+binaries = list(_platformdirs_binaries) + _conda_runtime_dlls()
+
+_rthook_preload = str(project_root / "packaging" / "pyi_rth_preload_platformdirs.py")
+_rthooks_exclude = {"pyi_rth_pkgres"}
+
 a = Analysis(
     [str(entry_script)],
     pathex=[str(project_root)],
-    binaries=[],
+    binaries=binaries,
     datas=datas,
     hiddenimports=hiddenimports,
     hookspath=[],
     hooksconfig={},
-    runtime_hooks=[],
+    runtime_hooks=[_rthook_preload],
     excludes=[],
     noarchive=False,
 )
+a.scripts = [entry for entry in a.scripts if entry[0] not in _rthooks_exclude]
 pyz = PYZ(a.pure)
 exe = EXE(
     pyz,

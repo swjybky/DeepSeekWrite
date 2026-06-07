@@ -137,7 +137,7 @@ _configure_macos_pywebview_env()
 
 import webview
 
-from app.runtime_paths import bundle_root
+from app.runtime_paths import bundle_root, writable_root
 from app.prompt_store import (
     read_raw_material_prompt_for_editor,
     read_raw_material_agent_prompt_for_editor,
@@ -168,6 +168,55 @@ from app.storage import (
     write_saved_workspace_root,
     write_workspace_agent_read_access,
 )
+
+
+_WEBVIEW2_INSTALLER_NAME = "MicrosoftEdgeWebView2RuntimeInstallerX64.exe"
+
+
+def _find_msedgewebview2_dir(root: Path) -> Path | None:
+    """返回包含 msedgewebview2.exe 的目录（用于捆绑的 Fixed Version 运行时）。"""
+    if not root.is_dir():
+        return None
+    if (root / "msedgewebview2.exe").is_file():
+        return root
+    for candidate in root.rglob("msedgewebview2.exe"):
+        return candidate.parent
+    return None
+
+
+def _bundled_webview2_installer() -> Path | None:
+    if not sys.platform.startswith("win"):
+        return None
+    for base in (writable_root(), bundle_root()):
+        candidate = base / _WEBVIEW2_INSTALLER_NAME
+        if candidate.is_file():
+            return candidate
+    return None
+
+
+def _ensure_windows_webview2() -> None:
+    """优先使用捆绑运行时；否则在缺少系统 WebView2 时用离线安装包静默安装。"""
+    if not sys.platform.startswith("win"):
+        return
+
+    bundled_runtime = _find_msedgewebview2_dir(bundle_root() / "webview2_runtime")
+    if bundled_runtime is not None:
+        webview.settings["WEBVIEW2_RUNTIME_PATH"] = str(bundled_runtime)
+        return
+
+    if _windows_webview2_runtime_hint():
+        return
+
+    installer = _bundled_webview2_installer()
+    if installer is None:
+        return
+
+    flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    subprocess.run(
+        [str(installer), "/silent", "/install"],
+        check=False,
+        creationflags=flags,
+    )
 
 
 def _windows_webview2_runtime_hint() -> bool:
@@ -938,6 +987,7 @@ def generate_image(prompt: str, output_dir: str | Path = ".data/image") -> Path 
 
 
 def main() -> None:
+    _ensure_windows_webview2()
     store = BookStore()
     api = Api(store)
     _httpd, url = _start_local_dist_server(_dist_dir())
@@ -950,14 +1000,22 @@ def main() -> None:
         min_size=(640, 480),
     )
     if sys.platform.startswith("win") and not _windows_webview2_runtime_hint():
-        print(
-            "警告：未检测到 Microsoft Edge WebView2 Runtime 的常规安装登记。\n"
-            "在未安装或未正确注册时，pywebview 可能退回到旧版 MSHTML，无法运行本应用前端（窗口常为白屏）。\n"
-            "请安装 Evergreen WebView2 Runtime："
-            "https://developer.microsoft.com/microsoft-edge/webview2/\n"
-            "若安装后仍为白屏，可设置环境变量 WRITECLAW_DEBUG=1 后重新启动以打开开发者工具查看控制台错误。\n",
-            file=sys.stderr,
-        )
+        bundled = _bundled_webview2_installer()
+        if bundled is not None:
+            print(
+                "警告：WebView2 自动安装可能未完成；请重新启动应用。\n"
+                "若仍为白屏，可手动运行同目录下的 "
+                f"{_WEBVIEW2_INSTALLER_NAME}，或设置 WRITECLAW_DEBUG=1 查看控制台。\n",
+                file=sys.stderr,
+            )
+        else:
+            print(
+                "警告：未检测到 Microsoft Edge WebView2 Runtime。\n"
+                "在未安装时窗口可能白屏。请安装 Evergreen WebView2 Runtime："
+                "https://developer.microsoft.com/microsoft-edge/webview2/\n"
+                "若安装后仍为白屏，可设置环境变量 WRITECLAW_DEBUG=1 后重新启动。\n",
+                file=sys.stderr,
+            )
     if (
         sys.platform == "darwin"
         and os.environ.get("PYWEBVIEW_GUI", "").lower() == "cocoa"
