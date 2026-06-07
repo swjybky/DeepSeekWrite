@@ -18,6 +18,7 @@ import {
   type WorkspaceAgentReadAccessConfig,
 } from './workspaces/short/stageReadAccess'
 import { appendLoadableSkillsToPrompt } from './workspaces/short/loadSkill'
+import defaultSkillTemplate from '../../../app/prompt_defaults/skill/default_skill_template.json'
 
 export type {
   WorkspaceAgentId,
@@ -1369,9 +1370,34 @@ const MOCK_SKILLS_KEY = 'write_claw_dev_skills'
 function loadMockSkills(): Map<string, Skill> {
   try {
     const raw = localStorage.getItem(MOCK_SKILLS_KEY)
-    if (!raw) return new Map()
+    if (!raw) {
+      const seeded = seedDefaultMockSkill()
+      if (seeded.size > 0) {
+        saveMockSkills(seeded)
+        return seeded
+      }
+      return new Map()
+    }
     const arr = JSON.parse(raw) as Array<Partial<Skill> & { id: string; stages?: unknown }>
     return new Map(arr.map((s) => [s.id, normalizeSkill(s)]))
+  } catch {
+    return new Map()
+  }
+}
+
+function seedDefaultMockSkill(): Map<string, Skill> {
+  try {
+    const tpl = defaultSkillTemplate as { title?: string; stages?: Record<string, unknown> }
+    if (!tpl?.stages) return new Map()
+    const now = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z')
+    const skill = normalizeSkill({
+      id: randomId(),
+      title: tpl.title || '参考技能',
+      stages: tpl.stages,
+      created_at: now,
+      updated_at: now,
+    })
+    return new Map([[skill.id, skill]])
   } catch {
     return new Map()
   }

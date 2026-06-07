@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from app.runtime_paths import writable_root
+from app.runtime_paths import bundle_root, writable_root
 
 from app.models import (
     Book,
@@ -27,6 +27,7 @@ from app.models import (
     new_book_id,
     new_material_id,
     new_skill_id,
+    new_skill_stage_item_id,
     primary_draft_stage_key,
     normalize_material_stages_from_storage,
     normalize_skill_stages_from_storage,
@@ -588,6 +589,62 @@ def load_skills(path: Path) -> dict[str, Skill]:
     return skills
 
 
+def _load_default_skill_template() -> dict[str, Any] | None:
+    """从 bundle_root 读取默认技能模板 JSON。"""
+    template_path = (
+        bundle_root() / "app" / "prompt_defaults" / "skill" / "default_skill_template.json"
+    )
+    if not template_path.exists():
+        return None
+    try:
+        raw = template_path.read_text(encoding="utf-8")
+        return json.loads(raw) if raw.strip() else None
+    except (json.JSONDecodeError, OSError):
+        return None
+
+
+def _seed_default_skill(skills_path: Path) -> dict[str, Skill]:
+    """首次启动无技能时，从内置模板创建默认参考技能。"""
+    template = _load_default_skill_template()
+    if not template:
+        return {}
+    now = datetime.now(timezone.utc).strftime(ISO_FMT)
+    sid = new_skill_id()
+    title = str(template.get("title") or "参考技能")
+    raw_stages = template.get("stages") or {}
+    stages: dict[str, list[dict[str, str]]] = {}
+    for stage_key in SKILL_STAGE_KEYS:
+        entries = raw_stages.get(stage_key, [])
+        if not isinstance(entries, list):
+            stages[stage_key] = []
+            continue
+        normalized: list[dict[str, str]] = []
+        for entry in entries:
+            if not isinstance(entry, dict):
+                continue
+            body = str(entry.get("body") or "")
+            entry_title = str(entry.get("title") or "未命名技能").strip() or "未命名技能"
+            normalized.append({
+                "id": new_skill_stage_item_id(),
+                "title": entry_title,
+                "body": body,
+                "created_at": now,
+                "updated_at": now,
+            })
+        stages[stage_key] = normalized
+    skill = Skill(
+        id=sid,
+        title=title,
+        stages=stages,
+        output_dir="",
+        created_at=now,
+        updated_at=now,
+    )
+    skills = {sid: skill}
+    save_skills_atomic(skills_path, skills)
+    return skills
+
+
 def save_materials_atomic(path: Path, materials: dict[str, Material]) -> None:
     """原子化保存素材数据到JSON文件"""
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -650,6 +707,8 @@ class BookStore:
         self._books = load_books(self._path)
         self._materials = load_materials(self._materials_path)
         self._skills = load_skills(self._skills_path)
+        if not self._skills and not self._skills_path.exists():
+            self._skills = _seed_default_skill(self._skills_path)
 
     def _reload_books_unlocked(self) -> None:
         self._books = load_books(self._path)
