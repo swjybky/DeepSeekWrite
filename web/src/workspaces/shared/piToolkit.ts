@@ -275,10 +275,10 @@ export function buildWriteWorkspaceEditorTool(opts: {
     name: 'write_workspace_editor',
     label: '写入编辑区',
     description:
-      '把稿件写入应用中间栏当前写作阶段的文本编辑框。每次创建直接落盘到编辑区，不需要和用户确认',
+      '把当前阶段应产出的正文稿件写入应用中间栏文本编辑框。仅写入该阶段的创作正文，不要写入分析报告、修改意见、过程说明或与阶段无关的内容；这些留在对话中回复用户即可。每次调用直接落盘到编辑区，不需要和用户确认。',
     parameters: Type.Object({
       text: Type.String({
-        description: '写入编辑区的完整正文（建议 Markdown）',
+        description: '当前阶段正文稿件（建议 Markdown）。不含分析报告、修改意见或过程说明。',
       }),
       mode: modeSchema,
     }),
