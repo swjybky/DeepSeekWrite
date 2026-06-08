@@ -1,6 +1,11 @@
 import type { AgentTool } from '@earendil-works/pi-agent-core'
 import { Agent } from '@earendil-works/pi-agent-core'
-import { ApiKeyPromptDialog, ChatPanel, ModelSelector } from '@earendil-works/pi-web-ui'
+import {
+  ApiKeyPromptDialog,
+  ChatPanel,
+  ModelSelector,
+  type Attachment,
+} from '@earendil-works/pi-web-ui'
 import { memo, useEffect, useRef, useState } from 'react'
 import type {
   Material,
@@ -30,6 +35,123 @@ import { convertToLlmWithSkillAsUser } from '../pi/skillMessageTransform'
 import { resolveWorkspaceAgentReadAccess } from '../workspaces/short/stageReadAccess'
 
 const ARTIFACTS_TOOL_NAME = 'artifacts'
+const WORKSPACE_ATTACHMENT_ACCEPTED_TYPES =
+  'image/*,.docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document,.txt,text/plain,.md,text/markdown,text/x-markdown'
+const WORKSPACE_ATTACHMENT_MAX_FILES = 10
+const WORKSPACE_ATTACHMENT_MAX_FILE_SIZE = 20 * 1024 * 1024
+const WORKSPACE_ATTACHMENT_SUPPORTED_LABEL = 'Word（.docx）、TXT、Markdown、图片'
+const WORKSPACE_SEND_VALIDATION_ERROR_NAME = 'WriteClawSendValidationError'
+
+type MessageEditorElement = HTMLElement & {
+  attachments?: Attachment[]
+  acceptedTypes?: string
+  maxFiles?: number
+  maxFileSize?: number
+  requestUpdate?: () => void
+}
+
+type AgentInterfaceElement = HTMLElement & {
+  requestUpdate?: () => void
+  sendMessage?: (input: string, attachments?: Attachment[]) => void | Promise<void>
+  __writeClawSendValidationGuard?: boolean
+}
+
+class WorkspaceSendValidationError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = WORKSPACE_SEND_VALIDATION_ERROR_NAME
+  }
+}
+
+function isWorkspaceSendValidationError(error: unknown): error is Error {
+  return (
+    error instanceof Error && error.name === WORKSPACE_SEND_VALIDATION_ERROR_NAME
+  )
+}
+
+function getAgentInterface(chatPanel: ChatPanel | null): AgentInterfaceElement | null {
+  if (!chatPanel) return null
+  if (chatPanel.agentInterface) {
+    return chatPanel.agentInterface as AgentInterfaceElement
+  }
+  return chatPanel.querySelector('agent-interface') as AgentInterfaceElement | null
+}
+
+function getMessageEditor(chatPanel: ChatPanel | null): MessageEditorElement | null {
+  return getAgentInterface(chatPanel)?.querySelector(
+    'message-editor',
+  ) as MessageEditorElement | null
+}
+
+function isWorkspaceSupportedAttachment(attachment: Attachment): boolean {
+  const fileName = attachment.fileName.toLowerCase()
+  if (attachment.type === 'image' || attachment.mimeType.startsWith('image/')) {
+    return true
+  }
+  if (fileName.endsWith('.docx')) return true
+  if (fileName.endsWith('.txt') || fileName.endsWith('.md')) return true
+  return (
+    attachment.mimeType ===
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document' ||
+    attachment.mimeType === 'text/plain' ||
+    attachment.mimeType === 'text/markdown' ||
+    attachment.mimeType === 'text/x-markdown'
+  )
+}
+
+function applyWorkspaceAttachmentOptions(chatPanel: ChatPanel | null): boolean {
+  const editor = getMessageEditor(chatPanel)
+  if (!editor) return false
+  editor.acceptedTypes = WORKSPACE_ATTACHMENT_ACCEPTED_TYPES
+  editor.maxFiles = WORKSPACE_ATTACHMENT_MAX_FILES
+  editor.maxFileSize = WORKSPACE_ATTACHMENT_MAX_FILE_SIZE
+  editor.requestUpdate?.()
+  return true
+}
+
+function configureWorkspaceAttachmentOptions(chatPanel: ChatPanel | null) {
+  if (applyWorkspaceAttachmentOptions(chatPanel)) return
+  requestAnimationFrame(() => {
+    if (applyWorkspaceAttachmentOptions(chatPanel)) return
+    requestAnimationFrame(() => applyWorkspaceAttachmentOptions(chatPanel))
+  })
+}
+
+function getCurrentAttachments(chatPanel: ChatPanel | null): Attachment[] {
+  return getMessageEditor(chatPanel)?.attachments ?? []
+}
+
+function refreshWorkspaceChatInput(chatPanel: ChatPanel | null) {
+  getMessageEditor(chatPanel)?.requestUpdate?.()
+  getAgentInterface(chatPanel)?.requestUpdate?.()
+  chatPanel?.requestUpdate?.()
+}
+
+function installWorkspaceSendValidationGuard(chatPanel: ChatPanel) {
+  const iface = getAgentInterface(chatPanel)
+  if (
+    !iface ||
+    iface.__writeClawSendValidationGuard ||
+    typeof iface.sendMessage !== 'function'
+  ) {
+    return
+  }
+
+  const originalSendMessage = iface.sendMessage.bind(iface)
+  iface.sendMessage = async (input, attachments) => {
+    try {
+      await originalSendMessage(input, attachments)
+    } catch (error) {
+      if (isWorkspaceSendValidationError(error)) {
+        console.warn('[DeepseekWrite·AI面板] 发送已取消:', error.message)
+        refreshWorkspaceChatInput(chatPanel)
+        return
+      }
+      throw error
+    }
+  }
+  iface.__writeClawSendValidationGuard = true
+}
 
 function useDebounced<T>(value: T, ms: number): T {
   const [out, setOut] = useState(value)
@@ -401,6 +523,37 @@ function WorkspaceAiChatInner({
       })
 
       await chatPanel.setAgent(agent, {
+        onBeforeSend: async () => {
+          const attachments = getCurrentAttachments(chatPanel)
+          const unsupported = attachments.filter(
+            (attachment) => !isWorkspaceSupportedAttachment(attachment),
+          )
+          if (unsupported.length > 0) {
+            window.alert(
+              `当前仅支持上传${WORKSPACE_ATTACHMENT_SUPPORTED_LABEL}。` +
+                `\n不支持：${unsupported.map((a) => a.fileName).join('、')}` +
+                '\n老式 .doc 文件请另存为 .docx 后再上传。',
+            )
+            throw new WorkspaceSendValidationError(
+              'Unsupported workspace attachment type',
+            )
+          }
+
+          const hasImage = attachments.some(
+            (attachment) =>
+              attachment.type === 'image' ||
+              attachment.mimeType.startsWith('image/'),
+          )
+          if (hasImage && !agent.state.model?.input?.includes('image')) {
+            const modelName = agent.state.model?.id ?? '当前模型'
+            window.alert(
+              `${modelName} 不支持图片输入。请先切换到支持视觉/图片输入的模型，再发送图片附件。`,
+            )
+            throw new WorkspaceSendValidationError(
+              'Current model does not support image attachments',
+            )
+          }
+        },
         onApiKeyRequired: async (provider: string) =>
           ApiKeyPromptDialog.prompt(provider),
         onModelSelect: async () => {
@@ -419,6 +572,8 @@ function WorkspaceAiChatInner({
         },
         toolsFactory: ctxTools,
       })
+      installWorkspaceSendValidationGuard(chatPanel)
+      configureWorkspaceAttachmentOptions(chatPanel)
 
       if (!includePiArtifacts) {
         agent.state.tools = (agent.state.tools ?? []).filter(

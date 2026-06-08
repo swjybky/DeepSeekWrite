@@ -10,13 +10,30 @@
  */
 import type {
   Message,
+  ImageContent,
   TextContent,
   ToolResultMessage,
   UserMessage,
 } from '@earendil-works/pi-ai'
 import type { AgentMessage } from '@earendil-works/pi-agent-core'
+import {
+  convertAttachments,
+  isArtifactMessage,
+  isUserMessageWithAttachments,
+} from '@earendil-works/pi-web-ui'
 
 const LOAD_SKILL_TOOL_NAME = 'load_skill'
+const ATTACHMENT_ONLY_FALLBACK_PROMPT =
+  '请阅读我上传的附件，并根据附件内容回复。'
+
+function flushPendingSkillUserMessages(
+  result: Message[],
+  pendingSkillUserMessages: UserMessage[],
+) {
+  if (pendingSkillUserMessages.length === 0) return
+  result.push(...pendingSkillUserMessages)
+  pendingSkillUserMessages.length = 0
+}
 
 /**
  * 自定义 convertToLlm：将 load_skill 工具返回的技能内容从 toolResult
@@ -33,6 +50,35 @@ export function convertToLlmWithSkillAsUser(messages: AgentMessage[]): Message[]
 
   for (const msg of messages) {
     if (!msg || typeof msg !== 'object' || !('role' in msg)) continue
+    if (isArtifactMessage(msg)) continue
+    if (isUserMessageWithAttachments(msg)) {
+      flushPendingSkillUserMessages(result, pendingSkillUserMessages)
+      const content: (TextContent | ImageContent)[] =
+        typeof msg.content === 'string'
+          ? [
+              {
+                type: 'text',
+                text:
+                  msg.content.trim() ||
+                  (msg.attachments?.length
+                    ? ATTACHMENT_ONLY_FALLBACK_PROMPT
+                    : ''),
+              },
+            ]
+          : [...msg.content]
+
+      if (msg.attachments?.length) {
+        content.push(...convertAttachments(msg.attachments))
+      }
+
+      result.push({
+        role: 'user',
+        content,
+        timestamp: msg.timestamp,
+      })
+      continue
+    }
+
     const m = msg as Message
 
     if (m.role === 'toolResult') {
@@ -64,17 +110,12 @@ export function convertToLlmWithSkillAsUser(messages: AgentMessage[]): Message[]
         result.push(m)
       }
     } else if (m.role === 'user' || m.role === 'assistant') {
-      if (pendingSkillUserMessages.length > 0) {
-        result.push(...pendingSkillUserMessages)
-        pendingSkillUserMessages.length = 0
-      }
+      flushPendingSkillUserMessages(result, pendingSkillUserMessages)
       result.push(m)
     }
   }
 
-  if (pendingSkillUserMessages.length > 0) {
-    result.push(...pendingSkillUserMessages)
-  }
+  flushPendingSkillUserMessages(result, pendingSkillUserMessages)
 
   return result
 }

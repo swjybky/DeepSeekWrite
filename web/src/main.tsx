@@ -7,6 +7,7 @@ import App from './App.tsx'
 import './bridge'
 
 const rootEl = document.getElementById('root')
+let appMounted = false
 
 function showBootFatalError(message: string) {
   if (!rootEl) return
@@ -28,6 +29,7 @@ function mount() {
       <App />
     </StrictMode>,
   )
+  appMounted = true
 }
 
 /**
@@ -46,6 +48,13 @@ function boot() {
   window.addEventListener('unhandledrejection', (event) => {
     const reason = event.reason
     const msg = reason instanceof Error ? reason.message : String(reason ?? '')
+    const isExpectedSendCancel =
+      reason instanceof Error && reason.name === 'WriteClawSendValidationError'
+    if (isExpectedSendCancel) {
+      event.preventDefault()
+      console.warn('[DeepseekWrite] 用户操作已取消:', msg)
+      return
+    }
     if (
       msg.includes('object store') ||
       msg.includes('key range') ||
@@ -53,6 +62,11 @@ function boot() {
     ) {
       event.preventDefault()
       console.warn('[DeepseekWrite] IndexedDB 瞬态错误（多窗口并发），已忽略:', msg)
+      return
+    }
+    if (appMounted) {
+      event.preventDefault()
+      console.error('[DeepseekWrite] 未处理 Promise 错误:', reason)
       return
     }
     const detail =

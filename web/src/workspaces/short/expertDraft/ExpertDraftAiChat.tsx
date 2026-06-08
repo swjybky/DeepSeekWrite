@@ -32,6 +32,35 @@ import {
 
 const ARTIFACTS_TOOL_NAME = 'artifacts'
 
+type MessageEditorElement = HTMLElement & {
+  attachments?: unknown[]
+  requestUpdate?: () => void
+}
+
+function disableExpertDraftAttachments(chatPanel: ChatPanel) {
+  const apply = () => {
+    const iface = chatPanel.agentInterface
+    if (!iface) return false
+    iface.enableAttachments = false
+    iface.requestUpdate?.()
+
+    const editor = iface.querySelector('message-editor') as
+      | MessageEditorElement
+      | null
+    if (editor) {
+      editor.attachments = []
+      editor.requestUpdate?.()
+    }
+    return true
+  }
+
+  if (apply()) return
+  requestAnimationFrame(() => {
+    if (apply()) return
+    requestAnimationFrame(apply)
+  })
+}
+
 type Props = {
   bookId: string
   bookTitle: string
@@ -353,6 +382,7 @@ export function ExpertDraftAiChat(props: Props) {
           },
           toolsFactory,
         })
+        disableExpertDraftAttachments(chatPanel)
         nextAgent.state.tools = stripArtifacts(nextAgent.state.tools)
         if (!cancelled) {
           nudgePiLayout()
