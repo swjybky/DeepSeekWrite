@@ -35,11 +35,30 @@ import { convertToLlmWithSkillAsUser } from '../pi/skillMessageTransform'
 import { resolveWorkspaceAgentReadAccess } from '../workspaces/short/stageReadAccess'
 
 const ARTIFACTS_TOOL_NAME = 'artifacts'
-const WORKSPACE_ATTACHMENT_ACCEPTED_TYPES =
-  'image/*,.docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document,.txt,text/plain,.md,text/markdown,text/x-markdown'
+const WORD_ATTACHMENT_EXTENSIONS = ['.docx']
+const WORD_ATTACHMENT_MIME_TYPES = [
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+]
+const EXCEL_ATTACHMENT_EXTENSIONS = ['.xlsx', '.xls']
+const EXCEL_ATTACHMENT_MIME_TYPES = [
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  'application/vnd.ms-excel',
+]
+const TEXT_ATTACHMENT_EXTENSIONS = ['.txt', '.md']
+const TEXT_ATTACHMENT_MIME_TYPES = ['text/plain', 'text/markdown', 'text/x-markdown']
+const WORKSPACE_ATTACHMENT_ACCEPTED_TYPES = [
+  'image/*',
+  ...WORD_ATTACHMENT_EXTENSIONS,
+  ...WORD_ATTACHMENT_MIME_TYPES,
+  ...EXCEL_ATTACHMENT_EXTENSIONS,
+  ...EXCEL_ATTACHMENT_MIME_TYPES,
+  ...TEXT_ATTACHMENT_EXTENSIONS,
+  ...TEXT_ATTACHMENT_MIME_TYPES,
+].join(',')
 const WORKSPACE_ATTACHMENT_MAX_FILES = 10
 const WORKSPACE_ATTACHMENT_MAX_FILE_SIZE = 20 * 1024 * 1024
-const WORKSPACE_ATTACHMENT_SUPPORTED_LABEL = 'Word（.docx）、TXT、Markdown、图片'
+const WORKSPACE_ATTACHMENT_SUPPORTED_LABEL =
+  'Word（.docx）、Excel（.xlsx/.xls）、TXT、Markdown、图片'
 const WORKSPACE_SEND_VALIDATION_ERROR_NAME = 'WriteClawSendValidationError'
 
 type MessageEditorElement = HTMLElement & {
@@ -88,15 +107,20 @@ function isWorkspaceSupportedAttachment(attachment: Attachment): boolean {
   if (attachment.type === 'image' || attachment.mimeType.startsWith('image/')) {
     return true
   }
-  if (fileName.endsWith('.docx')) return true
-  if (fileName.endsWith('.txt') || fileName.endsWith('.md')) return true
-  return (
-    attachment.mimeType ===
-      'application/vnd.openxmlformats-officedocument.wordprocessingml.document' ||
-    attachment.mimeType === 'text/plain' ||
-    attachment.mimeType === 'text/markdown' ||
-    attachment.mimeType === 'text/x-markdown'
-  )
+  if (WORD_ATTACHMENT_EXTENSIONS.some((ext) => fileName.endsWith(ext))) {
+    return true
+  }
+  if (EXCEL_ATTACHMENT_EXTENSIONS.some((ext) => fileName.endsWith(ext))) {
+    return true
+  }
+  if (TEXT_ATTACHMENT_EXTENSIONS.some((ext) => fileName.endsWith(ext))) {
+    return true
+  }
+  return [
+    ...WORD_ATTACHMENT_MIME_TYPES,
+    ...EXCEL_ATTACHMENT_MIME_TYPES,
+    ...TEXT_ATTACHMENT_MIME_TYPES,
+  ].includes(attachment.mimeType)
 }
 
 function applyWorkspaceAttachmentOptions(chatPanel: ChatPanel | null): boolean {
@@ -531,8 +555,7 @@ function WorkspaceAiChatInner({
           if (unsupported.length > 0) {
             window.alert(
               `当前仅支持上传${WORKSPACE_ATTACHMENT_SUPPORTED_LABEL}。` +
-                `\n不支持：${unsupported.map((a) => a.fileName).join('、')}` +
-                '\n老式 .doc 文件请另存为 .docx 后再上传。',
+                `\n不支持：${unsupported.map((a) => a.fileName).join('、')}`,
             )
             throw new WorkspaceSendValidationError(
               'Unsupported workspace attachment type',
