@@ -37,6 +37,7 @@ export const DEFAULT_COORDINATOR_SYSTEM_PROMPT = `当前书籍：《{{BOOK_TITLE
 - 必须使用工具修改左侧专家模式编辑器，不要只在聊天里输出列表。
 - 如需普通创作阶段或关联素材内容，调用可用的读取工具。
 - 正文列表和人物状态列表必须一一对应。
+- 如果用户在开始写作时提出文风、情绪、爽点、节奏、人设表达等偏向，调用 start_expert_writing 时必须写入 user_writing_prompt。
 - 不要调用普通模式写入工具，不要要求用户复制粘贴。`
 
 function excerpt(body: string, max = EXCERPT_LIMIT): string {
@@ -116,8 +117,10 @@ export function buildSectionWriterUserPrompt(input: {
   sectionIndex: number
   sectionCount: number
   draft: ExpertDraft
+  userWritingPrompt?: string
 }): string {
   const { sectionId, sectionTitle, sectionIndex, sectionCount, draft } = input
+  const userWritingPrompt = String(input.userWritingPrompt ?? '').trim()
   const currentIndex = draft.sections.findIndex((s) => s.id === sectionId)
   const previousSections =
     currentIndex > 0 ? draft.sections.slice(0, currentIndex) : []
@@ -157,6 +160,9 @@ export function buildSectionWriterUserPrompt(input: {
 - 本章节字数要求：${currentWordRequirement}
 
 如需普通创作阶段或关联素材内容，请调用当前可用的读取工具；本消息不再直接附带这些内容。
+
+用户写作提示（在不破坏既有设定、逻辑和字数要求的前提下贯穿执行）：
+${userWritingPrompt || '（无）'}
 
 前文（为保证连续长文写作性能，只附最近 ${RECENT_PREVIOUS_SECTION_LIMIT} 个已完成小节正文；更早变化见人物状态摘要）：
 ${omittedCount > 0 ? `（更早 ${omittedCount} 个小节正文已省略）\n\n` : ''}${previousBodies || '（无）'}

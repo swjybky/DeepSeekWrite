@@ -1152,10 +1152,13 @@ export function BookEditor() {
     (
       bookId: string,
       sectionIds: string[],
-      callbacks?: Pick<
-        RunExpertDraftSectionWriterOptions,
-        'onSectionAgentStart' | 'onRunFinish'
-      >,
+      options?: {
+        userWritingPrompt?: string
+        callbacks?: Pick<
+          RunExpertDraftSectionWriterOptions,
+          'onSectionAgentStart' | 'onRunFinish'
+        >
+      },
     ) => {
       const session = workspaceSessionsRef.current[bookId]
       if (
@@ -1194,6 +1197,7 @@ export function BookEditor() {
           workspaceSessionsRef.current[bookId]?.stages ?? EMPTY_STAGES,
         linkedMaterial: session.linkedMaterial,
         linkedSkill: session.linkedSkill,
+        userWritingPrompt: options?.userWritingPrompt,
         readAccess: resolveWorkspaceAgentReadAccess(
           workspaceAgentReadAccess,
           EXPERT_SECTION_WRITER_AGENT_ID,
@@ -1201,8 +1205,8 @@ export function BookEditor() {
         updateDraft: (updater) => updateExpertDraftForBook(bookId, updater),
         signal: ac.signal,
         onError: setError,
-        onSectionAgentStart: callbacks?.onSectionAgentStart,
-        onRunFinish: callbacks?.onRunFinish,
+        onSectionAgentStart: options?.callbacks?.onSectionAgentStart,
+        onRunFinish: options?.callbacks?.onRunFinish,
       })
         .catch((e: unknown) => {
           if (ac.signal.aborted) return
@@ -1574,7 +1578,7 @@ export function BookEditor() {
             type="button"
             className="btn-cover-generate"
             onClick={() => {
-              const defaultPrompt = `基于下面的书内容介绍，给我生成一个具有吸引力的书封面，封面不要有小字，给出合适配图，加上书名\n书名：${book?.title ?? ''}\n剧情设计：${stages.plot_design ?? ''}`
+              const defaultPrompt = `基于下面的书内容介绍，给我生成一个具有吸引力的书封面，封面不要有小字，给出合适配图，加上书名\n书名：${book?.title ?? ''}`
               setCoverPromptDraft(defaultPrompt)
               setCoverDialogOpen(true)
             }}
@@ -1910,11 +1914,11 @@ export function BookEditor() {
                       updateDraft={(updater) =>
                         updateExpertDraftForBook(session.book.id, updater)
                       }
-                      startWriting={(sectionIds, callbacks) =>
+                      startWriting={(sectionIds, options) =>
                         startExpertWritingForBook(
                           session.book.id,
                           sectionIds,
-                          callbacks,
+                          options,
                         )
                       }
                     />

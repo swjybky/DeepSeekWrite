@@ -27,7 +27,10 @@ export type ExpertDraftCoordinatorToolContext = {
   readAccess: WorkspaceAgentReadAccessEntry
   getDraft: () => ExpertDraft
   updateDraft: ExpertDraftUpdater
-  startWriting: (sectionIds: string[]) => boolean
+  startWriting: (input: {
+    sectionIds: string[]
+    userWritingPrompt?: string
+  }) => boolean
 }
 
 function defaultStateTitle(sectionTitle: string): string {
@@ -247,6 +250,12 @@ export function buildExpertDraftCoordinatorTools(
             }),
           ),
         ),
+        user_writing_prompt: Type.Optional(
+          Type.String({
+            description:
+              '用户写作提示：用户希望全文偏向的文风、情绪、爽点、节奏、人设表达或其它写作倾向；没有明确要求可留空。',
+          }),
+        ),
       }),
       execute: async (_id, params) => {
         const draft = ctx.getDraft()
@@ -262,7 +271,10 @@ export function buildExpertDraftCoordinatorTools(
         if (valid.length === 0) {
           return textBlock('未启动：没有可写的小节。')
         }
-        const started = ctx.startWriting(valid)
+        const started = ctx.startWriting({
+          sectionIds: valid,
+          userWritingPrompt: String(params.user_writing_prompt ?? '').trim(),
+        })
         return textBlock(
           started
             ? '调用成功，正在写书中。后台小节智能体会按顺序串行编写。'

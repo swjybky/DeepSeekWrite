@@ -74,10 +74,13 @@ type Props = {
   updateDraft: (updater: (draft: ExpertDraft) => ExpertDraft) => void
   startWriting: (
     sectionIds: string[],
-    callbacks?: Pick<
-      RunExpertDraftSectionWriterOptions,
-      'onSectionAgentStart' | 'onRunFinish'
-    >,
+    options?: {
+      userWritingPrompt?: string
+      callbacks?: Pick<
+        RunExpertDraftSectionWriterOptions,
+        'onSectionAgentStart' | 'onRunFinish'
+      >
+    },
   ) => boolean
 }
 
@@ -247,10 +250,13 @@ export function ExpertDraftAiChat(props: Props) {
         readAccess: propsLatestRef.current.readAccess,
         getDraft: () => propsLatestRef.current.expertDraft,
         updateDraft: propsLatestRef.current.updateDraft,
-        startWriting: (sectionIds) =>
+        startWriting: ({ sectionIds, userWritingPrompt }) =>
           propsLatestRef.current.startWriting(sectionIds, {
-            onSectionAgentStart: watchWriterAgent,
-            onRunFinish: finishWriterPreview,
+            userWritingPrompt,
+            callbacks: {
+              onSectionAgentStart: watchWriterAgent,
+              onRunFinish: finishWriterPreview,
+            },
           }),
       })
 
@@ -469,10 +475,13 @@ export function ExpertDraftAiChat(props: Props) {
         readAccess: p.readAccess,
         getDraft: () => propsLatestRef.current.expertDraft,
         updateDraft: propsLatestRef.current.updateDraft,
-        startWriting: (sectionIds) =>
+        startWriting: ({ sectionIds, userWritingPrompt }) =>
           propsLatestRef.current.startWriting(sectionIds, {
-            onSectionAgentStart: watchWriterAgent,
-            onRunFinish: finishWriterPreview,
+            userWritingPrompt,
+            callbacks: {
+              onSectionAgentStart: watchWriterAgent,
+              onRunFinish: finishWriterPreview,
+            },
           }),
       }),
     )

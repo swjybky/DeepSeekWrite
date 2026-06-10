@@ -48,6 +48,8 @@ export type RunExpertDraftSectionWriterOptions = {
   linkedMaterial?: Material | null
   /** 书籍绑定的技能库 */
   linkedSkill?: Skill | null
+  /** 用户在启动专家后台写作时补充的整体写作倾向 */
+  userWritingPrompt?: string
   /** 后台小节编写智能体的全局可读配置 */
   readAccess: WorkspaceAgentReadAccessEntry
   updateDraft: ExpertDraftUpdater
@@ -346,6 +348,7 @@ export async function runExpertDraftSectionWriter(
           sectionIndex,
           sectionCount: ids.length,
           draft: draftBefore,
+          userWritingPrompt: opts.userWritingPrompt,
         })
         try {
           await opts.onSectionAgentStart?.({
