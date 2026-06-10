@@ -137,7 +137,7 @@ _configure_macos_pywebview_env()
 
 import webview
 
-from app.runtime_paths import bundle_root, writable_root
+from app.runtime_paths import bundle_root, data_root, writable_root
 from app.prompt_store import (
     read_raw_material_prompt_for_editor,
     read_raw_material_agent_prompt_for_editor,
@@ -492,7 +492,7 @@ class Api:
         return read_ai_model_config()
 
     def save_ai_model_config(self, config: dict[str, object]) -> dict[str, object]:
-        """保存模型配置到 `.data/preferences.json`。"""
+        """保存模型配置到用户数据 `.data/preferences.json`。"""
         if not isinstance(config, dict):
             raise ValueError("ai_model_config 须为对象")
         return write_ai_model_config(config)
@@ -932,7 +932,7 @@ def _image_api_request_target(base_url: str) -> tuple[str, str, bool]:
     return parsed.netloc, path, parsed.scheme == "https"
 
 
-def generate_image(prompt: str, output_dir: str | Path = ".data/image") -> Path | None:
+def generate_image(prompt: str, output_dir: str | Path | None = None) -> Path | None:
     """调用图像生成 API，将返回的图片保存为 PNG。"""
     try:
         image_defaults = read_image_model_config()
@@ -972,7 +972,7 @@ def generate_image(prompt: str, output_dir: str | Path = ".data/image") -> Path 
             print(f"API 未返回图片数据: {_truncate_image_response(body)}")
             return None
 
-        dest = Path(output_dir)
+        dest = Path(output_dir) if output_dir is not None else data_root() / "image"
         dest.mkdir(parents=True, exist_ok=True)
 
         filename = "cover.png"

@@ -1,4 +1,4 @@
-"""工作台系统提示模板：磁盘默认 + `.data/prompt_overrides` 覆盖，占位符服务端替换。"""
+"""工作台系统提示模板：磁盘默认 + 用户数据 `.data/prompt_overrides` 覆盖。"""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ import json
 import re
 from pathlib import Path
 
-from app.runtime_paths import bundle_root, writable_root
+from app.runtime_paths import bundle_root, data_root
 
 # --- 创作空间共享提示词管线，与工作台 TS 对齐 ---
 
@@ -64,7 +64,7 @@ def validate_workspace_stage_id(stage_id: str) -> None:
 
 
 def _workspace_override_root() -> Path:
-    return writable_root() / ".data" / "prompt_overrides" / SHORT_PREFIX
+    return data_root() / "prompt_overrides" / SHORT_PREFIX
 
 
 def workspace_agent_override_absolute_path(agent_id: str) -> Path:
@@ -281,7 +281,7 @@ def validate_material_slot(prompt_kind: str, stage_id: str) -> None:
 
 
 def material_agent_override_absolute_path() -> Path:
-    root = writable_root() / ".data" / "prompt_overrides" / MATERIAL_PREFIX
+    root = data_root() / "prompt_overrides" / MATERIAL_PREFIX
     return (
         root
         / SHARED_MATERIAL_PROMPT_DIR
@@ -513,7 +513,7 @@ def validate_skill_stage_id(stage_id: str) -> None:
 
 
 def skill_agent_override_absolute_path() -> Path:
-    root = writable_root() / ".data" / "prompt_overrides" / SKILL_PREFIX
+    root = data_root() / "prompt_overrides" / SKILL_PREFIX
     return (
         root
         / SHARED_SKILL_PROMPT_DIR

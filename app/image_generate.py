@@ -8,6 +8,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 
+from app.runtime_paths import data_root
 from app.storage import read_image_model_config
 
 
@@ -109,7 +110,7 @@ def _image_api_request_target(base_url: str) -> tuple[str, str, bool]:
     return parsed.netloc, f"{prefix}/images/generations", parsed.scheme == "https"
 
 
-def generate_image(prompt: str, output_dir: str | Path = ".data/image") -> Path | None:
+def generate_image(prompt: str, output_dir: str | Path | None = None) -> Path | None:
     """调用图像生成 API，将返回的图片保存为 PNG。"""
     image_defaults = read_image_model_config()
     if not image_defaults:
@@ -149,7 +150,7 @@ def generate_image(prompt: str, output_dir: str | Path = ".data/image") -> Path 
         print(f"API 未返回图片数据: {_truncate_response(body)}")
         return None
 
-    dest = Path(output_dir)
+    dest = Path(output_dir) if output_dir is not None else data_root() / "image"
     dest.mkdir(parents=True, exist_ok=True)
 
     # 使用 UUID 确保文件名不重复

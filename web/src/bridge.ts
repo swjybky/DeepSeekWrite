@@ -545,10 +545,10 @@ declare global {
           linked_skill_id?: string | null,
         ): Promise<Book | null>
         delete_book(book_id: string): Promise<boolean>
-        /** 上次选定的工作文件夹（持久化在应用 .data/preferences.json） */
+        /** 上次选定的工作文件夹（持久化在用户数据 .data/preferences.json） */
         get_workspace_root(): Promise<string | null>
         set_workspace_root(path: string | null): Promise<void>
-        /** 全软件外观风格（持久化在应用 .data/preferences.json） */
+        /** 全软件外观风格（持久化在用户数据 .data/preferences.json） */
         get_appearance_style(): Promise<AppearanceStyle | string>
         set_appearance_style(style: AppearanceStyle): Promise<AppearanceStyle | string>
         /** 全局创作空间智能体可读配置 */
@@ -562,7 +562,7 @@ declare global {
         get_ai_model_config(): Promise<AiModelSettings>
         save_ai_model_config(config: AiModelSettings): Promise<AiModelSettings>
 
-        /** 渲染工作台系统提示词（磁盘默认 + `.data/prompt_overrides`，占位符服务端替换）。 */
+        /** 渲染工作台系统提示词（磁盘默认 + 用户数据 `.data/prompt_overrides`，占位符服务端替换）。 */
         get_workspace_system_prompt(
           stage_id: string,
           context_json: string,

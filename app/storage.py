@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from app.runtime_paths import bundle_root, writable_root
+from app.runtime_paths import bundle_root, data_root
 
 from app.models import (
     Book,
@@ -43,12 +43,12 @@ APPEARANCE_STYLES = {"classic", "modern"}
 
 @contextmanager
 def _data_file_lock():
-    """跨进程串行化 `.data` 下 JSON 的读改写。
+    """跨进程串行化用户数据目录 `.data` 下 JSON 的读改写。
 
     JSON 写入本身已经是 os.replace 原子替换；这里额外锁住读改写窗口，避免两个
     桌面进程各自基于旧内存快照保存，后写的一方覆盖先写的一方。
     """
-    data_dir = writable_root() / ".data"
+    data_dir = data_root()
     data_dir.mkdir(parents=True, exist_ok=True)
     lock_path = data_dir / ".write_claw.lock"
     with lock_path.open("a+b") as f:
@@ -120,21 +120,21 @@ def _utc_now_iso() -> str:
 
 
 def default_data_path() -> Path:
-    data_dir = writable_root() / ".data"
+    data_dir = data_root()
     data_dir.mkdir(parents=True, exist_ok=True)
     return data_dir / "books.json"
 
 
 def default_materials_path() -> Path:
     """素材数据文件路径"""
-    data_dir = writable_root() / ".data"
+    data_dir = data_root()
     data_dir.mkdir(parents=True, exist_ok=True)
     return data_dir / "materials.json"
 
 
 def default_skills_path() -> Path:
     """技能数据文件路径"""
-    data_dir = writable_root() / ".data"
+    data_dir = data_root()
     data_dir.mkdir(parents=True, exist_ok=True)
     return data_dir / "skills.json"
 
