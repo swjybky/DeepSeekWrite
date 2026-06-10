@@ -94,7 +94,7 @@ function describeCharMismatch(needle: string, matched: string): string[] {
     issues.add('分号全角/半角不同')
   }
   if (needle.length === matched.length && needle !== matched && issues.size === 0) {
-    issues.add('个别字符与编辑区不一致，请从 read_workspace_content 返回结果中复制')
+    issues.add('个别字符与编辑区不一致，请从读取或搜索结果中复制')
   }
   return [...issues]
 }
@@ -176,7 +176,7 @@ export function resolveReplacementSpan(
   const hint = suggestClosestFragment(haystack, needle)
   let message =
     `${itemName}的 original_text 未在当前阶段文本中找到。`
-    + '请先调用 read_workspace_content 读取当前阶段，从工具返回的正文中原样复制需替换的片段（不要从对话摘要或旧版本抄写）。'
+    + '请先调用 search_workspace_text 搜索失败片段中的关键词或短句，从搜索结果上下文里原样复制真实片段后重试。'
     + '注意 JSON 参数里的直引号 " 与编辑区弯引号 “” 不同；系统已自动容忍常见引号/标点差异，若仍失败说明片段内容本身不一致。'
   if (hint) {
     message += `\n编辑区中最接近的片段：${hint}`

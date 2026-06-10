@@ -133,6 +133,9 @@ function toolStatus(toolName: string, done = false): string {
   if (toolName === 'read_workspace_content') {
     return done ? '已读取创作阶段' : '正在读取创作阶段'
   }
+  if (toolName === 'search_workspace_text') {
+    return done ? '已搜索创作文本' : '正在搜索创作文本'
+  }
   if (toolName === 'read_linked_material_content') {
     return done ? '已读取关联素材' : '正在读取关联素材'
   }

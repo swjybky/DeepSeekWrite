@@ -2035,7 +2035,6 @@ export function BookEditor() {
                   onMetrics={setDraftMetrics}
                   readOnly={Boolean(streamingStages.draft)}
                   textareaRef={textareaRef}
-                  resizeKey={aiPanelWidth}
                 />
               ) : (
                 <textarea

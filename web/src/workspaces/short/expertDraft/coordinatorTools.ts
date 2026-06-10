@@ -13,6 +13,7 @@ import { defineTool, textBlock } from '../../shared/piToolkit'
 import {
   buildReadLinkedMaterialContentTool,
   buildReadWorkspaceContentTool,
+  buildSearchWorkspaceTextTool,
 } from '../stageAgents'
 import { buildLoadSkillTool } from '../loadSkill'
 import type { WorkspaceAgentReadAccessEntry } from '../stageReadAccess'
@@ -88,6 +89,9 @@ export function buildExpertDraftCoordinatorTools(
       buildReadWorkspaceContentTool(toolCtx, ctx.readAccess.workspace),
     )
   }
+  readTools.push(
+    buildSearchWorkspaceTextTool(toolCtx, ctx.readAccess.workspace),
+  )
   if (ctx.readAccess.material.length > 0) {
     readTools.push(
       buildReadLinkedMaterialContentTool(toolCtx, ctx.readAccess.material),

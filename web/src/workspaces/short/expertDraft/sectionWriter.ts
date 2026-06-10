@@ -13,6 +13,7 @@ import {
 import {
   buildReadLinkedMaterialContentTool,
   buildReadWorkspaceContentTool,
+  buildSearchWorkspaceTextTool,
 } from '../stageAgents'
 import { buildLoadSkillTool } from '../loadSkill'
 import {
@@ -192,6 +193,9 @@ function buildSectionWriterTools(input: {
       buildReadWorkspaceContentTool(toolCtx, readAccess.workspace),
     )
   }
+  readTools.push(
+    buildSearchWorkspaceTextTool(toolCtx, readAccess.workspace),
+  )
   if (readAccess.material.length > 0) {
     readTools.push(
       buildReadLinkedMaterialContentTool(toolCtx, readAccess.material),

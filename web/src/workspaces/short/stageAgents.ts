@@ -17,8 +17,11 @@ import {
 } from '../shared/piToolkit'
 import {
   applyTextSpanReplacement,
+  findFlexibleOccurrences,
   normalizeNewlines,
   resolveReplacementSpan,
+  suggestClosestFragment,
+  type TextSpan,
 } from '../shared/textReplaceMatch'
 
 export type ShortWorkspaceStageAgentContext = {
@@ -77,6 +80,10 @@ function readWorkspaceStageBody(
   return ctx.allStages[stageId] ?? ''
 }
 
+function shortStageLabel(stageId: ShortStageId | string): string {
+  return (SHORT_STAGE_LABELS as Record<string, string>)[stageId] ?? stageId
+}
+
 export function buildReadWorkspaceContentTool(
   ctx: ShortWorkspaceStageAgentContext,
   allowedStageIds: readonly ShortStageId[],
@@ -108,6 +115,200 @@ export function buildReadWorkspaceContentTool(
         return textBlock(`${header}\n\n该阶段当前文本为空。`)
       }
       return textBlock(`${header}\n\n${excerpt(raw)}`)
+    },
+  })
+}
+
+const MAX_WORKSPACE_SEARCH_QUERY_CHARS = 600
+const DEFAULT_WORKSPACE_SEARCH_CONTEXT_CHARS = 80
+const MAX_WORKSPACE_SEARCH_CONTEXT_CHARS = 500
+const DEFAULT_WORKSPACE_SEARCH_MATCHES = 10
+const MAX_WORKSPACE_SEARCH_MATCHES = 30
+
+function clampInteger(
+  value: number | undefined,
+  fallback: number,
+  min: number,
+  max: number,
+): number {
+  if (value === undefined || !Number.isFinite(value)) return fallback
+  return Math.max(min, Math.min(max, Math.floor(value)))
+}
+
+function findLiteralOccurrences(haystack: string, needle: string): TextSpan[] {
+  if (!needle) return []
+  const results: TextSpan[] = []
+  let pos = 0
+  while (pos <= haystack.length) {
+    const found = haystack.indexOf(needle, pos)
+    if (found === -1) break
+    results.push({
+      start: found,
+      end: found + needle.length,
+      matched: haystack.slice(found, found + needle.length),
+    })
+    pos = found + needle.length
+  }
+  return results
+}
+
+function lineColumnAt(text: string, index: number): { line: number; column: number } {
+  let line = 1
+  let lastBreak = -1
+  for (let i = 0; i < index; i += 1) {
+    if (text.charCodeAt(i) === 10) {
+      line += 1
+      lastBreak = i
+    }
+  }
+  return { line, column: index - lastBreak }
+}
+
+function snippetAroundMatch(
+  text: string,
+  span: TextSpan,
+  contextChars: number,
+): string {
+  const start = Math.max(0, span.start - contextChars)
+  const end = Math.min(text.length, span.end + contextChars)
+  const prefix = start > 0 ? '...' : ''
+  const suffix = end < text.length ? '...' : ''
+  return `${prefix}${text.slice(start, span.start)}<<${span.matched}>>${text.slice(span.end, end)}${suffix}`
+}
+
+export function buildSearchWorkspaceTextTool(
+  ctx: ShortWorkspaceStageAgentContext,
+  allowedStageIds: readonly ShortStageId[],
+): AgentTool {
+  const allowedSet = new Set(allowedStageIds)
+  const { schema: stageIdSchema, description: allowedDescription } =
+    shortStageIdParameterSchema(allowedStageIds)
+
+  return defineTool({
+    name: 'search_workspace_text',
+    label: '搜索工作区文本',
+    description:
+      '在本书创作空间里按 grep 风格搜索文本，只返回命中的行列位置和前后少量上下文，不返回全文。'
+      + `\n当前仅允许搜索：${allowedDescription || '（无）'}。不传 stage_id 时会搜索所有允许阶段。`
+      + '\n适用于 replace_current_stage_text 或全局替换失败后，先定位编辑区里真实存在的原文片段，再用搜索结果中的原样文本重试替换。',
+    parameters: Type.Object({
+      query: Type.String({
+        maxLength: MAX_WORKSPACE_SEARCH_QUERY_CHARS,
+        description:
+          '要搜索的原文片段或关键词。建议传替换失败片段中的 8-80 个连续字符，不要传整篇正文。',
+      }),
+      stage_id: Type.Optional(stageIdSchema),
+      max_matches: Type.Optional(
+        Type.Integer({
+          minimum: 1,
+          maximum: MAX_WORKSPACE_SEARCH_MATCHES,
+          description: '最多返回多少处匹配，默认 10，最高 30。',
+        }),
+      ),
+      context_chars: Type.Optional(
+        Type.Integer({
+          minimum: 20,
+          maximum: MAX_WORKSPACE_SEARCH_CONTEXT_CHARS,
+          description: '每处匹配前后返回多少字符上下文，默认 80，最高 500。',
+        }),
+      ),
+    }),
+    execute: async (_toolCallId, params) => {
+      const query = normalizeNewlines(params.query).trim()
+      if (!query) return textBlock('搜索文本不能为空。')
+      if (query.length > MAX_WORKSPACE_SEARCH_QUERY_CHARS) {
+        return textBlock(
+          `搜索文本过长（${query.length} 字符）。请截取需要定位的小段原文，最多 ${MAX_WORKSPACE_SEARCH_QUERY_CHARS} 字符。`,
+        )
+      }
+
+      const requestedStageId = params.stage_id as ShortStageId | undefined
+      const stageIds = requestedStageId ? [requestedStageId] : [...allowedStageIds]
+      if (requestedStageId && !allowedSet.has(requestedStageId)) {
+        return textBlock(
+          `当前不允许搜索「${shortStageLabel(requestedStageId)}」。仅可搜索：${allowedDescription || '（无）'}。`,
+        )
+      }
+      if (stageIds.length === 0) {
+        return textBlock('当前智能体未配置可搜索的创作阶段。')
+      }
+
+      const maxMatches = clampInteger(
+        params.max_matches,
+        DEFAULT_WORKSPACE_SEARCH_MATCHES,
+        1,
+        MAX_WORKSPACE_SEARCH_MATCHES,
+      )
+      const contextChars = clampInteger(
+        params.context_chars,
+        DEFAULT_WORKSPACE_SEARCH_CONTEXT_CHARS,
+        20,
+        MAX_WORKSPACE_SEARCH_CONTEXT_CHARS,
+      )
+
+      const output: string[] = [
+        `书名：《${ctx.bookTitle}》`,
+        `搜索：${query}`,
+        `范围：${stageIds.map((id) => `【${shortStageLabel(id)}】（${id}）`).join('、')}`,
+      ]
+      let total = 0
+      const emptyStages: string[] = []
+      const closestHints: string[] = []
+
+      for (const stageId of stageIds) {
+        const label = shortStageLabel(stageId)
+        const body = normalizeNewlines(readWorkspaceStageBody(ctx, stageId))
+        if (!body.trim()) {
+          emptyStages.push(`【${label}】`)
+          continue
+        }
+
+        let matchKind = '精确匹配'
+        let matches = findLiteralOccurrences(body, query)
+        if (matches.length === 0) {
+          matches = findFlexibleOccurrences(body, query)
+          if (matches.length > 0) {
+            matchKind = '引号/标点容错匹配'
+          }
+        }
+
+        if (matches.length === 0) {
+          const hint = suggestClosestFragment(body, query, 220)
+          if (hint) {
+            closestHints.push(`【${label}】中接近片段：${hint}`)
+          }
+          continue
+        }
+
+        output.push('', `【${label}】（${stageId}）${matchKind} ${matches.length} 处：`)
+        for (const [index, match] of matches.entries()) {
+          if (total >= maxMatches) break
+          const loc = lineColumnAt(body, match.start)
+          output.push(
+            `${index + 1}. L${loc.line}:C${loc.column} chars ${match.start}-${match.end}`,
+            snippetAroundMatch(body, match, contextChars),
+          )
+          total += 1
+        }
+        if (total >= maxMatches) break
+      }
+
+      if (total > 0) {
+        output.push('', `已返回 ${total} 处匹配；如需替换，请从 << >> 中或其上下文里原样复制真实片段。`)
+        return textBlock(output.join('\n'))
+      }
+
+      const searched = stageIds
+        .map((id) => `【${shortStageLabel(id)}】`)
+        .join('、')
+      const notFound = [`未在 ${searched} 中找到「${query}」。`]
+      if (emptyStages.length > 0) {
+        notFound.push(`空阶段：${emptyStages.join('、')}。`)
+      }
+      if (closestHints.length > 0) {
+        notFound.push(...closestHints)
+      }
+      return textBlock(notFound.join('\n'))
     },
   })
 }
@@ -290,7 +491,9 @@ export function buildGlobalReplaceTool(
         return textBlock('查找文本不能为空。')
       }
       if (!currentBody.includes(find)) {
-        return textBlock(`未在内容中找到「${find}」，未执行任何替换。`)
+        return textBlock(
+          `未在内容中找到「${find}」，未执行任何替换。请先调用 search_workspace_text 搜索关键词或短句，确认编辑区真实文本后再重试。`,
+        )
       }
       const newText = currentBody.split(find).join(replace)
       const apply = ctx.applyToStageEditor
@@ -366,6 +569,7 @@ export function buildReplaceCurrentStageTextTool(
       + '\n【必做】先调用 read_workspace_content 读取当前阶段，从工具返回正文中原样复制待改片段到 original_text；不要从对话摘要、系统提示词或旧回复中抄写。'
       + '\noriginal_text 须在正文中唯一匹配；系统会自动容忍直引号"与弯引号“”、全角/半角逗号分号、破折号等常见差异，但语义内容必须一致。'
       + '\n匹配失败时会返回编辑区中最接近的片段与可能差异；请据此修正后重试。'
+      + '\n若替换失败，不要立刻重新读取全文；先调用 search_workspace_text 搜索失败片段中的关键词或短句，确认编辑区真实原文后再重试。'
       + '\n需要多处修改时传 replacements 数组；每项只替换一个小段，不要把整篇作为 original_text 或 new_text。',
     parameters: Type.Object({
       replacements: Type.Array(
@@ -494,6 +698,7 @@ export function buildShortWorkspaceAdditionalTools(
 
   const readSaved = readWorkspaceTools(ctx, allowedWorkspace)
   const readMaterial = readMaterialTools(ctx, allowedMaterial)
+  const searchWorkspaceText = buildSearchWorkspaceTextTool(ctx, allowedWorkspace)
   const loadSkill = buildLoadSkillTool({
     linkedSkill: ctx.linkedSkill,
     currentStageId: ctx.stageId,
@@ -505,21 +710,49 @@ export function buildShortWorkspaceAdditionalTools(
     case 'character_design':
     case 'plot_design':
     case 'intro_design':
-      return [...readSaved, ...readMaterial, loadSkill, writeWorkspace, replaceCurrentStageText]
+      return [
+        ...readSaved,
+        searchWorkspaceText,
+        ...readMaterial,
+        loadSkill,
+        writeWorkspace,
+        replaceCurrentStageText,
+      ]
 
     case 'plot_refine':
-      return [...readSaved, ...readMaterial, loadSkill, writeWorkspace, replaceCurrentStageText]
+      return [
+        ...readSaved,
+        searchWorkspaceText,
+        ...readMaterial,
+        loadSkill,
+        writeWorkspace,
+        replaceCurrentStageText,
+      ]
 
     case 'outline':
     case 'draft_review':
-      return [...readSaved, ...readMaterial, loadSkill, writeWorkspace, replaceCurrentStageText]
+      return [
+        ...readSaved,
+        searchWorkspaceText,
+        ...readMaterial,
+        loadSkill,
+        writeWorkspace,
+        replaceCurrentStageText,
+      ]
 
     case 'draft':
-      return [...readSaved, ...readMaterial, loadSkill, replaceCurrentStageText]
+      return [
+        ...readSaved,
+        searchWorkspaceText,
+        ...readMaterial,
+        loadSkill,
+        replaceCurrentStageText,
+      ]
 
     case 'format_conversion':
       return [
         ...readSaved,
+        searchWorkspaceText,
         ...readMaterial,
         loadSkill,
         buildCopyStageToFormatTool(ctx),
@@ -528,6 +761,6 @@ export function buildShortWorkspaceAdditionalTools(
       ]
 
     default:
-      return [...readSaved, loadSkill, replaceCurrentStageText]
+      return [...readSaved, searchWorkspaceText, loadSkill, replaceCurrentStageText]
   }
 }
