@@ -49,9 +49,9 @@ export type RunExpertDraftSectionWriterOptions = {
   linkedMaterial?: Material | null
   /** 书籍绑定的技能库 */
   linkedSkill?: Skill | null
-  /** 用户在启动专家后台写作时补充的整体写作倾向 */
+  /** 用户在启动分节写作时补充的整体写作倾向 */
   userWritingPrompt?: string
-  /** 后台小节编写智能体的全局可读配置 */
+  /** 分节写手智能体的全局可读配置 */
   readAccess: WorkspaceAgentReadAccessEntry
   updateDraft: ExpertDraftUpdater
   signal?: AbortSignal
@@ -273,7 +273,7 @@ export async function runExpertDraftSectionWriter(
     const model = await resolvePreferredWorkspaceChatModel()
     const hasKey = await ensureModelApiKey(model.provider)
     if (!hasKey) {
-      opts.onError?.('专家模式后台写作未启动：缺少当前模型 API Key。')
+      opts.onError?.('分节写作未启动：缺少当前模型 API Key。')
       return
     }
 
@@ -366,8 +366,8 @@ export async function runExpertDraftSectionWriter(
         } catch (e) {
           opts.onError?.(
             e instanceof Error
-              ? `专家模式右侧子智能体展示失败：${e.message}`
-              : '专家模式右侧子智能体展示失败',
+              ? `分节写手展示失败：${e.message}`
+              : '分节写手展示失败',
           )
         }
         if (opts.signal?.aborted) return
@@ -396,7 +396,7 @@ export async function runExpertDraftSectionWriter(
         }
 
         if (!sectionBodyWritten) {
-          opts.onError?.(`专家模式后台写作未写入「${section.title}」正文，已停止。`)
+          opts.onError?.(`分节写作未写入「${section.title}」正文，已停止。`)
           return
         }
 
@@ -407,8 +407,8 @@ export async function runExpertDraftSectionWriter(
         if (opts.signal?.aborted) return
         opts.onError?.(
           e instanceof Error
-            ? `专家模式后台写作失败：${e.message}`
-            : '专家模式后台写作失败',
+            ? `分节写作失败：${e.message}`
+            : '分节写作失败',
         )
         return
       } finally {

@@ -39,10 +39,7 @@ const SKILL_ORDER: Record<string, readonly { id: string; label: string }[]> = {
     { id: 'intro_design', label: '导语设计技能' },
     { id: 'plot_refine', label: '剧情细化技能' },
     { id: 'outline', label: '大纲纲要技能' },
-    { id: 'draft', label: '正文技能' },
-    { id: 'draft_review', label: '正文审阅技能' },
-    { id: 'format_conversion', label: '格式转换技能' },
-    { id: 'expert_draft_coordinator', label: '专家总控技能' },
+    { id: 'draft', label: '正文专家编写技能' },
     { id: 'expert_section_writer', label: '分节写手技能' },
   ],
 }

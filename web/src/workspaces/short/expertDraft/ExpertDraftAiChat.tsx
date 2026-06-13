@@ -267,13 +267,13 @@ export function ExpertDraftAiChat(props: Props) {
       try {
         await ensurePiAppStorage()
       } catch (e) {
-        console.warn('[DeepseekWrite·专家面板] Pi 存储初始化失败，将重试:', e)
+        console.warn('[DeepseekWrite·正文专家面板] Pi 存储初始化失败，将重试:', e)
         await new Promise((r) => window.setTimeout(r, 500))
         if (cancelled) return
         try {
           await ensurePiAppStorage()
         } catch (e2) {
-          console.error('[DeepseekWrite·专家面板] Pi 存储初始化最终失败:', e2)
+          console.error('[DeepseekWrite·正文专家面板] Pi 存储初始化最终失败:', e2)
           return
         }
       }
@@ -513,7 +513,7 @@ export function ExpertDraftAiChat(props: Props) {
       >
         <div className="expert-draft-agent-preview-head">
           <span className="expert-draft-agent-preview-kicker">
-            后台小节智能体
+            分节写手智能体
           </span>
           <span className="expert-draft-agent-preview-actions">
             {writerPreview.userPrompt ? (
@@ -533,7 +533,7 @@ export function ExpertDraftAiChat(props: Props) {
         <div className="expert-draft-agent-preview-title">
           {writerPreview.sectionTitle
             ? `${writerPreview.progress} · ${writerPreview.sectionTitle}`
-            : '等待主智能体启动小节编写'}
+            : '等待正文专家启动分节编写'}
         </div>
         {writerPreview.text ? (
           <pre className="expert-draft-agent-preview-body">

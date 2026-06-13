@@ -3,6 +3,14 @@ import { useState } from 'react'
 export type WorkspaceTreeStage = {
   id: string
   label: string
+  children?: WorkspaceTreeStageChild[]
+  createChildLabel?: string
+  createChildDisabled?: boolean
+}
+
+export type WorkspaceTreeStageChild = {
+  id: string
+  label: string
 }
 
 export type WorkspaceTreeBook = {
@@ -18,9 +26,18 @@ type WorkspaceTreeNavProps = {
   books?: WorkspaceTreeBook[]
   activeBookId?: string
   activeStageId: string
+  activeStageChildId?: string
   onStageSelect: (stageId: string) => void
+  onStageChildSelect?: (stageId: string, childId: string) => void
+  onStageChildCreate?: (stageId: string) => void
   onBookSelect?: (bookId: string) => void
   onBookStageSelect?: (bookId: string, stageId: string) => void
+  onBookStageChildSelect?: (
+    bookId: string,
+    stageId: string,
+    childId: string,
+  ) => void
+  onBookStageChildCreate?: (bookId: string, stageId: string) => void
   defaultExpanded?: boolean
   ariaLabel?: string
   editingTitle?: boolean
@@ -37,9 +54,14 @@ export function WorkspaceTreeNav({
   books,
   activeBookId,
   activeStageId,
+  activeStageChildId,
   onStageSelect,
+  onStageChildSelect,
+  onStageChildCreate,
   onBookSelect,
   onBookStageSelect,
+  onBookStageChildSelect,
+  onBookStageChildCreate,
   defaultExpanded = false,
   ariaLabel = '项目结构',
   editingTitle = false,
@@ -66,6 +88,71 @@ export function WorkspaceTreeNav({
       ...prev,
       [bookId]: !(prev[bookId] ?? bookId === activeBookId),
     }))
+  }
+
+  const renderStageChildren = (
+    stage: WorkspaceTreeStage,
+    options: {
+      bookId?: string
+      isActiveStage: boolean
+      onSelectStage: () => void
+    },
+  ) => {
+    const children = stage.children ?? []
+    if (children.length === 0 && !stage.createChildLabel) return null
+
+    return (
+      <ul className="workspace-tree-stage-children">
+        {children.map((child) => {
+          const isActive =
+            options.isActiveStage && activeStageChildId === child.id
+          return (
+            <li key={child.id}>
+              <button
+                type="button"
+                className={
+                  isActive
+                    ? 'workspace-tree-stage-child workspace-tree-stage-child--active'
+                    : 'workspace-tree-stage-child'
+                }
+                onClick={() => {
+                  if (options.bookId && onBookStageChildSelect) {
+                    onBookStageChildSelect?.(options.bookId, stage.id, child.id)
+                  } else if (onStageChildSelect) {
+                    onStageChildSelect?.(stage.id, child.id)
+                  } else {
+                    options.onSelectStage()
+                  }
+                }}
+                title={child.label}
+              >
+                {child.label}
+              </button>
+            </li>
+          )
+        })}
+        {stage.createChildLabel ? (
+          <li>
+            <button
+              type="button"
+              className="workspace-tree-stage-child workspace-tree-stage-child--create"
+              disabled={stage.createChildDisabled}
+              onClick={() => {
+                if (options.bookId && onBookStageChildCreate) {
+                  onBookStageChildCreate?.(options.bookId, stage.id)
+                } else if (onStageChildCreate) {
+                  onStageChildCreate?.(stage.id)
+                } else {
+                  options.onSelectStage()
+                }
+              }}
+            >
+              {stage.createChildLabel}
+            </button>
+          </li>
+        ) : null}
+      </ul>
+    )
   }
 
   if (hasBookTree) {
@@ -149,7 +236,7 @@ export function WorkspaceTreeNav({
                         const isActive =
                           isActiveBook && activeStageId === stage.id
                         return (
-                          <li key={stage.id}>
+                          <li key={stage.id} className="workspace-tree-stage-item">
                             <button
                               type="button"
                               className={
@@ -168,6 +255,19 @@ export function WorkspaceTreeNav({
                               <span className="workspace-tree-stage-dot" aria-hidden />
                               {stage.label}
                             </button>
+                            {isActiveBook
+                              ? renderStageChildren(stage, {
+                                  bookId: treeBook.id,
+                                  isActiveStage: isActive,
+                                  onSelectStage: () => {
+                                    if (isActiveBook) {
+                                      onStageSelect(stage.id)
+                                    } else {
+                                      onBookStageSelect?.(treeBook.id, stage.id)
+                                    }
+                                  },
+                                })
+                              : null}
                           </li>
                         )
                       })}
@@ -225,7 +325,7 @@ export function WorkspaceTreeNav({
       {expanded ? (
         <ul className="workspace-tree-stages">
           {stages.map((stage) => (
-            <li key={stage.id}>
+            <li key={stage.id} className="workspace-tree-stage-item">
               <button
                 type="button"
                 className={
@@ -238,6 +338,10 @@ export function WorkspaceTreeNav({
                 <span className="workspace-tree-stage-dot" aria-hidden />
                 {stage.label}
               </button>
+              {renderStageChildren(stage, {
+                isActiveStage: activeStageId === stage.id,
+                onSelectStage: () => onStageSelect(stage.id),
+              })}
             </li>
           ))}
         </ul>

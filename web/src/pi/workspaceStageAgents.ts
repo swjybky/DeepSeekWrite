@@ -9,7 +9,10 @@ import type {
   SkillStageId,
   WorkspaceAgentReadAccessConfig,
 } from '../bridge'
-import { resolveWorkspaceAgentReadAccess } from '../workspaces/short/stageReadAccess'
+import {
+  EXPERT_DRAFT_COORDINATOR_AGENT_ID,
+  resolveWorkspaceAgentReadAccess,
+} from '../workspaces/short/stageReadAccess'
 import type { ShortStageId } from '../workspaces/short/stages'
 import {
   buildShortWorkspaceAdditionalTools,
@@ -84,9 +87,11 @@ export function getWorkspaceStageAdditionalTools(
 
   // 书籍短篇工作台模式
   const shortStageId = ctx.stageId as ShortStageId
+  const readAccessAgentId =
+    shortStageId === 'draft' ? EXPERT_DRAFT_COORDINATOR_AGENT_ID : shortStageId
   const readAccess = resolveWorkspaceAgentReadAccess(
     ctx.workspaceAgentReadAccess,
-    shortStageId,
+    readAccessAgentId,
   )
   const narrow: ShortWorkspaceStageAgentContext = {
     bookTitle: ctx.bookTitle,

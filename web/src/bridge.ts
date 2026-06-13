@@ -12,6 +12,7 @@ import {
 import { getEmbeddedPromptTemplate } from './prompt/embeddedDefaults'
 import { renderPromptFromTemplateRaw } from './prompt/renderTemplate'
 import {
+  EXPERT_DRAFT_COORDINATOR_AGENT_ID,
   WORKSPACE_AGENT_IDS,
   normalizeWorkspaceAgentReadAccess,
   type WorkspaceAgentId,
@@ -111,8 +112,10 @@ export function normalizeExpertDraft(
 
   const sections: ExpertDraftSection[] = []
   const seenSectionIds = new Set<string>()
-  if (Array.isArray(raw.sections)) {
-    raw.sections.forEach((item, index) => {
+  const rawSections = raw.sections
+  const hasSectionList = Array.isArray(rawSections)
+  if (hasSectionList) {
+    rawSections.forEach((item, index) => {
       if (!item || typeof item !== 'object') return
       const maybe = item as Partial<ExpertDraftSection>
       let id = String(maybe.id ?? '').trim()
@@ -131,7 +134,7 @@ export function normalizeExpertDraft(
     })
   }
 
-  const normalizedSections = sections.length > 0 ? sections : base.sections
+  const normalizedSections = hasSectionList ? sections : base.sections
   const titleById = new Map(normalizedSections.map((s) => [s.id, s.title]))
   const states: ExpertDraftCharacterState[] = []
   const seenStateIds = new Set<string>()
@@ -213,15 +216,16 @@ export function mergeStagePatchIntoAll(
   previous: Partial<Record<StageId, string>> | undefined,
   patch: Partial<Record<StageId, string>>,
 ): Record<StageId, string> {
-  const next = normalizeAllBookStages(previous)
+  const next = { ...(previous ?? {}) } as Record<string, string>
+  for (const stage of WORKSPACE_STAGES) {
+    if (!(stage.id in next)) next[stage.id] = ''
+  }
   // 对patch也进行迁移
   const migratedPatch = migrateLegacyStages(patch)
   for (const [k, v] of Object.entries(migratedPatch)) {
-    if (k in next) {
-      next[k as StageId] = String(v ?? '')
-    }
+    next[k] = String(v ?? '')
   }
-  return next
+  return next as Record<StageId, string>
 }
 
 function primaryDraftStageId(
@@ -348,10 +352,12 @@ export type SkillStageId =
   | 'plot_refine'
   | 'outline'
   | 'draft'
+  | 'expert_section_writer'
+
+type LegacySkillStageId =
   | 'draft_review'
   | 'format_conversion'
   | 'expert_draft_coordinator'
-  | 'expert_section_writer'
 
 export const SKILL_STAGE_LABELS: Record<SkillStageId, string> = {
   character_design: '人物设计技能',
@@ -359,14 +365,16 @@ export const SKILL_STAGE_LABELS: Record<SkillStageId, string> = {
   intro_design: '导语设计技能',
   plot_refine: '剧情细化技能',
   outline: '大纲纲要技能',
-  draft: '正文技能',
-  draft_review: '正文审阅技能',
-  format_conversion: '格式转换技能',
-  expert_draft_coordinator: '专家总控技能',
+  draft: '正文专家编写技能',
   expert_section_writer: '分节写手技能',
 }
 
 export const SKILL_STAGE_KEYS = Object.keys(SKILL_STAGE_LABELS) as SkillStageId[]
+const LEGACY_SKILL_STAGES_TO_DRAFT: LegacySkillStageId[] = [
+  'draft_review',
+  'format_conversion',
+  'expert_draft_coordinator',
+]
 
 export interface SkillSummary {
   id: string
@@ -395,19 +403,31 @@ function newLocalSkillStageEntryId(): string {
 }
 
 export function normalizeSkillStages(
-  raw?: Partial<Record<SkillStageId, unknown>> | null,
+  raw?: Partial<Record<SkillStageId | LegacySkillStageId, unknown>> | null,
 ): Record<SkillStageId, SkillStageEntry[]> {
   const out = {} as Record<SkillStageId, SkillStageEntry[]>
   for (const k of SKILL_STAGE_KEYS) {
     out[k] = normalizeSkillStageEntries(k, raw?.[k])
   }
+  if (raw) {
+    out.draft = [
+      ...out.draft,
+      ...LEGACY_SKILL_STAGES_TO_DRAFT.flatMap((stageId) =>
+        normalizeSkillStageEntries('draft', raw[stageId]),
+      ),
+    ]
+  }
   return out
 }
 
 export function normalizeSkillStageId(raw: unknown): SkillStageId {
-  return SKILL_STAGE_KEYS.includes(raw as SkillStageId)
-    ? (raw as SkillStageId)
-    : 'character_design'
+  if (SKILL_STAGE_KEYS.includes(raw as SkillStageId)) {
+    return raw as SkillStageId
+  }
+  if (LEGACY_SKILL_STAGES_TO_DRAFT.includes(raw as LegacySkillStageId)) {
+    return 'draft'
+  }
+  return 'character_design'
 }
 
 function normalizeSkillStageEntries(
@@ -2244,7 +2264,9 @@ export async function getWorkspaceSystemPrompt(
   const filteredStages = Object.fromEntries(
     Object.entries(input.allStages).filter(([id]) => allowed.has(id as StageId)),
   ) as Partial<Record<StageId, string>>
-  const raw = await readWorkspaceAgentPromptTemplate(stageId)
+  const promptAgentId =
+    stageId === 'draft' ? EXPERT_DRAFT_COORDINATOR_AGENT_ID : stageId
+  const raw = await readWorkspaceAgentPromptTemplate(promptAgentId)
   const prompt = renderPromptFromTemplateRaw(raw, {
     bookTitle: input.bookTitle,
     bookGenre: input.bookGenre,

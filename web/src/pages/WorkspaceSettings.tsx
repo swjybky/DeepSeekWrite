@@ -22,6 +22,7 @@ import {
   ALL_MATERIAL_STAGE_IDS,
   EXPERT_DRAFT_COORDINATOR_AGENT_ID,
   EXPERT_SECTION_WRITER_AGENT_ID,
+  WORKSPACE_STANDARD_AGENT_IDS,
   WORKSPACE_AGENT_IDS,
   getDefaultWorkspaceAgentReadAccess,
   getDefaultWorkspaceAgentReadAccessEntry,
@@ -37,11 +38,8 @@ const AGENT_LABELS: Record<WorkspaceAgentId, string> = {
   intro_design: '导语设计',
   plot_refine: '剧情细化',
   outline: '大纲纲要',
-  draft: '正文编写',
-  draft_review: '正文审阅',
-  format_conversion: '格式转换',
-  expert_draft_coordinator: '专家总控智能体',
-  expert_section_writer: '后台小节编写智能体',
+  expert_draft_coordinator: '正文专家编写智能体',
+  expert_section_writer: '分节写手智能体',
 }
 
 const EMPTY_PROMPTS = Object.fromEntries(
@@ -325,24 +323,24 @@ export function WorkspaceSettings() {
       <main className="workspace-settings-layout">
         <aside className="workspace-settings-nav" aria-label="智能体配置项">
           <section>
-            <h2>普通模式</h2>
-            {SHORT_WORKSPACE_STAGES.map((stage) => (
+            <h2>前置阶段</h2>
+            {WORKSPACE_STANDARD_AGENT_IDS.map((stageId) => (
               <button
-                key={stage.id}
+                key={stageId}
                 type="button"
                 className={
-                  activeAgentId === stage.id
+                  activeAgentId === stageId
                     ? 'workspace-settings-nav-item workspace-settings-nav-item--active'
                     : 'workspace-settings-nav-item'
                 }
-                onClick={() => void switchAgent(stage.id)}
+                onClick={() => void switchAgent(stageId)}
               >
-                {stage.label}
+                {AGENT_LABELS[stageId]}
               </button>
             ))}
           </section>
           <section>
-            <h2>专家模式</h2>
+            <h2>正文编写</h2>
             {[
               EXPERT_DRAFT_COORDINATOR_AGENT_ID,
               EXPERT_SECTION_WRITER_AGENT_ID,
@@ -370,7 +368,7 @@ export function WorkspaceSettings() {
             <>
               <div className="workspace-settings-content-head">
                 <div>
-                  <span>{activeIsExpert ? '专家模式' : '普通模式'}</span>
+                  <span>{activeIsExpert ? '正文编写' : '前置阶段'}</span>
                   <h2>{activeLabel}</h2>
                 </div>
                 <div className="workspace-settings-head-actions">

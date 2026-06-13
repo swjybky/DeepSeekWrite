@@ -7,6 +7,7 @@ import type { ShortStageId } from './stages'
 import { SHORT_STAGE_LABELS } from './stages'
 import { buildLoadSkillTool } from './loadSkill'
 import {
+  EXPERT_DRAFT_COORDINATOR_AGENT_ID,
   resolveWorkspaceAgentReadAccess,
   type WorkspaceAgentReadAccessConfig,
 } from './stageReadAccess'
@@ -325,9 +326,11 @@ function resolveAllowedStagesFromContext(
       material: ctx.allowedMaterialStages ?? [],
     }
   }
+  const agentId =
+    ctx.stageId === 'draft' ? EXPERT_DRAFT_COORDINATOR_AGENT_ID : ctx.stageId
   const resolved = resolveWorkspaceAgentReadAccess(
     ctx.workspaceAgentReadAccess,
-    ctx.stageId,
+    agentId,
   )
   return { workspace: resolved.workspace, material: resolved.material }
 }
@@ -730,7 +733,6 @@ export function buildShortWorkspaceAdditionalTools(
       ]
 
     case 'outline':
-    case 'draft_review':
       return [
         ...readSaved,
         searchWorkspaceText,
@@ -746,17 +748,6 @@ export function buildShortWorkspaceAdditionalTools(
         searchWorkspaceText,
         ...readMaterial,
         loadSkill,
-        replaceCurrentStageText,
-      ]
-
-    case 'format_conversion':
-      return [
-        ...readSaved,
-        searchWorkspaceText,
-        ...readMaterial,
-        loadSkill,
-        buildCopyStageToFormatTool(ctx),
-        buildGlobalReplaceTool(ctx),
         replaceCurrentStageText,
       ]
 

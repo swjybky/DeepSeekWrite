@@ -22,13 +22,14 @@ SHORT_STAGES_ORDER: tuple[str, ...] = (
     "plot_refine",
     "outline",
     "draft",
-    "draft_review",
-    "format_conversion",
 )
 
 EXPERT_DRAFT_COORDINATOR_AGENT_ID = "expert_draft_coordinator"
 EXPERT_SECTION_WRITER_AGENT_ID = "expert_section_writer"
-WORKSPACE_AGENT_IDS: tuple[str, ...] = SHORT_STAGES_ORDER + (
+WORKSPACE_STAGE_AGENT_IDS: tuple[str, ...] = tuple(
+    stage_id for stage_id in SHORT_STAGES_ORDER if stage_id != "draft"
+)
+WORKSPACE_AGENT_IDS: tuple[str, ...] = WORKSPACE_STAGE_AGENT_IDS + (
     EXPERT_DRAFT_COORDINATOR_AGENT_ID,
     EXPERT_SECTION_WRITER_AGENT_ID,
 )
@@ -154,7 +155,10 @@ def render_workspace_system_prompt(
     all_stages_for_peek: dict[str, str] | None = None,
 ) -> str:
     validate_workspace_stage_id(stage_id)
-    raw = read_workspace_agent_prompt_template(stage_id)
+    template_id = (
+        EXPERT_DRAFT_COORDINATOR_AGENT_ID if stage_id == "draft" else stage_id
+    )
+    raw = read_workspace_agent_prompt_template(template_id)
 
     title = (book_title or "").strip()
     genre = (book_genre or "").strip() or "未分类"
@@ -467,9 +471,6 @@ SKILL_STAGES_ORDER: tuple[str, ...] = (
     "plot_refine",
     "outline",
     "draft",
-    "draft_review",
-    "format_conversion",
-    "expert_draft_coordinator",
     "expert_section_writer",
 )
 
@@ -479,10 +480,7 @@ SKILL_STAGE_LABELS: dict[str, str] = {
     "intro_design": "导语设计技能",
     "plot_refine": "剧情细化技能",
     "outline": "大纲纲要技能",
-    "draft": "正文技能",
-    "draft_review": "正文审阅技能",
-    "format_conversion": "格式转换技能",
-    "expert_draft_coordinator": "专家总控技能",
+    "draft": "正文专家编写技能",
     "expert_section_writer": "分节写手技能",
 }
 

@@ -1,11 +1,19 @@
-import type { ExpertDraft, ExpertDraftCharacterState, ExpertDraftSection } from '../../../bridge'
+import type {
+  ExpertDraft,
+  ExpertDraftCharacterState,
+  ExpertDraftSection,
+} from '../../../bridge'
 
 type Props = {
   draft: ExpertDraft
+  stageBody: string
+  stageBodyReadOnly?: boolean
+  onStageBodyChange: (value: string) => void
   updateDraft: (updater: (draft: ExpertDraft) => ExpertDraft) => void
   stopWriting: () => void
   resetDraft: () => void
-  writeToDraftStage: () => void
+  mergeSectionsToDraft: () => void
+  exportDraft: () => void
 }
 
 function textCounts(text: string): { total: number; nonSpace: number } {
@@ -13,13 +21,6 @@ function textCounts(text: string): { total: number; nonSpace: number } {
     total: text.length,
     nonSpace: text.replace(/\p{White_Space}/gu, '').length,
   }
-}
-
-function nextSectionId(sections: ExpertDraftSection[]): string {
-  let n = sections.length
-  const used = new Set(sections.map((s) => s.id))
-  while (used.has(`section-${n}`)) n += 1
-  return `section-${n}`
 }
 
 function updateSectionList(
@@ -32,17 +33,22 @@ function updateSectionList(
   )
 }
 
+function defaultStateTitle(sectionTitle: string): string {
+  return `${sectionTitle.trim() || '小节'}人物状态`
+}
+
 function updateStateList(
   states: ExpertDraftCharacterState[],
   sectionId: string,
   patch: Partial<ExpertDraftCharacterState>,
+  sectionTitle: string,
 ): ExpertDraftCharacterState[] {
   if (!states.some((state) => state.section_id === sectionId)) {
     return [
       ...states,
       {
         section_id: sectionId,
-        title: patch.title ?? '人物状态',
+        title: patch.title ?? defaultStateTitle(sectionTitle),
         body: patch.body ?? '',
       },
     ]
@@ -54,29 +60,48 @@ function updateStateList(
 
 export function ExpertDraftEditor({
   draft,
+  stageBody,
+  stageBodyReadOnly = false,
+  onStageBodyChange,
   updateDraft,
   stopWriting,
   resetDraft,
-  writeToDraftStage,
+  mergeSectionsToDraft,
+  exportDraft,
 }: Props) {
-  const activeId = draft.active_section_id
-  const totalBody = draft.sections.map((s) => s.body).join('\n\n')
-  const counts = textCounts(totalBody)
+  const selectedSection = draft.sections.find(
+    (section) => section.id === draft.active_section_id,
+  )
+  const selectedId = selectedSection?.id ?? ''
+  const selectedState = selectedSection
+    ? draft.character_states.find((state) => state.section_id === selectedId) ?? {
+        section_id: selectedId,
+        title: defaultStateTitle(selectedSection.title),
+        body: '',
+      }
+    : null
+  const isSectionMode = Boolean(selectedSection && selectedState)
+  const counts = textCounts(isSectionMode ? (selectedSection?.body ?? '') : stageBody)
+  const sectionCounts = textCounts(selectedSection?.body ?? '')
 
-  const addSection = () => {
+  const deleteSelectedSection = () => {
+    if (!selectedSection || draft.running) return
+    const title = selectedSection.title.trim() || '当前小节'
+    const ok = window.confirm(`删除「${title}」？该操作会同时删除本节人物状态。`)
+    if (!ok) return
     updateDraft((current) => {
-      const id = nextSectionId(current.sections)
-      const title = `第${current.sections.length}节`
+      const index = current.sections.findIndex((section) => section.id === selectedId)
+      if (index < 0) return current
+      const sections = current.sections.filter((section) => section.id !== selectedId)
+      const nextActiveSectionId =
+        sections[Math.min(index, Math.max(0, sections.length - 1))]?.id ?? ''
       return {
         ...current,
-        sections: [
-          ...current.sections,
-          { id, title, word_count_requirement: '', body: '' },
-        ],
-        character_states: [
-          ...current.character_states,
-          { section_id: id, title: `${title}人物状态`, body: '' },
-        ],
+        sections,
+        character_states: current.character_states.filter(
+          (state) => state.section_id !== selectedId,
+        ),
+        active_section_id: nextActiveSectionId,
       }
     })
   }
@@ -85,9 +110,9 @@ export function ExpertDraftEditor({
     <div className="expert-draft-editor">
       <div className="expert-draft-heading">
         <div className="expert-draft-heading-main">
-          <label className="workspace-stage-label">正文编写 · 专家模式</label>
+          <label className="workspace-stage-label">正文编写</label>
           <span className="expert-draft-status">
-            {draft.running ? '后台写作中' : '待启动'}
+            {draft.running ? '分节写作中' : '待启动'}
           </span>
           {draft.running ? (
             <button
@@ -98,27 +123,47 @@ export function ExpertDraftEditor({
               立即停止
             </button>
           ) : null}
-          <button
-            type="button"
-            className="expert-draft-action"
-            onClick={resetDraft}
-            disabled={draft.running}
-          >
-            清空
-          </button>
-          <button
-            type="button"
-            className="expert-draft-action"
-            onClick={writeToDraftStage}
-            disabled={draft.running}
-          >
-            写入正文
-          </button>
+          {isSectionMode ? (
+            <button
+              type="button"
+              className="expert-draft-action expert-draft-action--danger"
+              onClick={deleteSelectedSection}
+              disabled={draft.running}
+            >
+              删除本节
+            </button>
+          ) : (
+            <>
+              <button
+                type="button"
+                className="expert-draft-action"
+                onClick={resetDraft}
+                disabled={draft.running}
+              >
+                清空
+              </button>
+              <button
+                type="button"
+                className="expert-draft-action"
+                onClick={mergeSectionsToDraft}
+                disabled={draft.running}
+              >
+                合并小节正文
+              </button>
+              <button
+                type="button"
+                className="expert-draft-action"
+                onClick={exportDraft}
+              >
+                导出正文
+              </button>
+            </>
+          )}
         </div>
         <span
           className="workspace-char-count muted"
           aria-live="polite"
-          title={`专家正文不含空白字数 ${counts.nonSpace.toLocaleString('zh-CN')}；总字符（含空格与换行）${counts.total.toLocaleString('zh-CN')}`}
+          title={`不含空白字数 ${counts.nonSpace.toLocaleString('zh-CN')}；总字符（含空格与换行）${counts.total.toLocaleString('zh-CN')}`}
         >
           {counts.nonSpace.toLocaleString('zh-CN')} 字
           <span className="workspace-char-count-sep" aria-hidden>
@@ -130,159 +175,114 @@ export function ExpertDraftEditor({
         </span>
       </div>
 
-      <div className="expert-draft-scroll">
-        <section className="expert-draft-list" aria-label="正文列表">
-          <div className="expert-draft-list-head">
-            <h2 className="expert-draft-list-title">正文列表</h2>
-            <button
-              type="button"
-              className="expert-draft-add"
-              onClick={addSection}
-              disabled={draft.running}
-            >
-              添加小节
-            </button>
-          </div>
-          {draft.sections.map((section, index) => {
-            const sectionCounts = textCounts(section.body)
-            const active = activeId === section.id
-            return (
-              <article
-                key={section.id}
-                className={
-                  active
-                    ? 'expert-draft-card expert-draft-card--active'
-                    : 'expert-draft-card'
-                }
-              >
-                <div className="expert-draft-card-head">
-                  <input
-                    className="expert-draft-title-input"
-                    value={section.title}
-                    aria-label={`正文小节 ${index + 1} 标题`}
-                    onChange={(e) => {
-                      const title = e.target.value
-                      updateDraft((current) => ({
-                        ...current,
-                        sections: updateSectionList(current.sections, section.id, {
-                          title,
-                        }),
-                      }))
-                    }}
-                    disabled={draft.running}
-                  />
-                  <span className="expert-draft-count muted">
-                    {sectionCounts.nonSpace.toLocaleString('zh-CN')} 字
-                  </span>
-                </div>
+      <div className="expert-draft-workbench">
+        {isSectionMode && selectedSection && selectedState ? (
+          <section className="expert-draft-active-editor">
+            <div className="expert-draft-section-toolbar">
+              <label className="field expert-draft-section-title-field">
+                <span className="field-label">章节名称</span>
                 <input
-                  className="expert-draft-word-input"
-                  value={section.word_count_requirement ?? ''}
-                  aria-label={`${section.title}字数要求`}
+                  type="text"
+                  value={selectedSection.title}
+                  onChange={(e) => {
+                    const title = e.target.value
+                    updateDraft((current) => ({
+                      ...current,
+                      sections: updateSectionList(current.sections, selectedId, {
+                        title,
+                      }),
+                      character_states: updateStateList(
+                        current.character_states,
+                        selectedId,
+                        { title: defaultStateTitle(title) },
+                        title,
+                      ),
+                    }))
+                  }}
+                  disabled={draft.running}
+                />
+              </label>
+              <label className="field expert-draft-section-word-field">
+                <span className="field-label">字数要求</span>
+                <input
+                  type="text"
+                  value={selectedSection.word_count_requirement ?? ''}
                   onChange={(e) => {
                     const word_count_requirement = e.target.value
                     updateDraft((current) => ({
                       ...current,
-                      sections: updateSectionList(current.sections, section.id, {
+                      sections: updateSectionList(current.sections, selectedId, {
                         word_count_requirement,
                       }),
                     }))
                   }}
-                  placeholder="字数要求，如 800-1000"
+                  placeholder="如 800-1000"
                   disabled={draft.running}
                 />
-                <textarea
-                  className="editor-body workspace-textarea expert-draft-textarea"
-                  value={section.body}
-                  aria-label={`${section.title}正文`}
-                  onChange={(e) => {
-                    const body = e.target.value
-                    updateDraft((current) => ({
-                      ...current,
-                      sections: updateSectionList(current.sections, section.id, {
-                        body,
-                      }),
-                    }))
-                  }}
-                  placeholder="正文内容…"
-                  spellCheck={false}
-                  readOnly={draft.running}
-                />
-              </article>
-            )
-          })}
-        </section>
+              </label>
+              <span className="expert-draft-count muted">
+                {sectionCounts.nonSpace.toLocaleString('zh-CN')} 字
+              </span>
+            </div>
 
-        <section className="expert-draft-list" aria-label="人物状态编辑框列表">
-          <div className="expert-draft-list-head">
-            <h2 className="expert-draft-list-title">人物状态编辑框列表</h2>
-          </div>
-          {draft.sections.map((section) => {
-            const state =
-              draft.character_states.find((s) => s.section_id === section.id) ??
-              {
-                section_id: section.id,
-                title: `${section.title}人物状态`,
-                body: '',
-              }
-            const active = activeId === section.id
-            return (
-              <article
-                key={section.id}
-                className={
-                  active
-                    ? 'expert-draft-card expert-draft-card--active'
-                    : 'expert-draft-card'
-                }
-              >
-                <div className="expert-draft-card-head">
-                  <input
-                    className="expert-draft-title-input"
-                    value={state.title}
-                    aria-label={`${section.title}人物状态标题`}
-                    onChange={(e) => {
-                      const title = e.target.value
-                      updateDraft((current) => ({
-                        ...current,
-                        character_states: updateStateList(
-                          current.character_states,
-                          section.id,
-                          { title },
-                        ),
-                      }))
-                    }}
-                    disabled={draft.running}
-                  />
-                </div>
-                <input
-                  className="expert-draft-word-input expert-draft-word-input--placeholder"
-                  readOnly
-                  tabIndex={-1}
-                  aria-hidden="true"
-                />
-                <textarea
-                  className="editor-body workspace-textarea expert-draft-state-textarea"
-                  value={state.body}
-                  aria-label={`${section.title}人物状态`}
-                  onChange={(e) => {
-                    const body = e.target.value
-                    updateDraft((current) => ({
-                      ...current,
-                      character_states: updateStateList(
-                        current.character_states,
-                        section.id,
-                        { body },
-                      ),
-                    }))
-                  }}
-                  placeholder="人物状态…"
-                  spellCheck={false}
-                  readOnly={draft.running}
-                />
-              </article>
-            )
-          })}
-        </section>
+            <label className="expert-draft-textarea-field">
+              <span>{selectedSection.title || '当前小节'}正文</span>
+              <textarea
+                className="editor-body workspace-textarea expert-draft-textarea"
+                value={selectedSection.body}
+                aria-label={`${selectedSection.title}正文`}
+                onChange={(e) => {
+                  const body = e.target.value
+                  updateDraft((current) => ({
+                    ...current,
+                    sections: updateSectionList(current.sections, selectedId, {
+                      body,
+                    }),
+                  }))
+                }}
+                placeholder="正文内容..."
+                spellCheck={false}
+                readOnly={draft.running}
+              />
+            </label>
+
+            <label className="expert-draft-textarea-field">
+              <span>{selectedState.title || defaultStateTitle(selectedSection.title)}</span>
+              <textarea
+                className="editor-body workspace-textarea expert-draft-state-textarea"
+                value={selectedState.body}
+                aria-label={`${selectedSection.title}人物状态`}
+                onChange={(e) => {
+                  const body = e.target.value
+                  updateDraft((current) => ({
+                    ...current,
+                    character_states: updateStateList(
+                      current.character_states,
+                      selectedId,
+                      { body },
+                      selectedSection.title,
+                    ),
+                  }))
+                }}
+                placeholder="人物状态..."
+                spellCheck={false}
+                readOnly={draft.running}
+              />
+            </label>
+          </section>
+        ) : (
+          <section className="expert-draft-main-editor">
+            <textarea
+              className="editor-body workspace-textarea expert-draft-main-textarea"
+              value={stageBody}
+              aria-label="正文编写正文"
+              onChange={(e) => onStageBodyChange(e.target.value)}
+              placeholder="在此编辑正文..."
+              spellCheck={false}
+              readOnly={draft.running || stageBodyReadOnly}
+            />
+          </section>
+        )}
       </div>
     </div>
   )

@@ -9,13 +9,23 @@ export const EXPERT_DRAFT_COORDINATOR_AGENT_ID =
 export const EXPERT_SECTION_WRITER_AGENT_ID =
   'expert_section_writer' as const
 
+export const WORKSPACE_STANDARD_AGENT_IDS = [
+  'character_design',
+  'plot_design',
+  'intro_design',
+  'plot_refine',
+  'outline',
+] as const satisfies readonly ShortStageId[]
+
 export const WORKSPACE_AGENT_IDS = [
-  ...SHORT_WORKSPACE_STAGES.map((stage) => stage.id),
+  ...WORKSPACE_STANDARD_AGENT_IDS,
   EXPERT_DRAFT_COORDINATOR_AGENT_ID,
   EXPERT_SECTION_WRITER_AGENT_ID,
 ] as const
 
 export type WorkspaceAgentId = (typeof WORKSPACE_AGENT_IDS)[number]
+export type WorkspaceStandardAgentId =
+  (typeof WORKSPACE_STANDARD_AGENT_IDS)[number]
 
 export type WorkspaceAgentReadAccessEntry = {
   workspace: ShortStageId[]
@@ -51,8 +61,6 @@ const DEFAULT_MATERIAL_BY_STAGE: Record<
   plot_refine: ['plot_refine', 'pacing'],
   outline: [],
   draft: [],
-  draft_review: [],
-  format_conversion: [],
 }
 
 const DEFAULT_COORDINATOR_WORKSPACE: ShortStageId[] = [
@@ -80,7 +88,7 @@ function defaultEntryForAgent(
   }
   return {
     workspace: [...ALL_WORKSPACE_STAGE_IDS_FOR_READ],
-    material: [...DEFAULT_MATERIAL_BY_STAGE[agentId]],
+    material: [...DEFAULT_MATERIAL_BY_STAGE[agentId as ShortStageId]],
   }
 }
 
@@ -103,8 +111,10 @@ export function isWorkspaceAgentId(id: string): id is WorkspaceAgentId {
   return (WORKSPACE_AGENT_IDS as readonly string[]).includes(id)
 }
 
-export function isWorkspaceStageAgentId(id: string): id is ShortStageId {
-  return ALL_WORKSPACE_STAGE_IDS_FOR_READ.includes(id as ShortStageId)
+export function isWorkspaceStageAgentId(
+  id: string,
+): id is WorkspaceStandardAgentId {
+  return (WORKSPACE_STANDARD_AGENT_IDS as readonly string[]).includes(id)
 }
 
 function isShortStageId(id: string): id is ShortStageId {

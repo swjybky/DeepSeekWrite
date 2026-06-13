@@ -110,7 +110,7 @@ export function buildExpertDraftCoordinatorTools(
       name: 'create_draft_sections',
       label: '创建正文列表',
       description:
-        '根据大纲要求创建或重建专家模式左侧正文列表。每个条目会变成一个独立正文文本框；可直接填入导语正文。',
+        '根据大纲要求创建或重建正文小节列表。每个条目会变成一个独立正文文本框；可直接填入导语正文。',
       parameters: Type.Object({
         sections: Type.Array(
           Type.Object({
@@ -173,7 +173,7 @@ export function buildExpertDraftCoordinatorTools(
       name: 'create_character_state_sections',
       label: '创建人物状态列表',
       description:
-        '创建或重建专家模式左侧人物状态编辑框列表。条目应与正文小节一一对应；可直接填入导语人物状态。',
+        '创建或重建正文编写的人物状态编辑框列表。条目应与正文小节一一对应；可直接填入导语人物状态。',
       parameters: Type.Object({
         items: Type.Array(
           Type.Object({
@@ -245,7 +245,7 @@ export function buildExpertDraftCoordinatorTools(
       name: 'start_expert_writing',
       label: '开始写书',
       description:
-        '异步启动专家模式后台小节编写智能体。工具会立即返回，后台会按传入 section_ids 串行写入正文和人物状态。',
+        '异步启动分节写手智能体。工具会立即返回，后台会按传入 section_ids 串行写入正文和人物状态。',
       parameters: Type.Object({
         section_ids: Type.Optional(
           Type.Array(
@@ -282,7 +282,7 @@ export function buildExpertDraftCoordinatorTools(
         return textBlock(
           started
             ? '调用成功，正在写书中。后台小节智能体会按顺序串行编写。'
-            : '未启动：当前已经有专家模式后台写作任务在运行。',
+            : '未启动：当前已经有后台分节写作任务在运行。',
         )
       },
       executionMode: 'sequential',

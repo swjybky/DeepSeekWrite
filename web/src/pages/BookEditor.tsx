@@ -6,6 +6,7 @@ import {
   type BookStatus,
   type BookSummary,
   type ExpertDraft,
+  type ExpertDraftSection,
   type StageId,
   defaultExpertDraft,
   mergeStagePatchIntoAll,
@@ -33,10 +34,6 @@ import {
   listSkills,
   getSkill,
 } from '../bridge'
-import {
-  DraftStageEditor,
-  type DraftStageEditorMetrics,
-} from '../components/DraftStageEditor'
 import { WorkspaceAiChat } from '../components/WorkspaceAiChat'
 import type { ApplyToStageEditorPayload } from '../pi/workspaceStageAgents'
 import { ExpertDraftAiChat } from '../workspaces/short/expertDraft/ExpertDraftAiChat'
@@ -67,14 +64,12 @@ type BookWorkspaceSessionState = {
   stages: Record<StageId, string>
   expertDraft: ExpertDraft
   activeStage: StageId
-  expertMode: boolean
   linkedMaterial: Material | null
   linkedSkill: Skill | null
   coverData: string | null
   aiChatEpochByStage: Partial<Record<StageId, number>>
   expertAiChatEpoch: number
   streamingStages: Partial<Record<StageId, boolean>>
-  draftMetrics: DraftStageEditorMetrics
 }
 
 const AI_PANEL_WIDTH_KEY = 'write-claw:workspace-ai-width'
@@ -125,7 +120,7 @@ function clampAiPanelWidth(width: number, viewportWidth: number): number {
 }
 
 /** 总字符长度与不含 Unicode 空白类字符的字数（换行不计入后者） */
-function stageTextCounts(text: string): DraftStageEditorMetrics {
+function stageTextCounts(text: string): { total: number; nonSpace: number } {
   return {
     total: text.length,
     nonSpace: text.replace(/\p{White_Space}/gu, '').length,
@@ -142,6 +137,40 @@ function combineExpertDraftSections(draft: ExpertDraft): string {
     })
     .filter(Boolean)
     .join('\n\n')
+}
+
+function chineseSectionNumber(n: number): string {
+  const digits = ['零', '一', '二', '三', '四', '五', '六', '七', '八', '九']
+  if (n <= 10) return n === 10 ? '十' : digits[n]!
+  if (n < 20) return `十${digits[n - 10]}`
+  if (n < 100) {
+    const tens = Math.floor(n / 10)
+    const ones = n % 10
+    return `${digits[tens]}十${ones ? digits[ones] : ''}`
+  }
+  return String(n)
+}
+
+function expertDraftSectionTitleForIndex(index: number): string {
+  if (index <= 0) return '导语'
+  return `第${chineseSectionNumber(index)}节`
+}
+
+function nextExpertDraftSectionId(sections: ExpertDraftSection[]): string {
+  let n = sections.length
+  const used = new Set(sections.map((s) => s.id))
+  while (used.has(`section-${n}`)) n += 1
+  return `section-${n}`
+}
+
+function defaultExpertDraftStateTitle(sectionTitle: string): string {
+  return `${sectionTitle.trim() || '小节'}人物状态`
+}
+
+function expertDraftSectionTreeLabel(section: ExpertDraftSection): string {
+  const title = section.title.trim()
+  if (!title) return '未命名小节'
+  return title.length > 12 ? `${title.slice(0, 12)}...` : title
 }
 
 /** 左侧树书籍列表保持进入工作台时的顺序，不因保存/切换导致按更新时间重排 */
@@ -198,14 +227,12 @@ function createBookWorkspaceSession(input: {
     stages,
     expertDraft,
     activeStage: input.activeStage,
-    expertMode: input.previous?.expertMode ?? false,
     linkedMaterial: input.linkedMaterial,
     linkedSkill: input.linkedSkill,
     coverData: input.coverData,
     aiChatEpochByStage: input.previous?.aiChatEpochByStage ?? {},
     expertAiChatEpoch: input.previous?.expertAiChatEpoch ?? 0,
     streamingStages: input.previous?.streamingStages ?? {},
-    draftMetrics: stageTextCounts(stages.draft ?? ''),
   }
 }
 
@@ -229,8 +256,6 @@ export function BookEditor() {
   const [error, setError] = useState<string | null>(null)
   const [aiPanelWidth, setAiPanelWidth] = useState(readStoredAiWidth)
   /** 当前阶段 AI 侧栏「对话轮次」：递增后重建 Pi 会话并清空该阶段对话历史 */
-  /** 专家模式开关 */
-  const [expertMode, setExpertMode] = useState(false)
   const [linkedMaterial, setLinkedMaterial] = useState<Material | null>(null)
   const [linkedSkill, setLinkedSkill] = useState<Skill | null>(null)
   const [workspaceAgentReadAccess, setWorkspaceAgentReadAccess] =
@@ -270,10 +295,6 @@ export function BookEditor() {
   const bookRef = useRef<Book | null>(book)
   /** 当前激活阶段的 textarea ref，用于自动滚动 */
   const textareaRef = useRef<HTMLTextAreaElement | null>(null)
-  const [draftMetrics, setDraftMetrics] = useState<DraftStageEditorMetrics>({
-    total: 0,
-    nonSpace: 0,
-  })
   /** 流式 token 缓冲区；按阶段隔离，避免切换阶段后写入串台 */
   const tokenBuffersRef = useRef<Partial<Record<StageId, string>>>({})
   const tokenBufferRafRefs = useRef<Partial<Record<StageId, number>>>({})
@@ -319,7 +340,6 @@ export function BookEditor() {
     setExpertDraftState(session.expertDraft)
     activeStageRef.current = session.activeStage
     setActiveStage(session.activeStage)
-    setExpertMode(session.expertMode)
     setLinkedMaterial(session.linkedMaterial)
     setLinkedSkill(session.linkedSkill)
     setCoverData(session.coverData)
@@ -327,7 +347,6 @@ export function BookEditor() {
     setExpertAiChatEpoch(session.expertAiChatEpoch)
     streamingStagesRef.current = session.streamingStages
     setStreamingStages(session.streamingStages)
-    setDraftMetrics(session.draftMetrics)
     tokenBuffersByBookRef.current[session.book.id] =
       tokenBuffersByBookRef.current[session.book.id] ?? {}
     tokenBufferRafByBookRef.current[session.book.id] =
@@ -484,10 +503,6 @@ export function BookEditor() {
         return {
           ...session,
           stages: updatedStages,
-          draftMetrics:
-            stageId === 'draft'
-              ? stageTextCounts(updatedStages.draft ?? '')
-              : session.draftMetrics,
           book: {
             ...session.book,
             stages: mergeStagePatchIntoAll(session.book.stages, updatedStages),
@@ -829,17 +844,16 @@ export function BookEditor() {
     void load()
   }, [load])
 
-  const handleExportDocx = useCallback(async () => {
+  const exportStageDocx = useCallback(async (stageId: StageId, body: string) => {
     if (!book) return
     const folder = await pickFolder()
     if (!folder) return
     setMessage(null)
     setError(null)
     try {
-      const body = stagesRef.current[activeStageRef.current] ?? ''
       const res = await exportDocx(
         book.id,
-        activeStageRef.current,
+        stageId,
         folder,
         body,
         coverData,
@@ -855,66 +869,18 @@ export function BookEditor() {
     }
   }, [book, coverData])
 
-  const handleDraftLiveChange = useCallback(
-    (value: string) => {
-      const currentBookId = bookRef.current?.id
-      if (!currentBookId) return
-      cancelTokenFlushForBook(currentBookId, 'draft')
-      const buffers = { ...(tokenBuffersByBookRef.current[currentBookId] ?? {}) }
-      delete buffers.draft
-      tokenBuffersByBookRef.current[currentBookId] = buffers
-      tokenBuffersRef.current = buffers
-      const updatedStages = { ...stagesRef.current, draft: value }
-      stagesRef.current = updatedStages
-      const currentSession = workspaceSessionsRef.current[currentBookId]
-      if (currentSession) {
-        workspaceSessionsRef.current = {
-          ...workspaceSessionsRef.current,
-          [currentBookId]: {
-            ...currentSession,
-            stages: updatedStages,
-            draftMetrics: stageTextCounts(value),
-            book: {
-              ...currentSession.book,
-              stages: mergeStagePatchIntoAll(
-                currentSession.book.stages,
-                updatedStages,
-              ),
-              content: value,
-            },
-          },
-        }
-      }
-    },
-    [cancelTokenFlushForBook],
-  )
-
-  const handleDraftCommit = useCallback(
-    (value: string) => {
-      const currentBookId = bookRef.current?.id
-      if (!currentBookId) return
-      const currentStages = stagesRef.current
-      const updatedStages = { ...currentStages, draft: value }
-      stagesRef.current = updatedStages
-      setStages(updatedStages)
-      setDraftMetrics(stageTextCounts(value))
-      commitWorkspaceSession(
-        currentBookId,
-        (session) => ({
-          ...session,
-          stages: updatedStages,
-          draftMetrics: stageTextCounts(value),
-          book: {
-            ...session.book,
-            stages: mergeStagePatchIntoAll(session.book.stages, updatedStages),
-            content: value,
-          },
-        }),
-        false,
-      )
-    },
-    [commitWorkspaceSession],
-  )
+  const handleExportExpertDraftDocx = useCallback(async () => {
+    const currentStageBody = stagesRef.current.draft ?? ''
+    const body = currentStageBody.trim()
+      ? currentStageBody
+      : combineExpertDraftSections(expertDraftRef.current)
+    if (!body) {
+      setMessage(null)
+      setError('正文编写没有可导出的正文')
+      return
+    }
+    await exportStageDocx('draft', body)
+  }, [exportStageDocx])
 
   const getRenderedWorkspaceStageBody = useCallback(
     (stageId: StageId): string | undefined => {
@@ -923,11 +889,6 @@ export function BookEditor() {
     },
     [],
   )
-
-  const flushDraftCommit = useCallback(() => {
-    const value = stagesRef.current.draft ?? ''
-    handleDraftCommit(value)
-  }, [handleDraftCommit])
 
   const saveBookSession = useCallback(
     async (
@@ -950,7 +911,6 @@ export function BookEditor() {
       }
       try {
         flushAllTokenBuffersForBook(bookId)
-        if (isActiveBook) flushDraftCommit()
         const beforeSave = workspaceSessionsRef.current[bookId] ?? session
         const merged = mergeStagePatchIntoAll(
           beforeSave.book.stages,
@@ -997,7 +957,6 @@ export function BookEditor() {
     },
     [
       flushAllTokenBuffersForBook,
-      flushDraftCommit,
       storeWorkspaceSession,
       syncWorkspaceBookSummary,
     ],
@@ -1024,33 +983,89 @@ export function BookEditor() {
       if (currentBookId) {
         commitWorkspaceSession(
           currentBookId,
-          (session) => ({ ...session, activeStage: stageId }),
-          false,
+          (session) => {
+            if (stageId !== 'draft' || !session.expertDraft.active_section_id) {
+              return { ...session, activeStage: stageId }
+            }
+            const nextExpertDraft = {
+              ...session.expertDraft,
+              active_section_id: '',
+            }
+            return {
+              ...session,
+              activeStage: stageId,
+              expertDraft: nextExpertDraft,
+              book: {
+                ...session.book,
+                expert_draft: nextExpertDraft,
+              },
+            }
+          },
+          true,
         )
       }
     },
     [commitWorkspaceSession],
   )
 
-  const updateActiveBookExpertMode = useCallback(
-    (updater: boolean | ((current: boolean) => boolean)) => {
-      const currentBookId = bookRef.current?.id
-      const current = expertMode
-      const next =
-        typeof updater === 'function'
-          ? (updater as (current: boolean) => boolean)(current)
-          : updater
-      setExpertMode(next)
-      if (currentBookId) {
-        commitWorkspaceSession(
-          currentBookId,
-          (session) => ({ ...session, expertMode: next }),
-          false,
-        )
-      }
+  const selectExpertDraftSectionForBook = useCallback(
+    (bookId: string, sectionId: string) => {
+      updateExpertDraftForBook(bookId, (draft) => {
+        if (!draft.sections.some((section) => section.id === sectionId)) {
+          return draft
+        }
+        return {
+          ...draft,
+          active_section_id: sectionId,
+        }
+      })
     },
-    [commitWorkspaceSession, expertMode],
+    [updateExpertDraftForBook],
   )
+
+  const createExpertDraftSectionForBook = useCallback(
+    (bookId: string) => {
+      updateExpertDraftForBook(bookId, (draft) => {
+        if (draft.running) return draft
+        const id = nextExpertDraftSectionId(draft.sections)
+        const title = expertDraftSectionTitleForIndex(draft.sections.length)
+        return {
+          ...draft,
+          active_section_id: id,
+          sections: [
+            ...draft.sections,
+            { id, title, word_count_requirement: '', body: '' },
+          ],
+          character_states: [
+            ...draft.character_states,
+            {
+              section_id: id,
+              title: defaultExpertDraftStateTitle(title),
+              body: '',
+            },
+          ],
+        }
+      })
+    },
+    [updateExpertDraftForBook],
+  )
+
+  const handleExpertDraftSectionSelect = useCallback(
+    (sectionId: string) => {
+      const currentBookId = bookRef.current?.id
+      if (!currentBookId) return
+      setActiveBookStage('draft')
+      selectExpertDraftSectionForBook(currentBookId, sectionId)
+    },
+    [selectExpertDraftSectionForBook, setActiveBookStage],
+  )
+
+  const handleExpertDraftSectionCreate = useCallback(() => {
+    const currentBookId = bookRef.current?.id
+    if (!currentBookId) return
+    setActiveBookStage('draft')
+    createExpertDraftSectionForBook(currentBookId)
+  }, [createExpertDraftSectionForBook, setActiveBookStage])
 
   const bumpActiveStageChatEpoch = useCallback(
     (stageId: StageId) => {
@@ -1093,6 +1108,9 @@ export function BookEditor() {
         targetBookId === book.id &&
         targetStageId === activeStageRef.current
       ) {
+        if (targetStageId === 'draft') {
+          setActiveBookStage('draft')
+        }
         return
       }
       if (targetBookId === book.id) {
@@ -1116,6 +1134,29 @@ export function BookEditor() {
       navigate(`/book/${targetBookId}`)
     },
     [book, navigate, saveCurrentBook, setActiveBookStage, waitForSaveIdle],
+  )
+
+  const handleTreeBookStageChildSelect = useCallback(
+    async (targetBookId: string, targetStageId: StageId, childId: string) => {
+      if (targetStageId !== 'draft') {
+        await handleTreeBookStageSelect(targetBookId, targetStageId)
+        return
+      }
+      await handleTreeBookStageSelect(targetBookId, 'draft')
+      selectExpertDraftSectionForBook(targetBookId, childId)
+    },
+    [handleTreeBookStageSelect, selectExpertDraftSectionForBook],
+  )
+
+  const handleTreeBookStageChildCreate = useCallback(
+    (targetBookId: string, targetStageId: StageId) => {
+      if (targetStageId !== 'draft') return
+      if (targetBookId === bookRef.current?.id) {
+        setActiveBookStage('draft')
+      }
+      createExpertDraftSectionForBook(targetBookId)
+    },
+    [createExpertDraftSectionForBook, setActiveBookStage],
   )
 
   const handleTreeBookSelect = useCallback(
@@ -1253,43 +1294,48 @@ export function BookEditor() {
 
   const resetExpertDraft = useCallback(() => {
     if (expertDraftRef.current.running) return
-    const ok = window.confirm('清空专家模式内容，并恢复为导语和第一节的初始状态？')
+    const ok = window.confirm('清空正文编写内容，并恢复为导语和第一节的初始状态？')
     if (!ok) return
     const currentBookId = bookRef.current?.id
     if (!currentBookId) return
     const next = normalizeExpertDraft(defaultExpertDraft(), true)
     commitWorkspaceSession(
       currentBookId,
-      (session) => ({
-        ...session,
-        expertDraft: next,
-        book: {
-          ...session.book,
-          expert_draft: next,
-        },
-      }),
+      (session) => {
+        const updatedStages = { ...session.stages, draft: '' }
+        return {
+          ...session,
+          stages: updatedStages,
+          expertDraft: next,
+          book: {
+            ...session.book,
+            stages: mergeStagePatchIntoAll(session.book.stages, updatedStages),
+            content: '',
+            expert_draft: next,
+          },
+        }
+      },
       true,
     )
-    setMessage('专家模式已清空')
+    setMessage('正文编写已清空')
     setError(null)
     window.setTimeout(() => setMessage(null), 2000)
   }, [commitWorkspaceSession])
 
-  const writeExpertDraftToStage = useCallback(() => {
+  const mergeExpertDraftToStage = useCallback(() => {
     if (expertDraftRef.current.running) return
     const body = combineExpertDraftSections(expertDraftRef.current)
     if (!body) {
       setMessage(null)
-      setError('专家正文列表没有可写入的正文')
+      setError('正文小节没有可合并的正文')
       return
     }
     updateStage('draft', () => body)
-    updateActiveBookExpertMode(false)
     setActiveBookStage('draft')
     setError(null)
-    setMessage('已写入普通模式正文')
+    setMessage('已合并小节正文')
     window.setTimeout(() => setMessage(null), 2000)
-  }, [setActiveBookStage, updateActiveBookExpertMode, updateStage])
+  }, [setActiveBookStage, updateStage])
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
@@ -1313,16 +1359,6 @@ export function BookEditor() {
     }
     updateStage(activeStage, () => value)
   }
-
-  useEffect(() => {
-    flushDraftCommit()
-  }, [activeStage, flushDraftCommit])
-
-  useEffect(() => {
-    if (activeStage === 'draft') {
-      setDraftMetrics(stageTextCounts(stagesRef.current.draft ?? ''))
-    }
-  }, [activeStage])
 
   const activeStageBody = stages[activeStage] ?? ''
 
@@ -1395,21 +1431,38 @@ export function BookEditor() {
   }
 
   const railStages = resolveWorkspaceStagesForBook(book)
-  const workspaceTreeStages = railStages.map((s) => ({ id: s.id, label: s.label }))
+  const workspaceTreeBaseStages = railStages.map((s) => ({
+    id: s.id,
+    label: s.label,
+  }))
+  const activeTreeDraft = workspaceSessions[book.id]?.expertDraft ?? expertDraft
+  const workspaceTreeStages = workspaceTreeBaseStages.map((stage) => {
+    if (stage.id !== 'draft') return stage
+    return {
+      ...stage,
+      children: activeTreeDraft.sections.map((section) => ({
+        id: section.id,
+        label: expertDraftSectionTreeLabel(section),
+      })),
+      createChildLabel: '创建章节',
+      createChildDisabled: activeTreeDraft.running,
+    }
+  })
   const workspaceTreeBooks = workspaceBooks
     .filter((item) => item.book_type === 'short' && item.status !== 'completed')
     .map((item) => ({
       id: item.id,
       title: item.title,
       meta: item.categories.length > 0 ? item.categories.join('、') : '未分类',
-      stages: workspaceTreeStages,
+      stages: item.id === book.id ? workspaceTreeStages : workspaceTreeBaseStages,
     }))
   const renderedWorkspaceSessions = loadedBookIds
     .map((bookId) => workspaceSessions[bookId])
     .filter((session): session is BookWorkspaceSessionState => Boolean(session))
     .filter((session) => isWorkspaceShortBook(session.book))
   const stageBody = activeStageBody
-  const expertDraftActive = expertMode && activeStage === 'draft'
+  const expertDraftActive = activeStage === 'draft'
+  const activeExpertDraftSectionId = expertDraft.active_section_id || ''
 
   const openMaterialSelector = async () => {
     setMaterialSelectorOpen(true)
@@ -1508,9 +1561,7 @@ export function BookEditor() {
   }
 
   const { total: stageCharTotal, nonSpace: stageCharNonSpace } =
-    activeStage === 'draft'
-      ? draftMetrics
-      : stageTextCounts(stageBody)
+    stageTextCounts(stageBody)
 
   return (
     <div className="editor-page editor-page--workspace">
@@ -1671,7 +1722,16 @@ export function BookEditor() {
               stages={workspaceTreeStages}
               defaultExpanded
               activeStageId={activeStage}
+              activeStageChildId={
+                activeStage === 'draft' ? activeExpertDraftSectionId : undefined
+              }
               onStageSelect={(stageId) => setActiveBookStage(stageId as StageId)}
+              onStageChildSelect={(stageId, childId) => {
+                if (stageId === 'draft') handleExpertDraftSectionSelect(childId)
+              }}
+              onStageChildCreate={(stageId) => {
+                if (stageId === 'draft') handleExpertDraftSectionCreate()
+              }}
               editingTitle={editingTitle}
               titleDraft={titleDraft}
               onTitleDraftChange={setTitleDraft}
@@ -1720,12 +1780,25 @@ export function BookEditor() {
               defaultExpanded={false}
               activeBookId={book.id}
               activeStageId={activeStage}
+              activeStageChildId={
+                activeStage === 'draft' ? activeExpertDraftSectionId : undefined
+              }
               onStageSelect={(stageId) =>
                 void handleTreeBookStageSelect(book.id, stageId as StageId)
               }
               onBookSelect={(bookId) => handleTreeBookSelect(bookId)}
               onBookStageSelect={(bookId, stageId) =>
                 void handleTreeBookStageSelect(bookId, stageId as StageId)
+              }
+              onBookStageChildSelect={(bookId, stageId, childId) =>
+                void handleTreeBookStageChildSelect(
+                  bookId,
+                  stageId as StageId,
+                  childId,
+                )
+              }
+              onBookStageChildCreate={(bookId, stageId) =>
+                handleTreeBookStageChildCreate(bookId, stageId as StageId)
               }
               editingTitle={editingTitle}
               titleDraft={titleDraft}
@@ -1777,32 +1850,17 @@ export function BookEditor() {
             <span className="workspace-ai-header-title">智能体</span>
             {book ? (
               <div className="workspace-ai-header-actions">
-                {activeStage === 'draft' ? (
-                  <button
-                    type="button"
-                    className={
-                      expertMode
-                        ? 'workspace-ai-expert-mode workspace-ai-expert-mode--active'
-                        : 'workspace-ai-expert-mode'
-                    }
-                    aria-label={expertMode ? '退出专家模式' : '进入专家模式'}
-                    title="切换正文专家模式"
-                    onClick={() => updateActiveBookExpertMode((v) => !v)}
-                  >
-                    专家模式
-                  </button>
-                ) : null}
                 <button
                   type="button"
                   className="workspace-ai-new-chat"
                   aria-label={
                     expertDraftActive
-                      ? '清空专家模式主智能体对话并开始新会话'
+                      ? '清空正文专家编写智能体对话并开始新会话'
                       : '清空当前阶段 AI 对话并开始新会话'
                   }
                   title={
                     expertDraftActive
-                      ? '仅清空专家模式右侧主智能体上下文，不影响后台小节编写任务'
+                      ? '仅清空正文专家编写智能体上下文，不影响后台分节写作任务'
                       : '仅影响当前左侧阶段对应的助手会话，其他阶段各有一份独立历史'
                   }
                   disabled={expertDraftActive && expertDraft.running}
@@ -1821,7 +1879,7 @@ export function BookEditor() {
           </div>
           <div className="workspace-ai-hint muted">
             {railStages.find((s) => s.id === activeStage)?.label}
-            {expertDraftActive ? ' · 专家模式' : ''}
+            {expertDraftActive ? ' · 正文专家编写' : ''}
             {' · '}
             {book?.categories.join('、') || '未分类'}
             {linkedMaterial ? ` · 素材：${linkedMaterial.title}` : ''}
@@ -1833,58 +1891,60 @@ export function BookEditor() {
                 const sessionBookGenre = resolveWorkspaceBookGenre(session.book)
                 const sessionStages = resolveWorkspaceStagesForBook(session.book)
                 const sessionExpertActive =
-                  session.expertMode && session.activeStage === 'draft'
+                  session.activeStage === 'draft'
                 const isVisibleBook = session.book.id === book.id
-                const stageLayers = sessionStages.map((s) => {
-                  const epoch = session.aiChatEpochByStage[s.id] ?? 0
-                  const layerKey =
-                    epoch > 0
-                      ? `${session.book.id}-shared-${s.id}-${epoch}`
-                      : `${session.book.id}-shared-${s.id}`
-                  const isActive =
-                    isVisibleBook &&
-                    session.activeStage === s.id &&
-                    !sessionExpertActive
-                  return (
-                    <div
-                      key={layerKey}
-                      className={
-                        isActive
-                          ? 'workspace-ai-chat-layer workspace-ai-chat-layer--active'
-                          : 'workspace-ai-chat-layer'
-                      }
-                      aria-hidden={!isActive}
-                    >
-                      <WorkspaceAiChat
-                        sessionBookId={session.book.id}
-                        sessionEpoch={epoch}
-                        bookTitle={session.book.title}
-                        bookGenre={sessionBookGenre}
-                        stageId={s.id}
-                        stageBody={session.stages[s.id] ?? ''}
-                        getCurrentStageBody={(stageId) => {
-                          const sid = (stageId ?? s.id) as StageId
-                          if (isVisibleBook && sid === activeStageRef.current) {
-                            return getRenderedWorkspaceStageBody(sid)
-                          }
-                          return workspaceSessionsRef.current[session.book.id]?.stages[sid]
-                        }}
-                        allStages={session.stages}
-                        linkedMaterial={session.linkedMaterial}
-                        linkedSkill={session.linkedSkill}
-                        workspaceAgentReadAccess={workspaceAgentReadAccess}
-                        includePiArtifacts={WORKSPACE_AI_INCLUDE_PI_ARTIFACTS}
-                        applyToStageEditor={(payload) =>
-                          applyToStageEditorForBook(session.book.id, s.id, payload)
+                const stageLayers = sessionStages
+                  .filter((s) => s.id !== 'draft')
+                  .map((s) => {
+                    const epoch = session.aiChatEpochByStage[s.id] ?? 0
+                    const layerKey =
+                      epoch > 0
+                        ? `${session.book.id}-shared-${s.id}-${epoch}`
+                        : `${session.book.id}-shared-${s.id}`
+                    const isActive =
+                      isVisibleBook &&
+                      session.activeStage === s.id &&
+                      !sessionExpertActive
+                    return (
+                      <div
+                        key={layerKey}
+                        className={
+                          isActive
+                            ? 'workspace-ai-chat-layer workspace-ai-chat-layer--active'
+                            : 'workspace-ai-chat-layer'
                         }
-                        onRequestSave={async () => {
-                          await saveBookSession(session.book.id)
-                        }}
-                        isPaused={!isActive}
-                      />
-                    </div>
-                  )
-                })
+                        aria-hidden={!isActive}
+                      >
+                        <WorkspaceAiChat
+                          sessionBookId={session.book.id}
+                          sessionEpoch={epoch}
+                          bookTitle={session.book.title}
+                          bookGenre={sessionBookGenre}
+                          stageId={s.id}
+                          stageBody={session.stages[s.id] ?? ''}
+                          getCurrentStageBody={(stageId) => {
+                            const sid = (stageId ?? s.id) as StageId
+                            if (isVisibleBook && sid === activeStageRef.current) {
+                              return getRenderedWorkspaceStageBody(sid)
+                            }
+                            return workspaceSessionsRef.current[session.book.id]?.stages[sid]
+                          }}
+                          allStages={session.stages}
+                          linkedMaterial={session.linkedMaterial}
+                          linkedSkill={session.linkedSkill}
+                          workspaceAgentReadAccess={workspaceAgentReadAccess}
+                          includePiArtifacts={WORKSPACE_AI_INCLUDE_PI_ARTIFACTS}
+                          applyToStageEditor={(payload) =>
+                            applyToStageEditorForBook(session.book.id, s.id, payload)
+                          }
+                          onRequestSave={async () => {
+                            await saveBookSession(session.book.id)
+                          }}
+                          isPaused={!isActive}
+                        />
+                      </div>
+                    )
+                  })
 
                 const expertLayerActive = isVisibleBook && sessionExpertActive
                 const expertLayer = (
@@ -1992,10 +2052,14 @@ export function BookEditor() {
           {expertDraftActive ? (
             <ExpertDraftEditor
               draft={expertDraft}
+              stageBody={stageBody}
+              stageBodyReadOnly={Boolean(streamingStages.draft)}
+              onStageBodyChange={handleStageBodyChange}
               updateDraft={updateExpertDraft}
               stopWriting={stopExpertWriting}
               resetDraft={resetExpertDraft}
-              writeToDraftStage={writeExpertDraftToStage}
+              mergeSectionsToDraft={mergeExpertDraftToStage}
+              exportDraft={handleExportExpertDraftDocx}
             />
           ) : (
             <>
@@ -2003,16 +2067,6 @@ export function BookEditor() {
                 <label className="workspace-stage-label" htmlFor="stage-body">
                   {railStages.find((s) => s.id === activeStage)?.label}
                 </label>
-                {['draft', 'draft_review', 'format_conversion'].includes(activeStage) ? (
-                  <button
-                    type="button"
-                    className="btn-export-docx"
-                    title="导出正文为 docx"
-                    onClick={() => void handleExportDocx()}
-                  >
-                    导出正文
-                  </button>
-                ) : null}
                 <span
                   className="workspace-char-count muted"
                   aria-live="polite"
@@ -2027,27 +2081,16 @@ export function BookEditor() {
                   </span>
                 </span>
               </div>
-              {activeStage === 'draft' ? (
-                <DraftStageEditor
-                  value={stages.draft ?? ''}
-                  onLiveChange={handleDraftLiveChange}
-                  onCommit={handleDraftCommit}
-                  onMetrics={setDraftMetrics}
-                  readOnly={Boolean(streamingStages.draft)}
-                  textareaRef={textareaRef}
-                />
-              ) : (
-                <textarea
-                  id="stage-body"
-                  ref={textareaRef}
-                  className="editor-body workspace-textarea"
-                  value={stageBody}
-                  onChange={(e) => handleStageBodyChange(e.target.value)}
-                  placeholder="在此编辑当前阶段内容…"
-                  spellCheck={false}
-                  readOnly={Boolean(streamingStages[activeStage])}
-                />
-              )}
+              <textarea
+                id="stage-body"
+                ref={textareaRef}
+                className="editor-body workspace-textarea"
+                value={stageBody}
+                onChange={(e) => handleStageBodyChange(e.target.value)}
+                placeholder="在此编辑当前阶段内容..."
+                spellCheck={false}
+                readOnly={Boolean(streamingStages[activeStage])}
+              />
             </>
           )}
         </div>

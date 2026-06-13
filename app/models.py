@@ -26,18 +26,22 @@ MATERIAL_STAGE_KEYS: tuple[str, ...] = (
     "draft_excerpt", # 正文片段
 )
 
-# 技能库阶段键：短篇创作空间阶段 + 专家正文两个智能体
+# 技能库阶段键：可见短篇技能栏目 + 分节写手技能。
+# 旧正文审阅、格式转换、专家总控技能会在读取时合并进 draft。
 SKILL_STAGE_KEYS: tuple[str, ...] = (
     "character_design",          # 人物设计技能
     "plot_design",               # 剧情设计技能
     "intro_design",              # 导语设计技能
     "plot_refine",               # 剧情细化技能
     "outline",                   # 大纲纲要技能
-    "draft",                     # 正文技能
-    "draft_review",              # 正文审阅技能
-    "format_conversion",         # 格式转换技能
-    "expert_draft_coordinator",  # 专家总控技能
+    "draft",                     # 正文专家编写技能
     "expert_section_writer",     # 分节写手技能
+)
+
+LEGACY_SKILL_STAGES_TO_DRAFT: tuple[str, ...] = (
+    "draft_review",
+    "format_conversion",
+    "expert_draft_coordinator",
 )
 
 SKILL_STAGE_LABELS: dict[str, str] = {
@@ -46,10 +50,7 @@ SKILL_STAGE_LABELS: dict[str, str] = {
     "intro_design": "导语设计技能",
     "plot_refine": "剧情细化技能",
     "outline": "大纲纲要技能",
-    "draft": "正文技能",
-    "draft_review": "正文审阅技能",
-    "format_conversion": "格式转换技能",
-    "expert_draft_coordinator": "专家总控技能",
+    "draft": "正文专家编写技能",
     "expert_section_writer": "分节写手技能",
 }
 
@@ -195,7 +196,8 @@ def normalize_expert_draft_from_storage(raw: Any | None) -> dict[str, Any]:
     sections: list[dict[str, str]] = []
     seen_section_ids: set[str] = set()
     raw_sections = raw.get("sections")
-    if isinstance(raw_sections, list):
+    has_section_list = isinstance(raw_sections, list)
+    if has_section_list:
         for idx, item in enumerate(raw_sections):
             if not isinstance(item, dict):
                 continue
@@ -218,7 +220,7 @@ def normalize_expert_draft_from_storage(raw: Any | None) -> dict[str, Any]:
                     "body": str(item.get("body") or ""),
                 }
             )
-    if not sections:
+    if not has_section_list:
         sections = list(base["sections"])
         seen_section_ids = {str(s["id"]) for s in sections}
 
@@ -428,12 +430,19 @@ def normalize_skill_stages_from_storage(raw: dict[str, Any] | None) -> dict[str,
     for k in SKILL_STAGE_KEYS:
         if k in raw:
             out[k] = normalize_skill_stage_items(k, raw[k])
+    for legacy_key in LEGACY_SKILL_STAGES_TO_DRAFT:
+        if legacy_key in raw:
+            out["draft"].extend(normalize_skill_stage_items("draft", raw[legacy_key]))
     return out
 
 
 def normalize_skill_stage_id(raw: Any | None) -> str:
     sid = str(raw or "").strip()
-    return sid if sid in SKILL_STAGE_KEYS else "character_design"
+    if sid in SKILL_STAGE_KEYS:
+        return sid
+    if sid in LEGACY_SKILL_STAGES_TO_DRAFT:
+        return "draft"
+    return "character_design"
 
 
 @dataclass

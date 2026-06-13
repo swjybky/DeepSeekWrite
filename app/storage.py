@@ -625,12 +625,12 @@ def _seed_default_skill(skills_path: Path) -> dict[str, Skill]:
     sid = new_skill_id()
     title = str(template.get("title") or "参考技能")
     raw_stages = template.get("stages") or {}
+    merged_stages = normalize_skill_stages_from_storage(
+        raw_stages if isinstance(raw_stages, dict) else {}
+    )
     stages: dict[str, list[dict[str, str]]] = {}
     for stage_key in SKILL_STAGE_KEYS:
-        entries = raw_stages.get(stage_key, [])
-        if not isinstance(entries, list):
-            stages[stage_key] = []
-            continue
+        entries = merged_stages.get(stage_key, [])
         normalized: list[dict[str, str]] = []
         for entry in entries:
             if not isinstance(entry, dict):

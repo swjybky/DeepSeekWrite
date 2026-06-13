@@ -33,7 +33,11 @@ import {
   resolvePreferredWorkspaceChatModel,
 } from '../pi/workspaceChatPreferences'
 import { convertToLlmWithSkillAsUser } from '../pi/skillMessageTransform'
-import { resolveWorkspaceAgentReadAccess } from '../workspaces/short/stageReadAccess'
+import {
+  EXPERT_DRAFT_COORDINATOR_AGENT_ID,
+  resolveWorkspaceAgentReadAccess,
+  type WorkspaceAgentId,
+} from '../workspaces/short/stageReadAccess'
 
 const ARTIFACTS_TOOL_NAME = 'artifacts'
 const WORD_ATTACHMENT_EXTENSIONS = ['.docx']
@@ -611,7 +615,9 @@ function WorkspaceAiChatInner({
                 allStages: mergeCurrentStageIntoAllStages(props) as Partial<Record<StageId, string>>,
                 allowedWorkspaceStages: resolveWorkspaceAgentReadAccess(
                   props.workspaceAgentReadAccess,
-                  props.stageId as StageId,
+                  (props.stageId === 'draft'
+                    ? EXPERT_DRAFT_COORDINATOR_AGENT_ID
+                    : props.stageId) as WorkspaceAgentId,
                 ).workspace,
                 linkedSkill: props.linkedSkill,
               },
@@ -896,7 +902,9 @@ function WorkspaceAiChatInner({
                 allStages: latestAllStages as Partial<Record<StageId, string>>,
                 allowedWorkspaceStages: resolveWorkspaceAgentReadAccess(
                   p.workspaceAgentReadAccess,
-                  p.stageId as StageId,
+                  (p.stageId === 'draft'
+                    ? EXPERT_DRAFT_COORDINATOR_AGENT_ID
+                    : p.stageId) as WorkspaceAgentId,
                 ).workspace,
                 linkedSkill: p.linkedSkill,
               },

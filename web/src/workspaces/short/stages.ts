@@ -9,23 +9,31 @@ export const SHORT_WORKSPACE_STAGES = [
   { id: 'plot_refine', label: '剧情细化' },
   { id: 'outline', label: '大纲纲要' },
   { id: 'draft', label: '正文编写' },
-  { id: 'draft_review', label: '正文审阅' },
-  { id: 'format_conversion', label: '格式转换' },
 ] as const
 
 export type ShortStageId = (typeof SHORT_WORKSPACE_STAGES)[number]['id']
 
-export const SHORT_STAGE_LABELS: Record<ShortStageId, string> =
-  SHORT_WORKSPACE_STAGES.reduce(
+export const LEGACY_SHORT_WORKSPACE_STAGES = [
+  { id: 'draft_review', label: '正文审阅' },
+  { id: 'format_conversion', label: '格式转换' },
+] as const
+
+export type LegacyShortStageId =
+  (typeof LEGACY_SHORT_WORKSPACE_STAGES)[number]['id']
+
+export type StoredShortStageId = ShortStageId | LegacyShortStageId
+
+export const SHORT_STAGE_LABELS: Record<StoredShortStageId, string> =
+  [...SHORT_WORKSPACE_STAGES, ...LEGACY_SHORT_WORKSPACE_STAGES].reduce(
     (acc, s) => {
       acc[s.id] = s.label
       return acc
     },
-    {} as Record<ShortStageId, string>,
+    {} as Record<StoredShortStageId, string>,
   )
 
 export function normalizeShortStages(
-  raw?: Partial<Record<ShortStageId, string>> | null,
+  raw?: Partial<Record<StoredShortStageId, string>> | null,
 ): Record<ShortStageId, string> {
   const out = {} as Record<ShortStageId, string>
   for (const s of SHORT_WORKSPACE_STAGES) {
@@ -38,7 +46,7 @@ export function normalizeShortStages(
  * 旧版情感阶段键到统一阶段键的映射
  * 用于数据迁移
  */
-export const LEGACY_QINGGAN_STAGE_MAPPING: Record<string, ShortStageId> = {
+export const LEGACY_QINGGAN_STAGE_MAPPING: Record<string, StoredShortStageId> = {
   'qinggan_character': 'character_design',
   'qinggan_intro': 'intro_design',
   'qinggan_plot_refine': 'plot_refine',
@@ -52,14 +60,19 @@ export const LEGACY_QINGGAN_STAGE_MAPPING: Record<string, ShortStageId> = {
  */
 export function migrateLegacyStages(
   raw?: Partial<Record<string, string>> | null,
-): Partial<Record<ShortStageId, string>> {
+): Partial<Record<StoredShortStageId, string>> {
   if (!raw) return {}
-  const result: Partial<Record<ShortStageId, string>> = {}
+  const result: Partial<Record<StoredShortStageId, string>> = {}
+  const validIds = new Set(
+    [...SHORT_WORKSPACE_STAGES, ...LEGACY_SHORT_WORKSPACE_STAGES].map(
+      (s) => s.id,
+    ),
+  )
 
   for (const [key, value] of Object.entries(raw)) {
     // 如果已经是新键，直接保留
-    if (SHORT_WORKSPACE_STAGES.some(s => s.id === key)) {
-      result[key as ShortStageId] = value
+    if (validIds.has(key as StoredShortStageId)) {
+      result[key as StoredShortStageId] = value
     }
     // 如果是旧版情感键，映射到新键
     else if (key in LEGACY_QINGGAN_STAGE_MAPPING) {
