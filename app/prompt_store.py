@@ -14,6 +14,7 @@ SHORT_PREFIX = Path("short")
 SHARED_WORKSPACE_PROMPT_DIR = "shared"
 LEGACY_QINGGAN_PROMPT_DIR = "qinggan"
 SHARED_PROMPT_MIGRATION_MARKER = ".shared_prompt_migration_from_qinggan_v1"
+PLOT_PROMPT_MERGE_MARKER = ".plot_prompt_merge_v1"
 
 SHORT_STAGES_ORDER: tuple[str, ...] = (
     "character_design",
@@ -27,7 +28,9 @@ SHORT_STAGES_ORDER: tuple[str, ...] = (
 EXPERT_DRAFT_COORDINATOR_AGENT_ID = "expert_draft_coordinator"
 EXPERT_SECTION_WRITER_AGENT_ID = "expert_section_writer"
 WORKSPACE_STAGE_AGENT_IDS: tuple[str, ...] = tuple(
-    stage_id for stage_id in SHORT_STAGES_ORDER if stage_id != "draft"
+    stage_id
+    for stage_id in SHORT_STAGES_ORDER
+    if stage_id not in {"draft", "intro_design", "plot_refine"}
 )
 WORKSPACE_AGENT_IDS: tuple[str, ...] = WORKSPACE_STAGE_AGENT_IDS + (
     EXPERT_DRAFT_COORDINATOR_AGENT_ID,
@@ -94,12 +97,13 @@ def _ensure_shared_prompt_override_migrated() -> None:
     root = _workspace_override_root()
     marker = root / SHARED_PROMPT_MIGRATION_MARKER
     if marker.is_file():
+        _ensure_plot_prompt_override_merged()
         return
     try:
         shared_root = root / SHARED_WORKSPACE_PROMPT_DIR
         legacy_root = root / LEGACY_QINGGAN_PROMPT_DIR
         shared_root.mkdir(parents=True, exist_ok=True)
-        for agent_id in WORKSPACE_AGENT_IDS:
+        for agent_id in (*WORKSPACE_AGENT_IDS, "intro_design", "plot_refine"):
             source = legacy_root / f"{agent_id}.txt"
             target = shared_root / f"{agent_id}.txt"
             if source.is_file() and not target.exists():
@@ -108,11 +112,43 @@ def _ensure_shared_prompt_override_migrated() -> None:
     except OSError:
         # 只读环境仍应允许读取内置默认；后续可写时会再次尝试迁移。
         return
+    _ensure_plot_prompt_override_merged()
+
+
+def _ensure_plot_prompt_override_merged() -> None:
+    """将旧剧情设计/导语设计/剧情细化提示词覆盖合并为剧情提示词。"""
+    root = _workspace_override_root()
+    marker = root / PLOT_PROMPT_MERGE_MARKER
+    if marker.is_file():
+        return
+    try:
+        shared_root = root / SHARED_WORKSPACE_PROMPT_DIR
+        shared_root.mkdir(parents=True, exist_ok=True)
+        sources = (
+            ("plot_design", "剧情设计"),
+            ("intro_design", "导语设计"),
+            ("plot_refine", "剧情细化"),
+        )
+        sections: list[str] = []
+        for agent_id, label in sources:
+            path = shared_root / f"{agent_id}.txt"
+            if not path.is_file():
+                continue
+            body = path.read_text(encoding="utf-8").strip()
+            if body:
+                sections.append(f"## {label}\n\n{body}")
+        if sections:
+            target = shared_root / "plot_design.txt"
+            target.write_text("\n\n---\n\n".join(sections) + "\n", encoding="utf-8")
+        marker.write_text("merged\n", encoding="utf-8")
+    except OSError:
+        return
 
 
 def resolve_workspace_agent_read_path(agent_id: str) -> Path:
     """共享覆盖优先。"""
     _ensure_shared_prompt_override_migrated()
+    _ensure_plot_prompt_override_merged()
     over = workspace_agent_override_absolute_path(agent_id)
     if over.is_file():
         return over
@@ -158,6 +194,8 @@ def render_workspace_system_prompt(
     template_id = (
         EXPERT_DRAFT_COORDINATOR_AGENT_ID if stage_id == "draft" else stage_id
     )
+    if template_id in {"intro_design", "plot_refine"}:
+        template_id = "plot_design"
     raw = read_workspace_agent_prompt_template(template_id)
 
     title = (book_title or "").strip()
@@ -467,8 +505,6 @@ SHARED_SKILL_PROMPT_DIR = "shared"
 SKILL_STAGES_ORDER: tuple[str, ...] = (
     "character_design",
     "plot_design",
-    "intro_design",
-    "plot_refine",
     "outline",
     "draft",
     "expert_section_writer",
@@ -476,10 +512,8 @@ SKILL_STAGES_ORDER: tuple[str, ...] = (
 
 SKILL_STAGE_LABELS: dict[str, str] = {
     "character_design": "人物设计技能",
-    "plot_design": "剧情设计技能",
-    "intro_design": "导语设计技能",
-    "plot_refine": "剧情细化技能",
-    "outline": "大纲纲要技能",
+    "plot_design": "剧情技能",
+    "outline": "大纲技能",
     "draft": "正文专家编写技能",
     "expert_section_writer": "分节写手技能",
 }
@@ -569,6 +603,8 @@ def render_skill_system_prompt(
     stage_body: str,
     all_stages_for_peek: dict[str, str] | None = None,
 ) -> str:
+    if stage_id in {"intro_design", "plot_refine"}:
+        stage_id = "plot_design"
     validate_skill_stage_id(stage_id)
     raw = read_skill_agent_prompt_template()
 

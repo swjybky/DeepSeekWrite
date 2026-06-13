@@ -10,6 +10,11 @@ type Props = {
   stageBodyReadOnly?: boolean
   onStageBodyChange: (value: string) => void
   updateDraft: (updater: (draft: ExpertDraft) => ExpertDraft) => void
+  onSectionTextareaRef?: (
+    sectionId: string,
+    field: 'body' | 'character_state',
+    node: HTMLTextAreaElement | null,
+  ) => void
   stopWriting: () => void
   resetDraft: () => void
   mergeSectionsToDraft: () => void
@@ -64,6 +69,7 @@ export function ExpertDraftEditor({
   stageBodyReadOnly = false,
   onStageBodyChange,
   updateDraft,
+  onSectionTextareaRef,
   stopWriting,
   resetDraft,
   mergeSectionsToDraft,
@@ -231,6 +237,9 @@ export function ExpertDraftEditor({
                 className="editor-body workspace-textarea expert-draft-textarea"
                 value={selectedSection.body}
                 aria-label={`${selectedSection.title}正文`}
+                ref={(node) =>
+                  onSectionTextareaRef?.(selectedId, 'body', node)
+                }
                 onChange={(e) => {
                   const body = e.target.value
                   updateDraft((current) => ({
@@ -252,6 +261,9 @@ export function ExpertDraftEditor({
                 className="editor-body workspace-textarea expert-draft-state-textarea"
                 value={selectedState.body}
                 aria-label={`${selectedSection.title}人物状态`}
+                ref={(node) =>
+                  onSectionTextareaRef?.(selectedId, 'character_state', node)
+                }
                 onChange={(e) => {
                   const body = e.target.value
                   updateDraft((current) => ({

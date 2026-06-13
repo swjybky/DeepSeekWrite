@@ -12,6 +12,27 @@ BUILTIN_IMAGE_MODEL_DEFAULTS: dict[str, str] = {
     "base_url": "https://sucloud.vip",
 }
 
+# 项目内置文字模型（新用户未配置时预填 DeepSeek Pro / Flash，Key 需自行填写）
+BUILTIN_TEXT_MODEL_DEFAULTS: dict[str, Any] = {
+    "models": [
+        {
+            "id": "deepseek_pro",
+            "label": "DeepSeek V4 Pro",
+            "provider": "deepseek",
+            "model_id": "deepseek-v4-pro",
+            "api_key": "",
+        },
+        {
+            "id": "deepseekflash",
+            "label": "DeepSeek V4 Flash",
+            "provider": "deepseek",
+            "model_id": "deepseek-v4-flash",
+            "api_key": "",
+        },
+    ],
+    "default_model_id": "deepseek_pro",
+}
+
 
 def _parse_env_file(path: Path) -> dict[str, str]:
     out: dict[str, str] = {}
@@ -303,6 +324,14 @@ def load_ai_model_defaults() -> dict[str, Any] | None:
         "api_key": api_key,
     }
     return out
+
+
+def load_text_model_defaults() -> dict[str, Any]:
+    """读取文字模型默认配置；未单独配置时返回项目内置 DeepSeek Pro / Flash。"""
+    return {
+        "models": [dict(item) for item in BUILTIN_TEXT_MODEL_DEFAULTS["models"]],
+        "default_model_id": BUILTIN_TEXT_MODEL_DEFAULTS["default_model_id"],
+    }
 
 
 def load_image_model_defaults() -> dict[str, str]:

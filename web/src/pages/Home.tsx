@@ -30,6 +30,7 @@ import {
   normalizeAiModelSettings,
   saveAiModelConfig,
   SHORT_MATERIAL_GENRES,
+  TEXT_MODEL_API_KEY_PLACEHOLDER,
   exportLibrary,
   importLibrary,
 } from '../bridge'
@@ -202,10 +203,10 @@ function ModelConfigDialog({
       api: model.api?.trim() || undefined,
     }))
     const incomplete = models.find(
-      (model) => !model.id || !model.provider || !model.model_id || !model.api_key,
+      (model) => !model.id || !model.provider || !model.model_id,
     )
     if (incomplete) {
-      setError('请补齐文字模型的 ID、来源、模型名和 API Key')
+      setError('请补齐文字模型的 ID、来源和模型名')
       return
     }
 
@@ -350,7 +351,7 @@ function ModelConfigDialog({
                             type="password"
                             value={model.api_key}
                             onChange={(e) => updateModel(index, { api_key: e.target.value })}
-                            placeholder="sk-..."
+                            placeholder={TEXT_MODEL_API_KEY_PLACEHOLDER}
                           />
                         </label>
                         <label className="field">

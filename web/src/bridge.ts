@@ -4,6 +4,7 @@ export type BookStatus = 'editing' | 'completed'
 // 统一短篇阶段定义
 import {
   SHORT_WORKSPACE_STAGES,
+  SHORT_WORKSPACE_CONTENT_STAGES,
   type ShortStageId,
   normalizeShortStages,
   migrateLegacyStages,
@@ -12,9 +13,9 @@ import {
 import { getEmbeddedPromptTemplate } from './prompt/embeddedDefaults'
 import { renderPromptFromTemplateRaw } from './prompt/renderTemplate'
 import {
-  EXPERT_DRAFT_COORDINATOR_AGENT_ID,
   WORKSPACE_AGENT_IDS,
   normalizeWorkspaceAgentReadAccess,
+  resolveWorkspaceAgentIdForStage,
   type WorkspaceAgentId,
   type WorkspaceAgentReadAccessConfig,
 } from './workspaces/short/stageReadAccess'
@@ -63,6 +64,7 @@ export type StageId = ShortStageId
 
 // 导出统一阶段定义
 export const WORKSPACE_STAGES = SHORT_WORKSPACE_STAGES
+export const WORKSPACE_CONTENT_STAGES = SHORT_WORKSPACE_CONTENT_STAGES
 
 export interface ExpertDraftSection {
   id: string
@@ -217,7 +219,7 @@ export function mergeStagePatchIntoAll(
   patch: Partial<Record<StageId, string>>,
 ): Record<StageId, string> {
   const next = { ...(previous ?? {}) } as Record<string, string>
-  for (const stage of WORKSPACE_STAGES) {
+  for (const stage of WORKSPACE_CONTENT_STAGES) {
     if (!(stage.id in next)) next[stage.id] = ''
   }
   // 对patch也进行迁移
@@ -348,28 +350,30 @@ export function normalizeMaterialStages(
 export type SkillStageId =
   | 'character_design'
   | 'plot_design'
-  | 'intro_design'
-  | 'plot_refine'
   | 'outline'
   | 'draft'
   | 'expert_section_writer'
 
 type LegacySkillStageId =
+  | 'intro_design'
+  | 'plot_refine'
   | 'draft_review'
   | 'format_conversion'
   | 'expert_draft_coordinator'
 
 export const SKILL_STAGE_LABELS: Record<SkillStageId, string> = {
   character_design: '人物设计技能',
-  plot_design: '剧情设计技能',
-  intro_design: '导语设计技能',
-  plot_refine: '剧情细化技能',
-  outline: '大纲纲要技能',
+  plot_design: '剧情技能',
+  outline: '大纲技能',
   draft: '正文专家编写技能',
   expert_section_writer: '分节写手技能',
 }
 
 export const SKILL_STAGE_KEYS = Object.keys(SKILL_STAGE_LABELS) as SkillStageId[]
+const LEGACY_SKILL_STAGES_TO_PLOT: LegacySkillStageId[] = [
+  'intro_design',
+  'plot_refine',
+]
 const LEGACY_SKILL_STAGES_TO_DRAFT: LegacySkillStageId[] = [
   'draft_review',
   'format_conversion',
@@ -410,6 +414,12 @@ export function normalizeSkillStages(
     out[k] = normalizeSkillStageEntries(k, raw?.[k])
   }
   if (raw) {
+    out.plot_design = [
+      ...out.plot_design,
+      ...LEGACY_SKILL_STAGES_TO_PLOT.flatMap((stageId) =>
+        normalizeSkillStageEntries('plot_design', raw[stageId]),
+      ),
+    ]
     out.draft = [
       ...out.draft,
       ...LEGACY_SKILL_STAGES_TO_DRAFT.flatMap((stageId) =>
@@ -423,6 +433,9 @@ export function normalizeSkillStages(
 export function normalizeSkillStageId(raw: unknown): SkillStageId {
   if (SKILL_STAGE_KEYS.includes(raw as SkillStageId)) {
     return raw as SkillStageId
+  }
+  if (LEGACY_SKILL_STAGES_TO_PLOT.includes(raw as LegacySkillStageId)) {
+    return 'plot_design'
   }
   if (LEGACY_SKILL_STAGES_TO_DRAFT.includes(raw as LegacySkillStageId)) {
     return 'draft'
@@ -532,9 +545,46 @@ const BUILTIN_IMAGE_MODEL_DEFAULTS: ImageModelConfig = {
   base_url: 'https://sucloud.vip',
 }
 
-function applyBuiltinImageDefault(settings: AiModelSettings): AiModelSettings {
-  if (settings.image) return settings
-  return { ...settings, image: { ...BUILTIN_IMAGE_MODEL_DEFAULTS } }
+/** 项目内置文字模型（与 app/ai_env.py 保持一致） */
+const BUILTIN_TEXT_MODEL_DEFAULTS: AiModelSettings['text'] = {
+  models: [
+    {
+      id: 'deepseek_pro',
+      label: 'DeepSeek V4 Pro',
+      provider: 'deepseek',
+      model_id: 'deepseek-v4-pro',
+      api_key: '',
+    },
+    {
+      id: 'deepseekflash',
+      label: 'DeepSeek V4 Flash',
+      provider: 'deepseek',
+      model_id: 'deepseek-v4-flash',
+      api_key: '',
+    },
+  ],
+  default_model_id: 'deepseek_pro',
+}
+
+/** 文字模型 API Key 输入框占位提示 */
+export const TEXT_MODEL_API_KEY_PLACEHOLDER =
+  '请到 DeepSeek 官方平台获取 Key（https://platform.deepseek.com/）'
+
+function applyBuiltinDefaults(settings: AiModelSettings): AiModelSettings {
+  let result = settings
+  if (!result.text.models.length) {
+    result = {
+      ...result,
+      text: {
+        models: BUILTIN_TEXT_MODEL_DEFAULTS.models.map((model) => ({ ...model })),
+        default_model_id: BUILTIN_TEXT_MODEL_DEFAULTS.default_model_id,
+      },
+    }
+  }
+  if (!result.image) {
+    result = { ...result, image: { ...BUILTIN_IMAGE_MODEL_DEFAULTS } }
+  }
+  return result
 }
 
 export type AppearanceStyle = 'classic' | 'modern'
@@ -932,7 +982,7 @@ function normalizeAiModelEntry(raw: unknown): AiModelConfig | null {
   const api_key = trimString(o.api_key ?? o.apiKey ?? o.model_key)
   const rawId = trimString(o.id) || model_id || provider
   const id = normalizeConfigId(rawId)
-  if (!id || !provider || !model_id || !api_key) return null
+  if (!id || !provider || !model_id) return null
 
   const out: AiModelConfig = {
     id,
@@ -1010,13 +1060,13 @@ function storedAiModelConfig(): AiModelSettings {
   try {
     const raw = localStorage.getItem(AI_MODEL_CONFIG_STORAGE_KEY)
     if (!raw?.trim()) {
-      return applyBuiltinImageDefault(normalizeAiModelSettings(null))
+      return applyBuiltinDefaults(normalizeAiModelSettings(null))
     }
-    return applyBuiltinImageDefault(
+    return applyBuiltinDefaults(
       normalizeAiModelSettings(JSON.parse(raw) as unknown),
     )
   } catch {
-    return applyBuiltinImageDefault(normalizeAiModelSettings(null))
+    return applyBuiltinDefaults(normalizeAiModelSettings(null))
   }
 }
 
@@ -1032,7 +1082,7 @@ export async function getAiModelConfig(): Promise<AiModelSettings> {
   const api = await getBridgeApi()
   if (api?.get_ai_model_config) {
     try {
-      const normalized = applyBuiltinImageDefault(
+      const normalized = applyBuiltinDefaults(
         normalizeAiModelSettings(await api.get_ai_model_config()),
       )
       setStoredAiModelConfig(normalized)
@@ -2076,6 +2126,7 @@ const SHARED_WORKSPACE_PROMPT_KIND = 'shared'
 const LEGACY_QINGGAN_PROMPT_KIND = 'qinggan'
 const SHARED_PROMPT_LS_MIGRATION_MARKER =
   'write_claw_shared_prompt_migration_from_qinggan_v1'
+const PLOT_PROMPT_LS_MERGE_MARKER = 'write_claw_plot_prompt_merge_v1'
 
 function localPromptLsKey(promptKind: string, stage: string): string {
   return PROMPT_TEMPLATE_LS_PREFIX + `${promptKind}:${stage}`
@@ -2084,7 +2135,11 @@ function localPromptLsKey(promptKind: string, stage: string): string {
 function ensureLocalSharedPromptMigrated(): void {
   try {
     if (localStorage.getItem(SHARED_PROMPT_LS_MIGRATION_MARKER)) return
-    for (const agentId of WORKSPACE_AGENT_IDS) {
+    for (const agentId of [
+      ...WORKSPACE_AGENT_IDS,
+      'intro_design',
+      'plot_refine',
+    ]) {
       const target = localPromptLsKey(SHARED_WORKSPACE_PROMPT_KIND, agentId)
       const source = localPromptLsKey(LEGACY_QINGGAN_PROMPT_KIND, agentId)
       if (localStorage.getItem(target) == null) {
@@ -2093,6 +2148,32 @@ function ensureLocalSharedPromptMigrated(): void {
       }
     }
     localStorage.setItem(SHARED_PROMPT_LS_MIGRATION_MARKER, '1')
+  } catch {
+    /* ignore */
+  }
+}
+
+function ensureLocalPlotPromptMerged(): void {
+  try {
+    if (localStorage.getItem(PLOT_PROMPT_LS_MERGE_MARKER)) return
+    const sections = [
+      ['plot_design', '剧情设计'],
+      ['intro_design', '导语设计'],
+      ['plot_refine', '剧情细化'],
+    ].flatMap(([agentId, label]) => {
+      const body =
+        localStorage.getItem(
+          localPromptLsKey(SHARED_WORKSPACE_PROMPT_KIND, agentId),
+        )?.trim() ?? ''
+      return body ? [`## ${label}\n\n${body}`] : []
+    })
+    if (sections.length > 0) {
+      localStorage.setItem(
+        localPromptLsKey(SHARED_WORKSPACE_PROMPT_KIND, 'plot_design'),
+        sections.join('\n\n---\n\n'),
+      )
+    }
+    localStorage.setItem(PLOT_PROMPT_LS_MERGE_MARKER, '1')
   } catch {
     /* ignore */
   }
@@ -2108,6 +2189,7 @@ export async function readWorkspaceAgentPromptTemplate(
     return t.endsWith('\n') ? t.slice(0, -1) : t
   }
   ensureLocalSharedPromptMigrated()
+  ensureLocalPlotPromptMerged()
   try {
     const ls = localStorage.getItem(
       localPromptLsKey(SHARED_WORKSPACE_PROMPT_KIND, agentId),
@@ -2129,6 +2211,7 @@ export async function saveWorkspaceAgentPromptOverride(
     return
   }
   ensureLocalSharedPromptMigrated()
+  ensureLocalPlotPromptMerged()
   try {
     localStorage.setItem(
       localPromptLsKey(SHARED_WORKSPACE_PROMPT_KIND, agentId),
@@ -2147,6 +2230,7 @@ export async function resetWorkspaceAgentPromptOverride(
     return api.reset_workspace_agent_prompt_override(agentId)
   }
   ensureLocalSharedPromptMigrated()
+  ensureLocalPlotPromptMerged()
   try {
     const k = localPromptLsKey(SHARED_WORKSPACE_PROMPT_KIND, agentId)
     const had = localStorage.getItem(k) != null
@@ -2264,8 +2348,7 @@ export async function getWorkspaceSystemPrompt(
   const filteredStages = Object.fromEntries(
     Object.entries(input.allStages).filter(([id]) => allowed.has(id as StageId)),
   ) as Partial<Record<StageId, string>>
-  const promptAgentId =
-    stageId === 'draft' ? EXPERT_DRAFT_COORDINATOR_AGENT_ID : stageId
+  const promptAgentId = resolveWorkspaceAgentIdForStage(stageId)
   const raw = await readWorkspaceAgentPromptTemplate(promptAgentId)
   const prompt = renderPromptFromTemplateRaw(raw, {
     bookTitle: input.bookTitle,

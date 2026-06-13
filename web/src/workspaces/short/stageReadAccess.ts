@@ -1,5 +1,6 @@
 import type { MaterialStageId } from '../../bridge'
 import {
+  SHORT_WORKSPACE_CONTENT_STAGES,
   SHORT_WORKSPACE_STAGES,
   type ShortStageId,
 } from './stages'
@@ -12,8 +13,6 @@ export const EXPERT_SECTION_WRITER_AGENT_ID =
 export const WORKSPACE_STANDARD_AGENT_IDS = [
   'character_design',
   'plot_design',
-  'intro_design',
-  'plot_refine',
   'outline',
 ] as const satisfies readonly ShortStageId[]
 
@@ -41,6 +40,10 @@ export const ALL_WORKSPACE_STAGE_IDS_FOR_READ = SHORT_WORKSPACE_STAGES.map(
   (stage) => stage.id,
 )
 
+export const ALL_WORKSPACE_CONTENT_STAGE_IDS = SHORT_WORKSPACE_CONTENT_STAGES.map(
+  (stage) => stage.id,
+)
+
 /** 与 bridge.MATERIAL_STAGE_LABELS 键一致；勿从 bridge 取值以免循环依赖。 */
 export const ALL_MATERIAL_STAGE_IDS: MaterialStageId[] = [
   'character',
@@ -52,15 +55,12 @@ export const ALL_MATERIAL_STAGE_IDS: MaterialStageId[] = [
 ]
 
 const DEFAULT_MATERIAL_BY_STAGE: Record<
-  ShortStageId,
+  WorkspaceStandardAgentId,
   readonly MaterialStageId[]
 > = {
   character_design: ['character'],
-  plot_design: ['character', 'intro', 'gimmick', 'pacing'],
-  intro_design: ['intro'],
-  plot_refine: ['plot_refine', 'pacing'],
+  plot_design: ['character', 'intro', 'gimmick', 'plot_refine', 'pacing'],
   outline: [],
-  draft: [],
 }
 
 const DEFAULT_COORDINATOR_WORKSPACE: ShortStageId[] = [
@@ -82,13 +82,13 @@ function defaultEntryForAgent(
   }
   if (agentId === EXPERT_SECTION_WRITER_AGENT_ID) {
     return {
-      workspace: [...ALL_WORKSPACE_STAGE_IDS_FOR_READ],
+      workspace: [...ALL_WORKSPACE_CONTENT_STAGE_IDS],
       material: [],
     }
   }
   return {
-    workspace: [...ALL_WORKSPACE_STAGE_IDS_FOR_READ],
-    material: [...DEFAULT_MATERIAL_BY_STAGE[agentId as ShortStageId]],
+    workspace: [...ALL_WORKSPACE_CONTENT_STAGE_IDS],
+    material: [...DEFAULT_MATERIAL_BY_STAGE[agentId as WorkspaceStandardAgentId]],
   }
 }
 
@@ -117,8 +117,18 @@ export function isWorkspaceStageAgentId(
   return (WORKSPACE_STANDARD_AGENT_IDS as readonly string[]).includes(id)
 }
 
+export function resolveWorkspaceAgentIdForStage(
+  stageId: ShortStageId,
+): WorkspaceAgentId {
+  if (stageId === 'draft') return EXPERT_DRAFT_COORDINATOR_AGENT_ID
+  if (stageId === 'intro_design' || stageId === 'plot_refine') {
+    return 'plot_design'
+  }
+  return stageId as WorkspaceAgentId
+}
+
 function isShortStageId(id: string): id is ShortStageId {
-  return ALL_WORKSPACE_STAGE_IDS_FOR_READ.includes(id as ShortStageId)
+  return ALL_WORKSPACE_CONTENT_STAGE_IDS.includes(id as ShortStageId)
 }
 
 function isMaterialStageId(id: string): id is MaterialStageId {
@@ -149,6 +159,39 @@ function normalizeEntry(
   return { workspace, material }
 }
 
+function mergePlotAgentReadAccessInput(
+  input: Record<string, unknown>,
+): unknown {
+  const sourceIds = ['plot_design', 'intro_design', 'plot_refine']
+  const workspace: string[] = []
+  const material: string[] = []
+  let hasWorkspace = false
+  let hasMaterial = false
+
+  for (const id of sourceIds) {
+    const raw = input[id]
+    if (!raw || typeof raw !== 'object') continue
+    const obj = raw as Record<string, unknown>
+    if (Array.isArray(obj.workspace)) {
+      hasWorkspace = true
+      workspace.push(...obj.workspace.map(String))
+    }
+    if (Array.isArray(obj.material)) {
+      hasMaterial = true
+      material.push(...obj.material.map(String))
+    }
+  }
+
+  if (!hasWorkspace && !hasMaterial) return input.plot_design
+  return {
+    ...(input.plot_design && typeof input.plot_design === 'object'
+      ? (input.plot_design as Record<string, unknown>)
+      : {}),
+    ...(hasWorkspace ? { workspace } : {}),
+    ...(hasMaterial ? { material } : {}),
+  }
+}
+
 export function normalizeWorkspaceAgentReadAccess(
   raw: unknown,
 ): WorkspaceAgentReadAccessConfig {
@@ -156,7 +199,10 @@ export function normalizeWorkspaceAgentReadAccess(
   if (!raw || typeof raw !== 'object') return defaults
   const input = raw as Record<string, unknown>
   for (const agentId of WORKSPACE_AGENT_IDS) {
-    defaults[agentId] = normalizeEntry(agentId, input[agentId])
+    defaults[agentId] =
+      agentId === 'plot_design'
+        ? normalizeEntry(agentId, mergePlotAgentReadAccessInput(input))
+        : normalizeEntry(agentId, input[agentId])
   }
   return defaults
 }

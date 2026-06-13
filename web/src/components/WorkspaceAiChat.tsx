@@ -443,6 +443,7 @@ type Props = {
   /** 创作空间共享模板可见的书籍分类上下文。 */
   bookGenre?: string
   stageId: StageId | MaterialStageId | SkillStageId
+  activeStageContentId?: StageId | MaterialStageId | SkillStageId
   stageBody: string
   getCurrentStageBody?: (
     stageId?: StageId | MaterialStageId | SkillStageId,
@@ -463,7 +464,7 @@ type Props = {
   includePiArtifacts?: boolean
   /** 素材库侧栏「编辑提示词」保存后递增，强制重新拉取模板并刷新 systemPrompt */
   promptRevision?: number
-  /** 供「写入编辑区」工具调用：写入中间栏当前阶段文本框 */
+  /** 供「写入当前文本编辑框」工具调用：写入当前阶段文本框 */
   applyToStageEditor?: (payload: ApplyToStageEditorPayload) => void
   /** 供工具调用后请求上层保存（如阶段复制后自动落盘） */
   onRequestSave?: () => void | Promise<void>
@@ -503,6 +504,7 @@ function WorkspaceAiChatInner({
     toolCallId: string
     accumulatedText: string
     hasCleared: boolean
+    targetStageId?: StageId | MaterialStageId | SkillStageId
   } | null>(null)
 
   useEffect(() => {
@@ -571,6 +573,7 @@ function WorkspaceAiChatInner({
           workspaceType,
           promptKind: latest.promptKind,
           stageId: latest.stageId,
+          activeStageContentId: latest.activeStageContentId,
           stageBody: resolveCurrentStageBody(latest),
           getCurrentStageBody: (stageId) =>
             latest.getCurrentStageBody?.(stageId ?? latest.stageId),
@@ -698,26 +701,48 @@ function WorkspaceAiChatInner({
             if (
               block?.type === 'toolCall' &&
               streamingWriteRef.current &&
-              block.id === streamingWriteRef.current.toolCallId
+                block.id === streamingWriteRef.current.toolCallId
             ) {
               const args = (block.arguments || {}) as Record<string, unknown>
               const text = String(args.text ?? '')
               const mode = args.mode as 'replace' | 'append' | undefined
+              const targetStageId = String(args.target_stage_id ?? '').trim() as
+                | StageId
+                | MaterialStageId
+                | SkillStageId
+                | ''
+              if (targetStageId) {
+                streamingWriteRef.current.targetStageId = targetStageId
+              }
+              const effectiveTargetStageId =
+                targetStageId || streamingWriteRef.current.targetStageId
 
               if (mode === 'replace' && !streamingWriteRef.current.hasCleared) {
                 streamingWriteRef.current.hasCleared = true
                 streamingWriteRef.current.accumulatedText = ''
-                apply({ text: '', mode: 'replace' })
+                apply({
+                  text: '',
+                  mode: 'replace',
+                  targetStageId: effectiveTargetStageId || undefined,
+                })
               }
 
               const prev = streamingWriteRef.current.accumulatedText
               if (text.length > prev.length && text.startsWith(prev)) {
                 const delta = text.slice(prev.length)
                 streamingWriteRef.current.accumulatedText = text
-                apply({ text: delta, mode: 'append_token' })
+                apply({
+                  text: delta,
+                  mode: 'append_token',
+                  targetStageId: effectiveTargetStageId || undefined,
+                })
               } else if (text !== prev) {
                 streamingWriteRef.current.accumulatedText = text
-                apply({ text: text, mode: 'replace' })
+                apply({
+                  text: text,
+                  mode: 'replace',
+                  targetStageId: effectiveTargetStageId || undefined,
+                })
               }
             }
           }
@@ -730,8 +755,9 @@ function WorkspaceAiChatInner({
               tc.id === streamingWriteRef.current.toolCallId
             ) {
               streamedToolCallIdsRef.current.add(tc.id)
+              const targetStageId = streamingWriteRef.current.targetStageId
               streamingWriteRef.current = null
-              apply({ text: '', mode: 'streaming_end' })
+              apply({ text: '', mode: 'streaming_end', targetStageId })
             }
           }
         }
@@ -740,10 +766,12 @@ function WorkspaceAiChatInner({
           // 清理未完成的流式写入
           if (streamingWriteRef.current) {
             streamedToolCallIdsRef.current.add(streamingWriteRef.current.toolCallId)
+            const targetStageId = streamingWriteRef.current.targetStageId
             streamingWriteRef.current = null
             propsLatestRef.current.applyToStageEditor?.({
               text: '',
               mode: 'streaming_end',
+              targetStageId,
             })
           }
           agent.state.messages = agent.state.messages.slice()
@@ -846,9 +874,11 @@ function WorkspaceAiChatInner({
       chatPanelRef.current?.remove()
       chatPanelRef.current = null
       if (streamingWriteRef.current) {
+        const targetStageId = streamingWriteRef.current.targetStageId
         propsLatestRef.current.applyToStageEditor?.({
           text: '',
           mode: 'streaming_end',
+          targetStageId,
         })
         streamingWriteRef.current = null
       }
@@ -917,6 +947,7 @@ function WorkspaceAiChatInner({
         workspaceType,
         promptKind: p.promptKind,
         stageId: p.stageId,
+        activeStageContentId: p.activeStageContentId,
         stageBody: latestStageBody,
         getCurrentStageBody: (stageId) =>
           p.getCurrentStageBody?.(stageId ?? p.stageId),
@@ -940,6 +971,7 @@ function WorkspaceAiChatInner({
     props.bookGenre,
     props.promptKind,
     props.stageId,
+    props.activeStageContentId,
     debouncedBody,
     props.allStages,
     props.linkedMaterial,
@@ -969,6 +1001,7 @@ export const WorkspaceAiChat = memo(WorkspaceAiChatInner, (prev, next) => {
   if (prev.sessionEpoch !== next.sessionEpoch) return false
   if (prev.promptKind !== next.promptKind) return false
   if (prev.stageId !== next.stageId) return false
+  if (prev.activeStageContentId !== next.activeStageContentId) return false
 
   // 暂停状态变化需要更新
   if (prev.isPaused !== next.isPaused) return false

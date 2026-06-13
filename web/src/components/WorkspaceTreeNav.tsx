@@ -73,8 +73,26 @@ export function WorkspaceTreeNav({
 }: WorkspaceTreeNavProps) {
   const [expanded, setExpanded] = useState(defaultExpanded)
   const [expandedBookIds, setExpandedBookIds] = useState<Record<string, boolean>>({})
+  const [expandedStageIds, setExpandedStageIds] = useState<Record<string, boolean>>({})
 
   const hasBookTree = books != null
+
+  const hasStageChildren = (stage: WorkspaceTreeStage) =>
+    (stage.children?.length ?? 0) > 0 || Boolean(stage.createChildLabel)
+
+  const isStageExpanded = (stageId: string, stage: WorkspaceTreeStage) => {
+    if (!hasStageChildren(stage)) return false
+    if (expandedStageIds[stageId] != null) return expandedStageIds[stageId]
+    if (activeStageId === stageId && activeStageChildId) return true
+    return activeStageId === stageId
+  }
+
+  const toggleStage = (stageId: string) => {
+    setExpandedStageIds((prev) => ({
+      ...prev,
+      [stageId]: !(prev[stageId] ?? activeStageId === stageId),
+    }))
+  }
   const isBookExpanded = (bookId: string) => {
     if (activeBookId && bookId !== activeBookId) return false
     if (activeBookId && bookId === activeBookId) {
@@ -103,7 +121,7 @@ export function WorkspaceTreeNav({
 
     return (
       <ul className="workspace-tree-stage-children">
-        {children.map((child) => {
+        {children.map((child, index) => {
           const isActive =
             options.isActiveStage && activeStageChildId === child.id
           return (
@@ -125,6 +143,7 @@ export function WorkspaceTreeNav({
                   }
                 }}
                 title={child.label}
+                aria-label={`第 ${index + 1} 节：${child.label}`}
               >
                 {child.label}
               </button>
@@ -152,6 +171,72 @@ export function WorkspaceTreeNav({
           </li>
         ) : null}
       </ul>
+    )
+  }
+
+  const renderStageItem = (
+    stage: WorkspaceTreeStage,
+    options: {
+      bookId?: string
+      isActive: boolean
+      onSelectStage: () => void
+    },
+  ) => {
+    const stageHasChildren = hasStageChildren(stage)
+    const stageExpanded = isStageExpanded(stage.id, stage)
+
+    if (!stageHasChildren) {
+      return (
+        <button
+          type="button"
+          className={
+            options.isActive
+              ? 'workspace-tree-stage workspace-tree-stage--active'
+              : 'workspace-tree-stage'
+          }
+          onClick={options.onSelectStage}
+        >
+          <span className="workspace-tree-stage-dot" aria-hidden />
+          {stage.label}
+        </button>
+      )
+    }
+
+    return (
+      <>
+        <div className="workspace-tree-stage-row">
+          <button
+            type="button"
+            className={
+              options.isActive
+                ? 'workspace-tree-stage workspace-tree-stage--active workspace-tree-stage--branch'
+                : 'workspace-tree-stage workspace-tree-stage--branch'
+            }
+            onClick={options.onSelectStage}
+          >
+            <span className="workspace-tree-stage-dot" aria-hidden />
+            {stage.label}
+          </button>
+          <button
+            type="button"
+            className="workspace-tree-toggle workspace-tree-stage-toggle"
+            aria-expanded={stageExpanded}
+            aria-label={stageExpanded ? `收起${stage.label}小节` : `展开${stage.label}小节`}
+            onClick={() => toggleStage(stage.id)}
+          >
+            <span className="workspace-tree-chevron" aria-hidden>
+              {stageExpanded ? '▾' : '▸'}
+            </span>
+          </button>
+        </div>
+        {stageExpanded
+          ? renderStageChildren(stage, {
+              bookId: options.bookId,
+              isActiveStage: options.isActive,
+              onSelectStage: options.onSelectStage,
+            })
+          : null}
+      </>
     )
   }
 
@@ -237,37 +322,17 @@ export function WorkspaceTreeNav({
                           isActiveBook && activeStageId === stage.id
                         return (
                           <li key={stage.id} className="workspace-tree-stage-item">
-                            <button
-                              type="button"
-                              className={
-                                isActive
-                                  ? 'workspace-tree-stage workspace-tree-stage--active'
-                                  : 'workspace-tree-stage'
-                              }
-                              onClick={() => {
+                            {renderStageItem(stage, {
+                              bookId: treeBook.id,
+                              isActive,
+                              onSelectStage: () => {
                                 if (isActiveBook) {
                                   onStageSelect(stage.id)
                                 } else {
                                   onBookStageSelect?.(treeBook.id, stage.id)
                                 }
-                              }}
-                            >
-                              <span className="workspace-tree-stage-dot" aria-hidden />
-                              {stage.label}
-                            </button>
-                            {isActiveBook
-                              ? renderStageChildren(stage, {
-                                  bookId: treeBook.id,
-                                  isActiveStage: isActive,
-                                  onSelectStage: () => {
-                                    if (isActiveBook) {
-                                      onStageSelect(stage.id)
-                                    } else {
-                                      onBookStageSelect?.(treeBook.id, stage.id)
-                                    }
-                                  },
-                                })
-                              : null}
+                              },
+                            })}
                           </li>
                         )
                       })}
@@ -326,20 +391,8 @@ export function WorkspaceTreeNav({
         <ul className="workspace-tree-stages">
           {stages.map((stage) => (
             <li key={stage.id} className="workspace-tree-stage-item">
-              <button
-                type="button"
-                className={
-                  activeStageId === stage.id
-                    ? 'workspace-tree-stage workspace-tree-stage--active'
-                    : 'workspace-tree-stage'
-                }
-                onClick={() => onStageSelect(stage.id)}
-              >
-                <span className="workspace-tree-stage-dot" aria-hidden />
-                {stage.label}
-              </button>
-              {renderStageChildren(stage, {
-                isActiveStage: activeStageId === stage.id,
+              {renderStageItem(stage, {
+                isActive: activeStageId === stage.id,
                 onSelectStage: () => onStageSelect(stage.id),
               })}
             </li>

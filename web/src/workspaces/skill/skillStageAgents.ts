@@ -48,7 +48,7 @@ export function buildWriteSkillEditorTool(
     name: 'write_skill_editor',
     label: '写入技能编辑区',
     description:
-      '把内容写入应用中间栏当前技能正文编辑框。每次调用直接落到编辑区，不需要和用户确认。',
+      '把内容写入当前技能正文编辑框。每次调用直接写入当前文本编辑框，不需要和用户确认。',
     parameters: Type.Object({
       text: Type.String({
         description: '写入编辑区的完整正文（建议 Markdown）',

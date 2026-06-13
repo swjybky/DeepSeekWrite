@@ -17,7 +17,7 @@ import {
   type WorkspaceAgentId,
   type WorkspaceAgentReadAccessConfig,
 } from '../bridge'
-import { SHORT_WORKSPACE_STAGES } from '../workspaces/short/stages'
+import { SHORT_WORKSPACE_CONTENT_STAGES } from '../workspaces/short/stages'
 import {
   ALL_MATERIAL_STAGE_IDS,
   EXPERT_DRAFT_COORDINATOR_AGENT_ID,
@@ -34,10 +34,8 @@ type PromptDrafts = Record<WorkspaceAgentId, string>
 
 const AGENT_LABELS: Record<WorkspaceAgentId, string> = {
   character_design: '人物设计',
-  plot_design: '剧情设计',
-  intro_design: '导语设计',
-  plot_refine: '剧情细化',
-  outline: '大纲纲要',
+  plot_design: '剧情',
+  outline: '大纲',
   expert_draft_coordinator: '正文专家编写智能体',
   expert_section_writer: '分节写手智能体',
 }
@@ -418,7 +416,7 @@ export function WorkspaceSettings() {
 
                   <fieldset>
                     <legend>创作空间阶段</legend>
-                    {SHORT_WORKSPACE_STAGES.map((stage) => (
+                    {SHORT_WORKSPACE_CONTENT_STAGES.map((stage) => (
                       <label key={stage.id}>
                         <input
                           type="checkbox"

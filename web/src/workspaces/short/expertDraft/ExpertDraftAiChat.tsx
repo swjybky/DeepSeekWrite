@@ -23,10 +23,18 @@ import {
   resolvePreferredWorkspaceChatModel,
 } from '../../../pi/workspaceChatPreferences'
 import { buildExpertDraftCoordinatorTools } from './coordinatorTools'
-import { buildExpertDraftCoordinatorSystemPrompt } from './prompts'
-import type { RunExpertDraftSectionWriterOptions } from './sectionWriter'
+import {
+  buildExpertDraftCoordinatorSystemPrompt,
+  buildSectionWriterSystemPrompt,
+} from './prompts'
+import {
+  buildSectionWriterTools,
+  type GetExpertDraftSectionContent,
+  type RunExpertDraftSectionWriterOptions,
+} from './sectionWriter'
 import {
   EXPERT_DRAFT_COORDINATOR_AGENT_ID,
+  EXPERT_SECTION_WRITER_AGENT_ID,
   type WorkspaceAgentReadAccessEntry,
 } from '../stageReadAccess'
 
@@ -35,6 +43,12 @@ const ARTIFACTS_TOOL_NAME = 'artifacts'
 type MessageEditorElement = HTMLElement & {
   attachments?: unknown[]
   requestUpdate?: () => void
+}
+
+type AgentKicker = {
+  label: string
+  detail: string
+  status: string
 }
 
 function disableExpertDraftAttachments(chatPanel: ChatPanel) {
@@ -70,6 +84,7 @@ type Props = {
   linkedMaterial?: Material | null
   linkedSkill?: Skill | null
   readAccess: WorkspaceAgentReadAccessEntry
+  writerReadAccess: WorkspaceAgentReadAccessEntry
   expertDraft: ExpertDraft
   updateDraft: (updater: (draft: ExpertDraft) => ExpertDraft) => void
   startWriting: (
@@ -82,15 +97,7 @@ type Props = {
       >
     },
   ) => boolean
-}
-
-type WriterPreview = {
-  active: boolean
-  sectionTitle: string
-  progress: string
-  status: string
-  text: string
-  userPrompt: string
+  getRenderedExpertDraftSectionContent?: GetExpertDraftSectionContent
 }
 
 function useDebounced<T>(value: T, ms: number): T {
@@ -117,12 +124,6 @@ function messageText(message: AgentMessage | undefined): string {
     .join('\n\n')
 }
 
-function previewText(text: string): string {
-  const trimmed = text.trim()
-  if (trimmed.length <= 1200) return trimmed
-  return `${trimmed.slice(-1200).trimStart()}`
-}
-
 function toolStatus(toolName: string, done = false): string {
   if (toolName === 'write_section_body') {
     return done ? '正文已写入' : '正在写入正文'
@@ -145,106 +146,174 @@ function toolStatus(toolName: string, done = false): string {
   return done ? '工具调用完成' : '正在调用工具'
 }
 
+function coordinatorKicker(): AgentKicker {
+  return {
+    label: '专家总控智能体',
+    detail: '当用户输入「初始化后进入正文编写」，进入章节自动编写模式',
+    status: '',
+  }
+}
+
+function sectionWriterKicker(sectionTitle: string): AgentKicker {
+  return {
+    label: '分节写手智能体',
+    detail: sectionTitle || '当前小节',
+    status: '',
+  }
+}
+
 export function ExpertDraftAiChat(props: Props) {
   const hostRef = useRef<HTMLDivElement>(null)
-  const agentRef = useRef<Agent | null>(null)
+  const coordinatorAgentRef = useRef<Agent | null>(null)
+  const sectionWriterAgentsRef = useRef<Map<string, Agent>>(new Map())
   const chatPanelRef = useRef<ChatPanel | null>(null)
   const propsLatestRef = useRef(props)
-  const promptTemplateRef = useRef('')
-  const unsubscribeWriterPreviewRef = useRef<(() => void) | null>(null)
-  const writerPreviewRafRef = useRef(0)
-  const writerPreviewPatchRef = useRef<Partial<WriterPreview> | null>(null)
+  const coordinatorPromptTemplateRef = useRef('')
+  const sectionWriterPromptTemplateRef = useRef('')
+  const setPanelAgentRef = useRef<
+    ((nextAgent: Agent, toolsFactory: () => AgentTool[]) => Promise<void>) | null
+  >(null)
+  const switchToCoordinatorRef = useRef<(() => Promise<void>) | null>(null)
+  const switchToSectionWriterRef = useRef<
+    ((sectionId: string) => Promise<void>) | null
+  >(null)
+  const backgroundWriterLockRef = useRef(false)
+  const activePanelKindRef = useRef<'coordinator' | 'section-writer'>(
+    'coordinator',
+  )
+  const unsubscribeMessagesRefreshRef = useRef<(() => void) | null>(null)
+  const unsubscribeBackgroundStatusRef = useRef<(() => void) | null>(null)
   const [chatReady, setChatReady] = useState(false)
-  const [writerPreview, setWriterPreview] = useState<WriterPreview>({
-    active: false,
-    sectionTitle: '',
-    progress: '',
-    status: '',
-    text: '',
-    userPrompt: '',
-  })
-  const [promptViewerOpen, setPromptViewerOpen] = useState(false)
+  const [agentKicker, setAgentKicker] = useState<AgentKicker>(coordinatorKicker)
   const debouncedDraft = useDebounced(props.expertDraft, 600)
 
   useEffect(() => {
     propsLatestRef.current = props
   }, [props])
 
-  const scheduleWriterPreview = useCallback((patch: Partial<WriterPreview>) => {
-    writerPreviewPatchRef.current = {
-      ...(writerPreviewPatchRef.current ?? {}),
-      ...patch,
+  const bindActiveAgentUi = useCallback((agent: Agent) => {
+    unsubscribeMessagesRefreshRef.current?.()
+    let postAgentEndRaf = 0
+
+    const refreshIdleUi = () => {
+      const panel = chatPanelRef.current
+      panel?.requestUpdate?.()
+      const iface = panel?.querySelector('agent-interface') as
+        | (HTMLElement & { requestUpdate?: () => void })
+        | null
+        | undefined
+      iface?.requestUpdate?.()
+      const editor = iface?.querySelector('message-editor') as
+        | (HTMLElement & {
+            isStreaming?: boolean
+            requestUpdate?: () => void
+          })
+        | null
+        | undefined
+      if (editor) {
+        editor.isStreaming = false
+        editor.requestUpdate?.()
+      }
     }
-    if (writerPreviewRafRef.current) return
-    writerPreviewRafRef.current = requestAnimationFrame(() => {
-      writerPreviewRafRef.current = 0
-      const pending = writerPreviewPatchRef.current
-      writerPreviewPatchRef.current = null
-      if (!pending) return
-      setWriterPreview((prev) => ({ ...prev, ...pending }))
+
+    unsubscribeMessagesRefreshRef.current = agent.subscribe((ev) => {
+      if (ev.type === 'message_end') {
+        agent.state.messages = agent.state.messages.slice()
+      }
+      if (ev.type === 'agent_end') {
+        cancelAnimationFrame(postAgentEndRaf)
+        postAgentEndRaf = requestAnimationFrame(() => {
+          refreshIdleUi()
+          postAgentEndRaf = requestAnimationFrame(() => {
+            postAgentEndRaf = 0
+            refreshIdleUi()
+          })
+        })
+      }
     })
   }, [])
 
   const watchWriterAgent: RunExpertDraftSectionWriterOptions['onSectionAgentStart'] =
-    useCallback(({ agent, sectionTitle, sectionIndex, sectionCount, userPrompt }) => {
-      unsubscribeWriterPreviewRef.current?.()
-      unsubscribeWriterPreviewRef.current = null
-      setWriterPreview({
-        active: true,
-        sectionTitle,
-        progress: `${sectionIndex + 1}/${sectionCount}`,
-        status: '准备中',
-        text: '',
-        userPrompt,
-      })
+    useCallback(
+      async ({ agent, sectionTitle, sectionIndex, sectionCount }) => {
+        backgroundWriterLockRef.current = true
+        activePanelKindRef.current = 'section-writer'
+        setAgentKicker({
+          label: '分节写手智能体',
+          detail: `${sectionIndex + 1}/${sectionCount} · ${sectionTitle}`,
+          status: '准备中',
+        })
 
-      unsubscribeWriterPreviewRef.current = agent.subscribe((ev) => {
-        if (ev.type === 'message_start') {
-          if (ev.message.role === 'assistant') {
-            scheduleWriterPreview({ status: '生成正文中', text: '' })
+        unsubscribeBackgroundStatusRef.current?.()
+        unsubscribeBackgroundStatusRef.current = agent.subscribe((ev) => {
+          if (ev.type === 'message_start' && ev.message.role === 'assistant') {
+            setAgentKicker((prev) => ({ ...prev, status: '生成正文中' }))
+            return
           }
-          return
-        }
-        if (ev.type === 'message_update') {
-          const text = messageText(ev.message)
-          scheduleWriterPreview({
-            status: text ? '生成正文中' : '思考中',
-            text: previewText(text),
-          })
-          return
-        }
-        if (ev.type === 'tool_execution_start') {
-          scheduleWriterPreview({ status: toolStatus(ev.toolName) })
-          return
-        }
-        if (ev.type === 'tool_execution_end') {
-          scheduleWriterPreview({ status: toolStatus(ev.toolName, true) })
-          return
-        }
-        if (ev.type === 'agent_end') {
-          scheduleWriterPreview({ status: '本节完成' })
-        }
-      })
-    }, [scheduleWriterPreview])
+          if (ev.type === 'message_update') {
+            const text = messageText(ev.message)
+            setAgentKicker((prev) => ({
+              ...prev,
+              status: text ? '生成正文中' : '思考中',
+            }))
+            return
+          }
+          if (ev.type === 'tool_execution_start') {
+            setAgentKicker((prev) => ({
+              ...prev,
+              status: toolStatus(ev.toolName),
+            }))
+            return
+          }
+          if (ev.type === 'tool_execution_end') {
+            setAgentKicker((prev) => ({
+              ...prev,
+              status: toolStatus(ev.toolName, true),
+            }))
+            return
+          }
+          if (ev.type === 'agent_end') {
+            setAgentKicker((prev) => ({ ...prev, status: '本节完成' }))
+          }
+        })
+
+        bindActiveAgentUi(agent)
+        await setPanelAgentRef.current?.(agent, () =>
+          stripArtifacts(agent.state.tools),
+        )
+      },
+      [bindActiveAgentUi],
+    )
 
   const finishWriterPreview: RunExpertDraftSectionWriterOptions['onRunFinish'] =
-    useCallback(({ aborted }) => {
-      unsubscribeWriterPreviewRef.current?.()
-      unsubscribeWriterPreviewRef.current = null
-      scheduleWriterPreview({
-        active: false,
-        status: aborted ? '已停止' : '全部完成',
-      })
-    }, [scheduleWriterPreview])
+    useCallback(async ({ aborted }) => {
+      unsubscribeBackgroundStatusRef.current?.()
+      unsubscribeBackgroundStatusRef.current = null
+      backgroundWriterLockRef.current = false
+
+      const sectionId = propsLatestRef.current.expertDraft.active_section_id
+      if (sectionId) {
+        await switchToSectionWriterRef.current?.(sectionId)
+      } else {
+        await switchToCoordinatorRef.current?.()
+      }
+
+      if (!sectionId) {
+        setAgentKicker({
+          ...coordinatorKicker(),
+          status: aborted ? '后台写作已停止' : '后台写作已完成',
+        })
+      }
+    }, [])
 
   useEffect(() => {
     let cancelled = false
-    let unsubscribeMessagesRefresh: (() => void) | undefined
-    let postAgentEndRaf = 0
     let resizeObserver: ResizeObserver | undefined
     let unsubscribePreferences: (() => void) | undefined
+    const sectionWriterAgents = new Map<string, Agent>()
+    sectionWriterAgentsRef.current = sectionWriterAgents
 
-    const currentTools = () =>
+    const currentCoordinatorTools = () =>
       buildExpertDraftCoordinatorTools({
         bookTitle: propsLatestRef.current.bookTitle,
         allStages: propsLatestRef.current.stages,
@@ -263,6 +332,58 @@ export function ExpertDraftAiChat(props: Props) {
           }),
       })
 
+    const buildSectionWriterToolsFor = (sectionId: string) => {
+      const p = propsLatestRef.current
+      const section = p.expertDraft.sections.find((item) => item.id === sectionId)
+      if (!section) return []
+      return buildSectionWriterTools({
+        bookTitle: p.bookTitle,
+        sectionId,
+        sectionTitle: section.title,
+        allStages: p.stages,
+        linkedMaterial: p.linkedMaterial,
+        linkedSkill: p.linkedSkill,
+        readAccess: p.writerReadAccess,
+        getDraft: () => propsLatestRef.current.expertDraft,
+        getRenderedSectionContent:
+          propsLatestRef.current.getRenderedExpertDraftSectionContent,
+        updateDraft: p.updateDraft,
+      })
+    }
+
+    const refreshCoordinatorAgentState = (draft: ExpertDraft) => {
+      const agent = coordinatorAgentRef.current
+      if (!agent) return
+      const p = propsLatestRef.current
+      agent.state.systemPrompt = buildExpertDraftCoordinatorSystemPrompt({
+        bookTitle: p.bookTitle,
+        bookGenre: p.bookGenre,
+        draft,
+        workspaceStages: p.stages,
+        allowedWorkspaceStages: p.readAccess.workspace,
+        template: coordinatorPromptTemplateRef.current,
+        linkedSkill: p.linkedSkill,
+      })
+      agent.state.tools = stripArtifacts(currentCoordinatorTools())
+    }
+
+    const refreshSectionWriterAgentState = (sectionId: string, draft: ExpertDraft) => {
+      const agent = sectionWriterAgentsRef.current.get(sectionId)
+      const section = draft.sections.find((item) => item.id === sectionId)
+      if (!agent || !section) return
+      const p = propsLatestRef.current
+      agent.state.systemPrompt = buildSectionWriterSystemPrompt({
+        bookTitle: p.bookTitle,
+        bookGenre: p.bookGenre,
+        stageBody: section.body,
+        workspaceStages: p.stages,
+        allowedWorkspaceStages: p.writerReadAccess.workspace,
+        template: sectionWriterPromptTemplateRef.current,
+        linkedSkill: p.linkedSkill,
+      })
+      agent.state.tools = stripArtifacts(buildSectionWriterToolsFor(sectionId))
+    }
+
     ;(async () => {
       try {
         await ensurePiAppStorage()
@@ -278,11 +399,16 @@ export function ExpertDraftAiChat(props: Props) {
         }
       }
       if (cancelled) return
-      const initialModel = await resolvePreferredWorkspaceChatModel()
-      const promptTemplate = await readWorkspaceAgentPromptTemplate(
-        EXPERT_DRAFT_COORDINATOR_AGENT_ID,
-      )
-      promptTemplateRef.current = promptTemplate
+
+      const [initialModel, coordinatorTemplate, sectionWriterTemplate] =
+        await Promise.all([
+          resolvePreferredWorkspaceChatModel(),
+          readWorkspaceAgentPromptTemplate(EXPERT_DRAFT_COORDINATOR_AGENT_ID),
+          readWorkspaceAgentPromptTemplate(EXPERT_SECTION_WRITER_AGENT_ID),
+        ])
+      coordinatorPromptTemplateRef.current = coordinatorTemplate
+      sectionWriterPromptTemplateRef.current = sectionWriterTemplate
+
       const root = hostRef.current
       if (cancelled || !root) return
 
@@ -309,7 +435,7 @@ export function ExpertDraftAiChat(props: Props) {
       })
       resizeObserver.observe(root)
 
-      const agent = new Agent({
+      const coordinatorAgent = new Agent({
         sessionId: createPiSessionId(
           'expert-draft-coordinator',
           props.bookId,
@@ -328,7 +454,7 @@ export function ExpertDraftAiChat(props: Props) {
             draft: props.expertDraft,
             workspaceStages: props.stages,
             allowedWorkspaceStages: props.readAccess.workspace,
-            template: promptTemplate,
+            template: coordinatorTemplate,
             linkedSkill: props.linkedSkill,
           }),
           model: initialModel,
@@ -337,29 +463,7 @@ export function ExpertDraftAiChat(props: Props) {
           tools: [],
         },
       })
-      agentRef.current = agent
-
-      const refreshIdleUi = () => {
-        if (cancelled) return
-        const panel = chatPanelRef.current
-        panel?.requestUpdate?.()
-        const iface = panel?.querySelector('agent-interface') as
-          | (HTMLElement & { requestUpdate?: () => void })
-          | null
-          | undefined
-        iface?.requestUpdate?.()
-        const editor = iface?.querySelector('message-editor') as
-          | (HTMLElement & {
-              isStreaming?: boolean
-              requestUpdate?: () => void
-            })
-          | null
-          | undefined
-        if (editor) {
-          editor.isStreaming = false
-          editor.requestUpdate?.()
-        }
-      }
+      coordinatorAgentRef.current = coordinatorAgent
 
       const setPanelAgent = async (
         nextAgent: Agent,
@@ -398,30 +502,74 @@ export function ExpertDraftAiChat(props: Props) {
           chatPanel.requestUpdate?.()
         }
       }
+      setPanelAgentRef.current = setPanelAgent
 
-      const setCoordinatorAgent = async () => {
-        await setPanelAgent(agent, currentTools)
+      const switchToCoordinator = async () => {
+        const agent = coordinatorAgentRef.current
+        if (!agent) return
+        refreshCoordinatorAgentState(propsLatestRef.current.expertDraft)
+        activePanelKindRef.current = 'coordinator'
+        setAgentKicker(coordinatorKicker())
+        bindActiveAgentUi(agent)
+        await setPanelAgent(agent, currentCoordinatorTools)
       }
 
-      // pi-agent-core mutates `messages` in place; pi-web-ui's message list
-      // only redraws reliably when the top-level array reference changes.
-      unsubscribeMessagesRefresh = agent.subscribe((ev) => {
-        if (ev.type === 'message_end') {
-          agent.state.messages = agent.state.messages.slice()
-        }
-        if (ev.type === 'agent_end') {
-          cancelAnimationFrame(postAgentEndRaf)
-          postAgentEndRaf = requestAnimationFrame(() => {
-            refreshIdleUi()
-            postAgentEndRaf = requestAnimationFrame(() => {
-              postAgentEndRaf = 0
-              refreshIdleUi()
-            })
-          })
-        }
-      })
+      const ensureSectionWriterAgent = async (sectionId: string) => {
+        let agent = sectionWriterAgents.get(sectionId)
+        if (agent) return agent
+        const model = await resolvePreferredWorkspaceChatModel()
+        agent = new Agent({
+          sessionId: createPiSessionId(
+            'expert-draft-writer',
+            propsLatestRef.current.bookId,
+            'shared',
+            sectionId,
+          ),
+          convertToLlm: convertToLlmWithSkillAsUser,
+          getApiKey: resolveWorkspaceProviderApiKey,
+          toolExecution: 'sequential',
+          initialState: {
+            systemPrompt: '',
+            model,
+            thinkingLevel: getPreferredWorkspaceThinkingLevel(),
+            messages: [],
+            tools: [],
+          },
+        })
+        sectionWriterAgents.set(sectionId, agent)
+        return agent
+      }
 
-      await setCoordinatorAgent()
+      const switchToSectionWriter = async (sectionId: string) => {
+        const section = propsLatestRef.current.expertDraft.sections.find(
+          (item) => item.id === sectionId,
+        )
+        if (!section) {
+          await switchToCoordinator()
+          return
+        }
+        const agent = await ensureSectionWriterAgent(sectionId)
+        refreshSectionWriterAgentState(
+          sectionId,
+          propsLatestRef.current.expertDraft,
+        )
+        activePanelKindRef.current = 'section-writer'
+        setAgentKicker(sectionWriterKicker(section.title))
+        bindActiveAgentUi(agent)
+        await setPanelAgent(agent, () =>
+          stripArtifacts(buildSectionWriterToolsFor(sectionId)),
+        )
+      }
+
+      switchToCoordinatorRef.current = switchToCoordinator
+      switchToSectionWriterRef.current = switchToSectionWriter
+
+      const initialSectionId = propsLatestRef.current.expertDraft.active_section_id
+      if (initialSectionId) {
+        await switchToSectionWriter(initialSectionId)
+      } else {
+        await switchToCoordinator()
+      }
 
       if (!cancelled) {
         requestAnimationFrame(() => {
@@ -436,18 +584,25 @@ export function ExpertDraftAiChat(props: Props) {
 
     return () => {
       cancelled = true
-      cancelAnimationFrame(postAgentEndRaf)
       resizeObserver?.disconnect()
       resizeObserver = undefined
       setChatReady(false)
-      unsubscribeMessagesRefresh?.()
+      unsubscribeMessagesRefreshRef.current?.()
+      unsubscribeMessagesRefreshRef.current = null
+      unsubscribeBackgroundStatusRef.current?.()
+      unsubscribeBackgroundStatusRef.current = null
       unsubscribePreferences?.()
-      unsubscribeWriterPreviewRef.current?.()
-      unsubscribeWriterPreviewRef.current = null
-      cancelAnimationFrame(writerPreviewRafRef.current)
-      writerPreviewRafRef.current = 0
-      agentRef.current?.abort()
-      agentRef.current = null
+      backgroundWriterLockRef.current = false
+      setPanelAgentRef.current = null
+      switchToCoordinatorRef.current = null
+      switchToSectionWriterRef.current = null
+      coordinatorAgentRef.current?.abort()
+      coordinatorAgentRef.current = null
+      for (const agent of sectionWriterAgents.values()) {
+        agent.abort()
+      }
+      sectionWriterAgents.clear()
+      sectionWriterAgentsRef.current = new Map()
       chatPanelRef.current?.remove()
       chatPanelRef.current = null
     }
@@ -456,38 +611,83 @@ export function ExpertDraftAiChat(props: Props) {
   }, [])
 
   useEffect(() => {
-    if (!chatReady || !agentRef.current) return
-    if (debouncedDraft.running) return
+    if (!chatReady || backgroundWriterLockRef.current) return
+    const sectionId = props.expertDraft.active_section_id
+    if (sectionId) {
+      void switchToSectionWriterRef.current?.(sectionId)
+      return
+    }
+    void switchToCoordinatorRef.current?.()
+  }, [chatReady, props.expertDraft.active_section_id])
+
+  useEffect(() => {
+    if (!chatReady || debouncedDraft.running) return
+    const coordinatorAgent = coordinatorAgentRef.current
+    if (coordinatorAgent) {
+      const p = propsLatestRef.current
+      coordinatorAgent.state.systemPrompt = buildExpertDraftCoordinatorSystemPrompt({
+        bookTitle: p.bookTitle,
+        bookGenre: p.bookGenre,
+        draft: debouncedDraft,
+        workspaceStages: p.stages,
+        allowedWorkspaceStages: p.readAccess.workspace,
+        template: coordinatorPromptTemplateRef.current,
+        linkedSkill: p.linkedSkill,
+      })
+      coordinatorAgent.state.tools = stripArtifacts(
+        buildExpertDraftCoordinatorTools({
+          bookTitle: p.bookTitle,
+          allStages: p.stages,
+          linkedMaterial: p.linkedMaterial,
+          linkedSkill: p.linkedSkill,
+          readAccess: p.readAccess,
+          getDraft: () => propsLatestRef.current.expertDraft,
+          updateDraft: propsLatestRef.current.updateDraft,
+          startWriting: ({ sectionIds, userWritingPrompt }) =>
+            propsLatestRef.current.startWriting(sectionIds, {
+              userWritingPrompt,
+              callbacks: {
+                onSectionAgentStart: watchWriterAgent,
+                onRunFinish: finishWriterPreview,
+              },
+            }),
+        }),
+      )
+    }
+
+    const sectionId = debouncedDraft.active_section_id
+    if (!sectionId || backgroundWriterLockRef.current) return
+    const sectionAgent = sectionWriterAgentsRef.current.get(sectionId)
+    const section = debouncedDraft.sections.find((item) => item.id === sectionId)
+    if (!sectionAgent || !section) return
     const p = propsLatestRef.current
-    const agent = agentRef.current
-    agent.state.systemPrompt = buildExpertDraftCoordinatorSystemPrompt({
+    sectionAgent.state.systemPrompt = buildSectionWriterSystemPrompt({
       bookTitle: p.bookTitle,
       bookGenre: p.bookGenre,
-      draft: debouncedDraft,
+      stageBody: section.body,
       workspaceStages: p.stages,
-      allowedWorkspaceStages: p.readAccess.workspace,
-      template: promptTemplateRef.current,
+      allowedWorkspaceStages: p.writerReadAccess.workspace,
+      template: sectionWriterPromptTemplateRef.current,
       linkedSkill: p.linkedSkill,
     })
-    agent.state.tools = stripArtifacts(
-      buildExpertDraftCoordinatorTools({
+    sectionAgent.state.tools = stripArtifacts(
+      buildSectionWriterTools({
         bookTitle: p.bookTitle,
+        sectionId,
+        sectionTitle: section.title,
         allStages: p.stages,
         linkedMaterial: p.linkedMaterial,
         linkedSkill: p.linkedSkill,
-        readAccess: p.readAccess,
+        readAccess: p.writerReadAccess,
         getDraft: () => propsLatestRef.current.expertDraft,
-        updateDraft: propsLatestRef.current.updateDraft,
-        startWriting: ({ sectionIds, userWritingPrompt }) =>
-          propsLatestRef.current.startWriting(sectionIds, {
-            userWritingPrompt,
-            callbacks: {
-              onSectionAgentStart: watchWriterAgent,
-              onRunFinish: finishWriterPreview,
-            },
-          }),
+        getRenderedSectionContent:
+          propsLatestRef.current.getRenderedExpertDraftSectionContent,
+        updateDraft: p.updateDraft,
       }),
     )
+    if (activePanelKindRef.current === 'section-writer') {
+      setAgentKicker(sectionWriterKicker(section.title))
+    }
   }, [
     chatReady,
     props.bookTitle,
@@ -496,6 +696,7 @@ export function ExpertDraftAiChat(props: Props) {
     props.linkedMaterial,
     props.linkedSkill,
     props.readAccess,
+    props.writerReadAccess,
     debouncedDraft,
     watchWriterAgent,
     finishWriterPreview,
@@ -505,7 +706,7 @@ export function ExpertDraftAiChat(props: Props) {
     <div className="expert-draft-ai-shell">
       <div
         className={
-          writerPreview.active
+          props.expertDraft.running
             ? 'expert-draft-agent-preview expert-draft-agent-preview--active'
             : 'expert-draft-agent-preview'
         }
@@ -513,65 +714,17 @@ export function ExpertDraftAiChat(props: Props) {
       >
         <div className="expert-draft-agent-preview-head">
           <span className="expert-draft-agent-preview-kicker">
-            分节写手智能体
+            {agentKicker.label}
           </span>
-          <span className="expert-draft-agent-preview-actions">
-            {writerPreview.userPrompt ? (
-              <button
-                type="button"
-                className="expert-draft-agent-prompt-button"
-                onClick={() => setPromptViewerOpen(true)}
-              >
-                Prompt
-              </button>
-            ) : null}
+          {agentKicker.status ? (
             <span className="expert-draft-agent-preview-status">
-              {writerPreview.status || '待启动'}
+              {agentKicker.status}
             </span>
-          </span>
+          ) : null}
         </div>
-        <div className="expert-draft-agent-preview-title">
-          {writerPreview.sectionTitle
-            ? `${writerPreview.progress} · ${writerPreview.sectionTitle}`
-            : '等待正文专家启动分节编写'}
-        </div>
-        {writerPreview.text ? (
-          <pre className="expert-draft-agent-preview-body">
-            {writerPreview.text}
-          </pre>
-        ) : null}
+        <div className="expert-draft-agent-preview-title">{agentKicker.detail}</div>
       </div>
       <div ref={hostRef} className="workspace-ai-chat-host" />
-      {promptViewerOpen ? (
-        <div
-          className="expert-draft-prompt-viewer-backdrop"
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="wc-expert-prompt-viewer-title"
-        >
-          <div className="expert-draft-prompt-viewer-panel">
-            <div className="expert-draft-prompt-viewer-head">
-              <h2
-                id="wc-expert-prompt-viewer-title"
-                className="expert-draft-prompt-viewer-title"
-              >
-                后台小节 User Prompt
-              </h2>
-              <button
-                type="button"
-                className="expert-draft-prompt-viewer-close"
-                aria-label="关闭"
-                onClick={() => setPromptViewerOpen(false)}
-              >
-                ×
-              </button>
-            </div>
-            <pre className="expert-draft-prompt-viewer-body">
-              {writerPreview.userPrompt || '暂无 prompt'}
-            </pre>
-          </div>
-        </div>
-      ) : null}
     </div>
   )
 }

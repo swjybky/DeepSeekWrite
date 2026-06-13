@@ -5,7 +5,7 @@ import type {
   SkillStageId,
   SkillPromptKind,
 } from '../bridge'
-import { SHORT_WORKSPACE_STAGES } from '../workspaces/short/stages'
+import { SHORT_WORKSPACE_CONTENT_STAGES } from '../workspaces/short/stages'
 
 const PEEK_EMPTY = '（其它阶段暂无内容）'
 const BODY_CAP = 12000
@@ -35,10 +35,8 @@ const MATERIAL_ORDER: Record<string, readonly { id: string; label: string }[]> =
 const SKILL_ORDER: Record<string, readonly { id: string; label: string }[]> = {
   skill_manager: [
     { id: 'character_design', label: '人物设计技能' },
-    { id: 'plot_design', label: '剧情设计技能' },
-    { id: 'intro_design', label: '导语设计技能' },
-    { id: 'plot_refine', label: '剧情细化技能' },
-    { id: 'outline', label: '大纲纲要技能' },
+    { id: 'plot_design', label: '剧情技能' },
+    { id: 'outline', label: '大纲技能' },
     { id: 'draft', label: '正文专家编写技能' },
     { id: 'expert_section_writer', label: '分节写手技能' },
   ],
@@ -55,7 +53,7 @@ function isSkillPromptKind(kind: string): kind is SkillPromptKind {
 function rowsForPromptKind(kind: PromptRenderKind) {
   if (isMaterialPromptKind(kind)) return MATERIAL_ORDER[kind]
   if (isSkillPromptKind(kind)) return SKILL_ORDER[kind]
-  return SHORT_WORKSPACE_STAGES
+  return SHORT_WORKSPACE_CONTENT_STAGES
 }
 
 export function peekOtherStagesExcerpt(
@@ -83,7 +81,7 @@ export function peekAllowedWorkspaceStagesExcerpt(
 ): string {
   const allowed = new Set(allowedStageIds)
   const filtered: Partial<Record<StageId, string>> = {}
-  for (const stage of SHORT_WORKSPACE_STAGES) {
+  for (const stage of SHORT_WORKSPACE_CONTENT_STAGES) {
     if (allowed.has(stage.id)) filtered[stage.id] = allStages[stage.id] ?? ''
   }
   return peekOtherStagesExcerpt('workspace', null, filtered)

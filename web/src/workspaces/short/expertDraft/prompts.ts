@@ -1,12 +1,6 @@
 import type { ExpertDraft, Skill, StageId } from '../../../bridge'
 import { appendLoadableSkillsToPrompt } from '../loadSkill'
 
-const EXCERPT_LIMIT = 8000
-const RECENT_PREVIOUS_SECTION_LIMIT = 3
-const PREVIOUS_SECTION_EXCERPT_LIMIT = 2200
-const PREVIOUS_STATE_EXCERPT_LIMIT = 900
-const CURRENT_SECTION_DRAFT_LIMIT = 3000
-
 const EXPERT_PLACEHOLDER_RE =
   /\{\{(BOOK_TITLE|BOOK_GENRE)\}\}/g
 
@@ -19,7 +13,7 @@ export const DEFAULT_SECTION_WRITER_SYSTEM_PROMPT = `当前书籍：《{{BOOK_TI
 
 硬性规则：
 - 先基于当前任务上下文编写当前小节正文。
-- 如需普通创作阶段或关联素材内容，调用当前可用的读取工具；不要凭空补全缺失设定。
+- 如需普通创作阶段或关联素材内容，调用 read_workspace_content / read_linked_material_content；如需读取其它已完成小节的正文或人物状态，调用 read_expert_draft_section（优先读当前文本编辑框，读不到再读已保存内容）。
 - 正文完成后必须调用 write_section_body，传入干净正文，覆盖当前小节正文框。
 - 然后总结当前小节结束时的人物状态，并调用 write_character_state 覆盖当前小节人物状态框。
 - write_section_body 里的 text 只允许是小说正文，不要包含思考、说明、标题解释、工具调用说明。
@@ -39,11 +33,6 @@ export const DEFAULT_COORDINATOR_SYSTEM_PROMPT = `当前书籍：《{{BOOK_TITLE
 - 正文列表和人物状态列表必须一一对应。
 - 如果用户在开始写作时提出文风、情绪、爽点、节奏、人设表达等偏向，调用 start_expert_writing 时必须写入 user_writing_prompt。
 - 不要调用普通模式写入工具，不要要求用户复制粘贴。`
-
-function excerpt(body: string, max = EXCERPT_LIMIT): string {
-  void max
-  return body.trim()
-}
 
 function wordCountRequirementLabel(value: string | undefined): string {
   const text = String(value ?? '').trim()
@@ -124,27 +113,8 @@ export function buildSectionWriterUserPrompt(input: {
   const currentIndex = draft.sections.findIndex((s) => s.id === sectionId)
   const previousSections =
     currentIndex > 0 ? draft.sections.slice(0, currentIndex) : []
-  const omittedCount = Math.max(
-    0,
-    previousSections.length - RECENT_PREVIOUS_SECTION_LIMIT,
-  )
-  const recentPreviousSections = previousSections.slice(
-    -RECENT_PREVIOUS_SECTION_LIMIT,
-  )
-  const previousBodies = recentPreviousSections
-    .map((s, idx) => {
-      const absoluteIndex = omittedCount + idx + 1
-      return `## 已完成小节 ${absoluteIndex}：${s.title}\n${excerpt(s.body, PREVIOUS_SECTION_EXCERPT_LIMIT) || '（空）'}`
-    })
-    .join('\n\n')
-  const previousStates = previousSections
-    .map((section, idx) => {
-      const state = draft.character_states.find(
-        (item) => item.section_id === section.id,
-      )
-      const stateBody = excerpt(state?.body ?? '', PREVIOUS_STATE_EXCERPT_LIMIT)
-      return `${idx + 1}. ${section.title}：${stateBody || '（空）'}`
-    })
+  const completedSectionsList = previousSections
+    .map((section, idx) => `${idx + 1}. ${section.title}（${section.id}）`)
     .join('\n')
   const currentSection = draft.sections.find((s) => s.id === sectionId)
   const currentWordRequirement = wordCountRequirementLabel(
@@ -159,19 +129,15 @@ export function buildSectionWriterUserPrompt(input: {
 - id：${sectionId}
 - 本章节字数要求：${currentWordRequirement}
 
-如需普通创作阶段或关联素材内容，请调用当前可用的读取工具；本消息不再直接附带这些内容。
+上下文读取（本消息不附带正文、人物状态或创作阶段内容，请按需调用工具）：
+- 普通创作阶段、关联素材等：调用 read_workspace_content / read_linked_material_content 等工具。
+- 已完成小节或当前小节（${sectionId}）的正文与人物状态：调用 read_expert_draft_section，传入 section_id；默认同时返回正文与人物状态。
 
 用户写作提示（在不破坏既有设定、逻辑和字数要求的前提下贯穿执行）：
 ${userWritingPrompt || '（无）'}
 
-前文（为保证连续长文写作性能，只附最近 ${RECENT_PREVIOUS_SECTION_LIMIT} 个已完成小节正文；更早变化见人物状态摘要）：
-${omittedCount > 0 ? `（更早 ${omittedCount} 个小节正文已省略）\n\n` : ''}${previousBodies || '（无）'}
-
-人物状态摘要：
-${previousStates || '（无）'}
-
-当前小节已有草稿：
-${excerpt(draft.sections.find((s) => s.id === sectionId)?.body ?? '', CURRENT_SECTION_DRAFT_LIMIT) || '（空）'}
+已完成小节（正文与人物状态请按需读取，不在此列出）：
+${completedSectionsList || '（无，当前为首个待写小节）'}
 
 完成标准：
 - 必须调用 write_section_body 写回当前小节正文。

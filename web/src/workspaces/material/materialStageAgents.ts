@@ -75,7 +75,7 @@ export function buildWriteMaterialEditorTool(
     name: 'write_material_editor',
     label: '写入素材编辑区',
     description:
-      '把内容写入应用中间栏当前素材阶段的文本编辑框。每次调用直接落盘到编辑区，不需要和用户确认。',
+      '把内容写入当前素材阶段的文本编辑框。每次调用直接写入当前文本编辑框，不需要和用户确认。',
     parameters: Type.Object({
       text: Type.String({
         description: '写入编辑区的完整正文（建议 Markdown）',

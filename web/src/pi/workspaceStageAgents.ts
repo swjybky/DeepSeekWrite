@@ -10,7 +10,7 @@ import type {
   WorkspaceAgentReadAccessConfig,
 } from '../bridge'
 import {
-  EXPERT_DRAFT_COORDINATOR_AGENT_ID,
+  resolveWorkspaceAgentIdForStage,
   resolveWorkspaceAgentReadAccess,
 } from '../workspaces/short/stageReadAccess'
 import type { ShortStageId } from '../workspaces/short/stages'
@@ -29,6 +29,7 @@ import {
 
 export type ApplyToStageEditorPayload = {
   text: string
+  targetStageId?: StageId | MaterialStageId | SkillStageId
   /** replace：整段替换；append：前空则整块，否则前加 \n\n；append_token：流式 delta，仅拼接不加分段；streaming_end：流式结束标记 */
   mode: 'replace' | 'append' | 'append_token' | 'streaming_end'
 }
@@ -38,6 +39,7 @@ export type WorkspaceStageAgentContext = {
   workspaceType?: 'book' | 'material' | 'skill'
   promptKind?: MaterialPromptKind
   stageId: StageId | MaterialStageId | SkillStageId
+  activeStageContentId?: StageId | MaterialStageId | SkillStageId
   stageBody: string
   getCurrentStageBody?: (
     stageId?: StageId | MaterialStageId | SkillStageId,
@@ -87,8 +89,7 @@ export function getWorkspaceStageAdditionalTools(
 
   // 书籍短篇工作台模式
   const shortStageId = ctx.stageId as ShortStageId
-  const readAccessAgentId =
-    shortStageId === 'draft' ? EXPERT_DRAFT_COORDINATOR_AGENT_ID : shortStageId
+  const readAccessAgentId = resolveWorkspaceAgentIdForStage(shortStageId)
   const readAccess = resolveWorkspaceAgentReadAccess(
     ctx.workspaceAgentReadAccess,
     readAccessAgentId,
@@ -96,6 +97,7 @@ export function getWorkspaceStageAdditionalTools(
   const narrow: ShortWorkspaceStageAgentContext = {
     bookTitle: ctx.bookTitle,
     stageId: shortStageId,
+    defaultWriteStageId: ctx.activeStageContentId as ShortStageId | undefined,
     stageBody: ctx.stageBody,
     getCurrentStageBody: (stageId) => ctx.getCurrentStageBody?.(stageId),
     allStages: ctx.allStages as Partial<Record<ShortWorkspaceStageAgentContext['stageId'], string>>,

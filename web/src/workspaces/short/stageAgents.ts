@@ -3,11 +3,12 @@ import { Type } from 'typebox'
 
 import type { Material, MaterialStageId, Skill } from '../../bridge'
 import { MATERIAL_STAGE_LABELS, normalizeMaterialStages } from '../../bridge'
-import type { ShortStageId } from './stages'
+import type { PlotChildStageId, ShortStageId } from './stages'
+import { PLOT_CHILD_STAGES, PLOT_STAGE_ID } from './stages'
 import { SHORT_STAGE_LABELS } from './stages'
 import { buildLoadSkillTool } from './loadSkill'
 import {
-  EXPERT_DRAFT_COORDINATOR_AGENT_ID,
+  resolveWorkspaceAgentIdForStage,
   resolveWorkspaceAgentReadAccess,
   type WorkspaceAgentReadAccessConfig,
 } from './stageReadAccess'
@@ -28,6 +29,7 @@ import {
 export type ShortWorkspaceStageAgentContext = {
   bookTitle: string
   stageId: ShortStageId
+  defaultWriteStageId?: ShortStageId
   stageBody: string
   getCurrentStageBody?: (stageId: ShortStageId) => string | undefined
   allStages: Partial<Record<ShortStageId, string>>
@@ -38,7 +40,11 @@ export type ShortWorkspaceStageAgentContext = {
   /** 全局配置解析后：当前阶段允许读取的素材库阶段 */
   allowedMaterialStages?: readonly MaterialStageId[]
   workspaceAgentReadAccess?: WorkspaceAgentReadAccessConfig | null
-  applyToStageEditor?: (payload: { mode: 'replace' | 'append'; text: string }) => void
+  applyToStageEditor?: (payload: {
+    mode: 'replace' | 'append' | 'append_token' | 'streaming_end'
+    text: string
+    targetStageId?: ShortStageId
+  }) => void
   isToolCallStreamed?: (toolCallId: string) => boolean
   /** 请求上层保存当前书籍；用于复制工具写入后自动落盘 */
   onRequestSave?: () => void | Promise<void>
@@ -85,6 +91,39 @@ function shortStageLabel(stageId: ShortStageId | string): string {
   return (SHORT_STAGE_LABELS as Record<string, string>)[stageId] ?? stageId
 }
 
+function isPlotChildStageId(id: string): id is PlotChildStageId {
+  return PLOT_CHILD_STAGES.some((stage) => stage.id === id)
+}
+
+function defaultWriteStageId(ctx: ShortWorkspaceStageAgentContext): ShortStageId {
+  if (ctx.stageId === PLOT_STAGE_ID && ctx.defaultWriteStageId) {
+    return ctx.defaultWriteStageId
+  }
+  return ctx.stageId
+}
+
+function resolveWritableTargetStageId(
+  ctx: ShortWorkspaceStageAgentContext,
+  raw: unknown,
+): ShortStageId {
+  if (ctx.stageId !== PLOT_STAGE_ID) return ctx.stageId
+  const requested = String(raw ?? '').trim()
+  if (isPlotChildStageId(requested)) return requested
+  return defaultWriteStageId(ctx)
+}
+
+function targetStageIdSchema() {
+  return Type.Optional(
+    Type.Union(
+      PLOT_CHILD_STAGES.map((stage) => Type.Literal(stage.id)),
+      {
+        description:
+          '仅剧情智能体使用：指定写入目标。plot_design=剧情设计，intro_design=导语设计，plot_refine=剧情细化；省略时写入当前选中的剧情子方向。',
+      },
+    ),
+  )
+}
+
 export function buildReadWorkspaceContentTool(
   ctx: ShortWorkspaceStageAgentContext,
   allowedStageIds: readonly ShortStageId[],
@@ -97,7 +136,7 @@ export function buildReadWorkspaceContentTool(
     name: 'read_workspace_content',
     label: '读取工作区内容',
     description:
-      `读取本书创作空间某一阶段的当前内容。优先读取前端编辑器中正在渲染的文本；读不到前端文本时，才回退到已加载/已保存内容。当前仅允许读取：${allowedDescription || '（无）'}。每次调用只返回一个 stage_id。`
+      `读取本书创作空间某一阶段的当前内容。优先读取当前文本编辑框中正在显示的内容；读不到时再回退到已加载/已保存内容。当前仅允许读取：${allowedDescription || '（无）'}。每次调用只返回一个 stage_id。`
       + '\n此工具不要随便使用，仅在使用者明确要求或智能体提示明确标记为使用时使用',
     parameters: Type.Object({
       stage_id: stageIdSchema,
@@ -191,7 +230,7 @@ export function buildSearchWorkspaceTextTool(
     description:
       '在本书创作空间里按 grep 风格搜索文本，只返回命中的行列位置和前后少量上下文，不返回全文。'
       + `\n当前仅允许搜索：${allowedDescription || '（无）'}。不传 stage_id 时会搜索所有允许阶段。`
-      + '\n适用于 replace_current_stage_text 或全局替换失败后，先定位编辑区里真实存在的原文片段，再用搜索结果中的原样文本重试替换。',
+      + '\n适用于 replace_current_stage_text 或全局替换失败后，先定位当前文本编辑框里真实存在的原文片段，再用搜索结果中的原样文本重试替换。',
     parameters: Type.Object({
       query: Type.String({
         maxLength: MAX_WORKSPACE_SEARCH_QUERY_CHARS,
@@ -326,8 +365,7 @@ function resolveAllowedStagesFromContext(
       material: ctx.allowedMaterialStages ?? [],
     }
   }
-  const agentId =
-    ctx.stageId === 'draft' ? EXPERT_DRAFT_COORDINATOR_AGENT_ID : ctx.stageId
+  const agentId = resolveWorkspaceAgentIdForStage(ctx.stageId)
   const resolved = resolveWorkspaceAgentReadAccess(
     ctx.workspaceAgentReadAccess,
     agentId,
@@ -377,7 +415,7 @@ export function buildReadLinkedMaterialContentTool(
       }
       const material = ctx.linkedMaterial
       if (!material) {
-        return textBlock('当前书籍尚未关联素材库。请先在页面顶部「生成封面」右侧点击「素材库选择」并选择素材。')
+        return textBlock('当前书籍尚未关联素材库。请先在页面顶部点击「素材库选择」并选择素材。')
       }
 
       const stages = normalizeMaterialStages(material.stages)
@@ -430,7 +468,7 @@ export function buildCopyStageToFormatTool(
         ],
         {
           description:
-            '源阶段键名：人物设计（character_design）、剧情设计（plot_design）、导语设计（intro_design）、剧情细化（plot_refine）、大纲纲要（outline）、正文编写（draft）、正文审阅（draft_review）、格式转换（format_conversion）',
+            '源阶段键名：人物设计（character_design）、剧情设计（plot_design）、导语设计（intro_design）、剧情细化（plot_refine）、大纲（outline）、正文编写（draft）、正文审阅（draft_review）、格式转换（format_conversion）',
         },
       ),
       mode: Type.Union(
@@ -495,7 +533,7 @@ export function buildGlobalReplaceTool(
       }
       if (!currentBody.includes(find)) {
         return textBlock(
-          `未在内容中找到「${find}」，未执行任何替换。请先调用 search_workspace_text 搜索关键词或短句，确认编辑区真实文本后再重试。`,
+          `未在内容中找到「${find}」，未执行任何替换。请先调用 search_workspace_text 搜索关键词或短句，确认当前文本编辑框真实文本后再重试。`,
         )
       }
       const newText = currentBody.split(find).join(replace)
@@ -568,19 +606,20 @@ export function buildReplaceCurrentStageTextTool(
     name: 'replace_current_stage_text',
     label: '替换当前阶段文本',
     description:
-      '根据当前阶段编辑区中的原文片段替换成新文本，不使用行号。'
+      '根据当前文本编辑框中的原文片段替换成新文本，不使用行号。'
       + '\n【必做】先调用 read_workspace_content 读取当前阶段，从工具返回正文中原样复制待改片段到 original_text；不要从对话摘要、系统提示词或旧回复中抄写。'
       + '\noriginal_text 须在正文中唯一匹配；系统会自动容忍直引号"与弯引号“”、全角/半角逗号分号、破折号等常见差异，但语义内容必须一致。'
-      + '\n匹配失败时会返回编辑区中最接近的片段与可能差异；请据此修正后重试。'
-      + '\n若替换失败，不要立刻重新读取全文；先调用 search_workspace_text 搜索失败片段中的关键词或短句，确认编辑区真实原文后再重试。'
+      + '\n匹配失败时会返回当前文本编辑框中最接近的片段与可能差异；请据此修正后重试。'
+      + '\n若替换失败，不要立刻重新读取全文；先调用 search_workspace_text 搜索失败片段中的关键词或短句，确认当前文本编辑框真实原文后再重试。'
       + '\n需要多处修改时传 replacements 数组；每项只替换一个小段，不要把整篇作为 original_text 或 new_text。',
     parameters: Type.Object({
+      target_stage_id: targetStageIdSchema(),
       replacements: Type.Array(
         Type.Object({
           original_text: Type.String({
             maxLength: MAX_CURRENT_STAGE_TEXT_REPLACE_CHARS,
             description:
-              '要被替换的原文片段。须来自 read_workspace_content 的返回正文；包含足够上下文以唯一定位。引号/常见标点可与编辑区略有差异，但字词须一致且只出现一次。',
+              '要被替换的原文片段。须来自 read_workspace_content 的返回正文；包含足够上下文以唯一定位。引号/常见标点可与当前文本编辑框略有差异，但字词须一致且只出现一次。',
           }),
           new_text: Type.String({
             maxLength: MAX_CURRENT_STAGE_TEXT_REPLACE_CHARS,
@@ -602,8 +641,12 @@ export function buildReplaceCurrentStageTextTool(
         return textBlock('（当前环境无法写入编辑区：未连接界面）')
       }
 
-      const label = SHORT_STAGE_LABELS[ctx.stageId]
-      const currentBody = readWorkspaceStageBody(ctx, ctx.stageId)
+      const targetStageId = resolveWritableTargetStageId(
+        ctx,
+        params.target_stage_id,
+      )
+      const label = SHORT_STAGE_LABELS[targetStageId]
+      const currentBody = readWorkspaceStageBody(ctx, targetStageId)
       if (!currentBody.trim()) {
         return textBlock(`当前「${label}」阶段文本为空，无法执行替换。`)
       }
@@ -613,7 +656,7 @@ export function buildReplaceCurrentStageTextTool(
       })
       if ('error' in result) return textBlock(`未替换：${result.error}`)
 
-      apply({ text: result.next, mode: 'replace' })
+      apply({ text: result.next, mode: 'replace', targetStageId })
       const flexibleNote =
         result.flexibleCount > 0
           ? `（其中 ${result.flexibleCount} 处经引号/标点归一化后定位）`
@@ -630,27 +673,29 @@ export function buildWriteWorkspaceEditorTool(
 ): AgentTool {
   const modeSchema = Type.Union(
     [Type.Literal('replace'), Type.Literal('append')],
-    { description: 'replace：覆盖当前编辑区全文；append：在文末追加' },
+    { description: 'replace：覆盖当前文本编辑框全文；append：在文末追加' },
   )
   return defineTool({
     name: 'write_workspace_editor',
-    label: '写入编辑区',
+    label: '写入当前文本编辑框',
     description:
-      '把当前阶段应产出的正文稿件写入应用中间栏文本编辑框。仅写入该阶段的创作正文（如人设、剧情、导语、大纲、审阅后正文等），不要写入分析报告、修改意见、过程说明或与阶段无关的内容；这些留在对话中回复用户即可。每次调用直接落盘到编辑区，不需要和用户确认。',
+      '把当前阶段应产出的正文稿件写入当前文本编辑框。仅写入该阶段的创作正文（如人设、剧情、导语、大纲、审阅后正文等），不要写入分析报告、修改意见、过程说明或与阶段无关的内容；这些留在对话中回复用户即可。每次调用直接写入当前文本编辑框，不需要和用户确认。',
     parameters: Type.Object({
+      target_stage_id: targetStageIdSchema(),
       text: Type.String({
         description: '当前阶段正文稿件（建议 Markdown）。不含分析报告、修改意见或过程说明。',
       }),
       mode: modeSchema,
     }),
-    execute: async (toolCallId, { text, mode }) => {
+    execute: async (toolCallId, { text, mode, target_stage_id }) => {
       const apply = ctx.applyToStageEditor
       if (!apply) {
         return textBlock('（当前环境无法写入编辑区：未连接界面）')
       }
+      const targetStageId = resolveWritableTargetStageId(ctx, target_stage_id)
+      const label = SHORT_STAGE_LABELS[targetStageId]
       // 若该 tool call 已在流式生成阶段同步到编辑器，避免重复写入
       if (ctx.isToolCallStreamed?.(toolCallId)) {
-        const label = SHORT_STAGE_LABELS[ctx.stageId]
         return textBlock(
           mode === 'replace'
             ? `已用新内容覆盖「${label}」编辑区。`
@@ -661,8 +706,7 @@ export function buildWriteWorkspaceEditorTool(
       if (!t) {
         return textBlock('（未写入：文本为空）')
       }
-      apply({ text: t, mode })
-      const label = SHORT_STAGE_LABELS[ctx.stageId]
+      apply({ text: t, mode, targetStageId })
       return textBlock(
         mode === 'replace'
           ? `已用新内容覆盖「${label}」编辑区。`

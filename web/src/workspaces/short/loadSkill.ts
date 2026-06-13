@@ -7,8 +7,6 @@ import { defineTool, textBlock } from '../shared/piToolkit'
 export const LOADABLE_SKILL_STAGE_IDS = [
   'character_design',
   'plot_design',
-  'intro_design',
-  'plot_refine',
   'outline',
   'draft',
   'expert_section_writer',
@@ -16,10 +14,8 @@ export const LOADABLE_SKILL_STAGE_IDS = [
 
 const LOADABLE_SKILL_STAGE_LABELS: Record<SkillStageId, string> = {
   character_design: '人物设计技能',
-  plot_design: '剧情设计技能',
-  intro_design: '导语设计技能',
-  plot_refine: '剧情细化技能',
-  outline: '大纲纲要技能',
+  plot_design: '剧情技能',
+  outline: '大纲技能',
   draft: '正文专家编写技能',
   expert_section_writer: '分节写手技能',
 }
@@ -40,6 +36,7 @@ function isLoadableSkillStageId(raw: string): raw is SkillStageId {
 
 function resolveLoadableSkillStageId(raw: string): SkillStageId | null {
   if (raw === 'expert_draft_coordinator') return 'draft'
+  if (raw === 'intro_design' || raw === 'plot_refine') return 'plot_design'
   if (isLoadableSkillStageId(raw)) return raw
   return null
 }

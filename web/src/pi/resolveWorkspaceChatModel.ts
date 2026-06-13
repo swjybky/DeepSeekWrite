@@ -62,7 +62,7 @@ function coerceModelConfig(raw: unknown): AiModelConfig | null {
   const api = trimString(o.api ?? o.model_like ?? o.modelLike)
   const reasoning = coerceBoolean(o.reasoning ?? o.model_reasoning ?? o.modelReasoning)
   const stream = coerceBoolean(o.stream ?? o.model_stream ?? o.modelStream)
-  if (!id || !provider || !model_id || !api_key) return null
+  if (!id || !provider || !model_id) return null
   const out: AiModelConfig = { id, label, provider, model_id, api_key }
   if (base_url) out.base_url = base_url
   if (api) out.api = api
@@ -183,6 +183,7 @@ async function syncOwnerModelsToCustomProvidersStore(
 async function writeConfiguredKeys(configs: AiModelConfig[]): Promise<void> {
   await withIndexedDbRetry(async () => {
     for (const config of configs) {
+      if (!config.api_key.trim()) continue
       const keyProvider = config.base_url ? config.id : config.provider
       await getAppStorage().providerKeys.set(keyProvider, config.api_key)
     }
@@ -258,8 +259,12 @@ function pickDefaultConfig(
   configs: ResolvedModelConfig[],
   defaultModelId?: string,
 ): ResolvedModelConfig {
-  if (!defaultModelId) return configs[0]
-  return configs.find((config) => config.id === defaultModelId) ?? configs[0]
+  const hasKey = (config: ResolvedModelConfig) => Boolean(config.api_key.trim())
+  if (defaultModelId) {
+    const preferred = configs.find((config) => config.id === defaultModelId)
+    if (preferred && hasKey(preferred)) return preferred
+  }
+  return configs.find(hasKey) ?? configs[0]
 }
 
 /**

@@ -323,7 +323,7 @@ def _normalize_ai_model_entry(raw: Any) -> dict[str, Any] | None:
     api_key = _read_string(raw.get("api_key") or raw.get("apiKey") or raw.get("model_key"))
     raw_id = _read_string(raw.get("id")) or model_id or provider
     config_id = _normalize_config_id(raw_id)
-    if not config_id or not provider or not model_id or not api_key:
+    if not config_id or not provider or not model_id:
         return None
 
     label = (
@@ -430,6 +430,23 @@ def _ai_model_config_has_values(config: dict[str, Any]) -> bool:
     return bool(models) or config.get("image") is not None
 
 
+def _apply_builtin_text_default(config: dict[str, Any]) -> dict[str, Any]:
+    text = config.get("text")
+    models = text.get("models") if isinstance(text, dict) else []
+    if models:
+        return config
+    from app.ai_env import load_text_model_defaults
+
+    text_defaults = load_text_model_defaults()
+    return {
+        **config,
+        "text": {
+            "models": text_defaults["models"],
+            "default_model_id": text_defaults["default_model_id"],
+        },
+    }
+
+
 def _apply_builtin_image_default(config: dict[str, Any]) -> dict[str, Any]:
     if config.get("image") is not None:
         return config
@@ -441,16 +458,20 @@ def _apply_builtin_image_default(config: dict[str, Any]) -> dict[str, Any]:
     return {**config, "image": image}
 
 
+def _apply_builtin_defaults(config: dict[str, Any]) -> dict[str, Any]:
+    return _apply_builtin_image_default(_apply_builtin_text_default(config))
+
+
 def read_ai_model_config() -> dict[str, Any]:
     with _data_file_lock():
         prefs = _load_preferences_unlocked()
         raw = prefs.get(AI_MODEL_CONFIG_PREF_KEY)
         if isinstance(raw, dict):
-            return _apply_builtin_image_default(normalize_ai_model_config(raw))
+            return _apply_builtin_defaults(normalize_ai_model_config(raw))
 
         from app.ai_env import load_ai_model_settings_from_env
 
-        imported = _apply_builtin_image_default(
+        imported = _apply_builtin_defaults(
             normalize_ai_model_config(load_ai_model_settings_from_env())
         )
         if _ai_model_config_has_values(imported):
@@ -568,6 +589,13 @@ def _write_skill_stages_to_disk(skill: Skill) -> None:
                 "\n\n---\n\n".join(blocks),
                 encoding="utf-8",
             )
+        except OSError:
+            pass
+    for legacy_stage_id in ("intro_design", "plot_refine"):
+        try:
+            legacy_path = root / f"{legacy_stage_id}.txt"
+            if legacy_path.is_file():
+                legacy_path.unlink()
         except OSError:
             pass
 
