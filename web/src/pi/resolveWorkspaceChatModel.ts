@@ -250,6 +250,12 @@ async function loadConfiguredModels(): Promise<ConfiguredModelsPayload | null> {
   return configuredModelsInflight
 }
 
+/** 清空模型配置缓存，使下次重新从后端/Pi 存储加载最新配置（含 API Key）。 */
+export function clearWorkspaceModelConfigCache(): void {
+  configuredModelsCache = undefined
+  configuredModelsInflight = null
+}
+
 /** 在首个 ChatPanel 挂载前预热模型配置，避免多面板并发写 IndexedDB。 */
 export async function warmupWorkspaceModelStorage(): Promise<void> {
   await loadConfiguredModels()

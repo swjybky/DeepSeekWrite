@@ -1,7 +1,10 @@
 import type { Api, Model } from '@earendil-works/pi-ai'
 import type { Agent, ThinkingLevel } from '@earendil-works/pi-agent-core'
 
-import { resolveWorkspaceChatModel } from './resolveWorkspaceChatModel'
+import {
+  clearWorkspaceModelConfigCache,
+  resolveWorkspaceChatModel,
+} from './resolveWorkspaceChatModel'
 
 type WorkspaceChatPreferences = {
   model: Model<Api> | null
@@ -85,6 +88,7 @@ export async function resolvePreferredWorkspaceChatModel(): Promise<Model<Api>> 
 }
 
 export async function refreshPreferredWorkspaceChatModel(): Promise<void> {
+  clearWorkspaceModelConfigCache()
   preferredModel = await resolveWorkspaceChatModel()
   emitPreferenceChange()
 }
