@@ -15,6 +15,10 @@ from app.runtime_paths import bundle_root, data_root
 from app.models import (
     Book,
     normalize_book_status,
+    normalize_book_type,
+    normalize_material_type,
+    normalize_skill_type,
+    WORKSPACE_BOOK_TYPES,
     Material,
     Skill,
     SHORT_STAGE_KEYS,
@@ -266,29 +270,53 @@ def write_appearance_style(style: str) -> str:
 
 
 def read_workspace_agent_read_access() -> dict[str, Any]:
-    """全局创作空间智能体读取配置，首次读取时兼容旧阶段配置。"""
+    return read_workspace_agent_read_access_for_type("short")
+
+
+def write_workspace_agent_read_access(config: dict[str, Any]) -> None:
+    write_workspace_agent_read_access_for_type("short", config)
+
+
+def _workspace_agent_read_access_pref_key(workspace_type: str) -> str:
+    normalized = normalize_book_type(workspace_type)
+    if normalized == "script":
+        return "script_workspace_agent_read_access"
+    return "workspace_agent_read_access"
+
+
+def read_workspace_agent_read_access_for_type(workspace_type: str) -> dict[str, Any]:
+    """按创作空间类型读取智能体读取配置；剧本首次从短篇配置复制。"""
+    key = _workspace_agent_read_access_pref_key(workspace_type)
     with _data_file_lock():
         prefs = _load_preferences_unlocked()
-        raw = prefs.get("workspace_agent_read_access")
+        raw = prefs.get(key)
         if isinstance(raw, dict):
             return raw
+
+        if normalize_book_type(workspace_type) == "script":
+            short_raw = prefs.get("workspace_agent_read_access")
+            if isinstance(short_raw, dict):
+                prefs[key] = short_raw
+                _save_preferences_atomic_unlocked(prefs)
+                return short_raw
 
         legacy = prefs.get("stage_read_access")
         if not isinstance(legacy, dict):
             return {}
 
-        prefs["workspace_agent_read_access"] = legacy
+        prefs[key] = legacy
         _save_preferences_atomic_unlocked(prefs)
         return legacy
 
 
-def write_workspace_agent_read_access(config: dict[str, Any]) -> None:
+def write_workspace_agent_read_access_for_type(workspace_type: str, config: dict[str, Any]) -> None:
+    key = _workspace_agent_read_access_pref_key(workspace_type)
     with _data_file_lock():
         prefs = _load_preferences_unlocked()
         if config:
-            prefs["workspace_agent_read_access"] = config
+            prefs[key] = config
         else:
-            prefs.pop("workspace_agent_read_access", None)
+            prefs.pop(key, None)
         _save_preferences_atomic_unlocked(prefs)
 
 
@@ -676,6 +704,7 @@ def _seed_default_skill(skills_path: Path) -> dict[str, Skill]:
     skill = Skill(
         id=sid,
         title=title,
+        skill_type="short",
         stages=stages,
         output_dir="",
         created_at=now,
@@ -804,10 +833,10 @@ class BookStore:
         with _data_file_lock():
             self._reload_all_unlocked()
             now = _utc_now_iso()
-            bt: str = book_type if book_type in ("short", "long") else "long"
-            cats = list(categories or []) if bt == "short" else []
+            bt = normalize_book_type(book_type)
+            cats = list(categories or []) if bt in WORKSPACE_BOOK_TYPES else []
             sid = (linked_skill_id or "").strip()
-            linked_sid = sid if bt == "short" and sid in self._skills else ""
+            linked_sid = sid if bt in WORKSPACE_BOOK_TYPES and sid in self._skills else ""
             wr = (workspace_root or "").strip()
             od = ""
             if wr:
@@ -868,7 +897,7 @@ class BookStore:
                 b.linked_material_id = mid if mid in self._materials else ""
             if linked_skill_id is not None:
                 sid = linked_skill_id.strip()
-                b.linked_skill_id = sid if b.book_type == "short" and sid in self._skills else ""
+                b.linked_skill_id = sid if b.book_type in WORKSPACE_BOOK_TYPES and sid in self._skills else ""
             if stages is not None:
                 b.stages = apply_stage_patch(b.stages, stages)
                 dk = primary_draft_stage_key(b)
@@ -938,7 +967,7 @@ class BookStore:
         with _data_file_lock():
             self._reload_materials_unlocked()
             now = _utc_now_iso()
-            mt: str = material_type if material_type in ("long", "short") else "short"
+            mt = normalize_material_type(material_type)
             wr = (workspace_root or "").strip()
             od = ""
             if wr:
@@ -963,8 +992,8 @@ class BookStore:
                 id=mid,
                 title=title.strip() or "未命名素材",
                 material_type=mt,  # type: ignore[arg-type]
-                parent_genre=str(parent_genre or ""),
-                sub_genre=str(sub_genre or ""),
+                parent_genre=str(parent_genre or "") if mt in ("short", "script") else "",
+                sub_genre="",
                 stages=default_material_stages(),
                 output_dir=od,
                 created_at=now,
@@ -1028,6 +1057,7 @@ class BookStore:
                 {
                     "id": s.id,
                     "title": s.title,
+                    "skill_type": s.skill_type,
                     "stage_counts": {
                         stage_id: len(s.stages.get(stage_id, []))
                         for stage_id in SKILL_STAGE_KEYS
@@ -1056,12 +1086,17 @@ class BookStore:
     def create_skill(
         self,
         title: str,
+        skill_type: str = "short",
         workspace_root: str | None = None,
     ) -> dict[str, Any]:
         """创建新技能集合"""
+        if workspace_root is None and str(skill_type or "").strip() not in LIBRARY_TYPES:
+            workspace_root = skill_type
+            skill_type = "short"
         with _data_file_lock():
             self._reload_skills_unlocked()
             now = _utc_now_iso()
+            st = normalize_skill_type(skill_type)
             wr = (workspace_root or "").strip()
             od = ""
             if wr:
@@ -1085,6 +1120,7 @@ class BookStore:
             s = Skill(
                 id=sid,
                 title=title.strip() or "未命名技能",
+                skill_type=st,
                 stages=normalize_skill_stages_from_storage(None),
                 output_dir=od,
                 created_at=now,
@@ -1099,6 +1135,7 @@ class BookStore:
         self,
         skill_id: str,
         title: str | None = None,
+        skill_type: str | None = None,
         stages: dict[str, Any] | None = None,
     ) -> dict[str, Any] | None:
         """保存技能集合及各阶段技能条目"""
@@ -1109,6 +1146,8 @@ class BookStore:
                 return None
             if title is not None:
                 s.title = title.strip()
+            if skill_type is not None:
+                s.skill_type = normalize_skill_type(skill_type)
             if stages is not None:
                 s.stages = normalize_skill_stages_from_storage(stages)
             s.updated_at = _utc_now_iso()

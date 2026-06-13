@@ -10,6 +10,7 @@ import {
   getSkill,
   normalizeSkillStages,
   saveSkill,
+  skillTypeLabel,
 } from '../bridge'
 import { WorkspaceAiChat } from '../components/WorkspaceAiChat'
 import { WorkspaceTreeNav } from '../components/WorkspaceTreeNav'
@@ -441,6 +442,7 @@ export function SkillEditor() {
   const stageBody = activeEntry?.body ?? ''
   const { total: stageCharTotal, nonSpace: stageCharNonSpace } = stageTextCounts(stageBody)
   const stageLabel = SKILL_STAGE_LABELS[activeStage]
+  const skillTypeText = skillTypeLabel(skill.skill_type)
 
   return (
     <div className="editor-page editor-page--workspace">
@@ -452,6 +454,8 @@ export function SkillEditor() {
           <span className="editor-header-meta-inner">
             <span className="editor-header-meta-text">
               {skill.title || '未命名技能库'}
+              {' · '}
+              {skillTypeText}
               {' · '}
               {stageLabel}
             </span>
@@ -500,14 +504,6 @@ export function SkillEditor() {
           <div className="workspace-ai-header workspace-ai-header-row">
             <span className="workspace-ai-header-title">技能管理智能体</span>
             <div className="workspace-ai-header-actions">
-              <Link
-                className="workspace-ai-prompt-edit"
-                aria-label="配置技能管理智能体"
-                title="配置技能管理智能体"
-                to="/skill-settings"
-              >
-                设置
-              </Link>
               <button
                 type="button"
                 className="workspace-ai-new-chat"
@@ -520,7 +516,7 @@ export function SkillEditor() {
             </div>
           </div>
           <div className="workspace-ai-hint muted">
-            技能库 · {stageLabel}
+            技能库 · {skillTypeText} · {stageLabel}
             {activeEntry ? ` · ${activeEntry.title}` : ''}
           </div>
           <div className="workspace-ai-chat-stack">
@@ -530,6 +526,7 @@ export function SkillEditor() {
                 sessionBookId={skill.id}
                 sessionEpoch={aiChatEpoch}
                 bookTitle={skill.title}
+                skillType={skill.skill_type}
                 stageId={activeStage}
                 stageBody={stageBody}
                 allStages={stagePromptBodies}

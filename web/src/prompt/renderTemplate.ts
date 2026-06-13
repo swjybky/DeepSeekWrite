@@ -92,13 +92,14 @@ const WORKSPACE_TAG =
 const MATERIAL_TAG =
   /\{\{(BOOK_TITLE|BOOK_LINE|MATERIAL_TITLE|MATERIAL_LINE|MATERIAL_TYPE|MATERIAL_GENRE|STAGE_ID|STAGE_LABEL|STAGE_BODY|OTHER_STAGES_EXCERPT)\}\}/g
 const SKILL_TAG =
-  /\{\{(BOOK_TITLE|BOOK_LINE|SKILL_TITLE|SKILL_LINE|STAGE_ID|STAGE_LABEL|STAGE_BODY|OTHER_STAGES_EXCERPT)\}\}/g
+  /\{\{(BOOK_TITLE|BOOK_LINE|SKILL_TITLE|SKILL_LINE|SKILL_TYPE|STAGE_ID|STAGE_LABEL|STAGE_BODY|OTHER_STAGES_EXCERPT)\}\}/g
 
 export type PromptSubstitutePayload = {
   bookTitle: string
   bookGenre?: string
   materialType?: string
   materialGenre?: string
+  skillType?: string
   stageId?: StageId | MaterialStageId | SkillStageId
   stageLabel?: string
   stageBody: string
@@ -111,6 +112,7 @@ export type PromptRenderPayload = {
   bookGenre?: string
   materialType?: string
   materialGenre?: string
+  skillType?: string
   stageBody: string
   otherStagesExcerpt?: string | null
   promptKind: PromptRenderKind
@@ -142,6 +144,7 @@ export function substitutePromptPlaceholders(
     MATERIAL_GENRE: input.materialGenre?.trim() || '未分类',
     SKILL_TITLE: bt,
     SKILL_LINE: skillLine,
+    SKILL_TYPE: input.skillType?.trim() || '短篇技能',
     STAGE_ID: input.stageId ? String(input.stageId) : '',
     STAGE_LABEL: input.stageLabel ?? '',
     STAGE_BODY: excerptText(input.stageBody),
@@ -174,6 +177,7 @@ export function renderPromptFromTemplateRaw(
     bookGenre: payload.bookGenre,
     materialType: payload.materialType,
     materialGenre: payload.materialGenre,
+    skillType: payload.skillType,
     stageId: payload.stageId,
     stageLabel: rowsForPromptKind(payload.promptKind)?.find(
       (row) => row.id === payload.stageId,

@@ -2,10 +2,13 @@ import type { AgentTool } from '@earendil-works/pi-agent-core'
 
 import type {
   Material,
+  BookType,
+  MaterialType,
   StageId,
   MaterialPromptKind,
   MaterialStageId,
   Skill,
+  SkillType,
   SkillStageId,
   WorkspaceAgentReadAccessConfig,
 } from '../bridge'
@@ -19,13 +22,38 @@ import {
   type ShortWorkspaceStageAgentContext,
 } from '../workspaces/short/stageAgents'
 import {
-  buildMaterialWorkspaceAdditionalTools,
-  type MaterialWorkspaceStageAgentContext,
-} from '../workspaces/material/materialStageAgents'
+  resolveWorkspaceAgentIdForStage as resolveScriptWorkspaceAgentIdForStage,
+  resolveWorkspaceAgentReadAccess as resolveScriptWorkspaceAgentReadAccess,
+} from '../workspaces/script/stageReadAccess'
+import type { ScriptStageId } from '../workspaces/script/stages'
 import {
-  buildSkillWorkspaceAdditionalTools,
-  type SkillWorkspaceStageAgentContext,
-} from '../workspaces/skill/skillStageAgents'
+  buildScriptWorkspaceAdditionalTools,
+  type ScriptWorkspaceStageAgentContext,
+} from '../workspaces/script/stageAgents'
+import {
+  buildMaterialWorkspaceAdditionalTools as buildShortMaterialWorkspaceAdditionalTools,
+  type MaterialWorkspaceStageAgentContext as ShortMaterialWorkspaceStageAgentContext,
+} from '../workspaces/material/short/materialStageAgents'
+import {
+  buildMaterialWorkspaceAdditionalTools as buildLongMaterialWorkspaceAdditionalTools,
+  type MaterialWorkspaceStageAgentContext as LongMaterialWorkspaceStageAgentContext,
+} from '../workspaces/material/long/materialStageAgents'
+import {
+  buildMaterialWorkspaceAdditionalTools as buildScriptMaterialWorkspaceAdditionalTools,
+  type MaterialWorkspaceStageAgentContext as ScriptMaterialWorkspaceStageAgentContext,
+} from '../workspaces/material/script/materialStageAgents'
+import {
+  buildSkillWorkspaceAdditionalTools as buildShortSkillWorkspaceAdditionalTools,
+  type SkillWorkspaceStageAgentContext as ShortSkillWorkspaceStageAgentContext,
+} from '../workspaces/skill/short/skillStageAgents'
+import {
+  buildSkillWorkspaceAdditionalTools as buildLongSkillWorkspaceAdditionalTools,
+  type SkillWorkspaceStageAgentContext as LongSkillWorkspaceStageAgentContext,
+} from '../workspaces/skill/long/skillStageAgents'
+import {
+  buildSkillWorkspaceAdditionalTools as buildScriptSkillWorkspaceAdditionalTools,
+  type SkillWorkspaceStageAgentContext as ScriptSkillWorkspaceStageAgentContext,
+} from '../workspaces/skill/script/skillStageAgents'
 
 export type ApplyToStageEditorPayload = {
   text: string
@@ -36,6 +64,9 @@ export type ApplyToStageEditorPayload = {
 
 export type WorkspaceStageAgentContext = {
   bookTitle: string
+  bookType?: BookType
+  materialTypeKey?: MaterialType
+  skillType?: SkillType
   workspaceType?: 'book' | 'material' | 'skill'
   promptKind?: MaterialPromptKind
   stageId: StageId | MaterialStageId | SkillStageId
@@ -63,7 +94,10 @@ export function getWorkspaceStageAdditionalTools(
   // 素材库模式
   if (ctx.workspaceType === 'material') {
     if (!ctx.promptKind) return []
-    const materialCtx: MaterialWorkspaceStageAgentContext = {
+    const materialCtx:
+      | ShortMaterialWorkspaceStageAgentContext
+      | LongMaterialWorkspaceStageAgentContext
+      | ScriptMaterialWorkspaceStageAgentContext = {
       materialTitle: ctx.bookTitle,
       promptKind: ctx.promptKind,
       stageId: ctx.stageId as MaterialStageId,
@@ -72,19 +106,60 @@ export function getWorkspaceStageAdditionalTools(
       applyToStageEditor: ctx.applyToStageEditor,
       isToolCallStreamed: ctx.isToolCallStreamed,
     }
-    return buildMaterialWorkspaceAdditionalTools(materialCtx)
+    if (ctx.materialTypeKey === 'script') {
+      return buildScriptMaterialWorkspaceAdditionalTools(materialCtx)
+    }
+    if (ctx.materialTypeKey === 'long') {
+      return buildLongMaterialWorkspaceAdditionalTools(materialCtx)
+    }
+    return buildShortMaterialWorkspaceAdditionalTools(materialCtx)
   }
 
   // 技能库模式
   if (ctx.workspaceType === 'skill') {
-    const skillCtx: SkillWorkspaceStageAgentContext = {
+    const skillCtx:
+      | ShortSkillWorkspaceStageAgentContext
+      | LongSkillWorkspaceStageAgentContext
+      | ScriptSkillWorkspaceStageAgentContext = {
       skillTitle: ctx.bookTitle,
       stageId: ctx.stageId as SkillStageId,
       stageBody: ctx.stageBody,
       applyToStageEditor: ctx.applyToStageEditor,
       isToolCallStreamed: ctx.isToolCallStreamed,
     }
-    return buildSkillWorkspaceAdditionalTools(skillCtx)
+    if (ctx.skillType === 'script') {
+      return buildScriptSkillWorkspaceAdditionalTools(skillCtx)
+    }
+    if (ctx.skillType === 'long') {
+      return buildLongSkillWorkspaceAdditionalTools(skillCtx)
+    }
+    return buildShortSkillWorkspaceAdditionalTools(skillCtx)
+  }
+
+  if (ctx.bookType === 'script') {
+    const scriptStageId = ctx.stageId as ScriptStageId
+    const readAccessAgentId = resolveScriptWorkspaceAgentIdForStage(scriptStageId)
+    const readAccess = resolveScriptWorkspaceAgentReadAccess(
+      ctx.workspaceAgentReadAccess,
+      readAccessAgentId,
+    )
+    const scriptCtx: ScriptWorkspaceStageAgentContext = {
+      bookTitle: ctx.bookTitle,
+      stageId: scriptStageId,
+      defaultWriteStageId: ctx.activeStageContentId as ScriptStageId | undefined,
+      stageBody: ctx.stageBody,
+      getCurrentStageBody: (stageId) => ctx.getCurrentStageBody?.(stageId),
+      allStages: ctx.allStages as Partial<Record<ScriptStageId, string>>,
+      linkedMaterial: ctx.linkedMaterial,
+      linkedSkill: ctx.linkedSkill,
+      workspaceAgentReadAccess: ctx.workspaceAgentReadAccess,
+      allowedWorkspaceStages: readAccess?.workspace,
+      allowedMaterialStages: readAccess?.material,
+      applyToStageEditor: ctx.applyToStageEditor,
+      onRequestSave: ctx.onRequestSave,
+      isToolCallStreamed: ctx.isToolCallStreamed,
+    }
+    return buildScriptWorkspaceAdditionalTools(scriptCtx)
   }
 
   // 书籍短篇工作台模式

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 import {
   SHORT_GENRE_OPTIONS,
+  SCRIPT_GENRE_OPTIONS,
   type AppearanceStyle,
   type AiModelConfig,
   type AiModelSettings,
@@ -10,6 +11,8 @@ import {
   type MaterialSummary,
   type MaterialType,
   type SkillSummary,
+  type SkillType,
+  bookTypeLabel,
   createBook,
   createSkill,
   deleteBook,
@@ -29,7 +32,9 @@ import {
   deleteMaterial,
   normalizeAiModelSettings,
   saveAiModelConfig,
-  SHORT_MATERIAL_GENRES,
+  getMaterialParentGenres,
+  materialTypeLabel,
+  skillTypeLabel,
   TEXT_MODEL_API_KEY_PLACEHOLDER,
   exportLibrary,
   importLibrary,
@@ -593,8 +598,7 @@ export function Home() {
   const [showMaterialForm, setShowMaterialForm] = useState(false)
   const [materialTitle, setMaterialTitle] = useState('')
   const [materialType, setMaterialType] = useState<MaterialType>('short')
-  const [materialParentGenre, setMaterialParentGenre] = useState<string>(Object.keys(SHORT_MATERIAL_GENRES)[0])
-  const [materialSubGenre, setMaterialSubGenre] = useState<string>(SHORT_MATERIAL_GENRES['世情'][0])
+  const [materialParentGenre, setMaterialParentGenre] = useState<string>(getMaterialParentGenres('short')[0] ?? '')
   const [submittingMaterial, setSubmittingMaterial] = useState(false)
   const [deletingMaterialId, setDeletingMaterialId] = useState<string | null>(null)
   const [materialError, setMaterialError] = useState<string | null>(null)
@@ -604,6 +608,7 @@ export function Home() {
   const [loadingSkills, setLoadingSkills] = useState(true)
   const [showSkillForm, setShowSkillForm] = useState(false)
   const [skillTitle, setSkillTitle] = useState('')
+  const [skillType, setSkillType] = useState<SkillType>('short')
   const [submittingSkill, setSubmittingSkill] = useState(false)
   const [deletingSkillId, setDeletingSkillId] = useState<string | null>(null)
   const [skillError, setSkillError] = useState<string | null>(null)
@@ -814,8 +819,8 @@ export function Home() {
     setSubmittingBook(true)
     setBookError(null)
     try {
-      const cats = bookType === 'short' ? [shortGenre] : []
-      const linkedSkillId = bookType === 'short' ? bookLinkedSkillId : ''
+      const cats = bookType === 'short' || bookType === 'script' ? [shortGenre] : []
+      const linkedSkillId = bookType === 'short' || bookType === 'script' ? bookLinkedSkillId : ''
       await createBook(bookTitle, bookType, cats, ws, linkedSkillId || null)
       setBookTitle('')
       setBookType('short')
@@ -857,13 +862,15 @@ export function Home() {
     setSubmittingMaterial(true)
     setMaterialError(null)
     try {
-      const parentGenre = materialType === 'short' ? materialParentGenre : undefined
-      const subGenre = materialType === 'short' ? materialSubGenre : undefined
+      const parentGenre =
+        materialType === 'short' || materialType === 'script'
+          ? materialParentGenre
+          : undefined
+      const subGenre = undefined
       await createMaterial(materialTitle, materialType, parentGenre, subGenre, ws)
       setMaterialTitle('')
       setMaterialType('short')
-      setMaterialParentGenre(Object.keys(SHORT_MATERIAL_GENRES)[0])
-      setMaterialSubGenre(SHORT_MATERIAL_GENRES['世情'][0])
+      setMaterialParentGenre(getMaterialParentGenres('short')[0] ?? '')
       setShowMaterialForm(false)
       await refreshMaterials()
     } catch (err) {
@@ -900,8 +907,9 @@ export function Home() {
     setSubmittingSkill(true)
     setSkillError(null)
     try {
-      await createSkill(skillTitle, ws)
+      await createSkill(skillTitle, skillType, ws)
       setSkillTitle('')
+      setSkillType('short')
       setShowSkillForm(false)
       await refreshSkills()
     } catch (err) {
@@ -999,17 +1007,12 @@ export function Home() {
   // ==================== 素材类型/分类改变处理 ====================
   const handleMaterialParentGenreChange = useCallback((genre: string) => {
     setMaterialParentGenre(genre)
-    const subGenres = SHORT_MATERIAL_GENRES[genre] || []
-    setMaterialSubGenre(subGenres[0] || '')
   }, [])
 
   const handleMaterialTypeChange = useCallback((type: MaterialType) => {
     setMaterialType(type)
-    if (type === 'short') {
-      const currentSubGenres = SHORT_MATERIAL_GENRES[materialParentGenre] || []
-      setMaterialSubGenre(currentSubGenres[0] || '')
-    }
-  }, [materialParentGenre])
+    setMaterialParentGenre(getMaterialParentGenres(type)[0] ?? '')
+  }, [])
 
   // ==================== 渲染 ====================
   const visibleBooks = useMemo(
@@ -1179,6 +1182,15 @@ export function Home() {
                     <input
                       type="radio"
                       name="bookType"
+                      checked={bookType === 'script'}
+                      onChange={() => setBookType('script')}
+                    />
+                    剧本
+                  </label>
+                  <label className="radio">
+                    <input
+                      type="radio"
+                      name="bookType"
                       checked={bookType === 'long'}
                       onChange={() => {
                         setBookType('long')
@@ -1190,12 +1202,12 @@ export function Home() {
                 </div>
               </fieldset>
 
-              {bookType === 'short' && (
+              {(bookType === 'short' || bookType === 'script') && (
                 <>
                   <fieldset className="field">
-                    <legend className="field-label">短篇分类</legend>
+                    <legend className="field-label">{bookTypeLabel(bookType)}分类</legend>
                     <div className="genre-grid">
-                      {SHORT_GENRE_OPTIONS.map((g) => (
+                      {(bookType === 'script' ? SCRIPT_GENRE_OPTIONS : SHORT_GENRE_OPTIONS).map((g) => (
                         <label key={g} className="radio">
                           <input
                             type="radio"
@@ -1348,7 +1360,9 @@ export function Home() {
                     >
                       <span className="export-picker-item-title">{m.title}</span>
                       <span className="export-picker-item-meta">
-                        {m.material_type === 'short' ? `${m.parent_genre || ''}${m.sub_genre ? ' · ' + m.sub_genre : ''}` : '长篇'}
+                        {[materialTypeLabel(m.material_type), m.parent_genre]
+                          .filter(Boolean)
+                          .join(' · ')}
                       </span>
                       {exportingId === m.id && <span className="export-picker-item-loading">导出中…</span>}
                     </button>
@@ -1393,38 +1407,30 @@ export function Home() {
                     />
                     短篇
                   </label>
+                  <label className="radio">
+                    <input
+                      type="radio"
+                      name="materialType"
+                      checked={materialType === 'script'}
+                      onChange={() => handleMaterialTypeChange('script')}
+                    />
+                    剧本
+                  </label>
                 </div>
               </fieldset>
 
-              {materialType === 'short' && (
+              {(materialType === 'short' || materialType === 'script') && (
                 <>
                   <fieldset className="field">
                     <legend className="field-label">大分类</legend>
                     <div className="genre-grid">
-                      {Object.keys(SHORT_MATERIAL_GENRES).map((g) => (
+                      {getMaterialParentGenres(materialType).map((g) => (
                         <label key={g} className="radio">
                           <input
                             type="radio"
                             name="materialParentGenre"
                             checked={materialParentGenre === g}
                             onChange={() => handleMaterialParentGenreChange(g)}
-                          />
-                          {g}
-                        </label>
-                      ))}
-                    </div>
-                  </fieldset>
-
-                  <fieldset className="field">
-                    <legend className="field-label">子分类</legend>
-                    <div className="genre-grid">
-                      {(SHORT_MATERIAL_GENRES[materialParentGenre] || []).map((g) => (
-                        <label key={g} className="radio">
-                          <input
-                            type="radio"
-                            name="materialSubGenre"
-                            checked={materialSubGenre === g}
-                            onChange={() => setMaterialSubGenre(g)}
                           />
                           {g}
                         </label>
@@ -1545,7 +1551,7 @@ export function Home() {
                     >
                       <span className="export-picker-item-title">{s.title}</span>
                       <span className="export-picker-item-meta">
-                        {s.stage_skill_count ?? 0} 条技能
+                        {skillTypeLabel(s.skill_type)} · {s.stage_skill_count ?? 0} 条技能
                       </span>
                       {exportingId === s.id && <span className="export-picker-item-loading">导出中…</span>}
                     </button>
@@ -1568,6 +1574,23 @@ export function Home() {
                   autoFocus
                 />
               </label>
+
+              <fieldset className="field">
+                <legend className="field-label">技能类型</legend>
+                <div className="radio-row">
+                  {(['short', 'long', 'script'] as const).map((type) => (
+                    <label key={type} className="radio">
+                      <input
+                        type="radio"
+                        name="skillType"
+                        checked={skillType === type}
+                        onChange={() => setSkillType(type)}
+                      />
+                      {skillTypeLabel(type)}
+                    </label>
+                  ))}
+                </div>
+              </fieldset>
 
               {skillError && <p className="form-error">{skillError}</p>}
 

@@ -1,4 +1,4 @@
-export type BookType = 'short' | 'long'
+export type BookType = 'short' | 'long' | 'script'
 export type BookStatus = 'editing' | 'completed'
 
 // 统一短篇阶段定义
@@ -9,6 +9,12 @@ import {
   normalizeShortStages,
   migrateLegacyStages,
 } from './workspaces/short/stages'
+import {
+  SCRIPT_WORKSPACE_STAGES,
+  type ScriptStageId,
+  normalizeScriptStages,
+  migrateLegacyStages as migrateLegacyScriptStages,
+} from './workspaces/script/stages'
 
 import { getEmbeddedPromptTemplate } from './prompt/embeddedDefaults'
 import { renderPromptFromTemplateRaw } from './prompt/renderTemplate'
@@ -19,6 +25,9 @@ import {
   type WorkspaceAgentId,
   type WorkspaceAgentReadAccessConfig,
 } from './workspaces/short/stageReadAccess'
+import {
+  normalizeWorkspaceAgentReadAccess as normalizeScriptWorkspaceAgentReadAccess,
+} from './workspaces/script/stageReadAccess'
 import { appendLoadableSkillsToPrompt } from './workspaces/short/loadSkill'
 
 const DEFAULT_SKILL_TEMPLATE_MODULES = import.meta.glob(
@@ -34,21 +43,32 @@ export type {
   WorkspaceAgentReadAccessEntry,
 } from './workspaces/short/stageReadAccess'
 
-export type { ShortStageId }
+export type { ShortStageId, ScriptStageId }
 
 type BookWorkspaceSlice = {
   book_type: BookType
   categories: string[]
 }
 
-/** 所有短篇书籍共用同一套完整创作空间。 */
+/** 短篇和剧本拥有完整创作空间；长篇暂未开放工作台。 */
+export function isWorkspaceBook(book: BookWorkspaceSlice): boolean {
+  return book.book_type === 'short' || book.book_type === 'script'
+}
+
+/** @deprecated 请用 isWorkspaceBook。 */
 export function isWorkspaceShortBook(book: BookWorkspaceSlice): boolean {
-  return book.book_type === 'short'
+  return isWorkspaceBook(book)
 }
 
 /** 提示词可见的分类上下文，不再影响智能体或模板选择。 */
 export function resolveWorkspaceBookGenre(book: BookWorkspaceSlice): string {
   return book.categories.map((item) => item.trim()).filter(Boolean).join('、') || '未分类'
+}
+
+export function bookTypeLabel(bookType: BookType): string {
+  if (bookType === 'script') return '剧本'
+  if (bookType === 'short') return '短篇'
+  return '长篇'
 }
 
 // ==================== 素材提示词类型 ====================
@@ -60,7 +80,7 @@ export const SKILL_MANAGER_PROMPT_KIND = 'skill_manager' as const
 export type SkillPromptKind = typeof SKILL_MANAGER_PROMPT_KIND
 
 // 统一阶段ID类型
-export type StageId = ShortStageId
+export type StageId = ShortStageId | ScriptStageId
 
 // 导出统一阶段定义
 export const WORKSPACE_STAGES = SHORT_WORKSPACE_STAGES
@@ -183,34 +203,38 @@ export function normalizeExpertDraft(
 
 /** 短篇可选分类（可扩展） */
 export const SHORT_GENRE_OPTIONS = ['世情', '追妻', '科幻', '悬疑'] as const
+/** 剧本分类暂时与短篇一致，但保持独立常量。 */
+export const SCRIPT_GENRE_OPTIONS = ['世情', '追妻', '科幻', '悬疑'] as const
 
 /** 获取统一阶段列表（所有短篇书籍使用同一套阶段） */
 export function resolveWorkspaceStagesForBook(
-  _book?: Pick<Book, 'book_type' | 'categories'>,
-): typeof SHORT_WORKSPACE_STAGES {
-  // 所有短篇分类统一返回 SHORT_WORKSPACE_STAGES
-  void _book
-  return SHORT_WORKSPACE_STAGES
+  book?: Pick<Book, 'book_type' | 'categories'>,
+): typeof SHORT_WORKSPACE_STAGES | typeof SCRIPT_WORKSPACE_STAGES {
+  return book?.book_type === 'script'
+    ? SCRIPT_WORKSPACE_STAGES
+    : SHORT_WORKSPACE_STAGES
 }
 
 /** 两端存储中的「全字段」工作台 stages（统一阶段键） */
 export function normalizeAllBookStages(
   raw?: Partial<Record<StageId, string>> | null,
 ): Record<StageId, string> {
-  return normalizeShortStages(raw)
+  return normalizeShortStages(raw) as Record<StageId, string>
 }
 
 /** 仅当前工作台在用的阶段子集（用于编辑区 state） */
 export function normalizeStagesForWorkspaceBook(
-  _book?: Pick<Book, 'book_type' | 'categories'>,
+  book?: Pick<Book, 'book_type' | 'categories'>,
   raw?: Partial<Record<StageId, string>> | null,
 ): Record<StageId, string> {
-  // _book 参数保留用于向后兼容，已不再需要
-  void _book
+  if (book?.book_type === 'script') {
+    const migrated = migrateLegacyScriptStages(raw)
+    return normalizeScriptStages(migrated) as Record<StageId, string>
+  }
   // 迁移旧数据
   const migrated = migrateLegacyStages(raw)
   // 归一化到统一阶段
-  return normalizeShortStages(migrated)
+  return normalizeShortStages(migrated) as Record<StageId, string>
 }
 
 /** 把部分阶段更新合并进完整存储，未出现的键保持原样 */
@@ -270,7 +294,14 @@ export interface Book extends BookSummary {
 
 // ==================== 素材类型定义 ====================
 
-export type MaterialType = 'long' | 'short'
+export type MaterialType = 'long' | 'short' | 'script'
+export type SkillType = 'long' | 'short' | 'script'
+
+export const LIBRARY_TYPE_LABELS: Record<MaterialType, string> = {
+  short: '短篇',
+  long: '长篇',
+  script: '剧本',
+}
 
 export type MaterialStageId =
   | 'character'
@@ -296,6 +327,25 @@ export const SHORT_MATERIAL_GENRES: Record<string, string[]> = {
   '悬疑': ['刑侦', '推理', '惊悚', '密室', '民俗', '心理', '反转'],
 }
 
+export const SCRIPT_MATERIAL_GENRES: Record<string, string[]> = {
+  '世情': ['家庭', '职场', '婚恋', '邻里', '亲子', '继承', '养老'],
+  '追妻': ['甜宠', '虐恋', '重生', '穿越', '暗恋', '破镜重圆', '先婚后爱'],
+  '科幻': ['未来都市', '星际', '人工智能', '赛博朋克', '末日', '时间旅行', '异星文明'],
+  '悬疑': ['刑侦', '推理', '惊悚', '密室', '民俗', '心理', '反转'],
+}
+
+export function libraryTypeLabel(type: MaterialType | SkillType): string {
+  return LIBRARY_TYPE_LABELS[type]
+}
+
+export function materialTypeLabel(type: MaterialType): string {
+  return `${libraryTypeLabel(type)}素材`
+}
+
+export function skillTypeLabel(type: SkillType): string {
+  return `${libraryTypeLabel(type)}技能`
+}
+
 /** 素材大分类兼容映射（旧名称 → 新名称） */
 const MATERIAL_GENRE_COMPAT: Record<string, string> = {
   '现实情感': '追妻',
@@ -312,12 +362,18 @@ export function getMaterialSubGenres(genre: string): string[] {
   return SHORT_MATERIAL_GENRES[resolveMaterialParentGenre(genre)] || []
 }
 
+export function getMaterialParentGenres(type: MaterialType): string[] {
+  if (type === 'script') return Object.keys(SCRIPT_MATERIAL_GENRES)
+  if (type === 'short') return Object.keys(SHORT_MATERIAL_GENRES)
+  return []
+}
+
 export interface MaterialSummary {
   id: string
   title: string
   material_type: MaterialType
-  parent_genre?: string  // 世情/追妻（仅short时有效）
-  sub_genre?: string     // 子分类
+  parent_genre?: string  // 世情/追妻（short/script 时有效）
+  sub_genre?: string     // legacy: 旧版子分类
   output_dir?: string
 }
 
@@ -383,6 +439,7 @@ const LEGACY_SKILL_STAGES_TO_DRAFT: LegacySkillStageId[] = [
 export interface SkillSummary {
   id: string
   title: string
+  skill_type: SkillType
   stage_counts?: Partial<Record<SkillStageId, number>>
   stage_skill_count?: number
   output_dir?: string
@@ -623,8 +680,15 @@ declare global {
         set_appearance_style(style: AppearanceStyle): Promise<AppearanceStyle | string>
         /** 全局创作空间智能体可读配置 */
         get_workspace_agent_read_access(): Promise<Record<string, unknown>>
+        get_workspace_agent_read_access(
+          workspace_type: string,
+        ): Promise<Record<string, unknown>>
         set_workspace_agent_read_access(
           config: Record<string, unknown>,
+        ): Promise<void>
+        set_workspace_agent_read_access(
+          config: Record<string, unknown>,
+          workspace_type: string,
         ): Promise<void>
         /** 本地配置中的默认文字模型与 Key；未配置完整时返回 null */
         get_ai_defaults(): Promise<AiModelDefaults | null>
@@ -636,14 +700,22 @@ declare global {
         get_workspace_system_prompt(
           stage_id: string,
           context_json: string,
+          workspace_type?: string | null,
         ): Promise<string>
         /** 读取当前生效的共享创作空间智能体模板原文。 */
-        read_workspace_agent_prompt_template(agent_id: string): Promise<string>
+        read_workspace_agent_prompt_template(
+          agent_id: string,
+          workspace_type?: string | null,
+        ): Promise<string>
         save_workspace_agent_prompt_override(
           agent_id: string,
           body: string,
+          workspace_type?: string | null,
         ): Promise<void>
-        reset_workspace_agent_prompt_override(agent_id: string): Promise<boolean>
+        reset_workspace_agent_prompt_override(
+          agent_id: string,
+          workspace_type?: string | null,
+        ): Promise<boolean>
 
         // ==================== 素材库 API ====================
         list_materials(): Promise<MaterialSummary[]>
@@ -668,6 +740,7 @@ declare global {
         get_skill(skill_id: string): Promise<Skill | null>
         create_skill(
           title: string,
+          skill_type?: string | null,
           workspace_root?: string | null,
         ): Promise<Skill>
         save_skill(
@@ -681,6 +754,7 @@ declare global {
           material_kind: string,
           stage_id: string,
           context_json: string,
+          material_type?: string | null,
         ): Promise<string>
         read_material_prompt_template(
           material_kind: string,
@@ -695,18 +769,25 @@ declare global {
           material_kind: string,
           stage_id: string,
         ): Promise<boolean>
-        read_material_agent_prompt_template(): Promise<string>
-        save_material_agent_prompt_override(body: string): Promise<void>
-        reset_material_agent_prompt_override(): Promise<boolean>
+        read_material_agent_prompt_template(material_type?: string | null): Promise<string>
+        save_material_agent_prompt_override(
+          body: string,
+          material_type?: string | null,
+        ): Promise<void>
+        reset_material_agent_prompt_override(material_type?: string | null): Promise<boolean>
 
         // ==================== 技能库提示词 API ====================
         get_skill_system_prompt(
           stage_id: string,
           context_json: string,
+          skill_type?: string | null,
         ): Promise<string>
-        read_skill_agent_prompt_template(): Promise<string>
-        save_skill_agent_prompt_override(body: string): Promise<void>
-        reset_skill_agent_prompt_override(): Promise<boolean>
+        read_skill_agent_prompt_template(skill_type?: string | null): Promise<string>
+        save_skill_agent_prompt_override(
+          body: string,
+          skill_type?: string | null,
+        ): Promise<void>
+        reset_skill_agent_prompt_override(skill_type?: string | null): Promise<boolean>
 
         // ==================== 封面 API ====================
         get_book_cover(book_id: string): Promise<{ cover_data: string | null }>
@@ -882,11 +963,19 @@ export async function persistWorkspaceRoot(path: string | null): Promise<void> {
   }
 }
 
-function getStoredWorkspaceAgentReadAccessRaw(): unknown {
+function workspaceAgentReadAccessStorageKey(workspaceType: BookType): string {
+  return workspaceType === 'script'
+    ? `${WORKSPACE_AGENT_READ_ACCESS_STORAGE_KEY}:script`
+    : WORKSPACE_AGENT_READ_ACCESS_STORAGE_KEY
+}
+
+function getStoredWorkspaceAgentReadAccessRaw(workspaceType: BookType = 'short'): unknown {
   try {
     const raw =
-      localStorage.getItem(WORKSPACE_AGENT_READ_ACCESS_STORAGE_KEY) ??
-      localStorage.getItem(LEGACY_STAGE_READ_ACCESS_STORAGE_KEY)
+      localStorage.getItem(workspaceAgentReadAccessStorageKey(workspaceType)) ??
+      (workspaceType === 'short'
+        ? localStorage.getItem(LEGACY_STAGE_READ_ACCESS_STORAGE_KEY)
+        : localStorage.getItem(WORKSPACE_AGENT_READ_ACCESS_STORAGE_KEY))
     if (!raw?.trim()) return null
     return JSON.parse(raw) as unknown
   } catch {
@@ -896,10 +985,11 @@ function getStoredWorkspaceAgentReadAccessRaw(): unknown {
 
 function setStoredWorkspaceAgentReadAccess(
   config: WorkspaceAgentReadAccessConfig,
+  workspaceType: BookType = 'short',
 ): void {
   try {
     localStorage.setItem(
-      WORKSPACE_AGENT_READ_ACCESS_STORAGE_KEY,
+      workspaceAgentReadAccessStorageKey(workspaceType),
       JSON.stringify(config),
     )
   } catch {
@@ -908,16 +998,22 @@ function setStoredWorkspaceAgentReadAccess(
 }
 
 /** 读取全局创作空间智能体可读配置；桌面端以 preferences.json 为准。 */
-export async function getWorkspaceAgentReadAccess(): Promise<WorkspaceAgentReadAccessConfig> {
+export async function getWorkspaceAgentReadAccess(
+  workspaceType: BookType = 'short',
+): Promise<WorkspaceAgentReadAccessConfig> {
   const api = await getBridgeApi()
   if (api?.get_workspace_agent_read_access) {
     try {
-      const fromDisk = await api.get_workspace_agent_read_access()
-      const normalized = normalizeWorkspaceAgentReadAccess(fromDisk)
-      setStoredWorkspaceAgentReadAccess(normalized)
+      const fromDisk = await api.get_workspace_agent_read_access(workspaceType)
+      const normalized =
+        workspaceType === 'script'
+          ? normalizeScriptWorkspaceAgentReadAccess(fromDisk)
+          : normalizeWorkspaceAgentReadAccess(fromDisk)
+      setStoredWorkspaceAgentReadAccess(normalized, workspaceType)
       try {
         await api.set_workspace_agent_read_access(
           normalized as unknown as Record<string, unknown>,
+          workspaceType,
         )
       } catch {
         /* 读取结果仍可使用；保存失败由后续设置修改重试 */
@@ -927,23 +1023,29 @@ export async function getWorkspaceAgentReadAccess(): Promise<WorkspaceAgentReadA
       /* fall through */
     }
   }
-  const normalized = normalizeWorkspaceAgentReadAccess(
-    getStoredWorkspaceAgentReadAccessRaw(),
-  )
-  setStoredWorkspaceAgentReadAccess(normalized)
+  const normalized =
+    workspaceType === 'script'
+      ? normalizeScriptWorkspaceAgentReadAccess(getStoredWorkspaceAgentReadAccessRaw(workspaceType))
+      : normalizeWorkspaceAgentReadAccess(getStoredWorkspaceAgentReadAccessRaw(workspaceType))
+  setStoredWorkspaceAgentReadAccess(normalized, workspaceType)
   return normalized
 }
 
 /** 保存全局创作空间智能体可读配置，同步 localStorage 与桌面 preferences。 */
 export async function saveWorkspaceAgentReadAccess(
   config: WorkspaceAgentReadAccessConfig,
+  workspaceType: BookType = 'short',
 ): Promise<WorkspaceAgentReadAccessConfig> {
-  const normalized = normalizeWorkspaceAgentReadAccess(config)
-  setStoredWorkspaceAgentReadAccess(normalized)
+  const normalized =
+    workspaceType === 'script'
+      ? normalizeScriptWorkspaceAgentReadAccess(config)
+      : normalizeWorkspaceAgentReadAccess(config)
+  setStoredWorkspaceAgentReadAccess(normalized, workspaceType)
   const api = await getBridgeApi()
   if (api?.set_workspace_agent_read_access) {
     await api.set_workspace_agent_read_access(
       normalized as unknown as Record<string, unknown>,
+      workspaceType,
     )
   }
   return normalized
@@ -1145,8 +1247,23 @@ export function normalizeBookStatus(raw: unknown): BookStatus {
   return raw === 'completed' ? 'completed' : 'editing'
 }
 
+export function normalizeBookType(raw: unknown): BookType {
+  if (raw === 'short' || raw === 'long' || raw === 'script') return raw
+  return 'short'
+}
+
+export function normalizeMaterialType(raw: unknown): MaterialType {
+  if (raw === 'short' || raw === 'long' || raw === 'script') return raw
+  return 'short'
+}
+
+export function normalizeSkillType(raw: unknown): SkillType {
+  if (raw === 'short' || raw === 'long' || raw === 'script') return raw
+  return 'short'
+}
+
 function normalizeBookSummary(raw: Partial<BookSummary> & { id: string }): BookSummary {
-  const book_type: BookType = raw.book_type === 'short' ? 'short' : 'long'
+  const book_type = normalizeBookType(raw.book_type)
   return {
     id: raw.id,
     title: typeof raw.title === 'string' ? raw.title : '未命名',
@@ -1173,6 +1290,29 @@ function normalizeBook(raw: Partial<Book> & { id: string }): Book {
   }
 }
 
+function normalizeMaterialSummary(
+  raw: Partial<MaterialSummary> & { id: string },
+): MaterialSummary {
+  return {
+    id: raw.id,
+    title: typeof raw.title === 'string' ? raw.title : '未命名素材',
+    material_type: normalizeMaterialType(raw.material_type),
+    parent_genre: typeof raw.parent_genre === 'string' ? raw.parent_genre : '',
+    sub_genre: typeof raw.sub_genre === 'string' ? raw.sub_genre : '',
+    output_dir: typeof raw.output_dir === 'string' ? raw.output_dir : undefined,
+  }
+}
+
+function normalizeMaterial(raw: Partial<Material> & { id: string }): Material {
+  const summary = normalizeMaterialSummary(raw)
+  return {
+    ...summary,
+    stages: normalizeMaterialStages(raw.stages),
+    created_at: typeof raw.created_at === 'string' ? raw.created_at : undefined,
+    updated_at: typeof raw.updated_at === 'string' ? raw.updated_at : undefined,
+  }
+}
+
 function normalizeSkillSummary(raw: Partial<SkillSummary> & { id: string }): SkillSummary {
   const stage_counts: Partial<Record<SkillStageId, number>> = {}
   if (raw.stage_counts && typeof raw.stage_counts === 'object') {
@@ -1188,6 +1328,7 @@ function normalizeSkillSummary(raw: Partial<SkillSummary> & { id: string }): Ski
   return {
     id: raw.id,
     title: typeof raw.title === 'string' ? raw.title : '未命名技能',
+    skill_type: normalizeSkillType(raw.skill_type),
     stage_counts,
     stage_skill_count,
     output_dir: typeof raw.output_dir === 'string' ? raw.output_dir : undefined,
@@ -1256,7 +1397,7 @@ async function mockCreateBook(
 ): Promise<Book> {
   const map = loadMock()
   const now = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z')
-  const bt: BookType = book_type === 'short' ? 'short' : 'long'
+  const bt = normalizeBookType(book_type)
   const ws = (workspace_root ?? '').trim()
   const safeName = (title.trim() || '未命名').replace(/[<>:"/\\|?*\n\r\t]/g, '_').trim() || '未命名'
   const output_dir =
@@ -1267,13 +1408,15 @@ async function mockCreateBook(
     id: randomId(),
     title: title.trim() || '未命名',
     book_type: bt,
-    categories: bt === 'short' ? [...categories] : [],
+    categories: bt === 'short' || bt === 'script' ? [...categories] : [],
     status: 'editing',
     content: '',
     output_dir,
     linked_material_id: '',
     linked_skill_id:
-      bt === 'short' && linked_skill_id && loadMockSkills().has(linked_skill_id)
+      isWorkspaceBook({ book_type: bt, categories: [] }) &&
+        linked_skill_id &&
+        loadMockSkills().has(linked_skill_id)
         ? linked_skill_id
         : '',
     stages: normalizeAllBookStages({}),
@@ -1331,7 +1474,7 @@ async function mockSaveBook(
     next = {
       ...next,
       linked_skill_id:
-        next.book_type === 'short' && sid && loadMockSkills().has(sid) ? sid : '',
+        isWorkspaceBook(next) && sid && loadMockSkills().has(sid) ? sid : '',
     }
   }
   if (options.expert_draft != null) {
@@ -1360,8 +1503,8 @@ function loadMockMaterials(): Map<string, Material> {
   try {
     const raw = localStorage.getItem(MOCK_MATERIALS_KEY)
     if (!raw) return new Map()
-    const arr = JSON.parse(raw) as Material[]
-    return new Map(arr.map((m) => [m.id, m]))
+    const arr = JSON.parse(raw) as Array<Partial<Material> & { id: string }>
+    return new Map(arr.map((m) => [m.id, normalizeMaterial(m)]))
   } catch {
     return new Map()
   }
@@ -1395,15 +1538,16 @@ async function mockCreateMaterial(
   parent_genre?: string | null,
   sub_genre?: string | null,
 ): Promise<Material> {
+  void sub_genre
   const map = loadMockMaterials()
   const now = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z')
-  const mt: MaterialType = material_type === 'long' ? 'long' : 'short'
+  const mt = normalizeMaterialType(material_type)
   const material: Material = {
     id: randomId(),
     title: title.trim() || '未命名素材',
     material_type: mt,
-    parent_genre: mt === 'short' ? (parent_genre || '') : '',
-    sub_genre: mt === 'short' ? (sub_genre || '') : '',
+    parent_genre: mt === 'short' || mt === 'script' ? (parent_genre || '') : '',
+    sub_genre: '',
     stages: normalizeMaterialStages({}),
     created_at: now,
     updated_at: now,
@@ -1454,7 +1598,10 @@ async function mockDeleteMaterial(material_id: string): Promise<boolean> {
 }
 
 async function mockGetMaterialGenres(): Promise<Record<string, string[]>> {
-  return { ...SHORT_MATERIAL_GENRES }
+  return {
+    short: Object.keys(SHORT_MATERIAL_GENRES),
+    script: Object.keys(SCRIPT_MATERIAL_GENRES),
+  }
 }
 
 // ==================== 技能 Mock 数据 ====================
@@ -1487,6 +1634,7 @@ function seedDefaultMockSkill(): Map<string, Skill> {
     const skill = normalizeSkill({
       id: randomId(),
       title: tpl.title || '参考技能',
+      skill_type: 'short',
       stages: tpl.stages,
       created_at: now,
       updated_at: now,
@@ -1505,9 +1653,10 @@ async function mockListSkills(): Promise<SkillSummary[]> {
   const map = loadMockSkills()
   return [...map.values()]
     .sort((a, b) => (b.updated_at || '').localeCompare(a.updated_at || ''))
-    .map(({ id, title, stages, output_dir }) => ({
+    .map(({ id, title, skill_type, stages, output_dir }) => ({
       id,
       title,
+      skill_type,
       stage_counts: Object.fromEntries(
         SKILL_STAGE_KEYS.map((stageId) => [stageId, stages[stageId]?.length ?? 0]),
       ) as Partial<Record<SkillStageId, number>>,
@@ -1525,12 +1674,14 @@ async function mockGetSkill(skill_id: string): Promise<Skill | null> {
 
 async function mockCreateSkill(
   title: string,
+  skill_type = 'short',
 ): Promise<Skill> {
   const map = loadMockSkills()
   const now = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z')
   const skill: Skill = {
     id: randomId(),
     title: title.trim() || '未命名技能',
+    skill_type: normalizeSkillType(skill_type),
     stages: normalizeSkillStages({}),
     stage_counts: {},
     stage_skill_count: 0,
@@ -1553,6 +1704,9 @@ async function mockSaveSkill(
   let next: Skill = { ...s, updated_at: now }
   if (options?.title != null) {
     next = { ...next, title: options.title.trim() || '未命名技能' }
+  }
+  if (options?.skill_type != null) {
+    next = { ...next, skill_type: normalizeSkillType(options.skill_type) }
   }
   if (options?.stages != null) {
     const stages = normalizeSkillStages(
@@ -1791,13 +1945,19 @@ export async function deleteBook(book_id: string): Promise<boolean> {
 
 export async function listMaterials(): Promise<MaterialSummary[]> {
   const api = await getBridgeApi()
-  if (api?.list_materials) return api.list_materials()
+  if (api?.list_materials) {
+    const list = await api.list_materials()
+    return list.map((item) => normalizeMaterialSummary(item))
+  }
   return mockListMaterials()
 }
 
 export async function getMaterial(material_id: string): Promise<Material | null> {
   const api = await getBridgeApi()
-  if (api?.get_material) return api.get_material(material_id)
+  if (api?.get_material) {
+    const raw = await api.get_material(material_id)
+    return raw ? normalizeMaterial(raw) : null
+  }
   return mockGetMaterial(material_id)
 }
 
@@ -1810,7 +1970,15 @@ export async function createMaterial(
 ): Promise<Material> {
   const api = await getBridgeApi()
   if (api?.create_material) {
-    return api.create_material(title, material_type, parent_genre ?? null, sub_genre ?? null, workspace_root ?? null)
+    return normalizeMaterial(
+      await api.create_material(
+        title,
+        material_type,
+        parent_genre ?? null,
+        sub_genre ?? null,
+        workspace_root ?? null,
+      ),
+    )
   }
   return mockCreateMaterial(title, material_type, parent_genre, sub_genre)
 }
@@ -1827,7 +1995,8 @@ export async function saveMaterial(
   const api = await getBridgeApi()
   const opts = options ?? {}
   if (api?.save_material) {
-    return api.save_material(material_id, opts.stages ?? null, opts.title ?? null)
+    const raw = await api.save_material(material_id, opts.stages ?? null, opts.title ?? null)
+    return raw ? normalizeMaterial(raw) : null
   }
   return mockSaveMaterial(material_id, opts.stages, opts.title)
 }
@@ -1866,19 +2035,21 @@ export async function getSkill(skill_id: string): Promise<Skill | null> {
 
 export async function createSkill(
   title: string,
+  skill_type: SkillType = 'short',
   workspace_root?: string | null,
 ): Promise<Skill> {
   const api = await getBridgeApi()
   if (api?.create_skill) {
     return normalizeSkill(
-      await api.create_skill(title, workspace_root ?? null),
+      await api.create_skill(title, skill_type, workspace_root ?? null),
     )
   }
-  return mockCreateSkill(title)
+  return mockCreateSkill(title, skill_type)
 }
 
 export type SaveSkillOptions = {
   title?: string
+  skill_type?: SkillType | string | null
   stages?: Partial<Record<SkillStageId, SkillStageEntry[]>> | null
 }
 
@@ -1908,6 +2079,7 @@ export async function getMaterialSystemPrompt(
   stageId: MaterialStageId,
   input: {
     materialTitle: string
+    materialTypeKey?: MaterialType
     materialType?: string
     materialGenre?: string
     stageBody: string
@@ -1927,15 +2099,17 @@ export async function getMaterialSystemPrompt(
       JSON.stringify({
         material_title: input.materialTitle,
         book_title: input.materialTitle,
+        material_type_key: input.materialTypeKey ?? 'short',
         material_type: input.materialType ?? '',
         material_genre: input.materialGenre ?? '',
         stage_body: input.stageBody,
         all_stages: stagesObj,
       }),
+      input.materialTypeKey ?? 'short',
     )
   }
 
-  const raw = await readMaterialAgentPromptTemplate()
+  const raw = await readMaterialAgentPromptTemplateForType(input.materialTypeKey ?? 'short')
   return renderPromptFromTemplateRaw(raw, {
     bookTitle: input.materialTitle,
     materialType: input.materialType,
@@ -1948,37 +2122,49 @@ export async function getMaterialSystemPrompt(
 }
 
 export async function readMaterialAgentPromptTemplate(): Promise<string> {
+  return readMaterialAgentPromptTemplateForType('short')
+}
+
+export async function readMaterialAgentPromptTemplateForType(
+  materialType: MaterialType = 'short',
+): Promise<string> {
   const api = await getBridgeApi()
   if (api?.read_material_agent_prompt_template) {
-    const t = await api.read_material_agent_prompt_template()
+    const t = await api.read_material_agent_prompt_template(materialType)
     return t.endsWith('\n') ? t.slice(0, -1) : t
   }
+  const typedKey = localPromptLsKey(`material_${materialType}`, MATERIAL_MANAGER_AGENT_ID)
   try {
-    const ls = localStorage.getItem(
-      localPromptLsKey(MATERIAL_MANAGER_PROMPT_KIND, MATERIAL_MANAGER_AGENT_ID),
-    )
+    const ls =
+      localStorage.getItem(typedKey) ??
+      (materialType === 'short'
+        ? localStorage.getItem(
+            localPromptLsKey(MATERIAL_MANAGER_PROMPT_KIND, MATERIAL_MANAGER_AGENT_ID),
+          )
+        : null)
     if (ls != null && ls.trim() !== '')
       return ls.endsWith('\n') ? ls.slice(0, -1) : ls
   } catch {
     /* ignore */
   }
   return getEmbeddedPromptTemplate(
-    MATERIAL_MANAGER_PROMPT_KIND,
+    `material_${materialType}`,
     MATERIAL_MANAGER_AGENT_ID,
   )
 }
 
 export async function saveMaterialAgentPromptOverride(
   body: string,
+  materialType: MaterialType = 'short',
 ): Promise<void> {
   const api = await getBridgeApi()
   if (api?.save_material_agent_prompt_override) {
-    await api.save_material_agent_prompt_override(body)
+    await api.save_material_agent_prompt_override(body, materialType)
     return
   }
   try {
     localStorage.setItem(
-      localPromptLsKey(MATERIAL_MANAGER_PROMPT_KIND, MATERIAL_MANAGER_AGENT_ID),
+      localPromptLsKey(`material_${materialType}`, MATERIAL_MANAGER_AGENT_ID),
       body,
     )
   } catch {
@@ -1986,13 +2172,15 @@ export async function saveMaterialAgentPromptOverride(
   }
 }
 
-export async function resetMaterialAgentPromptOverride(): Promise<boolean> {
+export async function resetMaterialAgentPromptOverride(
+  materialType: MaterialType = 'short',
+): Promise<boolean> {
   const api = await getBridgeApi()
   if (api?.reset_material_agent_prompt_override) {
-    return api.reset_material_agent_prompt_override()
+    return api.reset_material_agent_prompt_override(materialType)
   }
   try {
-    const k = localPromptLsKey(MATERIAL_MANAGER_PROMPT_KIND, MATERIAL_MANAGER_AGENT_ID)
+    const k = localPromptLsKey(`material_${materialType}`, MATERIAL_MANAGER_AGENT_ID)
     const had = localStorage.getItem(k) != null
     localStorage.removeItem(k)
     return had
@@ -2035,6 +2223,7 @@ export async function getSkillSystemPrompt(
   stageId: SkillStageId,
   input: {
     skillTitle: string
+    skillType?: SkillType
     stageBody: string
     allStages: Partial<Record<SkillStageId, string>>
   },
@@ -2051,15 +2240,18 @@ export async function getSkillSystemPrompt(
       JSON.stringify({
         skill_title: input.skillTitle,
         book_title: input.skillTitle,
+        skill_type: input.skillType ?? 'short',
         stage_body: input.stageBody,
         all_stages: stagesObj,
       }),
+      input.skillType ?? 'short',
     )
   }
 
-  const raw = await readSkillAgentPromptTemplate()
+  const raw = await readSkillAgentPromptTemplateForType(input.skillType ?? 'short')
   return renderPromptFromTemplateRaw(raw, {
     bookTitle: input.skillTitle,
+    skillType: skillTypeLabel(input.skillType ?? 'short'),
     stageBody: input.stageBody,
     allStages: input.allStages,
     promptKind: SKILL_MANAGER_PROMPT_KIND,
@@ -2068,37 +2260,49 @@ export async function getSkillSystemPrompt(
 }
 
 export async function readSkillAgentPromptTemplate(): Promise<string> {
+  return readSkillAgentPromptTemplateForType('short')
+}
+
+export async function readSkillAgentPromptTemplateForType(
+  skillType: SkillType = 'short',
+): Promise<string> {
   const api = await getBridgeApi()
   if (api?.read_skill_agent_prompt_template) {
-    const t = await api.read_skill_agent_prompt_template()
+    const t = await api.read_skill_agent_prompt_template(skillType)
     return t.endsWith('\n') ? t.slice(0, -1) : t
   }
+  const typedKey = localPromptLsKey(`skill_${skillType}`, SKILL_MANAGER_AGENT_ID)
   try {
-    const ls = localStorage.getItem(
-      localPromptLsKey(SKILL_MANAGER_PROMPT_KIND, SKILL_MANAGER_AGENT_ID),
-    )
+    const ls =
+      localStorage.getItem(typedKey) ??
+      (skillType === 'short'
+        ? localStorage.getItem(
+            localPromptLsKey(SKILL_MANAGER_PROMPT_KIND, SKILL_MANAGER_AGENT_ID),
+          )
+        : null)
     if (ls != null && ls.trim() !== '')
       return ls.endsWith('\n') ? ls.slice(0, -1) : ls
   } catch {
     /* ignore */
   }
   return getEmbeddedPromptTemplate(
-    SKILL_MANAGER_PROMPT_KIND,
+    `skill_${skillType}`,
     SKILL_MANAGER_AGENT_ID,
   )
 }
 
 export async function saveSkillAgentPromptOverride(
   body: string,
+  skillType: SkillType = 'short',
 ): Promise<void> {
   const api = await getBridgeApi()
   if (api?.save_skill_agent_prompt_override) {
-    await api.save_skill_agent_prompt_override(body)
+    await api.save_skill_agent_prompt_override(body, skillType)
     return
   }
   try {
     localStorage.setItem(
-      localPromptLsKey(SKILL_MANAGER_PROMPT_KIND, SKILL_MANAGER_AGENT_ID),
+      localPromptLsKey(`skill_${skillType}`, SKILL_MANAGER_AGENT_ID),
       body,
     )
   } catch {
@@ -2106,13 +2310,15 @@ export async function saveSkillAgentPromptOverride(
   }
 }
 
-export async function resetSkillAgentPromptOverride(): Promise<boolean> {
+export async function resetSkillAgentPromptOverride(
+  skillType: SkillType = 'short',
+): Promise<boolean> {
   const api = await getBridgeApi()
   if (api?.reset_skill_agent_prompt_override) {
-    return api.reset_skill_agent_prompt_override()
+    return api.reset_skill_agent_prompt_override(skillType)
   }
   try {
-    const k = localPromptLsKey(SKILL_MANAGER_PROMPT_KIND, SKILL_MANAGER_AGENT_ID)
+    const k = localPromptLsKey(`skill_${skillType}`, SKILL_MANAGER_AGENT_ID)
     const had = localStorage.getItem(k) != null
     localStorage.removeItem(k)
     return had
@@ -2123,10 +2329,12 @@ export async function resetSkillAgentPromptOverride(): Promise<boolean> {
 
 const PROMPT_TEMPLATE_LS_PREFIX = 'write_claw_prompt_template_override:'
 const SHARED_WORKSPACE_PROMPT_KIND = 'shared'
+const SCRIPT_SHARED_WORKSPACE_PROMPT_KIND = 'script_shared'
 const LEGACY_QINGGAN_PROMPT_KIND = 'qinggan'
 const SHARED_PROMPT_LS_MIGRATION_MARKER =
   'write_claw_shared_prompt_migration_from_qinggan_v1'
 const PLOT_PROMPT_LS_MERGE_MARKER = 'write_claw_plot_prompt_merge_v1'
+const SCRIPT_PROMPT_LS_SEED_MARKER = 'write_claw_script_prompt_seed_from_short_v1'
 
 function localPromptLsKey(promptKind: string, stage: string): string {
   return PROMPT_TEMPLATE_LS_PREFIX + `${promptKind}:${stage}`
@@ -2179,42 +2387,77 @@ function ensureLocalPlotPromptMerged(): void {
   }
 }
 
+function ensureLocalScriptPromptSeeded(): void {
+  try {
+    if (localStorage.getItem(SCRIPT_PROMPT_LS_SEED_MARKER)) return
+    ensureLocalSharedPromptMigrated()
+    ensureLocalPlotPromptMerged()
+    for (const agentId of WORKSPACE_AGENT_IDS) {
+      const target = localPromptLsKey(SCRIPT_SHARED_WORKSPACE_PROMPT_KIND, agentId)
+      if (localStorage.getItem(target) != null) continue
+      const shortOverride = localStorage.getItem(
+        localPromptLsKey(SHARED_WORKSPACE_PROMPT_KIND, agentId),
+      )
+      localStorage.setItem(
+        target,
+        shortOverride ?? getEmbeddedPromptTemplate(SHARED_WORKSPACE_PROMPT_KIND, agentId),
+      )
+    }
+    localStorage.setItem(SCRIPT_PROMPT_LS_SEED_MARKER, '1')
+  } catch {
+    /* ignore */
+  }
+}
+
 /** 磁盘 / 嵌入式默认 + （浏览器）localStorage 覆盖；供集中设置页使用。 */
 export async function readWorkspaceAgentPromptTemplate(
   agentId: WorkspaceAgentId,
+  workspaceType: BookType = 'short',
 ): Promise<string> {
   const api = await getBridgeApi()
   if (api?.read_workspace_agent_prompt_template) {
-    const t = await api.read_workspace_agent_prompt_template(agentId)
+    const t = await api.read_workspace_agent_prompt_template(agentId, workspaceType)
     return t.endsWith('\n') ? t.slice(0, -1) : t
   }
   ensureLocalSharedPromptMigrated()
   ensureLocalPlotPromptMerged()
+  if (workspaceType === 'script') ensureLocalScriptPromptSeeded()
   try {
     const ls = localStorage.getItem(
-      localPromptLsKey(SHARED_WORKSPACE_PROMPT_KIND, agentId),
+      localPromptLsKey(
+        workspaceType === 'script' ? SCRIPT_SHARED_WORKSPACE_PROMPT_KIND : SHARED_WORKSPACE_PROMPT_KIND,
+        agentId,
+      ),
     )
     if (ls != null) return ls.endsWith('\n') ? ls.slice(0, -1) : ls
   } catch {
     /* ignore */
   }
-  return getEmbeddedPromptTemplate(SHARED_WORKSPACE_PROMPT_KIND, agentId)
+  return getEmbeddedPromptTemplate(
+    workspaceType === 'script' ? SCRIPT_SHARED_WORKSPACE_PROMPT_KIND : SHARED_WORKSPACE_PROMPT_KIND,
+    agentId,
+  )
 }
 
 export async function saveWorkspaceAgentPromptOverride(
   agentId: WorkspaceAgentId,
   body: string,
+  workspaceType: BookType = 'short',
 ): Promise<void> {
   const api = await getBridgeApi()
   if (api?.save_workspace_agent_prompt_override) {
-    await api.save_workspace_agent_prompt_override(agentId, body)
+    await api.save_workspace_agent_prompt_override(agentId, body, workspaceType)
     return
   }
   ensureLocalSharedPromptMigrated()
   ensureLocalPlotPromptMerged()
+  if (workspaceType === 'script') ensureLocalScriptPromptSeeded()
   try {
     localStorage.setItem(
-      localPromptLsKey(SHARED_WORKSPACE_PROMPT_KIND, agentId),
+      localPromptLsKey(
+        workspaceType === 'script' ? SCRIPT_SHARED_WORKSPACE_PROMPT_KIND : SHARED_WORKSPACE_PROMPT_KIND,
+        agentId,
+      ),
       body,
     )
   } catch {
@@ -2224,15 +2467,20 @@ export async function saveWorkspaceAgentPromptOverride(
 
 export async function resetWorkspaceAgentPromptOverride(
   agentId: WorkspaceAgentId,
+  workspaceType: BookType = 'short',
 ): Promise<boolean> {
   const api = await getBridgeApi()
   if (api?.reset_workspace_agent_prompt_override) {
-    return api.reset_workspace_agent_prompt_override(agentId)
+    return api.reset_workspace_agent_prompt_override(agentId, workspaceType)
   }
   ensureLocalSharedPromptMigrated()
   ensureLocalPlotPromptMerged()
+  if (workspaceType === 'script') ensureLocalScriptPromptSeeded()
   try {
-    const k = localPromptLsKey(SHARED_WORKSPACE_PROMPT_KIND, agentId)
+    const k = localPromptLsKey(
+      workspaceType === 'script' ? SCRIPT_SHARED_WORKSPACE_PROMPT_KIND : SHARED_WORKSPACE_PROMPT_KIND,
+      agentId,
+    )
     const had = localStorage.getItem(k) != null
     localStorage.removeItem(k)
     return had
@@ -2316,6 +2564,7 @@ export async function importLibrary(
 export async function getWorkspaceSystemPrompt(
   stageId: StageId,
   input: {
+    workspaceType?: BookType
     bookTitle: string
     bookGenre: string
     stageBody: string
@@ -2330,16 +2579,19 @@ export async function getWorkspaceSystemPrompt(
   }
 
   const api = await getBridgeApi()
+  const workspaceType = input.workspaceType ?? 'short'
   if (api?.get_workspace_system_prompt) {
     const prompt = await api.get_workspace_system_prompt(
       stageId,
       JSON.stringify({
+        workspace_type: workspaceType,
         book_title: input.bookTitle,
         book_genre: input.bookGenre,
         stage_body: input.stageBody,
         all_stages: stagesObj,
         allowed_workspace_stages: input.allowedWorkspaceStages,
       }),
+      workspaceType,
     )
     return appendLoadableSkillsToPrompt(prompt, input.linkedSkill, stageId)
   }
@@ -2349,7 +2601,7 @@ export async function getWorkspaceSystemPrompt(
     Object.entries(input.allStages).filter(([id]) => allowed.has(id as StageId)),
   ) as Partial<Record<StageId, string>>
   const promptAgentId = resolveWorkspaceAgentIdForStage(stageId)
-  const raw = await readWorkspaceAgentPromptTemplate(promptAgentId)
+  const raw = await readWorkspaceAgentPromptTemplate(promptAgentId, workspaceType)
   const prompt = renderPromptFromTemplateRaw(raw, {
     bookTitle: input.bookTitle,
     bookGenre: input.bookGenre,

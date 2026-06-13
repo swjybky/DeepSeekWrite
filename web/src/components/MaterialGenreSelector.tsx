@@ -1,11 +1,17 @@
-import { useState, useEffect, useMemo } from 'react'
-import { SHORT_MATERIAL_GENRES, getMaterialSubGenres, resolveMaterialParentGenre, type MaterialType } from '../bridge'
+import { useEffect, useMemo, useState } from 'react'
+import {
+  getMaterialParentGenres,
+  materialTypeLabel,
+  resolveMaterialParentGenre,
+  type MaterialType,
+} from '../bridge'
 import './MaterialGenreSelector.css'
 
 export interface MaterialGenreValue {
   materialType: MaterialType
-  parentGenre: string  // 世情/追妻
-  subGenre: string     // 子分类
+  parentGenre: string
+  /** legacy: 旧数据保留字段，新界面不再展示或写入子分类。 */
+  subGenre: string
 }
 
 interface MaterialGenreSelectorProps {
@@ -14,85 +20,64 @@ interface MaterialGenreSelectorProps {
   disabled?: boolean
 }
 
-export function MaterialGenreSelector({ value, onChange, disabled }: MaterialGenreSelectorProps) {
+const MATERIAL_TYPES: MaterialType[] = ['short', 'long', 'script']
+
+export function MaterialGenreSelector({
+  value,
+  onChange,
+  disabled,
+}: MaterialGenreSelectorProps) {
   const [isExpanded, setIsExpanded] = useState(false)
+  const parentGenres = useMemo(
+    () => getMaterialParentGenres(value.materialType),
+    [value.materialType],
+  )
 
-  // 获取可用的大分类列表
-  const parentGenres = useMemo(() => Object.keys(SHORT_MATERIAL_GENRES), [])
-
-  // 自动将旧分类名称映射为新名称
   useEffect(() => {
-    const resolved = resolveMaterialParentGenre(value.parentGenre)
-    if (resolved !== value.parentGenre) {
-      onChange({ ...value, parentGenre: resolved, subGenre: getMaterialSubGenres(resolved)[0] || '' })
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [value.parentGenre])
-
-  // 获取当前大分类下的子分类（兼容旧名称）
-  const subGenres = useMemo(() => {
-    if (!value.parentGenre) return []
-    return getMaterialSubGenres(value.parentGenre)
-  }, [value.parentGenre])
-
-  // 当大分类改变时，如果当前子分类不在新列表中，重置子分类
-  useEffect(() => {
-    if (value.parentGenre && subGenres.length > 0 && !subGenres.includes(value.subGenre)) {
-      onChange({ ...value, subGenre: subGenres[0] || '' })
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [value.parentGenre, subGenres, value.subGenre, onChange])
-
-  // 获取显示文本
-  const displayText = useMemo(() => {
     if (value.materialType === 'long') {
-      return '长篇素材'
+      if (value.parentGenre || value.subGenre) {
+        onChange({ ...value, parentGenre: '', subGenre: '' })
+      }
+      return
     }
+
+    const resolved = resolveMaterialParentGenre(value.parentGenre)
+    const nextParent = parentGenres.includes(resolved)
+      ? resolved
+      : parentGenres[0] || ''
+    if (nextParent !== value.parentGenre || value.subGenre) {
+      onChange({ ...value, parentGenre: nextParent, subGenre: '' })
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [parentGenres, value.materialType, value.parentGenre, value.subGenre])
+
+  const displayText = useMemo(() => {
+    const typeText = materialTypeLabel(value.materialType)
+    if (value.materialType === 'long') return typeText
     const parent = resolveMaterialParentGenre(value.parentGenre)
-    if (parent && value.subGenre) {
-      return `${parent} · ${value.subGenre}`
-    }
-    if (parent) {
-      return parent
-    }
-    return '短篇素材'
+    return parent ? `${typeText} · ${parent}` : typeText
   }, [value])
 
-  // 选择素材类型（长篇/短篇）
   const handleTypeChange = (type: MaterialType) => {
+    const nextParents = getMaterialParentGenres(type)
     onChange({
       materialType: type,
-      parentGenre: type === 'short' ? parentGenres[0] || '' : '',
-      subGenre: type === 'short' ? (getMaterialSubGenres(parentGenres[0])?.[0] || '') : '',
+      parentGenre: nextParents[0] || '',
+      subGenre: '',
     })
-    if (type === 'long') {
-      setIsExpanded(false)
-    }
+    if (type === 'long') setIsExpanded(false)
   }
 
-  // 选择大分类
   const handleParentGenreChange = (genre: string) => {
-    const newSubGenres = getMaterialSubGenres(genre)
     onChange({
       ...value,
-      materialType: 'short',
       parentGenre: genre,
-      subGenre: newSubGenres[0] || '',
-    })
-  }
-
-  // 选择子分类
-  const handleSubGenreChange = (subGenre: string) => {
-    onChange({
-      ...value,
-      materialType: 'short',
-      subGenre,
+      subGenre: '',
     })
   }
 
   return (
     <div className={`material-genre-selector ${isExpanded ? 'expanded' : ''}`}>
-      {/* 主选择器按钮 */}
       <button
         type="button"
         className="genre-selector-trigger"
@@ -103,72 +88,42 @@ export function MaterialGenreSelector({ value, onChange, disabled }: MaterialGen
         <span className={`genre-arrow ${isExpanded ? 'up' : 'down'}`}>▼</span>
       </button>
 
-      {/* 展开的分类选择面板 */}
       {isExpanded && (
         <div className="genre-selector-panel">
-          {/* 素材类型选择 */}
           <div className="genre-type-section">
             <label className="genre-section-label">素材类型</label>
             <div className="genre-type-options">
-              <button
-                type="button"
-                className={`genre-type-btn ${value.materialType === 'long' ? 'active' : ''}`}
-                onClick={() => handleTypeChange('long')}
-              >
-                长篇
-              </button>
-              <button
-                type="button"
-                className={`genre-type-btn ${value.materialType === 'short' ? 'active' : ''}`}
-                onClick={() => handleTypeChange('short')}
-              >
-                短篇
-              </button>
+              {MATERIAL_TYPES.map((type) => (
+                <button
+                  key={type}
+                  type="button"
+                  className={`genre-type-btn ${value.materialType === type ? 'active' : ''}`}
+                  onClick={() => handleTypeChange(type)}
+                >
+                  {materialTypeLabel(type)}
+                </button>
+              ))}
             </div>
           </div>
 
-          {/* 短篇分类选择 */}
-          {value.materialType === 'short' && (
-            <>
-              {/* 大分类 */}
-              <div className="genre-parent-section">
-                <label className="genre-section-label">分类</label>
-                <div className="genre-parent-options">
-                  {parentGenres.map((genre) => (
-                    <button
-                      key={genre}
-                      type="button"
-                      className={`genre-parent-btn ${value.parentGenre === genre ? 'active' : ''}`}
-                      onClick={() => handleParentGenreChange(genre)}
-                    >
-                      {genre}
-                    </button>
-                  ))}
-                </div>
+          {parentGenres.length > 0 && (
+            <div className="genre-parent-section">
+              <label className="genre-section-label">分类</label>
+              <div className="genre-parent-options">
+                {parentGenres.map((genre) => (
+                  <button
+                    key={genre}
+                    type="button"
+                    className={`genre-parent-btn ${value.parentGenre === genre ? 'active' : ''}`}
+                    onClick={() => handleParentGenreChange(genre)}
+                  >
+                    {genre}
+                  </button>
+                ))}
               </div>
-
-              {/* 子分类 */}
-              {subGenres.length > 0 && (
-                <div className="genre-sub-section">
-                  <label className="genre-section-label">子分类</label>
-                  <div className="genre-sub-options">
-                    {subGenres.map((subGenre) => (
-                      <button
-                        key={subGenre}
-                        type="button"
-                        className={`genre-sub-btn ${value.subGenre === subGenre ? 'active' : ''}`}
-                        onClick={() => handleSubGenreChange(subGenre)}
-                      >
-                        {subGenre}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </>
+            </div>
           )}
 
-          {/* 关闭按钮 */}
           <div className="genre-selector-actions">
             <button
               type="button"
@@ -184,10 +139,10 @@ export function MaterialGenreSelector({ value, onChange, disabled }: MaterialGen
   )
 }
 
-// 分类筛选器组件（用于素材库筛选）
 export interface MaterialFilterValue {
   materialType: MaterialType | 'all'
   parentGenre: string | 'all'
+  /** legacy: 旧筛选值兼容，不再展示子分类筛选。 */
   subGenre: string | 'all'
 }
 
@@ -196,26 +151,29 @@ interface MaterialFilterProps {
   onChange: (value: MaterialFilterValue) => void
 }
 
-export function MaterialFilter({ value, onChange }: MaterialFilterProps) {
-  const parentGenres = useMemo(() => Object.keys(SHORT_MATERIAL_GENRES), [])
+function filterParentGenres(type: MaterialType | 'all'): string[] {
+  if (type === 'long') return []
+  if (type === 'short' || type === 'script') return getMaterialParentGenres(type)
+  return [...new Set([
+    ...getMaterialParentGenres('short'),
+    ...getMaterialParentGenres('script'),
+  ])]
+}
 
-  // 获取子分类
-  const subGenres = useMemo(() => {
-    if (value.parentGenre === 'all') {
-      return Object.values(SHORT_MATERIAL_GENRES).flat()
-    }
-    return getMaterialSubGenres(value.parentGenre)
-  }, [value.parentGenre])
+export function MaterialFilter({ value, onChange }: MaterialFilterProps) {
+  const parentGenres = useMemo(
+    () => filterParentGenres(value.materialType),
+    [value.materialType],
+  )
 
   return (
     <div className="material-filter">
-      {/* 类型筛选 */}
       <div className="filter-group">
         <select
           value={value.materialType}
-          onChange={(e) =>
+          onChange={(event) =>
             onChange({
-              materialType: e.target.value as MaterialType | 'all',
+              materialType: event.target.value as MaterialType | 'all',
               parentGenre: 'all',
               subGenre: 'all',
             })
@@ -223,51 +181,35 @@ export function MaterialFilter({ value, onChange }: MaterialFilterProps) {
           className="filter-select"
         >
           <option value="all">全部类型</option>
-          <option value="long">长篇</option>
-          <option value="short">短篇</option>
+          {MATERIAL_TYPES.map((type) => (
+            <option key={type} value={type}>
+              {materialTypeLabel(type)}
+            </option>
+          ))}
         </select>
       </div>
 
-      {/* 分类筛选 */}
-      {(value.materialType === 'short' || value.materialType === 'all') && (
-        <>
-          <div className="filter-group">
-            <select
-              value={value.parentGenre}
-              onChange={(e) =>
-                onChange({
-                  ...value,
-                  parentGenre: e.target.value,
-                  subGenre: 'all',
-                })
-              }
-              className="filter-select"
-            >
-              <option value="all">全部分类</option>
-              {parentGenres.map((g) => (
-                <option key={g} value={g}>
-                  {g}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div className="filter-group">
-            <select
-              value={value.subGenre}
-              onChange={(e) => onChange({ ...value, subGenre: e.target.value })}
-              className="filter-select"
-              disabled={value.parentGenre === 'all'}
-            >
-              <option value="all">全部子分类</option>
-              {subGenres.map((g) => (
-                <option key={g} value={g}>
-                  {g}
-                </option>
-              ))}
-            </select>
-          </div>
-        </>
+      {parentGenres.length > 0 && (
+        <div className="filter-group">
+          <select
+            value={value.parentGenre}
+            onChange={(event) =>
+              onChange({
+                ...value,
+                parentGenre: event.target.value,
+                subGenre: 'all',
+              })
+            }
+            className="filter-select"
+          >
+            <option value="all">全部分类</option>
+            {parentGenres.map((genre) => (
+              <option key={genre} value={genre}>
+                {genre}
+              </option>
+            ))}
+          </select>
+        </div>
       )}
     </div>
   )

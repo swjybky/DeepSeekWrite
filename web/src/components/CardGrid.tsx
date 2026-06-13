@@ -1,5 +1,12 @@
 import { Link } from 'react-router-dom'
-import type { BookSummary, MaterialSummary, SkillSummary } from '../bridge'
+import {
+  bookTypeLabel,
+  materialTypeLabel,
+  skillTypeLabel,
+  type BookSummary,
+  type MaterialSummary,
+  type SkillSummary,
+} from '../bridge'
 import defaultMaterialCover from '../assets/default-material-cover.png'
 import defaultSkillCover from '../assets/default-skill-cover.png'
 import './CardGrid.css'
@@ -56,19 +63,28 @@ export function CardGrid({ items, emptyText = '暂无项目', onDelete, deleting
                 <h3 className="card-title">{item.title || '未命名'}</h3>
                 <div className="card-meta">
                   {item.type === 'book' ? (
-                    <span className="card-type">
-                      {item.subtype === 'short' ? '短篇' : '长篇'}
+                    <span className="card-type" title={[
+                      item.meta,
+                      item.genre,
+                    ].filter(Boolean).join(' · ')}>
+                      {item.meta}
                       {item.genre && ` · ${item.genre}`}
                     </span>
                   ) : item.type === 'skill' ? (
-                    <span className="card-type">
+                    <span className="card-type" title={[
+                      '技能库',
+                      item.meta,
+                    ].filter(Boolean).join(' · ')}>
                       技能库
                       {item.meta && ` · ${item.meta}`}
                     </span>
                   ) : (
-                    <span className="card-type">
-                      {item.subtype === 'short' ? '短篇素材' : '长篇素材'}
-                      {item.genre && item.subGenre && ` · ${item.genre}`}
+                    <span className="card-type" title={[
+                      item.meta,
+                      item.genre,
+                    ].filter(Boolean).join(' · ')}>
+                      {item.meta}
+                      {item.genre && ` · ${item.genre}`}
                     </span>
                   )}
                 </div>
@@ -124,6 +140,7 @@ export function bookToCardItem(book: BookSummary, coverData?: string): CardItem 
     title: book.title,
     type: 'book',
     subtype: book.book_type,
+    meta: bookTypeLabel(book.book_type),
     genre: book.categories?.[0],
     outputDir: book.output_dir,
     coverData,
@@ -139,8 +156,8 @@ export function materialToCardItem(material: MaterialSummary): CardItem {
     title: material.title,
     type: 'material',
     subtype: material.material_type,
+    meta: materialTypeLabel(material.material_type),
     genre: material.parent_genre,
-    subGenre: material.sub_genre,
     outputDir: material.output_dir,
     to: `/material/${material.id}`,
   }
@@ -154,8 +171,8 @@ export function skillToCardItem(skill: SkillSummary): CardItem {
     id: skill.id,
     title: skill.title,
     type: 'skill',
-    subtype: 'short',
-    meta: count > 0 ? `${count} 个阶段技能` : '暂无阶段技能',
+    subtype: skill.skill_type,
+    meta: `${skillTypeLabel(skill.skill_type)} · ${count > 0 ? `${count} 个阶段技能` : '暂无阶段技能'}`,
     outputDir: skill.output_dir,
     to: `/skill/${skill.id}`,
   }

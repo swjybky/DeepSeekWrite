@@ -144,6 +144,8 @@
   display: flex;
   flex-direction: column;
   gap: 0.35rem;
+  min-width: 0;
+  overflow: hidden;
 }
 
 .library-card .card-content {
@@ -196,8 +198,11 @@
 /* 元信息区域 */
 .card-meta {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: 0.3rem;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
 }
 
 .card-type {
@@ -208,6 +213,11 @@
   border-radius: 2px;
   white-space: nowrap;
   border: 1px solid rgba(139, 125, 107, 0.08);
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: block;
+  box-sizing: border-box;
 }
 
 .library-card .card-type {

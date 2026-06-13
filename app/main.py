@@ -163,10 +163,12 @@ from app.storage import (
     read_image_model_config,
     read_saved_workspace_root,
     read_workspace_agent_read_access,
+    read_workspace_agent_read_access_for_type,
     write_appearance_style,
     write_ai_model_config,
     write_saved_workspace_root,
     write_workspace_agent_read_access,
+    write_workspace_agent_read_access_for_type,
 )
 
 
@@ -398,9 +400,9 @@ class Api:
 
         Args:
             title: 素材标题
-            material_type: 素材类型，'long' 或 'short'
-            parent_genre: 父分类，短篇时为 '世情' 或 '追妻'
-            sub_genre: 子分类，如 '家庭'、'甜宠' 等
+            material_type: 素材类型，'short'、'long' 或 'script'
+            parent_genre: 父分类，短篇/剧本时为一级分类
+            sub_genre: legacy 子分类字段；新建素材不再写入
             workspace_root: 工作区根目录
         """
         return self._store.create_material(
@@ -428,8 +430,11 @@ class Api:
 
     def get_material_genres(self) -> dict[str, list[str]]:
         """获取素材分类结构"""
-        from app.models import SHORT_MATERIAL_GENRES
-        return SHORT_MATERIAL_GENRES
+        from app.models import SCRIPT_MATERIAL_GENRES, SHORT_MATERIAL_GENRES
+        return {
+            "short": list(SHORT_MATERIAL_GENRES.keys()),
+            "script": list(SCRIPT_MATERIAL_GENRES.keys()),
+        }
 
     # ==================== 技能库 API ====================
 
@@ -444,10 +449,14 @@ class Api:
     def create_skill(
         self,
         title: str,
+        skill_type: str = "short",
         workspace_root: str | None = None,
     ) -> dict:
         """创建新技能集合"""
-        return self._store.create_skill(title, workspace_root)
+        if workspace_root is None and str(skill_type or "").strip() not in {"short", "long", "script"}:
+            workspace_root = skill_type
+            skill_type = "short"
+        return self._store.create_skill(title, skill_type, workspace_root)
 
     def save_skill(
         self,
@@ -459,6 +468,7 @@ class Api:
         return self._store.save_skill(
             skill_id,
             title=data.get("title") if "title" in data else None,
+            skill_type=data.get("skill_type") if "skill_type" in data else None,
             stages=data.get("stages") if "stages" in data else None,
         )
 
@@ -478,13 +488,22 @@ class Api:
     def set_appearance_style(self, style: str) -> str:
         return write_appearance_style(style)
 
-    def get_workspace_agent_read_access(self) -> dict[str, object]:
+    def get_workspace_agent_read_access(self, workspace_type: str | None = None) -> dict[str, object]:
         """全局创作空间智能体可读的 workspace/material 阶段列表。"""
+        if workspace_type:
+            return read_workspace_agent_read_access_for_type(workspace_type)
         return read_workspace_agent_read_access()
 
-    def set_workspace_agent_read_access(self, config: dict[str, object]) -> None:
+    def set_workspace_agent_read_access(
+        self,
+        config: dict[str, object],
+        workspace_type: str | None = None,
+    ) -> None:
         if not isinstance(config, dict):
             raise ValueError("workspace_agent_read_access 须为对象")
+        if workspace_type:
+            write_workspace_agent_read_access_for_type(workspace_type, config)
+            return
         write_workspace_agent_read_access(config)
 
     def get_ai_model_config(self) -> dict[str, object]:
@@ -505,17 +524,31 @@ class Api:
         self,
         stage_id: str,
         context_json: str,
+        workspace_type: str | None = None,
     ) -> str:
-        return render_from_api_context(stage_id, context_json)
+        return render_from_api_context(stage_id, context_json, workspace_type)
 
-    def read_workspace_agent_prompt_template(self, agent_id: str) -> str:
-        return read_raw_workspace_agent_prompt_for_editor(agent_id)
+    def read_workspace_agent_prompt_template(
+        self,
+        agent_id: str,
+        workspace_type: str | None = None,
+    ) -> str:
+        return read_raw_workspace_agent_prompt_for_editor(agent_id, workspace_type)
 
-    def save_workspace_agent_prompt_override(self, agent_id: str, body: str) -> None:
-        _save_workspace_agent_prompt_override(agent_id, body)
+    def save_workspace_agent_prompt_override(
+        self,
+        agent_id: str,
+        body: str,
+        workspace_type: str | None = None,
+    ) -> None:
+        _save_workspace_agent_prompt_override(agent_id, body, workspace_type)
 
-    def reset_workspace_agent_prompt_override(self, agent_id: str) -> bool:
-        return _reset_workspace_agent_prompt_override(agent_id)
+    def reset_workspace_agent_prompt_override(
+        self,
+        agent_id: str,
+        workspace_type: str | None = None,
+    ) -> bool:
+        return _reset_workspace_agent_prompt_override(agent_id, workspace_type)
 
     # ==================== 素材库提示词 API ====================
 
@@ -524,32 +557,49 @@ class Api:
         material_kind: str,
         stage_id: str,
         context_json: str,
+        material_type: str | None = None,
     ) -> str:
+        if material_type:
+            try:
+                ctx = json.loads(context_json) if isinstance(context_json, str) else dict(context_json)
+            except Exception:
+                ctx = {}
+            if isinstance(ctx, dict):
+                ctx["material_type_key"] = material_type
+                context_json = json.dumps(ctx, ensure_ascii=False)
         return render_material_from_api_context(material_kind, stage_id, context_json)
 
     def read_material_prompt_template(
-        self, material_kind: str, stage_id: str
+        self, material_kind: str, stage_id: str, material_type: str | None = None
     ) -> str:
-        return read_raw_material_prompt_for_editor(material_kind, stage_id)
+        return read_raw_material_prompt_for_editor(material_kind, stage_id, material_type)
 
     def save_material_prompt_override(
-        self, material_kind: str, stage_id: str, body: str
+        self,
+        material_kind: str,
+        stage_id: str,
+        body: str,
+        material_type: str | None = None,
     ) -> None:
-        _save_material_prompt_override(material_kind, stage_id, body)
+        _save_material_prompt_override(material_kind, stage_id, body, material_type)
 
     def reset_material_prompt_override(
-        self, material_kind: str, stage_id: str
+        self, material_kind: str, stage_id: str, material_type: str | None = None
     ) -> bool:
-        return _reset_material_prompt_override(material_kind, stage_id)
+        return _reset_material_prompt_override(material_kind, stage_id, material_type)
 
-    def read_material_agent_prompt_template(self) -> str:
-        return read_raw_material_agent_prompt_for_editor()
+    def read_material_agent_prompt_template(self, material_type: str | None = None) -> str:
+        return read_raw_material_agent_prompt_for_editor(material_type)
 
-    def save_material_agent_prompt_override(self, body: str) -> None:
-        _save_material_agent_prompt_override(body)
+    def save_material_agent_prompt_override(
+        self,
+        body: str,
+        material_type: str | None = None,
+    ) -> None:
+        _save_material_agent_prompt_override(body, material_type)
 
-    def reset_material_agent_prompt_override(self) -> bool:
-        return _reset_material_agent_prompt_override()
+    def reset_material_agent_prompt_override(self, material_type: str | None = None) -> bool:
+        return _reset_material_agent_prompt_override(material_type)
 
     # ==================== 技能库提示词 API ====================
 
@@ -557,17 +607,30 @@ class Api:
         self,
         stage_id: str,
         context_json: str,
+        skill_type: str | None = None,
     ) -> str:
+        if skill_type:
+            try:
+                ctx = json.loads(context_json) if isinstance(context_json, str) else dict(context_json)
+            except Exception:
+                ctx = {}
+            if isinstance(ctx, dict):
+                ctx["skill_type"] = skill_type
+                context_json = json.dumps(ctx, ensure_ascii=False)
         return render_skill_from_api_context(stage_id, context_json)
 
-    def read_skill_agent_prompt_template(self) -> str:
-        return read_raw_skill_agent_prompt_for_editor()
+    def read_skill_agent_prompt_template(self, skill_type: str | None = None) -> str:
+        return read_raw_skill_agent_prompt_for_editor(skill_type)
 
-    def save_skill_agent_prompt_override(self, body: str) -> None:
-        _save_skill_agent_prompt_override(body)
+    def save_skill_agent_prompt_override(
+        self,
+        body: str,
+        skill_type: str | None = None,
+    ) -> None:
+        _save_skill_agent_prompt_override(body, skill_type)
 
-    def reset_skill_agent_prompt_override(self) -> bool:
-        return _reset_skill_agent_prompt_override()
+    def reset_skill_agent_prompt_override(self, skill_type: str | None = None) -> bool:
+        return _reset_skill_agent_prompt_override(skill_type)
 
     def get_book_cover(self, book_id: str) -> dict:
         """获取书籍封面图片（base64）。
@@ -743,7 +806,8 @@ class Api:
 
                 elif actual_type == "skill":
                     title = data.get("title", "导入技能")
-                    created = self._store.create_skill(title, ws or None)
+                    skill_type = data.get("skill_type", "short")
+                    created = self._store.create_skill(title, skill_type, ws or None)
                     stages = data.get("stages")
                     if stages:
                         self._store.save_skill(created["id"], stages=stages)

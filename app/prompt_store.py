@@ -11,10 +11,12 @@ from app.runtime_paths import bundle_root, data_root
 # --- 创作空间共享提示词管线，与工作台 TS 对齐 ---
 
 SHORT_PREFIX = Path("short")
+SCRIPT_PREFIX = Path("script")
 SHARED_WORKSPACE_PROMPT_DIR = "shared"
 LEGACY_QINGGAN_PROMPT_DIR = "qinggan"
 SHARED_PROMPT_MIGRATION_MARKER = ".shared_prompt_migration_from_qinggan_v1"
 PLOT_PROMPT_MERGE_MARKER = ".plot_prompt_merge_v1"
+SCRIPT_PROMPT_SEED_MARKER = ".script_prompt_seed_from_short_v1"
 
 SHORT_STAGES_ORDER: tuple[str, ...] = (
     "character_design",
@@ -48,7 +50,7 @@ _MATERIAL_PLACEHOLDER_RE = re.compile(
     r"\{\{(BOOK_TITLE|BOOK_LINE|MATERIAL_TITLE|MATERIAL_LINE|MATERIAL_TYPE|MATERIAL_GENRE|STAGE_ID|STAGE_LABEL|STAGE_BODY|OTHER_STAGES_EXCERPT)\}\}"
 )
 _SKILL_PLACEHOLDER_RE = re.compile(
-    r"\{\{(BOOK_TITLE|BOOK_LINE|SKILL_TITLE|SKILL_LINE|STAGE_ID|STAGE_LABEL|STAGE_BODY|OTHER_STAGES_EXCERPT)\}\}"
+    r"\{\{(BOOK_TITLE|BOOK_LINE|SKILL_TITLE|SKILL_LINE|SKILL_TYPE|STAGE_ID|STAGE_LABEL|STAGE_BODY|OTHER_STAGES_EXCERPT)\}\}"
 )
 
 
@@ -67,26 +69,40 @@ def validate_workspace_stage_id(stage_id: str) -> None:
         raise ValueError(f"未知的 stage_id: {stage_id!r}")
 
 
-def _workspace_override_root() -> Path:
-    return data_root() / "prompt_overrides" / SHORT_PREFIX
+def normalize_workspace_prompt_type(raw: str | None = None) -> str:
+    return "script" if str(raw or "").strip() == "script" else "short"
 
 
-def workspace_agent_override_absolute_path(agent_id: str) -> Path:
+def _workspace_prefix(workspace_type: str | None = None) -> Path:
+    return SCRIPT_PREFIX if normalize_workspace_prompt_type(workspace_type) == "script" else SHORT_PREFIX
+
+
+def _workspace_override_root(workspace_type: str | None = None) -> Path:
+    return data_root() / "prompt_overrides" / _workspace_prefix(workspace_type)
+
+
+def workspace_agent_override_absolute_path(
+    agent_id: str,
+    workspace_type: str | None = None,
+) -> Path:
     validate_workspace_agent_id(agent_id)
     return (
-        _workspace_override_root()
+        _workspace_override_root(workspace_type)
         / SHARED_WORKSPACE_PROMPT_DIR
         / f"{agent_id}.txt"
     ).resolve()
 
 
-def workspace_agent_builtin_default_path(agent_id: str) -> Path:
+def workspace_agent_builtin_default_path(
+    agent_id: str,
+    workspace_type: str | None = None,
+) -> Path:
     validate_workspace_agent_id(agent_id)
     return (
         bundle_root()
         / "app"
         / "prompt_defaults"
-        / SHORT_PREFIX
+        / _workspace_prefix(workspace_type)
         / SHARED_WORKSPACE_PROMPT_DIR
         / f"{agent_id}.txt"
     )
@@ -94,7 +110,7 @@ def workspace_agent_builtin_default_path(agent_id: str) -> Path:
 
 def _ensure_shared_prompt_override_migrated() -> None:
     """首次使用共享提示词时，将现有追妻覆盖复制到共享目录。"""
-    root = _workspace_override_root()
+    root = _workspace_override_root("short")
     marker = root / SHARED_PROMPT_MIGRATION_MARKER
     if marker.is_file():
         _ensure_plot_prompt_override_merged()
@@ -117,7 +133,7 @@ def _ensure_shared_prompt_override_migrated() -> None:
 
 def _ensure_plot_prompt_override_merged() -> None:
     """将旧剧情设计/导语设计/剧情细化提示词覆盖合并为剧情提示词。"""
-    root = _workspace_override_root()
+    root = _workspace_override_root("short")
     marker = root / PLOT_PROMPT_MERGE_MARKER
     if marker.is_file():
         return
@@ -145,18 +161,51 @@ def _ensure_plot_prompt_override_merged() -> None:
         return
 
 
-def resolve_workspace_agent_read_path(agent_id: str) -> Path:
-    """共享覆盖优先。"""
+def _ensure_script_prompt_overrides_seeded() -> None:
+    """剧本提示词首次使用时，从短篇当前生效提示词复制一份独立覆盖。"""
+    root = _workspace_override_root("script")
+    marker = root / SCRIPT_PROMPT_SEED_MARKER
+    if marker.is_file():
+        return
+    try:
+        shared_root = root / SHARED_WORKSPACE_PROMPT_DIR
+        shared_root.mkdir(parents=True, exist_ok=True)
+        for agent_id in WORKSPACE_AGENT_IDS:
+            target = shared_root / f"{agent_id}.txt"
+            if target.exists():
+                continue
+            body = read_workspace_agent_prompt_template(agent_id, "short")
+            target.write_text(body if body.endswith("\n") else body + "\n", encoding="utf-8")
+        marker.write_text("seeded\n", encoding="utf-8")
+    except OSError:
+        return
+
+
+def _ensure_workspace_prompt_prepared(workspace_type: str | None = None) -> None:
+    if normalize_workspace_prompt_type(workspace_type) == "script":
+        _ensure_script_prompt_overrides_seeded()
+        return
     _ensure_shared_prompt_override_migrated()
     _ensure_plot_prompt_override_merged()
-    over = workspace_agent_override_absolute_path(agent_id)
+
+
+def resolve_workspace_agent_read_path(
+    agent_id: str,
+    workspace_type: str | None = None,
+) -> Path:
+    """共享覆盖优先。"""
+    _ensure_workspace_prompt_prepared(workspace_type)
+    over = workspace_agent_override_absolute_path(agent_id, workspace_type)
     if over.is_file():
         return over
-    return workspace_agent_builtin_default_path(agent_id)
+    return workspace_agent_builtin_default_path(agent_id, workspace_type)
 
 
-def read_workspace_agent_prompt_template(agent_id: str) -> str:
-    path = resolve_workspace_agent_read_path(agent_id)
+def read_workspace_agent_prompt_template(
+    agent_id: str,
+    workspace_type: str | None = None,
+) -> str:
+    path = resolve_workspace_agent_read_path(agent_id, workspace_type)
     if not path.is_file():
         return (
             f"[缺少默认创作空间提示模板文件]\n路径: {path}\n\n"
@@ -166,16 +215,23 @@ def read_workspace_agent_prompt_template(agent_id: str) -> str:
     return text[:-1] if text.endswith("\n") else text
 
 
-def save_workspace_agent_prompt_override(agent_id: str, body: str) -> None:
-    _ensure_shared_prompt_override_migrated()
-    path = workspace_agent_override_absolute_path(agent_id)
+def save_workspace_agent_prompt_override(
+    agent_id: str,
+    body: str,
+    workspace_type: str | None = None,
+) -> None:
+    _ensure_workspace_prompt_prepared(workspace_type)
+    path = workspace_agent_override_absolute_path(agent_id, workspace_type)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(body if body.endswith("\n") else body + "\n", encoding="utf-8")
 
 
-def reset_workspace_agent_prompt_override(agent_id: str) -> bool:
-    _ensure_shared_prompt_override_migrated()
-    path = workspace_agent_override_absolute_path(agent_id)
+def reset_workspace_agent_prompt_override(
+    agent_id: str,
+    workspace_type: str | None = None,
+) -> bool:
+    _ensure_workspace_prompt_prepared(workspace_type)
+    path = workspace_agent_override_absolute_path(agent_id, workspace_type)
     if path.is_file():
         path.unlink()
         return True
@@ -185,6 +241,7 @@ def reset_workspace_agent_prompt_override(agent_id: str) -> bool:
 def render_workspace_system_prompt(
     stage_id: str,
     *,
+    workspace_type: str | None = None,
     book_title: str,
     book_genre: str,
     stage_body: str,
@@ -196,7 +253,7 @@ def render_workspace_system_prompt(
     )
     if template_id in {"intro_design", "plot_refine"}:
         template_id = "plot_design"
-    raw = read_workspace_agent_prompt_template(template_id)
+    raw = read_workspace_agent_prompt_template(template_id, workspace_type)
 
     title = (book_title or "").strip()
     genre = (book_genre or "").strip() or "未分类"
@@ -224,13 +281,19 @@ def parse_context_payload(context_raw: object) -> dict[str, object]:
     raise TypeError("context 须为 dict 或 JSON 字符串")
 
 
-def render_from_api_context(stage_id: str, context_raw: object) -> str:
+def render_from_api_context(
+    stage_id: str,
+    context_raw: object,
+    workspace_type: str | None = None,
+) -> str:
     ctx = parse_context_payload(context_raw)
     title = str(ctx.get("book_title") or "")
     genre = str(ctx.get("book_genre") or "")
+    prompt_type = workspace_type or str(ctx.get("workspace_type") or "")
 
     return render_workspace_system_prompt(
         stage_id,
+        workspace_type=prompt_type,
         book_title=title,
         book_genre=genre,
         stage_body="",
@@ -238,9 +301,12 @@ def render_from_api_context(stage_id: str, context_raw: object) -> str:
     )
 
 
-def read_raw_workspace_agent_prompt_for_editor(agent_id: str) -> str:
+def read_raw_workspace_agent_prompt_for_editor(
+    agent_id: str,
+    workspace_type: str | None = None,
+) -> str:
     """设置页读取当前生效来源（优先共享覆盖）的原始模板正文。"""
-    path = resolve_workspace_agent_read_path(agent_id)
+    path = resolve_workspace_agent_read_path(agent_id, workspace_type)
     if not path.is_file():
         return ""
     text = path.read_text(encoding="utf-8")
@@ -253,6 +319,7 @@ MATERIAL_PREFIX = Path("material")
 MATERIAL_MANAGER_AGENT_ID = "material_manager"
 MATERIAL_MANAGER_PROMPT_KIND = "material_manager"
 SHARED_MATERIAL_PROMPT_DIR = "shared"
+LIBRARY_PROMPT_TYPES: frozenset[str] = frozenset({"short", "long", "script"})
 
 # 素材阶段顺序（人设/导语/梗/剧情细化/剧情设计/正文片段），对齐 app/models.py MATERIAL_STAGE_KEYS
 MATERIAL_STAGES_ORDER: tuple[str, ...] = (
@@ -284,6 +351,26 @@ VALID_MATERIAL_PROMPT_KINDS: frozenset[str] = frozenset(
         "material_short_xuanyi",
     }
 )
+
+
+def normalize_library_prompt_type(raw: str | None = None) -> str:
+    value = str(raw or "").strip()
+    if value in LIBRARY_PROMPT_TYPES:
+        return value
+    if "剧本" in value:
+        return "script"
+    if "长篇" in value:
+        return "long"
+    return "short"
+
+
+def library_prompt_type_label(raw: str | None = None) -> str:
+    normalized = normalize_library_prompt_type(raw)
+    if normalized == "script":
+        return "剧本"
+    if normalized == "long":
+        return "长篇"
+    return "短篇"
 
 
 def _peek_material_other_stages(
@@ -322,16 +409,26 @@ def validate_material_slot(prompt_kind: str, stage_id: str) -> None:
         raise ValueError(f"未知的 material stage_id: {stage_id!r}")
 
 
-def material_agent_override_absolute_path() -> Path:
+def material_agent_override_absolute_path(material_type: str | None = None) -> Path:
     root = data_root() / "prompt_overrides" / MATERIAL_PREFIX
     return (
         root
+        / normalize_library_prompt_type(material_type)
         / SHARED_MATERIAL_PROMPT_DIR
         / f"{MATERIAL_MANAGER_AGENT_ID}.txt"
     ).resolve()
 
 
-def material_agent_builtin_default_path() -> Path:
+def material_agent_builtin_default_path(material_type: str | None = None) -> Path:
+    return (
+        (bundle_root() / "app" / "prompt_defaults" / MATERIAL_PREFIX)
+        / normalize_library_prompt_type(material_type)
+        / SHARED_MATERIAL_PROMPT_DIR
+        / f"{MATERIAL_MANAGER_AGENT_ID}.txt"
+    )
+
+
+def material_agent_legacy_builtin_default_path() -> Path:
     return (
         (bundle_root() / "app" / "prompt_defaults" / MATERIAL_PREFIX)
         / SHARED_MATERIAL_PROMPT_DIR
@@ -339,16 +436,19 @@ def material_agent_builtin_default_path() -> Path:
     )
 
 
-def resolve_material_agent_read_path() -> Path:
+def resolve_material_agent_read_path(material_type: str | None = None) -> Path:
     """覆盖优先。"""
-    over = material_agent_override_absolute_path()
+    over = material_agent_override_absolute_path(material_type)
     if over.is_file():
         return over
-    return material_agent_builtin_default_path()
+    default = material_agent_builtin_default_path(material_type)
+    if default.is_file():
+        return default
+    return material_agent_legacy_builtin_default_path()
 
 
-def read_material_agent_prompt_template() -> str:
-    path = resolve_material_agent_read_path()
+def read_material_agent_prompt_template(material_type: str | None = None) -> str:
+    path = resolve_material_agent_read_path(material_type)
     if not path.is_file():
         return (
             f"[缺少素材默认提示模板文件]\n路径: {path}\n\n"
@@ -360,42 +460,59 @@ def read_material_agent_prompt_template() -> str:
     return text
 
 
-def save_material_agent_prompt_override(body: str) -> None:
-    path = material_agent_override_absolute_path()
+def save_material_agent_prompt_override(
+    body: str,
+    material_type: str | None = None,
+) -> None:
+    path = material_agent_override_absolute_path(material_type)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(body if body.endswith("\n") else body + "\n", encoding="utf-8")
 
 
-def reset_material_agent_prompt_override() -> bool:
-    path = material_agent_override_absolute_path()
+def reset_material_agent_prompt_override(material_type: str | None = None) -> bool:
+    path = material_agent_override_absolute_path(material_type)
     if path.is_file():
         path.unlink()
         return True
     return False
 
 
-def read_material_prompt_template(prompt_kind: str, stage_id: str) -> str:
+def read_material_prompt_template(
+    prompt_kind: str,
+    stage_id: str,
+    material_type: str | None = None,
+) -> str:
     """兼容旧 API：素材库不再按 kind/stage 拆分模板。"""
     validate_material_slot(prompt_kind, stage_id)
-    return read_material_agent_prompt_template()
+    return read_material_agent_prompt_template(material_type)
 
 
-def save_material_prompt_override(prompt_kind: str, stage_id: str, body: str) -> None:
+def save_material_prompt_override(
+    prompt_kind: str,
+    stage_id: str,
+    body: str,
+    material_type: str | None = None,
+) -> None:
     """兼容旧 API：写入唯一的素材库管理智能体模板。"""
     validate_material_slot(prompt_kind, stage_id)
-    save_material_agent_prompt_override(body)
+    save_material_agent_prompt_override(body, material_type)
 
 
-def reset_material_prompt_override(prompt_kind: str, stage_id: str) -> bool:
+def reset_material_prompt_override(
+    prompt_kind: str,
+    stage_id: str,
+    material_type: str | None = None,
+) -> bool:
     """兼容旧 API：重置唯一的素材库管理智能体模板。"""
     validate_material_slot(prompt_kind, stage_id)
-    return reset_material_agent_prompt_override()
+    return reset_material_agent_prompt_override(material_type)
 
 
 def render_material_system_prompt(
     prompt_kind: str,
     stage_id: str,
     *,
+    material_prompt_type: str | None = None,
     book_title: str,
     material_type: str = "",
     material_genre: str = "",
@@ -404,7 +521,7 @@ def render_material_system_prompt(
     all_stages_for_peek: dict[str, str] | None = None,
 ) -> str:
     validate_material_slot(prompt_kind, stage_id)
-    raw = read_material_agent_prompt_template()
+    raw = read_material_agent_prompt_template(material_prompt_type)
 
     staged_body = excerpt(stage_body, STAGE_BODY_EXCERPT_CAP)
     if other_stages_excerpt is None:
@@ -417,12 +534,15 @@ def render_material_system_prompt(
 
     title = (book_title or "").strip()
     stage_label = MATERIAL_STAGE_LABELS.get(stage_id, stage_id)
+    type_text = (material_type or "").strip() or (
+        f"{library_prompt_type_label(material_prompt_type)}素材"
+    )
     replacements = {
         "BOOK_TITLE": title,
         "BOOK_LINE": f"素材：《{title}》",
         "MATERIAL_TITLE": title,
         "MATERIAL_LINE": f"素材：《{title}》",
-        "MATERIAL_TYPE": (material_type or "").strip() or "未分类素材",
+        "MATERIAL_TYPE": type_text,
         "MATERIAL_GENRE": (material_genre or "").strip() or "未分类",
         "STAGE_ID": stage_id,
         "STAGE_LABEL": stage_label,
@@ -443,6 +563,12 @@ def render_material_from_api_context(
     ctx = parse_context_payload(context_raw)
     title = str(ctx.get("material_title") or ctx.get("book_title") or "")
     material_type = str(ctx.get("material_type") or "")
+    material_prompt_type = str(
+        ctx.get("material_type_key")
+        or ctx.get("material_prompt_type")
+        or ctx.get("library_type")
+        or ""
+    )
     material_genre = str(ctx.get("material_genre") or "")
     if not material_genre:
         parts = [
@@ -461,6 +587,7 @@ def render_material_from_api_context(
         return render_material_system_prompt(
             prompt_kind,
             stage_id,
+            material_prompt_type=material_prompt_type or material_type,
             book_title=title,
             material_type=material_type,
             material_genre=material_genre,
@@ -470,6 +597,7 @@ def render_material_from_api_context(
     return render_material_system_prompt(
         prompt_kind,
         stage_id,
+        material_prompt_type=material_prompt_type or material_type,
         book_title=title,
         material_type=material_type,
         material_genre=material_genre,
@@ -478,9 +606,9 @@ def render_material_from_api_context(
     )
 
 
-def read_raw_material_agent_prompt_for_editor() -> str:
+def read_raw_material_agent_prompt_for_editor(material_type: str | None = None) -> str:
     """素材库智能体设置页读取当前生效来源（优先覆盖）的原始模板正文。"""
-    path = resolve_material_agent_read_path()
+    path = resolve_material_agent_read_path(material_type)
     if not path.is_file():
         return ""
     text = path.read_text(encoding="utf-8")
@@ -489,10 +617,14 @@ def read_raw_material_agent_prompt_for_editor() -> str:
     return text
 
 
-def read_raw_material_prompt_for_editor(prompt_kind: str, stage_id: str) -> str:
+def read_raw_material_prompt_for_editor(
+    prompt_kind: str,
+    stage_id: str,
+    material_type: str | None = None,
+) -> str:
     """兼容旧 API：读取唯一的素材库管理智能体模板。"""
     validate_material_slot(prompt_kind, stage_id)
-    return read_raw_material_agent_prompt_for_editor()
+    return read_raw_material_agent_prompt_for_editor(material_type)
 
 
 # ==================== 技能库提示词管线 ====================
@@ -544,16 +676,26 @@ def validate_skill_stage_id(stage_id: str) -> None:
         raise ValueError(f"未知的 skill stage_id: {stage_id!r}")
 
 
-def skill_agent_override_absolute_path() -> Path:
+def skill_agent_override_absolute_path(skill_type: str | None = None) -> Path:
     root = data_root() / "prompt_overrides" / SKILL_PREFIX
     return (
         root
+        / normalize_library_prompt_type(skill_type)
         / SHARED_SKILL_PROMPT_DIR
         / f"{SKILL_MANAGER_AGENT_ID}.txt"
     ).resolve()
 
 
-def skill_agent_builtin_default_path() -> Path:
+def skill_agent_builtin_default_path(skill_type: str | None = None) -> Path:
+    return (
+        (bundle_root() / "app" / "prompt_defaults" / SKILL_PREFIX)
+        / normalize_library_prompt_type(skill_type)
+        / SHARED_SKILL_PROMPT_DIR
+        / f"{SKILL_MANAGER_AGENT_ID}.txt"
+    )
+
+
+def skill_agent_legacy_builtin_default_path() -> Path:
     return (
         (bundle_root() / "app" / "prompt_defaults" / SKILL_PREFIX)
         / SHARED_SKILL_PROMPT_DIR
@@ -561,16 +703,19 @@ def skill_agent_builtin_default_path() -> Path:
     )
 
 
-def resolve_skill_agent_read_path() -> Path:
+def resolve_skill_agent_read_path(skill_type: str | None = None) -> Path:
     """覆盖优先。"""
-    over = skill_agent_override_absolute_path()
+    over = skill_agent_override_absolute_path(skill_type)
     if over.is_file():
         return over
-    return skill_agent_builtin_default_path()
+    default = skill_agent_builtin_default_path(skill_type)
+    if default.is_file():
+        return default
+    return skill_agent_legacy_builtin_default_path()
 
 
-def read_skill_agent_prompt_template() -> str:
-    path = resolve_skill_agent_read_path()
+def read_skill_agent_prompt_template(skill_type: str | None = None) -> str:
+    path = resolve_skill_agent_read_path(skill_type)
     if not path.is_file():
         return (
             f"[缺少技能默认提示模板文件]\n路径: {path}\n\n"
@@ -582,14 +727,14 @@ def read_skill_agent_prompt_template() -> str:
     return text
 
 
-def save_skill_agent_prompt_override(body: str) -> None:
-    path = skill_agent_override_absolute_path()
+def save_skill_agent_prompt_override(body: str, skill_type: str | None = None) -> None:
+    path = skill_agent_override_absolute_path(skill_type)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(body if body.endswith("\n") else body + "\n", encoding="utf-8")
 
 
-def reset_skill_agent_prompt_override() -> bool:
-    path = skill_agent_override_absolute_path()
+def reset_skill_agent_prompt_override(skill_type: str | None = None) -> bool:
+    path = skill_agent_override_absolute_path(skill_type)
     if path.is_file():
         path.unlink()
         return True
@@ -599,6 +744,7 @@ def reset_skill_agent_prompt_override() -> bool:
 def render_skill_system_prompt(
     stage_id: str,
     *,
+    skill_type: str | None = None,
     skill_title: str,
     stage_body: str,
     all_stages_for_peek: dict[str, str] | None = None,
@@ -606,7 +752,7 @@ def render_skill_system_prompt(
     if stage_id in {"intro_design", "plot_refine"}:
         stage_id = "plot_design"
     validate_skill_stage_id(stage_id)
-    raw = read_skill_agent_prompt_template()
+    raw = read_skill_agent_prompt_template(skill_type)
 
     staged_body = excerpt(stage_body, STAGE_BODY_EXCERPT_CAP)
     other = (
@@ -626,6 +772,7 @@ def render_skill_system_prompt(
         "BOOK_LINE": f"技能：《{title}》",
         "SKILL_TITLE": title,
         "SKILL_LINE": f"技能：《{title}》",
+        "SKILL_TYPE": f"{library_prompt_type_label(skill_type)}技能",
         "STAGE_ID": stage_id,
         "STAGE_LABEL": stage_label,
         "STAGE_BODY": staged_body,
@@ -641,6 +788,7 @@ def render_skill_system_prompt(
 def render_skill_from_api_context(stage_id: str, context_raw: object) -> str:
     ctx = parse_context_payload(context_raw)
     title = str(ctx.get("skill_title") or ctx.get("book_title") or "")
+    skill_type = str(ctx.get("skill_type") or "")
     body = str(ctx.get("stage_body") or "")
     all_stages: dict[str, str] | None = None
     stages_val = ctx.get("all_stages")
@@ -649,15 +797,16 @@ def render_skill_from_api_context(stage_id: str, context_raw: object) -> str:
 
     return render_skill_system_prompt(
         stage_id,
+        skill_type=skill_type,
         skill_title=title,
         stage_body=body,
         all_stages_for_peek=all_stages if all_stages is not None else {},
     )
 
 
-def read_raw_skill_agent_prompt_for_editor() -> str:
+def read_raw_skill_agent_prompt_for_editor(skill_type: str | None = None) -> str:
     """技能库智能体设置页读取当前生效来源（优先覆盖）的原始模板正文。"""
-    path = resolve_skill_agent_read_path()
+    path = resolve_skill_agent_read_path(skill_type)
     if not path.is_file():
         return ""
     text = path.read_text(encoding="utf-8")

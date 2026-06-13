@@ -245,7 +245,7 @@ export function WorkspaceTreeNav({
     return (
       <nav className="workspace-tree" aria-label={ariaLabel}>
         {treeBooks.length === 0 ? (
-          <p className="workspace-tree-empty muted">暂无编辑中的短篇书籍</p>
+          <p className="workspace-tree-empty muted">暂无编辑中的创作空间书籍</p>
         ) : (
           <ul className="workspace-tree-books">
             {treeBooks.map((treeBook) => {

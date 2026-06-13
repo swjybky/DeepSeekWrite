@@ -10,10 +10,13 @@ import {
 import { memo, useEffect, useRef, useState } from 'react'
 import type {
   Material,
+  BookType,
   StageId,
   MaterialStageId,
+  MaterialType,
   MaterialPromptKind,
   Skill,
+  SkillType,
   SkillStageId,
   WorkspaceAgentReadAccessConfig,
 } from '../bridge'
@@ -38,6 +41,9 @@ import {
   resolveWorkspaceAgentReadAccess,
   type WorkspaceAgentId,
 } from '../workspaces/short/stageReadAccess'
+import {
+  resolveWorkspaceAgentReadAccess as resolveScriptWorkspaceAgentReadAccess,
+} from '../workspaces/script/stageReadAccess'
 
 const ARTIFACTS_TOOL_NAME = 'artifacts'
 const WORD_ATTACHMENT_EXTENSIONS = ['.docx']
@@ -65,6 +71,16 @@ const WORKSPACE_ATTACHMENT_ACCEPTED_TYPES = [
   ...TEXT_ATTACHMENT_MIME_TYPES,
 ].join(',')
 const WORKSPACE_ATTACHMENT_MAX_FILES = 10
+
+function resolvePromptReadAccess(
+  bookType: BookType | undefined,
+  config: WorkspaceAgentReadAccessConfig | null | undefined,
+  agentId: WorkspaceAgentId,
+) {
+  return bookType === 'script'
+    ? resolveScriptWorkspaceAgentReadAccess(config, agentId)
+    : resolveWorkspaceAgentReadAccess(config, agentId)
+}
 const WORKSPACE_ATTACHMENT_MAX_FILE_SIZE = 20 * 1024 * 1024
 const WORKSPACE_ATTACHMENT_SUPPORTED_LABEL =
   'Word（.doc/.docx）、Excel（.xlsx/.xls）、TXT、Markdown、图片'
@@ -401,17 +417,19 @@ function useDebounced<T>(value: T, ms: number): T {
 }
 
 function resolveCurrentStageBody(
-  props: Pick<Props, 'stageId' | 'stageBody' | 'getCurrentStageBody'>,
+  props: Pick<Props, 'stageId' | 'activeStageContentId' | 'stageBody' | 'getCurrentStageBody'>,
 ): string {
-  return props.getCurrentStageBody?.(props.stageId) ?? props.stageBody
+  const contentStageId = props.activeStageContentId ?? props.stageId
+  return props.getCurrentStageBody?.(contentStageId) ?? props.stageBody
 }
 
 function mergeCurrentStageIntoAllStages(
-  props: Pick<Props, 'stageId' | 'allStages' | 'stageBody' | 'getCurrentStageBody'>,
+  props: Pick<Props, 'stageId' | 'activeStageContentId' | 'allStages' | 'stageBody' | 'getCurrentStageBody'>,
 ): Partial<Record<StageId | MaterialStageId | SkillStageId, string>> {
+  const contentStageId = props.activeStageContentId ?? props.stageId
   return {
     ...props.allStages,
-    [props.stageId]: resolveCurrentStageBody(props),
+    [contentStageId]: resolveCurrentStageBody(props),
   }
 }
 
@@ -435,9 +453,12 @@ type Props = {
   sessionEpoch?: number
   /** 素材库提示词目录；创作空间/技能库共享提示词时不传。 */
   promptKind?: MaterialPromptKind
+  /** 书籍创作空间类型；素材/技能模式不使用。 */
+  bookType?: BookType
   bookTitle: string
   /** 素材库智能体可见的素材类型上下文。 */
   materialType?: string
+  materialTypeKey?: MaterialType
   /** 素材库智能体可见的素材分类上下文。 */
   materialGenre?: string
   /** 创作空间共享模板可见的书籍分类上下文。 */
@@ -454,6 +475,7 @@ type Props = {
   linkedMaterial?: Material | null
   /** 当前书籍绑定的技能库；书籍工作台智能体可按阶段加载技能 */
   linkedSkill?: Skill | null
+  skillType?: SkillType
   /** 全局创作空间智能体可读配置（仅书籍短篇工作台） */
   workspaceAgentReadAccess?: WorkspaceAgentReadAccessConfig | null
   /**
@@ -570,13 +592,16 @@ function WorkspaceAiChatInner({
         const latest = propsLatestRef.current
         return getWorkspaceStageAdditionalTools({
           bookTitle: latest.bookTitle,
+          bookType: latest.bookType,
+          materialTypeKey: latest.materialTypeKey,
+          skillType: latest.skillType,
           workspaceType,
           promptKind: latest.promptKind,
           stageId: latest.stageId,
           activeStageContentId: latest.activeStageContentId,
           stageBody: resolveCurrentStageBody(latest),
           getCurrentStageBody: (stageId) =>
-            latest.getCurrentStageBody?.(stageId ?? latest.stageId),
+            latest.getCurrentStageBody?.(stageId ?? latest.activeStageContentId ?? latest.stageId),
           allStages: mergeCurrentStageIntoAllStages(latest),
           linkedMaterial: latest.linkedMaterial,
           linkedSkill: latest.linkedSkill,
@@ -593,6 +618,7 @@ function WorkspaceAiChatInner({
               props.stageId as SkillStageId,
               {
                 skillTitle: props.bookTitle,
+                skillType: props.skillType ?? 'short',
                 stageBody: resolveCurrentStageBody(props),
                 allStages: mergeCurrentStageIntoAllStages(props) as Partial<Record<SkillStageId, string>>,
               },
@@ -603,6 +629,7 @@ function WorkspaceAiChatInner({
               props.stageId as MaterialStageId,
               {
                 materialTitle: props.bookTitle,
+                materialTypeKey: props.materialTypeKey ?? 'short',
                 materialType: props.materialType,
                 materialGenre: props.materialGenre,
                 stageBody: resolveCurrentStageBody(props),
@@ -612,11 +639,13 @@ function WorkspaceAiChatInner({
             : await getWorkspaceSystemPrompt(
               props.stageId as StageId,
               {
+                workspaceType: props.bookType ?? 'short',
                 bookTitle: props.bookTitle,
                 bookGenre: props.bookGenre ?? '未分类',
                 stageBody: resolveCurrentStageBody(props),
                 allStages: mergeCurrentStageIntoAllStages(props) as Partial<Record<StageId, string>>,
-                allowedWorkspaceStages: resolveWorkspaceAgentReadAccess(
+                allowedWorkspaceStages: resolvePromptReadAccess(
+                  props.bookType,
                   props.workspaceAgentReadAccess,
                   (props.stageId === 'draft'
                     ? EXPERT_DRAFT_COORDINATOR_AGENT_ID
@@ -631,10 +660,12 @@ function WorkspaceAiChatInner({
         'workspace',
         props.sessionBookId,
         workspaceType === 'skill'
-          ? 'skill_manager'
+          ? `skill_${props.skillType ?? 'short'}_manager`
           : workspaceType === 'material'
-            ? 'material_manager'
-            : 'shared',
+            ? `material_${props.materialTypeKey ?? 'short'}_manager`
+            : props.bookType === 'script'
+              ? 'script_shared'
+              : 'shared',
         workspaceType === 'material' || workspaceType === 'skill'
           ? undefined
           : props.stageId,
@@ -895,19 +926,21 @@ function WorkspaceAiChatInner({
     const seq = ++promptPullSeqRef.current
     ;(async () => {
       const p = propsLatestRef.current
+      const contentStageId = p.activeStageContentId ?? p.stageId
       const latestStageBody =
-        p.getCurrentStageBody?.(p.stageId) ?? debouncedBody
+        p.getCurrentStageBody?.(contentStageId) ?? debouncedBody
       const latestAllStages = {
         ...p.allStages,
-        [p.stageId]: latestStageBody,
+        [contentStageId]: latestStageBody,
       }
       const nextPrompt =
         workspaceType === 'skill'
           ? await getSkillSystemPrompt(
               p.stageId as SkillStageId,
               {
-                skillTitle: p.bookTitle,
-                stageBody: latestStageBody,
+               skillTitle: p.bookTitle,
+                skillType: p.skillType ?? 'short',
+               stageBody: latestStageBody,
                 allStages: latestAllStages as Partial<Record<SkillStageId, string>>,
               },
             )
@@ -916,8 +949,9 @@ function WorkspaceAiChatInner({
               p.promptKind as MaterialPromptKind,
               p.stageId as MaterialStageId,
               {
-                materialTitle: p.bookTitle,
-                materialType: p.materialType,
+               materialTitle: p.bookTitle,
+                materialTypeKey: p.materialTypeKey ?? 'short',
+               materialType: p.materialType,
                 materialGenre: p.materialGenre,
                 stageBody: latestStageBody,
                 allStages: latestAllStages as Partial<Record<MaterialStageId, string>>,
@@ -926,11 +960,13 @@ function WorkspaceAiChatInner({
             : await getWorkspaceSystemPrompt(
               p.stageId as StageId,
               {
+                workspaceType: p.bookType ?? 'short',
                 bookTitle: p.bookTitle,
                 bookGenre: p.bookGenre ?? '未分类',
                 stageBody: latestStageBody,
                 allStages: latestAllStages as Partial<Record<StageId, string>>,
-                allowedWorkspaceStages: resolveWorkspaceAgentReadAccess(
+                allowedWorkspaceStages: resolvePromptReadAccess(
+                  p.bookType,
                   p.workspaceAgentReadAccess,
                   (p.stageId === 'draft'
                     ? EXPERT_DRAFT_COORDINATOR_AGENT_ID
@@ -944,13 +980,16 @@ function WorkspaceAiChatInner({
       agent.state.systemPrompt = nextPrompt
       const extras = getWorkspaceStageAdditionalTools({
         bookTitle: p.bookTitle,
+        bookType: p.bookType,
+        materialTypeKey: p.materialTypeKey,
+        skillType: p.skillType,
         workspaceType,
         promptKind: p.promptKind,
         stageId: p.stageId,
         activeStageContentId: p.activeStageContentId,
         stageBody: latestStageBody,
         getCurrentStageBody: (stageId) =>
-          p.getCurrentStageBody?.(stageId ?? p.stageId),
+          p.getCurrentStageBody?.(stageId ?? p.activeStageContentId ?? p.stageId),
         allStages: latestAllStages,
         linkedMaterial: p.linkedMaterial,
         linkedSkill: p.linkedSkill,
@@ -966,8 +1005,11 @@ function WorkspaceAiChatInner({
   }, [
     chatReady,
     props.bookTitle,
+    props.bookType,
     props.materialType,
+    props.materialTypeKey,
     props.materialGenre,
+    props.skillType,
     props.bookGenre,
     props.promptKind,
     props.stageId,
@@ -1037,8 +1079,11 @@ export const WorkspaceAiChat = memo(WorkspaceAiChatInner, (prev, next) => {
 
   // bookTitle 变化需要更新
   if (prev.bookTitle !== next.bookTitle) return false
+  if (prev.bookType !== next.bookType) return false
   if (prev.materialType !== next.materialType) return false
+  if (prev.materialTypeKey !== next.materialTypeKey) return false
   if (prev.materialGenre !== next.materialGenre) return false
+  if (prev.skillType !== next.skillType) return false
   if (prev.bookGenre !== next.bookGenre) return false
   if (prev.workspaceAgentReadAccess !== next.workspaceAgentReadAccess) return false
 

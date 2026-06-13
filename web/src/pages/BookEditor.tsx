@@ -3,6 +3,7 @@ import type { CSSProperties } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import {
   type Book,
+  bookTypeLabel,
   type BookStatus,
   type BookSummary,
   type ExpertDraft,
@@ -16,12 +17,13 @@ import {
   resolveWorkspaceStagesForBook,
   resolveWorkspaceBookGenre,
   getBook,
-  isWorkspaceShortBook,
+  isWorkspaceBook,
   listBooks,
   saveBook,
   listMaterials,
   getMaterial,
   MATERIAL_STAGE_LABELS,
+  materialTypeLabel,
   type Material,
   type MaterialSummary,
   type Skill,
@@ -34,13 +36,18 @@ import {
   type WorkspaceAgentReadAccessConfig,
   listSkills,
   getSkill,
+  skillTypeLabel,
 } from '../bridge'
 import { WorkspaceAiChat } from '../components/WorkspaceAiChat'
 import type { ApplyToStageEditorPayload } from '../pi/workspaceStageAgents'
-import { ExpertDraftAiChat } from '../workspaces/short/expertDraft/ExpertDraftAiChat'
-import { ExpertDraftEditor } from '../workspaces/short/expertDraft/ExpertDraftEditor'
 import {
-  runExpertDraftSectionWriter,
+  ExpertDraftAiChat as ShortExpertDraftAiChat,
+} from '../workspaces/short/expertDraft/ExpertDraftAiChat'
+import {
+  ExpertDraftEditor as ShortExpertDraftEditor,
+} from '../workspaces/short/expertDraft/ExpertDraftEditor'
+import {
+  runExpertDraftSectionWriter as runShortExpertDraftSectionWriter,
   type GetExpertDraftSectionContent,
   type RunExpertDraftSectionWriterOptions,
 } from '../workspaces/short/expertDraft/sectionWriter'
@@ -48,13 +55,29 @@ import {
   EXPERT_DRAFT_COORDINATOR_AGENT_ID,
   EXPERT_SECTION_WRITER_AGENT_ID,
   getDefaultWorkspaceAgentReadAccess,
-  resolveWorkspaceAgentReadAccess,
+  resolveWorkspaceAgentReadAccess as resolveShortWorkspaceAgentReadAccess,
 } from '../workspaces/short/stageReadAccess'
 import {
-  PLOT_CHILD_STAGES,
+  ExpertDraftAiChat as ScriptExpertDraftAiChat,
+} from '../workspaces/script/expertDraft/ExpertDraftAiChat'
+import {
+  ExpertDraftEditor as ScriptExpertDraftEditor,
+} from '../workspaces/script/expertDraft/ExpertDraftEditor'
+import {
+  runExpertDraftSectionWriter as runScriptExpertDraftSectionWriter,
+} from '../workspaces/script/expertDraft/sectionWriter'
+import {
+  resolveWorkspaceAgentReadAccess as resolveScriptWorkspaceAgentReadAccess,
+} from '../workspaces/script/stageReadAccess'
+import {
+  PLOT_CHILD_STAGES as SHORT_PLOT_CHILD_STAGES,
   PLOT_STAGE_ID,
-  type PlotChildStageId,
+  type PlotChildStageId as ShortPlotChildStageId,
 } from '../workspaces/short/stages'
+import {
+  PLOT_CHILD_STAGES as SCRIPT_PLOT_CHILD_STAGES,
+  type PlotChildStageId as ScriptPlotChildStageId,
+} from '../workspaces/script/stages'
 import { WorkspaceTreeNav } from '../components/WorkspaceTreeNav'
 import './BookEditor.css'
 
@@ -86,8 +109,33 @@ type BookWorkspaceSessionState = {
   streamingStages: Partial<Record<StageId, boolean>>
 }
 
+type PlotChildStageId = ShortPlotChildStageId | ScriptPlotChildStageId
+type PlotChildStageDefinition = { id: PlotChildStageId; label: string }
+
 const WORKSPACE_LEAVE_CONFIRM_MESSAGE =
   '当前有未保存的修改，确定离开创作空间吗？未保存的内容将丢失。'
+
+function workspaceBookType(book: Pick<Book, 'book_type'> | BookSummary | null | undefined): 'short' | 'script' {
+  return book?.book_type === 'script' ? 'script' : 'short'
+}
+
+function plotChildStagesForBook(
+  book: Pick<Book, 'book_type'> | BookSummary | null | undefined,
+): readonly PlotChildStageDefinition[] {
+  return workspaceBookType(book) === 'script'
+    ? SCRIPT_PLOT_CHILD_STAGES
+    : SHORT_PLOT_CHILD_STAGES
+}
+
+function resolveReadAccessForBook(
+  book: Pick<Book, 'book_type'> | BookSummary | null | undefined,
+  config: WorkspaceAgentReadAccessConfig | null | undefined,
+  agentId: typeof EXPERT_DRAFT_COORDINATOR_AGENT_ID | typeof EXPERT_SECTION_WRITER_AGENT_ID,
+) {
+  return workspaceBookType(book) === 'script'
+    ? resolveScriptWorkspaceAgentReadAccess(config, agentId)
+    : resolveShortWorkspaceAgentReadAccess(config, agentId)
+}
 
 function expertDraftPersistedFingerprint(draft: ExpertDraft): string {
   return JSON.stringify({
@@ -259,7 +307,10 @@ function expertDraftSectionTreeLabel(section: ExpertDraftSection): string {
 }
 
 function isPlotChildStageId(stageId: string): stageId is PlotChildStageId {
-  return PLOT_CHILD_STAGES.some((stage) => stage.id === stageId)
+  return (
+    SHORT_PLOT_CHILD_STAGES.some((stage) => stage.id === stageId) ||
+    SCRIPT_PLOT_CHILD_STAGES.some((stage) => stage.id === stageId)
+  )
 }
 
 function resolvePlotEditorStageId(
@@ -934,7 +985,7 @@ export function BookEditor() {
         syncActiveSessionState(nextCached)
         try {
           const [readAccessConfig, bookSummaries] = await Promise.all([
-            getWorkspaceAgentReadAccess(),
+            getWorkspaceAgentReadAccess(workspaceBookType(cached.book)),
             listBooks(),
           ])
           setWorkspaceAgentReadAccess(readAccessConfig)
@@ -947,9 +998,8 @@ export function BookEditor() {
         return
       }
 
-      const [b, readAccessConfig, bookSummaries] = await Promise.all([
+      const [b, bookSummaries] = await Promise.all([
         getBook(id),
-        getWorkspaceAgentReadAccess(),
         listBooks(),
       ])
       if (!b) {
@@ -957,6 +1007,7 @@ export function BookEditor() {
         setError('未找到该书籍')
         return
       }
+      const readAccessConfig = await getWorkspaceAgentReadAccess(workspaceBookType(b))
       setWorkspaceAgentReadAccess(readAccessConfig)
       setWorkspaceBooks(
         mergeWorkspaceBooksStable(workspaceBookOrderRef, bookSummaries),
@@ -1210,7 +1261,7 @@ export function BookEditor() {
   }, [hasUnsavedWorkspaceChanges])
 
   useEffect(() => {
-    if (!book || !isWorkspaceShortBook(book)) return
+    if (!book || !isWorkspaceBook(book)) return
     const onPopState = () => {
       if (!hasUnsavedWorkspaceChanges()) return
       const ok = window.confirm(WORKSPACE_LEAVE_CONFIRM_MESSAGE)
@@ -1538,6 +1589,10 @@ export function BookEditor() {
         active_section_id: ids[0] ?? '',
       }))
 
+      const runExpertDraftSectionWriter =
+        session.book.book_type === 'script'
+          ? runScriptExpertDraftSectionWriter
+          : runShortExpertDraftSectionWriter
       const run = runExpertDraftSectionWriter({
         bookId: session.book.id,
         bookTitle: session.book.title,
@@ -1551,7 +1606,8 @@ export function BookEditor() {
         linkedMaterial: session.linkedMaterial,
         linkedSkill: session.linkedSkill,
         userWritingPrompt: options?.userWritingPrompt,
-        readAccess: resolveWorkspaceAgentReadAccess(
+        readAccess: resolveReadAccessForBook(
+          session.book,
           workspaceAgentReadAccess,
           EXPERT_SECTION_WRITER_AGENT_ID,
         ),
@@ -1653,7 +1709,7 @@ export function BookEditor() {
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if (!(e.ctrlKey || e.metaKey) || e.key.toLowerCase() !== 's') return
-      if (!id || !book || !isWorkspaceShortBook(book)) return
+      if (!id || !book || !isWorkspaceBook(book)) return
       e.preventDefault()
       void handleSave()
     }
@@ -1709,7 +1765,7 @@ export function BookEditor() {
     )
   }
 
-  const useWorkspace = book ? isWorkspaceShortBook(book) : false
+  const useWorkspace = book ? isWorkspaceBook(book) : false
 
   if (book && !useWorkspace) {
     return (
@@ -1721,8 +1777,8 @@ export function BookEditor() {
           <div className="editor-title-block">
             <h1 className="editor-title">{book.title}</h1>
             <span className="editor-sub">
-              {book.book_type === 'short' ? '短篇' : '长篇'}
-              {book.book_type === 'short' && book.categories.length > 0
+              {bookTypeLabel(book.book_type)}
+              {isWorkspaceBook(book) && book.categories.length > 0
                 ? ` · ${book.categories.join('、')}`
                 : ''}
             </span>
@@ -1732,7 +1788,7 @@ export function BookEditor() {
         <div className="editor-pending-main">
           <p className="editor-pending-title">该类型工作台开发中</p>
           <p className="muted editor-pending-desc">
-            当前所有短篇书籍可使用完整写作台与 AI 协作；长篇工作台仍在扩展中。
+            当前短篇与剧本可使用完整写作台与 AI 协作；长篇工作台仍在扩展中。
           </p>
           <Link className="btn-pending-home" to="/">
             返回书架
@@ -1752,12 +1808,13 @@ export function BookEditor() {
   }
 
   const railStages = resolveWorkspaceStagesForBook(book)
+  const activePlotChildStages = plotChildStagesForBook(book)
   const workspaceTreeBaseStages = railStages.map((s) => ({
     id: s.id,
     label: s.label,
     ...(s.id === PLOT_STAGE_ID
       ? {
-          children: PLOT_CHILD_STAGES.map((child) => ({
+          children: activePlotChildStages.map((child) => ({
             id: child.id,
             label: child.label,
           })),
@@ -1778,7 +1835,7 @@ export function BookEditor() {
     }
   })
   const workspaceTreeBooks = workspaceBooks
-    .filter((item) => item.book_type === 'short' && item.status !== 'completed')
+    .filter((item) => item.book_type === book.book_type && isWorkspaceBook(item) && item.status !== 'completed')
     .map((item) => ({
       id: item.id,
       title: item.title,
@@ -1788,13 +1845,17 @@ export function BookEditor() {
   const renderedWorkspaceSessions = loadedBookIds
     .map((bookId) => workspaceSessions[bookId])
     .filter((session): session is BookWorkspaceSessionState => Boolean(session))
-    .filter((session) => isWorkspaceShortBook(session.book))
+    .filter((session) => isWorkspaceBook(session.book) && session.book.book_type === book.book_type)
   const stageBody = activeStageBody
   const expertDraftActive = activeStage === 'draft'
   const activeExpertDraftSectionId = expertDraft.active_section_id || ''
+  const ActiveExpertDraftEditor =
+    book.book_type === 'script'
+      ? ScriptExpertDraftEditor
+      : ShortExpertDraftEditor
   const activePlotChildLabel =
     activeStage === PLOT_STAGE_ID && activePlotChildStage
-      ? PLOT_CHILD_STAGES.find((stage) => stage.id === activePlotChildStage)?.label
+      ? activePlotChildStages.find((stage) => stage.id === activePlotChildStage)?.label
       : ''
 
   const openMaterialSelector = async () => {
@@ -1907,8 +1968,8 @@ export function BookEditor() {
             <span className="editor-header-meta-text">
               {book?.title || '未命名'}
               {' · '}
-              {book?.book_type === 'short' ? '短篇' : '长篇'}
-              {book?.book_type === 'short' && (book.categories?.length ?? 0) > 0
+              {book ? bookTypeLabel(book.book_type) : '书籍'}
+              {book && isWorkspaceBook(book) && (book.categories?.length ?? 0) > 0
                 ? ` · ${(book.categories ?? []).join('、')}`
                 : ''}
               {book?.status === 'completed' ? ' · 已完成' : ''}
@@ -2246,6 +2307,10 @@ export function BookEditor() {
                 const sessionExpertActive =
                   session.activeStage === 'draft'
                 const isVisibleBook = session.book.id === book.id
+                const SessionExpertDraftAiChat =
+                  session.book.book_type === 'script'
+                    ? ScriptExpertDraftAiChat
+                    : ShortExpertDraftAiChat
                 const stageLayers = sessionStages
                   .filter((s) => s.id !== 'draft')
                   .map((s) => {
@@ -2275,6 +2340,7 @@ export function BookEditor() {
                         <WorkspaceAiChat
                           sessionBookId={session.book.id}
                           sessionEpoch={epoch}
+                          bookType={session.book.book_type}
                           bookTitle={session.book.title}
                           bookGenre={sessionBookGenre}
                           stageId={s.id}
@@ -2287,9 +2353,6 @@ export function BookEditor() {
                             if (isVisibleBook) {
                               const rendered = getRenderedWorkspaceStageBody(sid)
                               if (rendered !== undefined) return rendered
-                            }
-                            if (isVisibleBook && sid === activeStageRef.current) {
-                              return getRenderedWorkspaceStageBody(sid)
                             }
                             return workspaceSessionsRef.current[session.book.id]?.stages[sid]
                           }}
@@ -2321,7 +2384,7 @@ export function BookEditor() {
                     }
                     aria-hidden={!expertLayerActive}
                   >
-                    <ExpertDraftAiChat
+                    <SessionExpertDraftAiChat
                       key={`${session.book.id}-shared-expert-draft-${session.expertAiChatEpoch}`}
                       bookId={session.book.id}
                       bookTitle={session.book.title}
@@ -2330,11 +2393,13 @@ export function BookEditor() {
                       stages={session.stages}
                       linkedMaterial={session.linkedMaterial}
                       linkedSkill={session.linkedSkill}
-                      readAccess={resolveWorkspaceAgentReadAccess(
+                      readAccess={resolveReadAccessForBook(
+                        session.book,
                         workspaceAgentReadAccess,
                         EXPERT_DRAFT_COORDINATOR_AGENT_ID,
                       )}
-                      writerReadAccess={resolveWorkspaceAgentReadAccess(
+                      writerReadAccess={resolveReadAccessForBook(
+                        session.book,
                         workspaceAgentReadAccess,
                         EXPERT_SECTION_WRITER_AGENT_ID,
                       )}
@@ -2423,7 +2488,7 @@ export function BookEditor() {
 
         <div className="workspace-editor-pane workspace-editor-pane--primary">
           {expertDraftActive ? (
-            <ExpertDraftEditor
+            <ActiveExpertDraftEditor
               draft={expertDraft}
               stageBody={stageBody}
               stageBodyReadOnly={Boolean(streamingStages.draft)}
@@ -2444,10 +2509,10 @@ export function BookEditor() {
               }
             >
               {(activePlotChildStage
-                ? PLOT_CHILD_STAGES.filter(
+                ? activePlotChildStages.filter(
                     (stage) => stage.id === activePlotChildStage,
                   )
-                : PLOT_CHILD_STAGES
+                : activePlotChildStages
               ).map((plotStage) => {
                 const body = stages[plotStage.id] ?? ''
                 const counts = stageTextCounts(body)
@@ -2580,9 +2645,8 @@ export function BookEditor() {
                   materialSummaries.map((material) => {
                     const selected = material.id === book.linked_material_id
                     const genre = [
-                      material.material_type === 'short' ? '短篇素材' : '长篇素材',
+                      materialTypeLabel(material.material_type),
                       material.parent_genre,
-                      material.sub_genre,
                     ].filter(Boolean).join(' · ')
                     return (
                       <button
@@ -2690,7 +2754,7 @@ export function BookEditor() {
                         <span className="workspace-material-item-main">
                           <span className="workspace-material-item-title">{skill.title}</span>
                           <span className="workspace-material-item-meta">
-                            {count > 0 ? `${count} 条阶段技能` : '暂无阶段技能'}
+                            {skillTypeLabel(skill.skill_type)} · {count > 0 ? `${count} 条阶段技能` : '暂无阶段技能'}
                           </span>
                         </span>
                         <span className="workspace-material-item-state">

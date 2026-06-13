@@ -6,6 +6,7 @@ import {
   type Material,
   type MaterialStageId,
   MATERIAL_STAGE_LABELS,
+  materialTypeLabel,
   normalizeMaterialStages,
   getMaterial,
   saveMaterial,
@@ -377,9 +378,11 @@ export function MaterialEditor() {
   const { total: stageCharTotal, nonSpace: stageCharNonSpace } = stageTextCounts(stageBody)
 
   // 构建素材类型显示文本
-  const materialTypeText = material.material_type === 'short'
-    ? `短篇素材 · ${material.parent_genre || ''} · ${material.sub_genre || ''}`
-    : '长篇素材'
+  const materialGenreText = material.parent_genre?.trim() || ''
+  const materialTypeText = [
+    materialTypeLabel(material.material_type),
+    materialGenreText,
+  ].filter(Boolean).join(' · ')
 
   return (
     <div className="editor-page editor-page--workspace">
@@ -471,14 +474,6 @@ export function MaterialEditor() {
           <div className="workspace-ai-header workspace-ai-header-row">
             <span className="workspace-ai-header-title">素材管理智能体</span>
             <div className="workspace-ai-header-actions">
-              <Link
-                className="workspace-ai-prompt-edit"
-                aria-label="配置素材库管理智能体"
-                title="配置素材库管理智能体"
-                to="/material-settings"
-              >
-                设置
-              </Link>
               <button
                 type="button"
                 className="workspace-ai-new-chat"
@@ -501,15 +496,9 @@ export function MaterialEditor() {
                 sessionEpoch={aiChatEpoch}
                 promptKind={MATERIAL_MANAGER_PROMPT_KIND}
                 bookTitle={material.title}
-                materialType={material.material_type === 'short' ? '短篇素材' : '长篇素材'}
-                materialGenre={
-                  material.material_type === 'short'
-                    ? [material.parent_genre, material.sub_genre]
-                        .map((item) => item?.trim())
-                        .filter(Boolean)
-                        .join(' · ')
-                    : '长篇'
-                }
+                materialTypeKey={material.material_type}
+                materialType={materialTypeLabel(material.material_type)}
+                materialGenre={materialGenreText || materialTypeLabel(material.material_type)}
                 stageId={activeStage}
                 stageBody={stageBody}
                 allStages={stages}

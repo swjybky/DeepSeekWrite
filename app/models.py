@@ -4,9 +4,13 @@ from dataclasses import asdict, dataclass, field
 from typing import Any, Literal
 from uuid import uuid4
 
-BookType = Literal["short", "long"]
+BookType = Literal["short", "long", "script"]
 BookStatus = Literal["editing", "completed"]
-MaterialType = Literal["long", "short"]
+MaterialType = Literal["long", "short", "script"]
+SkillType = Literal["long", "short", "script"]
+
+WORKSPACE_BOOK_TYPES: tuple[str, ...] = ("short", "script")
+LIBRARY_TYPES: tuple[str, ...] = ("short", "long", "script")
 
 # 素材分类定义
 SHORT_MATERIAL_GENRES: dict[str, list[str]] = {
@@ -14,6 +18,11 @@ SHORT_MATERIAL_GENRES: dict[str, list[str]] = {
     "追妻": ["甜宠", "虐恋", "重生", "穿越", "暗恋", "破镜重圆", "先婚后爱"],
     "科幻": ["未来都市", "星际", "人工智能", "赛博朋克", "末日", "时间旅行", "异星文明"],
     "悬疑": ["刑侦", "推理", "惊悚", "密室", "民俗", "心理", "反转"],
+}
+
+# 剧本素材暂时沿用短篇一级分类，但保持独立常量，后续可单独演进。
+SCRIPT_MATERIAL_GENRES: dict[str, list[str]] = {
+    key: list(values) for key, values in SHORT_MATERIAL_GENRES.items()
 }
 
 # 素材阶段键（人设、导语、梗、剧情细化、剧情设计、正文片段）
@@ -287,6 +296,21 @@ def normalize_book_status(raw: Any | None) -> BookStatus:
     return "completed" if raw == "completed" else "editing"
 
 
+def normalize_book_type(raw: Any | None) -> BookType:
+    bt = str(raw or "").strip()
+    return bt if bt in ("short", "long", "script") else "short"  # type: ignore[return-value]
+
+
+def normalize_material_type(raw: Any | None) -> MaterialType:
+    mt = str(raw or "").strip()
+    return mt if mt in LIBRARY_TYPES else "short"  # type: ignore[return-value]
+
+
+def normalize_skill_type(raw: Any | None) -> SkillType:
+    st = str(raw or "").strip()
+    return st if st in LIBRARY_TYPES else "short"  # type: ignore[return-value]
+
+
 @dataclass
 class Book:
     id: str
@@ -308,7 +332,7 @@ class Book:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "Book":
-        bt = data["book_type"] if data["book_type"] in ("short", "long") else "long"
+        bt = normalize_book_type(data.get("book_type"))
         # 从存储加载时执行迁移
         raw_stages = data.get("stages")
         migrated_stages = normalize_stages_from_storage(raw_stages)
@@ -460,7 +484,7 @@ class Material:
     title: str
     material_type: MaterialType
     parent_genre: str = ""  # 世情/情感（仅short时有效）
-    sub_genre: str = ""     # 子分类（如家庭、甜宠等）
+    sub_genre: str = ""     # legacy: 旧版子分类；新建素材不再填写
     stages: dict[str, str] = field(default_factory=default_material_stages)
     output_dir: str = ""
     created_at: str = ""
@@ -471,7 +495,7 @@ class Material:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "Material":
-        mt = data["material_type"] if data["material_type"] in ("long", "short") else "short"
+        mt = normalize_material_type(data.get("material_type"))
         # 从存储加载时归一化阶段
         raw_stages = data.get("stages")
         normalized_stages = normalize_material_stages_from_storage(raw_stages)
@@ -495,6 +519,7 @@ class Skill:
 
     id: str
     title: str
+    skill_type: SkillType = "short"
     stages: dict[str, list[dict[str, str]]] = field(default_factory=default_skill_stages)
     output_dir: str = ""
     created_at: str = ""
@@ -521,6 +546,7 @@ class Skill:
         return cls(
             id=str(data["id"]),
             title=str(data["title"]),
+            skill_type=normalize_skill_type(data.get("skill_type")),
             stages=stages,
             output_dir=str(data.get("output_dir") or ""),
             created_at=str(data.get("created_at") or ""),

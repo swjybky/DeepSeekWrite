@@ -1,16 +1,19 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
-  readSkillAgentPromptTemplate,
+  readSkillAgentPromptTemplateForType,
   resetSkillAgentPromptOverride,
   saveSkillAgentPromptOverride,
+  skillTypeLabel,
+  type SkillType,
 } from '../bridge'
 import './WorkspaceSettings.css'
 
 type SaveStatus = 'idle' | 'saving' | 'saved' | 'error'
+const SKILL_SETTING_TYPES: SkillType[] = ['short', 'long', 'script']
 
 const PLACEHOLDER_HINT =
-  '{{SKILL_TITLE}}  {{SKILL_LINE}}  {{STAGE_ID}}  {{STAGE_LABEL}}  {{STAGE_BODY}}  {{OTHER_STAGES_EXCERPT}}'
+  '{{SKILL_TITLE}}  {{SKILL_LINE}}  {{SKILL_TYPE}}  {{STAGE_ID}}  {{STAGE_LABEL}}  {{STAGE_BODY}}  {{OTHER_STAGES_EXCERPT}}'
 
 function statusLabel(status: SaveStatus): string {
   if (status === 'saving') return '保存中…'
@@ -21,6 +24,7 @@ function statusLabel(status: SaveStatus): string {
 
 export function SkillSettings() {
   const navigate = useNavigate()
+  const [skillType, setSkillType] = useState<SkillType>('short')
   const [promptDraft, setPromptDraft] = useState('')
   const [loading, setLoading] = useState(true)
   const [saveStatus, setSaveStatus] = useState<SaveStatus>('idle')
@@ -64,11 +68,11 @@ export function SkillSettings() {
     async (value: string): Promise<void> => {
       if (savedPromptRef.current === value) return
       await enqueueSave(async () => {
-        await saveSkillAgentPromptOverride(value)
+        await saveSkillAgentPromptOverride(value, skillType)
         savedPromptRef.current = value
       })
     },
-    [enqueueSave],
+    [enqueueSave, skillType],
   )
 
   const flushPrompt = useCallback((): Promise<void> => {
@@ -98,7 +102,7 @@ export function SkillSettings() {
       setLoading(true)
       setError(null)
       try {
-        const prompt = await readSkillAgentPromptTemplate()
+        const prompt = await readSkillAgentPromptTemplateForType(skillType)
         if (cancelled) return
         promptDraftRef.current = prompt
         savedPromptRef.current = prompt
@@ -120,7 +124,17 @@ export function SkillSettings() {
         void savePromptValue(promptDraftRef.current).catch(() => undefined)
       }
     }
-  }, [savePromptValue])
+  }, [savePromptValue, skillType])
+
+  const switchSkillType = useCallback(
+    async (next: SkillType) => {
+      if (next === skillType) return
+      await flushPrompt().catch(() => undefined)
+      setSkillType(next)
+      setPromptDraft('')
+    },
+    [flushPrompt, skillType],
+  )
 
   const handleBack = useCallback(async () => {
     try {
@@ -141,13 +155,13 @@ export function SkillSettings() {
       promptTimerRef.current = undefined
     }
     await enqueueSave(async () => {
-      await resetSkillAgentPromptOverride()
-      const value = await readSkillAgentPromptTemplate()
+      await resetSkillAgentPromptOverride(skillType)
+      const value = await readSkillAgentPromptTemplateForType(skillType)
       savedPromptRef.current = value
       promptDraftRef.current = value
       setPromptDraft(value)
     }).catch(() => undefined)
-  }, [enqueueSave])
+  }, [enqueueSave, skillType])
 
   return (
     <div className="workspace-settings-page">
@@ -161,7 +175,7 @@ export function SkillSettings() {
         </button>
         <div>
           <h1>技能库智能体设置</h1>
-          <p>技能库共用一个技能管理智能体。</p>
+          <p>短篇、长篇与剧本技能库分别保存管理智能体提示词。</p>
         </div>
         <span
           className={`workspace-settings-save-state workspace-settings-save-state--${saveStatus}`}
@@ -173,6 +187,25 @@ export function SkillSettings() {
 
       {error ? <p className="workspace-settings-error">{error}</p> : null}
 
+      <div className="workspace-settings-type-switch" role="tablist" aria-label="技能类型">
+        {SKILL_SETTING_TYPES.map((type) => (
+          <button
+            key={type}
+            type="button"
+            role="tab"
+            aria-selected={skillType === type}
+            className={
+              skillType === type
+                ? 'workspace-settings-type-btn workspace-settings-type-btn--active'
+                : 'workspace-settings-type-btn'
+            }
+            onClick={() => void switchSkillType(type)}
+          >
+            {skillTypeLabel(type)}
+          </button>
+        ))}
+      </div>
+
       <main className="workspace-settings-content">
         {loading ? (
           <div className="workspace-settings-loading">加载设置中…</div>
@@ -181,7 +214,7 @@ export function SkillSettings() {
             <div className="workspace-settings-content-head">
               <div>
                 <span>技能库</span>
-                <h2>技能管理智能体</h2>
+                <h2>{skillTypeLabel(skillType)}管理智能体</h2>
               </div>
               <div className="workspace-settings-head-actions">
                 <button type="button" onClick={() => void resetPrompt()}>

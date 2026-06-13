@@ -1,13 +1,16 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
-  readMaterialAgentPromptTemplate,
+  materialTypeLabel,
+  readMaterialAgentPromptTemplateForType,
   resetMaterialAgentPromptOverride,
   saveMaterialAgentPromptOverride,
+  type MaterialType,
 } from '../bridge'
 import './WorkspaceSettings.css'
 
 type SaveStatus = 'idle' | 'saving' | 'saved' | 'error'
+const MATERIAL_SETTING_TYPES: MaterialType[] = ['short', 'long', 'script']
 
 const PLACEHOLDER_HINT =
   '{{MATERIAL_TITLE}}  {{MATERIAL_LINE}}  {{MATERIAL_TYPE}}  {{MATERIAL_GENRE}}  {{STAGE_ID}}  {{STAGE_LABEL}}  {{STAGE_BODY}}  {{OTHER_STAGES_EXCERPT}}'
@@ -21,6 +24,7 @@ function statusLabel(status: SaveStatus): string {
 
 export function MaterialSettings() {
   const navigate = useNavigate()
+  const [materialType, setMaterialType] = useState<MaterialType>('short')
   const [promptDraft, setPromptDraft] = useState('')
   const [loading, setLoading] = useState(true)
   const [saveStatus, setSaveStatus] = useState<SaveStatus>('idle')
@@ -64,11 +68,11 @@ export function MaterialSettings() {
     async (value: string): Promise<void> => {
       if (savedPromptRef.current === value) return
       await enqueueSave(async () => {
-        await saveMaterialAgentPromptOverride(value)
+        await saveMaterialAgentPromptOverride(value, materialType)
         savedPromptRef.current = value
       })
     },
-    [enqueueSave],
+    [enqueueSave, materialType],
   )
 
   const flushPrompt = useCallback((): Promise<void> => {
@@ -98,7 +102,7 @@ export function MaterialSettings() {
       setLoading(true)
       setError(null)
       try {
-        const prompt = await readMaterialAgentPromptTemplate()
+        const prompt = await readMaterialAgentPromptTemplateForType(materialType)
         if (cancelled) return
         promptDraftRef.current = prompt
         savedPromptRef.current = prompt
@@ -120,7 +124,17 @@ export function MaterialSettings() {
         void savePromptValue(promptDraftRef.current).catch(() => undefined)
       }
     }
-  }, [savePromptValue])
+  }, [materialType, savePromptValue])
+
+  const switchMaterialType = useCallback(
+    async (next: MaterialType) => {
+      if (next === materialType) return
+      await flushPrompt().catch(() => undefined)
+      setMaterialType(next)
+      setPromptDraft('')
+    },
+    [flushPrompt, materialType],
+  )
 
   const handleBack = useCallback(async () => {
     try {
@@ -141,13 +155,13 @@ export function MaterialSettings() {
       promptTimerRef.current = undefined
     }
     await enqueueSave(async () => {
-      await resetMaterialAgentPromptOverride()
-      const value = await readMaterialAgentPromptTemplate()
+      await resetMaterialAgentPromptOverride(materialType)
+      const value = await readMaterialAgentPromptTemplateForType(materialType)
       savedPromptRef.current = value
       promptDraftRef.current = value
       setPromptDraft(value)
     }).catch(() => undefined)
-  }, [enqueueSave])
+  }, [enqueueSave, materialType])
 
   return (
     <div className="workspace-settings-page">
@@ -161,7 +175,7 @@ export function MaterialSettings() {
         </button>
         <div>
           <h1>素材库智能体设置</h1>
-          <p>素材库共用一个素材库管理智能体。</p>
+          <p>短篇、长篇与剧本素材库分别保存管理智能体提示词。</p>
         </div>
         <span
           className={`workspace-settings-save-state workspace-settings-save-state--${saveStatus}`}
@@ -173,6 +187,25 @@ export function MaterialSettings() {
 
       {error ? <p className="workspace-settings-error">{error}</p> : null}
 
+      <div className="workspace-settings-type-switch" role="tablist" aria-label="素材类型">
+        {MATERIAL_SETTING_TYPES.map((type) => (
+          <button
+            key={type}
+            type="button"
+            role="tab"
+            aria-selected={materialType === type}
+            className={
+              materialType === type
+                ? 'workspace-settings-type-btn workspace-settings-type-btn--active'
+                : 'workspace-settings-type-btn'
+            }
+            onClick={() => void switchMaterialType(type)}
+          >
+            {materialTypeLabel(type)}
+          </button>
+        ))}
+      </div>
+
       <main className="workspace-settings-content">
         {loading ? (
           <div className="workspace-settings-loading">加载设置中…</div>
@@ -181,7 +214,7 @@ export function MaterialSettings() {
             <div className="workspace-settings-content-head">
               <div>
                 <span>素材库</span>
-                <h2>素材库管理智能体</h2>
+                <h2>{materialTypeLabel(materialType)}库管理智能体</h2>
               </div>
               <div className="workspace-settings-head-actions">
                 <button type="button" onClick={() => void resetPrompt()}>

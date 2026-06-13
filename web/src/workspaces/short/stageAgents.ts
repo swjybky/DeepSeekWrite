@@ -2,7 +2,11 @@ import type { AgentTool } from '@earendil-works/pi-agent-core'
 import { Type } from 'typebox'
 
 import type { Material, MaterialStageId, Skill } from '../../bridge'
-import { MATERIAL_STAGE_LABELS, normalizeMaterialStages } from '../../bridge'
+import {
+  MATERIAL_STAGE_LABELS,
+  materialTypeLabel,
+  normalizeMaterialStages,
+} from '../../bridge'
 import type { PlotChildStageId, ShortStageId } from './stages'
 import { PLOT_CHILD_STAGES, PLOT_STAGE_ID } from './stages'
 import { SHORT_STAGE_LABELS } from './stages'
@@ -422,9 +426,8 @@ export function buildReadLinkedMaterialContentTool(
       const raw = stages[stageId].trim()
       const label = MATERIAL_STAGE_LABELS[stageId]
       const genre = [
-        material.material_type === 'short' ? '短篇素材' : '长篇素材',
+        materialTypeLabel(material.material_type),
         material.parent_genre,
-        material.sub_genre,
       ].filter(Boolean).join(' · ')
       const location = material.output_dir?.trim()
         ? `\n素材库地址：${material.output_dir}`

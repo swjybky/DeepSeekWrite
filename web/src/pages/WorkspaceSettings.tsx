@@ -7,17 +7,20 @@ import {
 import { useNavigate } from 'react-router-dom'
 import {
   MATERIAL_STAGE_LABELS,
+  bookTypeLabel,
   getWorkspaceAgentReadAccess,
   readWorkspaceAgentPromptTemplate,
   resetWorkspaceAgentPromptOverride,
   saveWorkspaceAgentPromptOverride,
   saveWorkspaceAgentReadAccess,
+  type BookType,
   type MaterialStageId,
   type StageId,
   type WorkspaceAgentId,
   type WorkspaceAgentReadAccessConfig,
 } from '../bridge'
 import { SHORT_WORKSPACE_CONTENT_STAGES } from '../workspaces/short/stages'
+import { SCRIPT_WORKSPACE_CONTENT_STAGES } from '../workspaces/script/stages'
 import {
   ALL_MATERIAL_STAGE_IDS,
   EXPERT_DRAFT_COORDINATOR_AGENT_ID,
@@ -27,10 +30,16 @@ import {
   getDefaultWorkspaceAgentReadAccess,
   getDefaultWorkspaceAgentReadAccessEntry,
 } from '../workspaces/short/stageReadAccess'
+import {
+  getDefaultWorkspaceAgentReadAccess as getDefaultScriptWorkspaceAgentReadAccess,
+  getDefaultWorkspaceAgentReadAccessEntry as getDefaultScriptWorkspaceAgentReadAccessEntry,
+} from '../workspaces/script/stageReadAccess'
 import './WorkspaceSettings.css'
 
 type SaveStatus = 'idle' | 'saving' | 'saved' | 'error'
 type PromptDrafts = Record<WorkspaceAgentId, string>
+type WorkspaceSettingsType = Extract<BookType, 'short' | 'script'>
+const WORKSPACE_SETTING_TYPES: WorkspaceSettingsType[] = ['short', 'script']
 
 const AGENT_LABELS: Record<WorkspaceAgentId, string> = {
   character_design: '人物设计',
@@ -44,7 +53,30 @@ const EMPTY_PROMPTS = Object.fromEntries(
   WORKSPACE_AGENT_IDS.map((agentId) => [agentId, '']),
 ) as PromptDrafts
 const WORKSPACE_PLACEHOLDER_HINT =
-  '当前书籍：《{{BOOK_TITLE}}》  当前短篇分类：{{BOOK_GENRE}}'
+  '当前书籍：《{{BOOK_TITLE}}》  当前类型分类：{{BOOK_GENRE}}'
+
+function getDefaultReadAccessForType(
+  workspaceType: WorkspaceSettingsType,
+): WorkspaceAgentReadAccessConfig {
+  return workspaceType === 'script'
+    ? getDefaultScriptWorkspaceAgentReadAccess()
+    : getDefaultWorkspaceAgentReadAccess()
+}
+
+function getDefaultReadAccessEntryForType(
+  workspaceType: WorkspaceSettingsType,
+  agentId: WorkspaceAgentId,
+) {
+  return workspaceType === 'script'
+    ? getDefaultScriptWorkspaceAgentReadAccessEntry(agentId)
+    : getDefaultWorkspaceAgentReadAccessEntry(agentId)
+}
+
+function getWorkspaceContentStagesForType(workspaceType: WorkspaceSettingsType) {
+  return workspaceType === 'script'
+    ? SCRIPT_WORKSPACE_CONTENT_STAGES
+    : SHORT_WORKSPACE_CONTENT_STAGES
+}
 
 function statusLabel(status: SaveStatus): string {
   if (status === 'saving') return '保存中…'
@@ -55,6 +87,8 @@ function statusLabel(status: SaveStatus): string {
 
 export function WorkspaceSettings() {
   const navigate = useNavigate()
+  const [workspaceType, setWorkspaceType] =
+    useState<WorkspaceSettingsType>('short')
   const [activeAgentId, setActiveAgentId] =
     useState<WorkspaceAgentId>('character_design')
   const [promptDrafts, setPromptDrafts] = useState<PromptDrafts>(EMPTY_PROMPTS)
@@ -115,14 +149,14 @@ export function WorkspaceSettings() {
     async (agentId: WorkspaceAgentId, value: string): Promise<void> => {
       if (savedPromptsRef.current[agentId] === value) return
       await enqueueSave(async () => {
-        await saveWorkspaceAgentPromptOverride(agentId, value)
+        await saveWorkspaceAgentPromptOverride(agentId, value, workspaceType)
         savedPromptsRef.current = {
           ...savedPromptsRef.current,
           [agentId]: value,
         }
       })
     },
-    [enqueueSave],
+    [enqueueSave, workspaceType],
   )
 
   const flushPrompt = useCallback(
@@ -160,10 +194,10 @@ export function WorkspaceSettings() {
           Promise.all(
             WORKSPACE_AGENT_IDS.map(async (agentId) => [
               agentId,
-              await readWorkspaceAgentPromptTemplate(agentId),
+              await readWorkspaceAgentPromptTemplate(agentId, workspaceType),
             ] as const),
           ),
-          getWorkspaceAgentReadAccess(),
+          getWorkspaceAgentReadAccess(workspaceType),
         ])
         if (cancelled) return
         const nextPrompts = Object.fromEntries(prompts) as PromptDrafts
@@ -197,7 +231,7 @@ export function WorkspaceSettings() {
         }
       }
     }
-  }, [savePromptValue])
+  }, [savePromptValue, workspaceType])
 
   const activeEntry = readAccess[activeAgentId]
   const activeLabel = AGENT_LABELS[activeAgentId]
@@ -212,6 +246,17 @@ export function WorkspaceSettings() {
       setActiveAgentId(next)
     },
     [flushPrompt],
+  )
+
+  const switchWorkspaceType = useCallback(
+    async (next: WorkspaceSettingsType) => {
+      if (next === workspaceType) return
+      await flushPrompt(activeAgentRef.current).catch(() => undefined)
+      setWorkspaceType(next)
+      setReadAccess(getDefaultReadAccessForType(next))
+      setPromptDrafts(EMPTY_PROMPTS)
+    },
+    [flushPrompt, workspaceType],
   )
 
   const handleBack = useCallback(async () => {
@@ -253,10 +298,10 @@ export function WorkspaceSettings() {
       readAccessRef.current = next
       setReadAccess(next)
       void enqueueSave(async () => {
-        await saveWorkspaceAgentReadAccess(next)
+        await saveWorkspaceAgentReadAccess(next, workspaceType)
       }).catch(() => undefined)
     },
-    [enqueueSave],
+    [enqueueSave, workspaceType],
   )
 
   const resetPrompt = useCallback(async () => {
@@ -270,13 +315,13 @@ export function WorkspaceSettings() {
       delete promptTimersRef.current[agentId]
     }
     await enqueueSave(async () => {
-      await resetWorkspaceAgentPromptOverride(agentId)
-      const value = await readWorkspaceAgentPromptTemplate(agentId)
+      await resetWorkspaceAgentPromptOverride(agentId, workspaceType)
+      const value = await readWorkspaceAgentPromptTemplate(agentId, workspaceType)
       savedPromptsRef.current = { ...savedPromptsRef.current, [agentId]: value }
       promptDraftsRef.current = { ...promptDraftsRef.current, [agentId]: value }
       setPromptDrafts((prev) => ({ ...prev, [agentId]: value }))
     }).catch(() => undefined)
-  }, [enqueueSave])
+  }, [enqueueSave, workspaceType])
 
   const resetReadAccess = useCallback(async () => {
     const agentId = activeAgentRef.current
@@ -285,14 +330,14 @@ export function WorkspaceSettings() {
     }
     const next: WorkspaceAgentReadAccessConfig = {
       ...readAccessRef.current,
-      [agentId]: getDefaultWorkspaceAgentReadAccessEntry(agentId),
+      [agentId]: getDefaultReadAccessEntryForType(workspaceType, agentId),
     }
     readAccessRef.current = next
     setReadAccess(next)
     await enqueueSave(async () => {
-      await saveWorkspaceAgentReadAccess(next)
+      await saveWorkspaceAgentReadAccess(next, workspaceType)
     }).catch(() => undefined)
-  }, [enqueueSave])
+  }, [enqueueSave, workspaceType])
 
   return (
     <div className="workspace-settings-page">
@@ -306,7 +351,7 @@ export function WorkspaceSettings() {
         </button>
         <div>
           <h1>创作空间设置</h1>
-          <p>所有短篇书籍共享同一套智能体、提示词与读取范围。</p>
+          <p>短篇与剧本分别保存智能体提示词与读取范围。</p>
         </div>
         <span
           className={`workspace-settings-save-state workspace-settings-save-state--${saveStatus}`}
@@ -317,6 +362,25 @@ export function WorkspaceSettings() {
       </header>
 
       {error ? <p className="workspace-settings-error">{error}</p> : null}
+
+      <div className="workspace-settings-type-switch" role="tablist" aria-label="创作空间类型">
+        {WORKSPACE_SETTING_TYPES.map((type) => (
+          <button
+            key={type}
+            type="button"
+            role="tab"
+            aria-selected={workspaceType === type}
+            className={
+              workspaceType === type
+                ? 'workspace-settings-type-btn workspace-settings-type-btn--active'
+                : 'workspace-settings-type-btn'
+            }
+            onClick={() => void switchWorkspaceType(type)}
+          >
+            {bookTypeLabel(type)}
+          </button>
+        ))}
+      </div>
 
       <main className="workspace-settings-layout">
         <aside className="workspace-settings-nav" aria-label="智能体配置项">
@@ -367,7 +431,9 @@ export function WorkspaceSettings() {
               <div className="workspace-settings-content-head">
                 <div>
                   <span>{activeIsExpert ? '正文编写' : '前置阶段'}</span>
-                  <h2>{activeLabel}</h2>
+                  <h2>
+                    {bookTypeLabel(workspaceType)} · {activeLabel}
+                  </h2>
                 </div>
                 <div className="workspace-settings-head-actions">
                   <button type="button" onClick={() => void resetReadAccess()}>
@@ -416,7 +482,7 @@ export function WorkspaceSettings() {
 
                   <fieldset>
                     <legend>创作空间阶段</legend>
-                    {SHORT_WORKSPACE_CONTENT_STAGES.map((stage) => (
+                    {getWorkspaceContentStagesForType(workspaceType).map((stage) => (
                       <label key={stage.id}>
                         <input
                           type="checkbox"
