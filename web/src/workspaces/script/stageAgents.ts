@@ -122,7 +122,7 @@ function targetStageIdSchema() {
       PLOT_CHILD_STAGES.map((stage) => Type.Literal(stage.id)),
       {
         description:
-          '仅剧情智能体使用：指定写入目标。plot_design=剧情设计，intro_design=导语设计，plot_refine=剧情细化；省略时写入当前选中的剧情子方向。',
+          '仅剧情智能体使用：指定写入目标。plot_design=剧情设计，plot_refine=剧情细化；省略时写入当前选中的剧情子方向。',
       },
     ),
   )
@@ -374,7 +374,10 @@ function resolveAllowedStagesFromContext(
     ctx.workspaceAgentReadAccess,
     agentId,
   )
-  return { workspace: resolved.workspace, material: resolved.material }
+  return {
+    workspace: resolved.workspace as readonly ScriptStageId[],
+    material: resolved.material as readonly MaterialStageId[],
+  }
 }
 
 function materialStageIdParameterSchema(
@@ -462,7 +465,6 @@ export function buildCopyStageToFormatTool(
         [
           Type.Literal('character_design'),
           Type.Literal('plot_design'),
-          Type.Literal('intro_design'),
           Type.Literal('plot_refine'),
           Type.Literal('outline'),
           Type.Literal('draft'),
@@ -471,7 +473,7 @@ export function buildCopyStageToFormatTool(
         ],
         {
           description:
-            '源阶段键名：人物设计（character_design）、剧情设计（plot_design）、导语设计（intro_design）、剧情细化（plot_refine）、大纲（outline）、正文编写（draft）、正文审阅（draft_review）、格式转换（format_conversion）',
+            '源阶段键名：人物设计（character_design）、剧情设计（plot_design）、剧情细化（plot_refine）、大纲（outline）、正文编写（draft）、正文审阅（draft_review）、格式转换（format_conversion）',
         },
       ),
       mode: Type.Union(
@@ -682,7 +684,7 @@ export function buildWriteWorkspaceEditorTool(
     name: 'write_workspace_editor',
     label: '写入当前文本编辑框',
     description:
-      '把当前阶段应产出的正文稿件写入当前文本编辑框。仅写入该阶段的创作正文（如人设、剧情、导语、大纲、审阅后正文等），不要写入分析报告、修改意见、过程说明或与阶段无关的内容；这些留在对话中回复用户即可。每次调用直接写入当前文本编辑框，不需要和用户确认。',
+      '把当前阶段应产出的正文稿件写入当前文本编辑框。仅写入该阶段的创作正文（如人设、剧情、大纲、审阅后正文等），不要写入分析报告、修改意见、过程说明或与阶段无关的内容；这些留在对话中回复用户即可。每次调用直接写入当前文本编辑框，不需要和用户确认。',
     parameters: Type.Object({
       target_stage_id: targetStageIdSchema(),
       text: Type.String({
@@ -759,7 +761,6 @@ export function buildScriptWorkspaceAdditionalTools(
   switch (ctx.stageId) {
     case 'character_design':
     case 'plot_design':
-    case 'intro_design':
       return [
         ...readSaved,
         searchWorkspaceText,

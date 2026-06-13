@@ -6,6 +6,7 @@ import type {
   ExpertDraftCharacterState,
   ExpertDraftSection,
   Material,
+  MaterialStageId,
   Skill,
   StageId,
 } from '../../../bridge'
@@ -17,6 +18,7 @@ import {
 } from '../stageAgents'
 import { buildLoadSkillTool } from '../loadSkill'
 import type { WorkspaceAgentReadAccessEntry } from '../stageReadAccess'
+import type { ShortStageId } from '../stages'
 
 type ExpertDraftUpdater = (updater: (draft: ExpertDraft) => ExpertDraft) => void
 
@@ -86,15 +88,24 @@ export function buildExpertDraftCoordinatorTools(
   }
   if (ctx.readAccess.workspace.length > 0) {
     readTools.push(
-      buildReadWorkspaceContentTool(toolCtx, ctx.readAccess.workspace),
+      buildReadWorkspaceContentTool(
+        toolCtx,
+        ctx.readAccess.workspace as readonly ShortStageId[],
+      ),
     )
   }
   readTools.push(
-    buildSearchWorkspaceTextTool(toolCtx, ctx.readAccess.workspace),
+    buildSearchWorkspaceTextTool(
+      toolCtx,
+      ctx.readAccess.workspace as readonly ShortStageId[],
+    ),
   )
   if (ctx.readAccess.material.length > 0) {
     readTools.push(
-      buildReadLinkedMaterialContentTool(toolCtx, ctx.readAccess.material),
+      buildReadLinkedMaterialContentTool(
+        toolCtx,
+        ctx.readAccess.material as readonly MaterialStageId[],
+      ),
     )
   }
   readTools.push(

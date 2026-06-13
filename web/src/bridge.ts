@@ -23,11 +23,13 @@ import {
   normalizeWorkspaceAgentReadAccess,
   resolveWorkspaceAgentIdForStage,
   type WorkspaceAgentId,
-  type WorkspaceAgentReadAccessConfig,
 } from './workspaces/short/stageReadAccess'
 import {
   normalizeWorkspaceAgentReadAccess as normalizeScriptWorkspaceAgentReadAccess,
 } from './workspaces/script/stageReadAccess'
+import type {
+  WorkspaceAgentReadAccessConfig,
+} from './workspaces/shared/readAccess'
 import { appendLoadableSkillsToPrompt } from './workspaces/short/loadSkill'
 
 const DEFAULT_SKILL_TEMPLATE_MODULES = import.meta.glob(
@@ -39,9 +41,11 @@ const defaultSkillTemplate = Object.values(DEFAULT_SKILL_TEMPLATE_MODULES)[0] ??
 
 export type {
   WorkspaceAgentId,
+} from './workspaces/short/stageReadAccess'
+export type {
   WorkspaceAgentReadAccessConfig,
   WorkspaceAgentReadAccessEntry,
-} from './workspaces/short/stageReadAccess'
+} from './workspaces/shared/readAccess'
 
 export type { ShortStageId, ScriptStageId }
 
@@ -106,7 +110,19 @@ export interface ExpertDraft {
   active_section_id?: string
 }
 
-export function defaultExpertDraft(): ExpertDraft {
+export function defaultExpertDraft(bookType: BookType = 'short'): ExpertDraft {
+  if (bookType === 'script') {
+    return {
+      sections: [
+        { id: 'section-1', title: '第一节', word_count_requirement: '', body: '' },
+      ],
+      character_states: [
+        { section_id: 'section-1', title: '第一节人物状态', body: '' },
+      ],
+      running: false,
+      active_section_id: '',
+    }
+  }
   return {
     sections: [
       { id: 'intro', title: '导语', word_count_requirement: '', body: '' },
@@ -128,8 +144,9 @@ function defaultExpertCharacterStateTitle(sectionTitle: string): string {
 export function normalizeExpertDraft(
   raw?: Partial<ExpertDraft> | null,
   resetRuntime = false,
+  bookType: BookType = 'short',
 ): ExpertDraft {
-  const base = defaultExpertDraft()
+  const base = defaultExpertDraft(bookType)
   if (!raw || typeof raw !== 'object') return base
 
   const sections: ExpertDraftSection[] = []
@@ -141,12 +158,19 @@ export function normalizeExpertDraft(
       if (!item || typeof item !== 'object') return
       const maybe = item as Partial<ExpertDraftSection>
       let id = String(maybe.id ?? '').trim()
-      if (!id) id = index === 0 ? 'intro' : `section-${index}`
+      if (!id) {
+        id =
+          bookType === 'script'
+            ? `section-${index + 1}`
+            : index === 0
+              ? 'intro'
+              : `section-${index}`
+      }
       if (seenSectionIds.has(id)) return
       seenSectionIds.add(id)
       const title =
         String(maybe.title ?? '').trim() ||
-        (id === 'intro' ? '导语' : `第${sections.length}节`)
+        (id === 'intro' ? '导语' : `第${sections.length + (bookType === 'script' ? 1 : 0)}节`)
       sections.push({
         id,
         title,
@@ -202,9 +226,9 @@ export function normalizeExpertDraft(
 }
 
 /** 短篇可选分类（可扩展） */
-export const SHORT_GENRE_OPTIONS = ['世情', '追妻', '科幻', '悬疑'] as const
+export const SHORT_GENRE_OPTIONS = ['世情', '追妻', '科幻', '悬疑', '其他'] as const
 /** 剧本分类暂时与短篇一致，但保持独立常量。 */
-export const SCRIPT_GENRE_OPTIONS = ['世情', '追妻', '科幻', '悬疑'] as const
+export const SCRIPT_GENRE_OPTIONS = ['世情', '追妻', '科幻', '悬疑', '其他'] as const
 
 /** 获取统一阶段列表（所有短篇书籍使用同一套阶段） */
 export function resolveWorkspaceStagesForBook(
@@ -325,6 +349,7 @@ export const SHORT_MATERIAL_GENRES: Record<string, string[]> = {
   '追妻': ['甜宠', '虐恋', '重生', '穿越', '暗恋', '破镜重圆', '先婚后爱'],
   '科幻': ['未来都市', '星际', '人工智能', '赛博朋克', '末日', '时间旅行', '异星文明'],
   '悬疑': ['刑侦', '推理', '惊悚', '密室', '民俗', '心理', '反转'],
+  '其他': [],
 }
 
 export const SCRIPT_MATERIAL_GENRES: Record<string, string[]> = {
@@ -332,6 +357,7 @@ export const SCRIPT_MATERIAL_GENRES: Record<string, string[]> = {
   '追妻': ['甜宠', '虐恋', '重生', '穿越', '暗恋', '破镜重圆', '先婚后爱'],
   '科幻': ['未来都市', '星际', '人工智能', '赛博朋克', '末日', '时间旅行', '异星文明'],
   '悬疑': ['刑侦', '推理', '惊悚', '密室', '民俗', '心理', '反转'],
+  '其他': [],
 }
 
 export function libraryTypeLabel(type: MaterialType | SkillType): string {
@@ -1420,7 +1446,7 @@ async function mockCreateBook(
         ? linked_skill_id
         : '',
     stages: normalizeAllBookStages({}),
-    expert_draft: defaultExpertDraft(),
+    expert_draft: defaultExpertDraft(bt),
     created_at: now,
     updated_at: now,
   }
@@ -1435,7 +1461,7 @@ async function mockGetBook(book_id: string): Promise<Book | null> {
   return {
     ...book,
     status: normalizeBookStatus(book.status),
-    expert_draft: normalizeExpertDraft(book.expert_draft),
+    expert_draft: normalizeExpertDraft(book.expert_draft, false, book.book_type),
   }
 }
 
@@ -1478,7 +1504,14 @@ async function mockSaveBook(
     }
   }
   if (options.expert_draft != null) {
-    next = { ...next, expert_draft: normalizeExpertDraft(options.expert_draft) }
+    next = {
+      ...next,
+      expert_draft: normalizeExpertDraft(
+        options.expert_draft,
+        false,
+        next.book_type,
+      ),
+    }
   }
   if (options.status != null) {
     next = { ...next, status: normalizeBookStatus(options.status) }

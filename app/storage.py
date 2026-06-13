@@ -22,6 +22,7 @@ from app.models import (
     Material,
     Skill,
     SHORT_STAGE_KEYS,
+    SCRIPT_STAGE_KEYS,
     MATERIAL_STAGE_KEYS,
     SKILL_STAGE_KEYS,
     apply_stage_patch,
@@ -99,7 +100,7 @@ def _unique_child_dir(parent: Path, base_name: str) -> Path:
 def _write_stages_to_disk(book: Book) -> None:
     """
     将各阶段内容写入书籍输出目录
-    使用所有短篇分类共享的统一阶段键
+    根据书籍类型选择适用的阶段键
     """
     od = (book.output_dir or "").strip()
     if not od:
@@ -110,8 +111,8 @@ def _write_stages_to_disk(book: Book) -> None:
     except OSError:
         return
 
-    # 统一使用 SHORT_STAGE_KEYS 写入所有阶段
-    for key in SHORT_STAGE_KEYS:
+    keys = SCRIPT_STAGE_KEYS if book.book_type == "script" else SHORT_STAGE_KEYS
+    for key in keys:
         text = str(book.stages.get(key, "") or "")
         try:
             (root / f"{key}.txt").write_text(text, encoding="utf-8")
@@ -864,8 +865,8 @@ class BookStore:
                 output_dir=od,
                 linked_material_id="",
                 linked_skill_id=linked_sid,
-                stages=default_stages(),
-                expert_draft=normalize_expert_draft_from_storage(None),
+                stages=default_stages(bt),
+                expert_draft=normalize_expert_draft_from_storage(None, bt),
                 created_at=now,
                 updated_at=now,
             )
@@ -899,13 +900,15 @@ class BookStore:
                 sid = linked_skill_id.strip()
                 b.linked_skill_id = sid if b.book_type in WORKSPACE_BOOK_TYPES and sid in self._skills else ""
             if stages is not None:
-                b.stages = apply_stage_patch(b.stages, stages)
+                b.stages = apply_stage_patch(b.stages, stages, b.book_type)
                 dk = primary_draft_stage_key(b)
                 b.content = str(b.stages.get(dk, "") or "")
             elif content is not None:
                 b.content = content
             if expert_draft is not None:
-                b.expert_draft = normalize_expert_draft_from_storage(expert_draft)
+                b.expert_draft = normalize_expert_draft_from_storage(
+                    expert_draft, b.book_type
+                )
             if status is not None:
                 b.status = normalize_book_status(status)
             b.updated_at = _utc_now_iso()

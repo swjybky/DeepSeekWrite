@@ -6,6 +6,7 @@ import {
   bookTypeLabel,
   type BookStatus,
   type BookSummary,
+  type BookType,
   type ExpertDraft,
   type ExpertDraftSection,
   type StageId,
@@ -159,7 +160,11 @@ function createBookPersistedSnapshot(
 ): BookPersistedSnapshot {
   return {
     stages: normalizeStagesForWorkspaceBook(book, book.stages),
-    expertDraft: normalizeExpertDraft(expertDraft ?? book.expert_draft, true),
+    expertDraft: normalizeExpertDraft(
+      expertDraft ?? book.expert_draft,
+      true,
+      book.book_type,
+    ),
   }
 }
 
@@ -285,9 +290,12 @@ function chineseSectionNumber(n: number): string {
   return String(n)
 }
 
-function expertDraftSectionTitleForIndex(index: number): string {
-  if (index <= 0) return '导语'
-  return `第${chineseSectionNumber(index)}节`
+function expertDraftSectionTitleForIndex(
+  index: number,
+  bookType: BookType = 'short',
+): string {
+  if (bookType !== 'script' && index <= 0) return '导语'
+  return `第${chineseSectionNumber(bookType === 'script' ? index + 1 : index)}节`
 }
 
 function nextExpertDraftSectionId(sections: ExpertDraftSection[]): string {
@@ -370,6 +378,7 @@ function createBookWorkspaceSession(input: {
   const expertDraft = normalizeExpertDraft(
     input.book.expert_draft,
     input.resetExpertRuntime,
+    input.book.book_type,
   )
   const persistedSnapshot =
     input.previous?.persistedSnapshot ??
@@ -646,7 +655,11 @@ export function BookEditor() {
   const updateExpertDraftForBook = useCallback(
     (bookId: string, updater: (current: ExpertDraft) => ExpertDraft) => {
       commitWorkspaceSession(bookId, (session) => {
-        const nextExpertDraft = normalizeExpertDraft(updater(session.expertDraft))
+        const nextExpertDraft = normalizeExpertDraft(
+          updater(session.expertDraft),
+          false,
+          session.book.book_type,
+        )
         return {
           ...session,
           expertDraft: nextExpertDraft,
@@ -1355,8 +1368,10 @@ export function BookEditor() {
     (bookId: string) => {
       updateExpertDraftForBook(bookId, (draft) => {
         if (draft.running) return draft
+        const session = workspaceSessionsRef.current[bookId]
+        const bookType = session?.book.book_type ?? 'short'
         const id = nextExpertDraftSectionId(draft.sections)
-        const title = expertDraftSectionTitleForIndex(draft.sections.length)
+        const title = expertDraftSectionTitleForIndex(draft.sections.length, bookType)
         return {
           ...draft,
           active_section_id: id,
@@ -1600,7 +1615,7 @@ export function BookEditor() {
         sectionIds: ids,
         getDraft: () =>
           workspaceSessionsRef.current[bookId]?.expertDraft ??
-          normalizeExpertDraft(null),
+          normalizeExpertDraft(null, false, session.book.book_type),
         getWorkspaceStages: () =>
           workspaceSessionsRef.current[bookId]?.stages ?? EMPTY_STAGES,
         linkedMaterial: session.linkedMaterial,
@@ -1663,11 +1678,12 @@ export function BookEditor() {
 
   const resetExpertDraft = useCallback(() => {
     if (expertDraftRef.current.running) return
-    const ok = window.confirm('清空正文编写内容，并恢复为导语和第一节的初始状态？')
+    const ok = window.confirm('清空正文编写内容，并恢复为第一节的初始状态？')
     if (!ok) return
     const currentBookId = bookRef.current?.id
     if (!currentBookId) return
-    const next = normalizeExpertDraft(defaultExpertDraft(), true)
+    const bookType = bookRef.current?.book_type ?? 'short'
+    const next = normalizeExpertDraft(defaultExpertDraft(bookType), true, bookType)
     commitWorkspaceSession(
       currentBookId,
       (session) => {

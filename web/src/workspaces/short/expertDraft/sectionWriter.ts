@@ -8,6 +8,7 @@ import {
   type ExpertDraft,
   type ExpertDraftSection,
   type Material,
+  type MaterialStageId,
   type Skill,
   type StageId,
 } from '../../../bridge'
@@ -21,6 +22,7 @@ import {
   EXPERT_SECTION_WRITER_AGENT_ID,
   type WorkspaceAgentReadAccessEntry,
 } from '../stageReadAccess'
+import type { ShortStageId } from '../stages'
 import {
   resolveWorkspaceProviderApiKey,
 } from '../../../pi/resolveWorkspaceChatModel'
@@ -346,15 +348,24 @@ export function buildSectionWriterTools(input: {
   const readTools: AgentTool[] = []
   if (readAccess.workspace.length > 0) {
     readTools.push(
-      buildReadWorkspaceContentTool(toolCtx, readAccess.workspace),
+      buildReadWorkspaceContentTool(
+        toolCtx,
+        readAccess.workspace as readonly ShortStageId[],
+      ),
     )
   }
   readTools.push(
-    buildSearchWorkspaceTextTool(toolCtx, readAccess.workspace),
+    buildSearchWorkspaceTextTool(
+      toolCtx,
+      readAccess.workspace as readonly ShortStageId[],
+    ),
   )
   if (readAccess.material.length > 0) {
     readTools.push(
-      buildReadLinkedMaterialContentTool(toolCtx, readAccess.material),
+      buildReadLinkedMaterialContentTool(
+        toolCtx,
+        readAccess.material as readonly MaterialStageId[],
+      ),
     )
   }
   readTools.push(
@@ -477,7 +488,7 @@ export async function runExpertDraftSectionWriter(
             bookGenre: opts.bookGenre,
             stageBody: section.body,
             workspaceStages: opts.getWorkspaceStages(),
-            allowedWorkspaceStages: opts.readAccess.workspace,
+            allowedWorkspaceStages: opts.readAccess.workspace as readonly StageId[],
             template: systemPromptTemplate,
             linkedSkill: opts.linkedSkill,
           }),

@@ -18,6 +18,7 @@ SHORT_MATERIAL_GENRES: dict[str, list[str]] = {
     "追妻": ["甜宠", "虐恋", "重生", "穿越", "暗恋", "破镜重圆", "先婚后爱"],
     "科幻": ["未来都市", "星际", "人工智能", "赛博朋克", "末日", "时间旅行", "异星文明"],
     "悬疑": ["刑侦", "推理", "惊悚", "密室", "民俗", "心理", "反转"],
+    "其他": [],
 }
 
 # 剧本素材暂时沿用短篇一级分类，但保持独立常量，后续可单独演进。
@@ -78,6 +79,12 @@ SHORT_STAGE_KEYS: tuple[str, ...] = (
     "format_conversion",    # 格式转换（新增到情感）
 )
 
+# 剧本工作台阶段键：与短篇一致，但移除独立的导语设计阶段
+# 对应 web/src/workspaces/script/stages.ts 中的 SCRIPT_WORKSPACE_CONTENT_STAGES
+SCRIPT_STAGE_KEYS: tuple[str, ...] = tuple(
+    key for key in SHORT_STAGE_KEYS if key != "intro_design"
+)
+
 # 保留旧键用于数据迁移
 LEGACY_QINGGAN_STAGE_KEYS: tuple[str, ...] = (
     "qinggan_character",
@@ -90,6 +97,11 @@ LEGACY_QINGGAN_STAGE_KEYS: tuple[str, ...] = (
 
 # 所有可能的阶段键（包括统一新键和遗留旧键）
 ALL_STAGE_KEYS: tuple[str, ...] = SHORT_STAGE_KEYS + LEGACY_QINGGAN_STAGE_KEYS
+
+
+def _stage_keys_for_book_type(book_type: str | None = None) -> tuple[str, ...]:
+    """根据书籍类型返回适用的阶段键列表。"""
+    return SCRIPT_STAGE_KEYS if str(book_type or "").strip() == "script" else SHORT_STAGE_KEYS
 
 
 def _legacy_key_mapping() -> dict[str, str]:
@@ -133,16 +145,20 @@ def migrate_legacy_stages(stages: dict[str, str]) -> dict[str, str]:
     return result
 
 
-def default_stages() -> dict[str, str]:
-    """创建默认的空阶段字典（仅包含统一阶段键）"""
-    return {k: "" for k in SHORT_STAGE_KEYS}
+def default_stages(book_type: str | None = None) -> dict[str, str]:
+    """创建默认的空阶段字典（仅包含当前书籍类型适用的统一阶段键）"""
+    return {k: "" for k in _stage_keys_for_book_type(book_type)}
 
 
-def normalize_stages_from_storage(raw: dict[str, Any] | None) -> dict[str, str]:
+def normalize_stages_from_storage(
+    raw: dict[str, Any] | None,
+    book_type: str | None = None,
+) -> dict[str, str]:
     """
     从 JSON 载入：补齐缺失键为 ''，并执行数据迁移
     """
-    out = default_stages()
+    keys = _stage_keys_for_book_type(book_type)
+    out = {k: "" for k in keys}
     if not raw:
         return out
 
@@ -150,30 +166,51 @@ def normalize_stages_from_storage(raw: dict[str, Any] | None) -> dict[str, str]:
     migrated = migrate_legacy_stages({k: str(v or "") for k, v in raw.items()})
 
     # 填充到输出
-    for k in SHORT_STAGE_KEYS:
+    for k in keys:
         if k in migrated:
             out[k] = migrated[k]
 
     return out
 
 
-def apply_stage_patch(base: dict[str, str], patch: dict[str, Any] | None) -> dict[str, str]:
+def apply_stage_patch(
+    base: dict[str, str],
+    patch: dict[str, Any] | None,
+    book_type: str | None = None,
+) -> dict[str, str]:
     """
     合并前端传入的部分阶段字段，保留未出现在 patch 中的键。
     同时处理可能的旧键映射。
     """
-    out = normalize_stages_from_storage(base)
+    out = normalize_stages_from_storage(base, book_type)
+    keys = _stage_keys_for_book_type(book_type)
     if patch:
         # 先对patch进行迁移
         migrated_patch = migrate_legacy_stages({k: str(v or "") for k, v in patch.items()})
-        for k in SHORT_STAGE_KEYS:
+        for k in keys:
             if k in migrated_patch:
                 out[k] = migrated_patch[k]
     return out
 
 
-def default_expert_draft() -> dict[str, Any]:
-    """创建专家模式正文编写的默认空结构。"""
+def default_expert_draft(book_type: str | None = None) -> dict[str, Any]:
+    """创建专家模式正文编写的默认空结构。剧本从第一节开始，短篇保留导语。"""
+    if str(book_type or "").strip() == "script":
+        return {
+            "sections": [
+                {
+                    "id": "section-1",
+                    "title": "第一节",
+                    "word_count_requirement": "",
+                    "body": "",
+                },
+            ],
+            "character_states": [
+                {"section_id": "section-1", "title": "第一节人物状态", "body": ""},
+            ],
+            "running": False,
+            "active_section_id": "",
+        }
     return {
         "sections": [
             {"id": "intro", "title": "导语", "word_count_requirement": "", "body": ""},
@@ -198,12 +235,21 @@ def _default_character_state_title(section_title: str) -> str:
     return f"{title}人物状态"
 
 
-def normalize_expert_draft_from_storage(raw: Any | None) -> dict[str, Any]:
-    """从 JSON 载入专家模式正文结构，补齐导语/第一节和对应人物状态。"""
-    base = default_expert_draft()
+def _section_number_for_index(index: int, book_type: str | None) -> int:
+    """计算小节序号：剧本从 1 开始，短篇 index 0 为导语，index 1 为第一节。"""
+    return index + 1 if str(book_type or "").strip() == "script" else index
+
+
+def normalize_expert_draft_from_storage(
+    raw: Any | None,
+    book_type: str | None = None,
+) -> dict[str, Any]:
+    """从 JSON 载入专家模式正文结构，补齐对应书籍类型的默认小节和人物状态。"""
+    base = default_expert_draft(book_type)
     if not isinstance(raw, dict):
         return base
 
+    is_script = str(book_type or "").strip() == "script"
     sections: list[dict[str, str]] = []
     seen_section_ids: set[str] = set()
     raw_sections = raw.get("sections")
@@ -214,13 +260,19 @@ def normalize_expert_draft_from_storage(raw: Any | None) -> dict[str, Any]:
                 continue
             sid = str(item.get("id") or "").strip()
             if not sid:
-                sid = "intro" if idx == 0 else f"section-{idx}"
+                if is_script:
+                    sid = f"section-{idx + 1}"
+                else:
+                    sid = "intro" if idx == 0 else f"section-{idx}"
             if sid in seen_section_ids:
                 continue
             seen_section_ids.add(sid)
             title = str(item.get("title") or "").strip()
             if not title:
-                title = "导语" if sid == "intro" else f"第{len(sections)}节"
+                if sid == "intro":
+                    title = "导语"
+                else:
+                    title = f"第{_section_number_for_index(len(sections), book_type)}节"
             sections.append(
                 {
                     "id": sid,
@@ -335,7 +387,7 @@ class Book:
         bt = normalize_book_type(data.get("book_type"))
         # 从存储加载时执行迁移
         raw_stages = data.get("stages")
-        migrated_stages = normalize_stages_from_storage(raw_stages)
+        migrated_stages = normalize_stages_from_storage(raw_stages, bt)
 
         return cls(
             id=str(data["id"]),
@@ -348,7 +400,9 @@ class Book:
             linked_skill_id=str(data.get("linked_skill_id") or ""),
             status=normalize_book_status(data.get("status")),
             stages=migrated_stages,
-            expert_draft=normalize_expert_draft_from_storage(data.get("expert_draft")),
+            expert_draft=normalize_expert_draft_from_storage(
+                data.get("expert_draft"), bt
+            ),
             created_at=str(data.get("created_at") or ""),
             updated_at=str(data.get("updated_at") or ""),
         )

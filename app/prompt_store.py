@@ -27,6 +27,10 @@ SHORT_STAGES_ORDER: tuple[str, ...] = (
     "draft",
 )
 
+SCRIPT_STAGES_ORDER: tuple[str, ...] = tuple(
+    stage_id for stage_id in SHORT_STAGES_ORDER if stage_id != "intro_design"
+)
+
 EXPERT_DRAFT_COORDINATOR_AGENT_ID = "expert_draft_coordinator"
 EXPERT_SECTION_WRITER_AGENT_ID = "expert_section_writer"
 WORKSPACE_STAGE_AGENT_IDS: tuple[str, ...] = tuple(
@@ -64,8 +68,16 @@ def validate_workspace_agent_id(agent_id: str) -> None:
         raise ValueError(f"未知的 workspace_agent_id: {agent_id!r}")
 
 
-def validate_workspace_stage_id(stage_id: str) -> None:
-    if stage_id not in SHORT_STAGES_ORDER:
+def validate_workspace_stage_id(
+    stage_id: str,
+    workspace_type: str | None = None,
+) -> None:
+    order = (
+        SCRIPT_STAGES_ORDER
+        if normalize_workspace_prompt_type(workspace_type) == "script"
+        else SHORT_STAGES_ORDER
+    )
+    if stage_id not in order:
         raise ValueError(f"未知的 stage_id: {stage_id!r}")
 
 
@@ -247,7 +259,7 @@ def render_workspace_system_prompt(
     stage_body: str,
     all_stages_for_peek: dict[str, str] | None = None,
 ) -> str:
-    validate_workspace_stage_id(stage_id)
+    validate_workspace_stage_id(stage_id, workspace_type)
     template_id = (
         EXPERT_DRAFT_COORDINATOR_AGENT_ID if stage_id == "draft" else stage_id
     )

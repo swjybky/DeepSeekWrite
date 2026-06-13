@@ -374,7 +374,10 @@ function resolveAllowedStagesFromContext(
     ctx.workspaceAgentReadAccess,
     agentId,
   )
-  return { workspace: resolved.workspace, material: resolved.material }
+  return {
+    workspace: resolved.workspace as readonly ShortStageId[],
+    material: resolved.material as readonly MaterialStageId[],
+  }
 }
 
 function materialStageIdParameterSchema(

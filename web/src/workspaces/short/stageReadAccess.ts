@@ -4,6 +4,15 @@ import {
   SHORT_WORKSPACE_STAGES,
   type ShortStageId,
 } from './stages'
+import type {
+  WorkspaceAgentReadAccessConfig,
+  WorkspaceAgentReadAccessEntry,
+} from '../shared/readAccess'
+
+export type {
+  WorkspaceAgentReadAccessConfig,
+  WorkspaceAgentReadAccessEntry,
+} from '../shared/readAccess'
 
 export const EXPERT_DRAFT_COORDINATOR_AGENT_ID =
   'expert_draft_coordinator' as const
@@ -25,16 +34,6 @@ export const WORKSPACE_AGENT_IDS = [
 export type WorkspaceAgentId = (typeof WORKSPACE_AGENT_IDS)[number]
 export type WorkspaceStandardAgentId =
   (typeof WORKSPACE_STANDARD_AGENT_IDS)[number]
-
-export type WorkspaceAgentReadAccessEntry = {
-  workspace: ShortStageId[]
-  material: MaterialStageId[]
-}
-
-export type WorkspaceAgentReadAccessConfig = Record<
-  WorkspaceAgentId,
-  WorkspaceAgentReadAccessEntry
->
 
 export const ALL_WORKSPACE_STAGE_IDS_FOR_READ = SHORT_WORKSPACE_STAGES.map(
   (stage) => stage.id,

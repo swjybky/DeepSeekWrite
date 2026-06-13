@@ -4,6 +4,15 @@ import {
   SCRIPT_WORKSPACE_STAGES,
   type ScriptStageId,
 } from './stages'
+import type {
+  WorkspaceAgentReadAccessConfig,
+  WorkspaceAgentReadAccessEntry,
+} from '../shared/readAccess'
+
+export type {
+  WorkspaceAgentReadAccessConfig,
+  WorkspaceAgentReadAccessEntry,
+} from '../shared/readAccess'
 
 export const EXPERT_DRAFT_COORDINATOR_AGENT_ID =
   'expert_draft_coordinator' as const
@@ -25,16 +34,6 @@ export const WORKSPACE_AGENT_IDS = [
 export type WorkspaceAgentId = (typeof WORKSPACE_AGENT_IDS)[number]
 export type WorkspaceStandardAgentId =
   (typeof WORKSPACE_STANDARD_AGENT_IDS)[number]
-
-export type WorkspaceAgentReadAccessEntry = {
-  workspace: ScriptStageId[]
-  material: MaterialStageId[]
-}
-
-export type WorkspaceAgentReadAccessConfig = Record<
-  WorkspaceAgentId,
-  WorkspaceAgentReadAccessEntry
->
 
 export const ALL_WORKSPACE_STAGE_IDS_FOR_READ = SCRIPT_WORKSPACE_STAGES.map(
   (stage) => stage.id,
@@ -59,14 +58,13 @@ const DEFAULT_MATERIAL_BY_STAGE: Record<
   readonly MaterialStageId[]
 > = {
   character_design: ['character'],
-  plot_design: ['character', 'intro', 'gimmick', 'plot_refine', 'pacing'],
+  plot_design: ['character', 'gimmick', 'plot_refine', 'pacing'],
   outline: [],
 }
 
 const DEFAULT_COORDINATOR_WORKSPACE: ScriptStageId[] = [
   'character_design',
   'plot_design',
-  'intro_design',
   'plot_refine',
   'outline',
 ]
@@ -121,7 +119,7 @@ export function resolveWorkspaceAgentIdForStage(
   stageId: ScriptStageId,
 ): WorkspaceAgentId {
   if (stageId === 'draft') return EXPERT_DRAFT_COORDINATOR_AGENT_ID
-  if (stageId === 'intro_design' || stageId === 'plot_refine') {
+  if (stageId === 'plot_refine') {
     return 'plot_design'
   }
   return stageId as WorkspaceAgentId
@@ -162,7 +160,7 @@ function normalizeEntry(
 function mergePlotAgentReadAccessInput(
   input: Record<string, unknown>,
 ): unknown {
-  const sourceIds = ['plot_design', 'intro_design', 'plot_refine']
+  const sourceIds = ['plot_design', 'plot_refine']
   const workspace: string[] = []
   const material: string[] = []
   let hasWorkspace = false

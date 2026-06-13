@@ -6,6 +6,7 @@ import type {
   ExpertDraftCharacterState,
   ExpertDraftSection,
   Material,
+  MaterialStageId,
   Skill,
   StageId,
 } from '../../../bridge'
@@ -17,6 +18,7 @@ import {
 } from '../stageAgents'
 import { buildLoadSkillTool } from '../loadSkill'
 import type { WorkspaceAgentReadAccessEntry } from '../stageReadAccess'
+import type { ScriptStageId } from '../stages'
 
 type ExpertDraftUpdater = (updater: (draft: ExpertDraft) => ExpertDraft) => void
 
@@ -43,7 +45,7 @@ function normalizeWordCountRequirement(raw: unknown): string {
 }
 
 function sectionIdForIndex(index: number): string {
-  return index === 0 ? 'intro' : `section-${index}`
+  return `section-${index + 1}`
 }
 
 function normalizeSectionId(
@@ -86,15 +88,24 @@ export function buildExpertDraftCoordinatorTools(
   }
   if (ctx.readAccess.workspace.length > 0) {
     readTools.push(
-      buildReadWorkspaceContentTool(toolCtx, ctx.readAccess.workspace),
+      buildReadWorkspaceContentTool(
+        toolCtx,
+        ctx.readAccess.workspace as readonly ScriptStageId[],
+      ),
     )
   }
   readTools.push(
-    buildSearchWorkspaceTextTool(toolCtx, ctx.readAccess.workspace),
+    buildSearchWorkspaceTextTool(
+      toolCtx,
+      ctx.readAccess.workspace as readonly ScriptStageId[],
+    ),
   )
   if (ctx.readAccess.material.length > 0) {
     readTools.push(
-      buildReadLinkedMaterialContentTool(toolCtx, ctx.readAccess.material),
+      buildReadLinkedMaterialContentTool(
+        toolCtx,
+        ctx.readAccess.material as readonly MaterialStageId[],
+      ),
     )
   }
   readTools.push(
@@ -110,16 +121,16 @@ export function buildExpertDraftCoordinatorTools(
       name: 'create_draft_sections',
       label: '创建正文列表',
       description:
-        '根据大纲要求创建或重建正文小节列表。每个条目会变成一个独立正文文本框；可直接填入导语正文。',
+        '根据大纲要求创建或重建正文小节列表。每个条目会变成一个独立正文文本框；可直接填入第一节正文。',
       parameters: Type.Object({
         sections: Type.Array(
           Type.Object({
             id: Type.Optional(
               Type.String({
-                description: '可选小节 id；导语建议 intro，第一节建议 section-1',
+                description: '可选小节 id；第一节建议 section-1',
               }),
             ),
-            title: Type.String({ description: '小节标题，如 导语、第一节' }),
+            title: Type.String({ description: '小节标题，如 第一节、第二节' }),
             word_count_requirement: Type.Optional(
               Type.String({
                 description:
@@ -143,7 +154,7 @@ export function buildExpertDraftCoordinatorTools(
             const previous = previousById.get(id)
             return {
               id,
-              title: item.title.trim() || previous?.title || (index === 0 ? '导语' : `第${index}节`),
+              title: item.title.trim() || previous?.title || `第${index + 1}节`,
               word_count_requirement: normalizeWordCountRequirement(
                 item.word_count_requirement ?? previous?.word_count_requirement,
               ),
@@ -173,7 +184,7 @@ export function buildExpertDraftCoordinatorTools(
       name: 'create_character_state_sections',
       label: '创建人物状态列表',
       description:
-        '创建或重建正文编写的人物状态编辑框列表。条目应与正文小节一一对应；可直接填入导语人物状态。',
+        '创建或重建正文编写的人物状态编辑框列表。条目应与正文小节一一对应；可直接填入第一节人物状态。',
       parameters: Type.Object({
         items: Type.Array(
           Type.Object({
@@ -183,7 +194,7 @@ export function buildExpertDraftCoordinatorTools(
               }),
             ),
             section_title: Type.String({
-              description: '对应正文小节标题，如 导语、第一节',
+              description: '对应正文小节标题，如 第一节、第二节',
             }),
             title: Type.Optional(Type.String({ description: '人物状态框标题' })),
             body: Type.Optional(
@@ -265,9 +276,7 @@ export function buildExpertDraftCoordinatorTools(
         const draft = ctx.getDraft()
         const ids = (params.section_ids?.length
           ? params.section_ids
-          : draft.sections
-              .filter((s) => s.id !== 'intro')
-              .map((s) => s.id)
+          : draft.sections.map((s) => s.id)
         )
           .map((id) => String(id).trim())
           .filter(Boolean)

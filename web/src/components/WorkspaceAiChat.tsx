@@ -650,7 +650,7 @@ function WorkspaceAiChatInner({
                   (props.stageId === 'draft'
                     ? EXPERT_DRAFT_COORDINATOR_AGENT_ID
                     : props.stageId) as WorkspaceAgentId,
-                ).workspace,
+                ).workspace as readonly StageId[],
                 linkedSkill: props.linkedSkill,
               },
             )
@@ -971,7 +971,7 @@ function WorkspaceAiChatInner({
                   (p.stageId === 'draft'
                     ? EXPERT_DRAFT_COORDINATOR_AGENT_ID
                     : p.stageId) as WorkspaceAgentId,
-                ).workspace,
+                ).workspace as readonly StageId[],
                 linkedSkill: p.linkedSkill,
               },
             )

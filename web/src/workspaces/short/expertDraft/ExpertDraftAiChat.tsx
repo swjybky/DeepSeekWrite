@@ -360,7 +360,7 @@ export function ExpertDraftAiChat(props: Props) {
         bookGenre: p.bookGenre,
         draft,
         workspaceStages: p.stages,
-        allowedWorkspaceStages: p.readAccess.workspace,
+        allowedWorkspaceStages: p.readAccess.workspace as readonly StageId[],
         template: coordinatorPromptTemplateRef.current,
         linkedSkill: p.linkedSkill,
       })
@@ -377,7 +377,7 @@ export function ExpertDraftAiChat(props: Props) {
         bookGenre: p.bookGenre,
         stageBody: section.body,
         workspaceStages: p.stages,
-        allowedWorkspaceStages: p.writerReadAccess.workspace,
+        allowedWorkspaceStages: p.writerReadAccess.workspace as readonly StageId[],
         template: sectionWriterPromptTemplateRef.current,
         linkedSkill: p.linkedSkill,
       })
@@ -453,7 +453,7 @@ export function ExpertDraftAiChat(props: Props) {
             bookGenre: props.bookGenre,
             draft: props.expertDraft,
             workspaceStages: props.stages,
-            allowedWorkspaceStages: props.readAccess.workspace,
+            allowedWorkspaceStages: props.readAccess.workspace as readonly StageId[],
             template: coordinatorTemplate,
             linkedSkill: props.linkedSkill,
           }),
@@ -630,7 +630,7 @@ export function ExpertDraftAiChat(props: Props) {
         bookGenre: p.bookGenre,
         draft: debouncedDraft,
         workspaceStages: p.stages,
-        allowedWorkspaceStages: p.readAccess.workspace,
+        allowedWorkspaceStages: p.readAccess.workspace as readonly StageId[],
         template: coordinatorPromptTemplateRef.current,
         linkedSkill: p.linkedSkill,
       })
@@ -666,7 +666,7 @@ export function ExpertDraftAiChat(props: Props) {
       bookGenre: p.bookGenre,
       stageBody: section.body,
       workspaceStages: p.stages,
-      allowedWorkspaceStages: p.writerReadAccess.workspace,
+      allowedWorkspaceStages: p.writerReadAccess.workspace as readonly StageId[],
       template: sectionWriterPromptTemplateRef.current,
       linkedSkill: p.linkedSkill,
     })
