@@ -121,6 +121,24 @@
   font-weight: 700;
 }
 
+.workspace-settings-sync-defaults {
+  margin-left: auto;
+  padding: 0.45rem 0.8rem;
+  border: 1px solid #dbe3ef;
+  border-radius: 8px;
+  background: #fff;
+  color: #475569;
+  font-size: 0.875rem;
+  cursor: pointer;
+  transition: border-color 0.2s ease, color 0.2s ease, background 0.2s ease;
+}
+
+.workspace-settings-sync-defaults:hover {
+  border-color: #3b82f6;
+  color: #2563eb;
+  background: #f8fbff;
+}
+
 .workspace-settings-layout {
   flex: 1;
   min-height: 0;
@@ -211,6 +229,18 @@
 
 .workspace-settings-head-actions button {
   padding: 0.5rem 0.75rem;
+}
+
+.workspace-settings-head-actions .workspace-settings-reset-all {
+  border-color: #fca5a5;
+  background: #fef2f2;
+  color: #b91c1c;
+}
+
+.workspace-settings-head-actions .workspace-settings-reset-all:hover {
+  border-color: #ef4444;
+  background: #fee2e2;
+  color: #991b1b;
 }
 
 .workspace-settings-grid {

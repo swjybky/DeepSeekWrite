@@ -9,10 +9,13 @@ import {
   MATERIAL_STAGE_LABELS,
   bookTypeLabel,
   getWorkspaceAgentReadAccess,
+  getWorkspaceAgentReadAccessDefaults,
   readWorkspaceAgentPromptTemplate,
   resetWorkspaceAgentPromptOverride,
+  resetAllWorkspaceSettings,
   saveWorkspaceAgentPromptOverride,
   saveWorkspaceAgentReadAccess,
+  syncWorkspaceAgentReadAccessDefaults,
   type BookType,
   type MaterialStageId,
   type StageId,
@@ -328,9 +331,10 @@ export function WorkspaceSettings() {
     if (!window.confirm(`恢复「${AGENT_LABELS[agentId]}」的默认读取范围？`)) {
       return
     }
+    const defaults = await getWorkspaceAgentReadAccessDefaults(workspaceType)
     const next: WorkspaceAgentReadAccessConfig = {
       ...readAccessRef.current,
-      [agentId]: getDefaultReadAccessEntryForType(workspaceType, agentId),
+      [agentId]: defaults[agentId] ?? getDefaultReadAccessEntryForType(workspaceType, agentId),
     }
     readAccessRef.current = next
     setReadAccess(next)
@@ -338,6 +342,69 @@ export function WorkspaceSettings() {
       await saveWorkspaceAgentReadAccess(next, workspaceType)
     }).catch(() => undefined)
   }, [enqueueSave, workspaceType])
+
+  const resetAllSettings = useCallback(async () => {
+    if (
+      !window.confirm(
+        `确定将「${bookTypeLabel(workspaceType)}创作空间」的所有智能体提示词和读取范围恢复为默认配置？此操作不可撤销。`,
+      )
+    ) {
+      return
+    }
+
+    // 取消所有未保存的提示词定时保存
+    for (const agentId of WORKSPACE_AGENT_IDS) {
+      const timer = promptTimersRef.current[agentId]
+      if (timer !== undefined) {
+        window.clearTimeout(timer)
+        delete promptTimersRef.current[agentId]
+      }
+    }
+
+    setSaveStatus('saving')
+    setError(null)
+    try {
+      await resetAllWorkspaceSettings(workspaceType)
+      const [prompts, config] = await Promise.all([
+        Promise.all(
+          WORKSPACE_AGENT_IDS.map(async (agentId) => [
+            agentId,
+            await readWorkspaceAgentPromptTemplate(agentId, workspaceType),
+          ] as const),
+        ),
+        getWorkspaceAgentReadAccess(workspaceType),
+      ])
+      const nextPrompts = Object.fromEntries(prompts) as PromptDrafts
+      promptDraftsRef.current = nextPrompts
+      savedPromptsRef.current = nextPrompts
+      readAccessRef.current = config
+      setPromptDrafts(nextPrompts)
+      setReadAccess(config)
+      setSaveStatus('saved')
+    } catch (cause) {
+      setSaveStatus('error')
+      setError(cause instanceof Error ? cause.message : '还原默认配置失败')
+    }
+  }, [workspaceType])
+
+  const syncReadAccessDefaults = useCallback(async () => {
+    if (
+      !window.confirm(
+        `将当前「${bookTypeLabel(workspaceType)}」的用户读取范围配置同步为内置默认配置？此操作会修改项目源码中的默认 JSON 文件，供后续版本使用。`,
+      )
+    ) {
+      return
+    }
+    setSaveStatus('saving')
+    setError(null)
+    try {
+      await syncWorkspaceAgentReadAccessDefaults(workspaceType)
+      setSaveStatus('saved')
+    } catch (cause) {
+      setSaveStatus('error')
+      setError(cause instanceof Error ? cause.message : '同步默认配置失败')
+    }
+  }, [workspaceType])
 
   return (
     <div className="workspace-settings-page">
@@ -380,6 +447,14 @@ export function WorkspaceSettings() {
             {bookTypeLabel(type)}
           </button>
         ))}
+        <button
+          type="button"
+          className="workspace-settings-sync-defaults"
+          onClick={() => void syncReadAccessDefaults()}
+          title="将当前类型的用户读取范围配置写入项目默认 JSON 文件"
+        >
+          同步为内置默认
+        </button>
       </div>
 
       <main className="workspace-settings-layout">
@@ -436,6 +511,13 @@ export function WorkspaceSettings() {
                   </h2>
                 </div>
                 <div className="workspace-settings-head-actions">
+                  <button
+                    type="button"
+                    className="workspace-settings-reset-all"
+                    onClick={() => void resetAllSettings()}
+                  >
+                    一键还原默认配置
+                  </button>
                   <button type="button" onClick={() => void resetReadAccess()}>
                     恢复默认读取范围
                   </button>

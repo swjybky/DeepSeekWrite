@@ -10,10 +10,14 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from app.runtime_paths import bundle_root, data_root
+from app.runtime_paths import bundle_root, data_root, is_frozen
 
 from app.models import (
     Book,
+    MATERIAL_STAGE_KEYS,
+    SCRIPT_STAGE_KEYS,
+    SHORT_STAGE_KEYS,
+    SKILL_STAGE_KEYS,
     normalize_book_status,
     normalize_book_type,
     normalize_material_type,
@@ -21,13 +25,9 @@ from app.models import (
     WORKSPACE_BOOK_TYPES,
     Material,
     Skill,
-    SHORT_STAGE_KEYS,
-    SCRIPT_STAGE_KEYS,
-    MATERIAL_STAGE_KEYS,
-    SKILL_STAGE_KEYS,
     apply_stage_patch,
-    default_stages,
     default_material_stages,
+    default_stages,
     normalize_expert_draft_from_storage,
     new_book_id,
     new_material_id,
@@ -319,6 +319,126 @@ def write_workspace_agent_read_access_for_type(workspace_type: str, config: dict
         else:
             prefs.pop(key, None)
         _save_preferences_atomic_unlocked(prefs)
+
+
+_READ_ACCESS_DEFAULT_AGENT_IDS = {
+    "character_design",
+    "plot_design",
+    "outline",
+    "expert_draft_coordinator",
+    "expert_section_writer",
+}
+
+
+def _builtin_read_access_default_path(workspace_type: str) -> Path:
+    normalized = normalize_book_type(workspace_type)
+    prefix = "script" if normalized == "script" else "short"
+    return (
+        bundle_root() / "app" / "prompt_defaults" / prefix / "shared" / "read_access.json"
+    )
+
+
+def _validate_read_access_entry(
+    agent_id: str,
+    entry: dict[str, Any],
+    valid_workspace_stages: set[str],
+    valid_material_stages: set[str],
+) -> dict[str, Any] | None:
+    if not isinstance(entry, dict):
+        return None
+    workspace_raw = entry.get("workspace")
+    material_raw = entry.get("material")
+    out: dict[str, Any] = {}
+    if isinstance(workspace_raw, list):
+        out["workspace"] = [
+            str(x) for x in workspace_raw if str(x) in valid_workspace_stages
+        ]
+    if isinstance(material_raw, list):
+        out["material"] = [
+            str(x) for x in material_raw if str(x) in valid_material_stages
+        ]
+    return out if out else None
+
+
+def sync_workspace_agent_read_access_defaults(
+    workspace_type: str | None = None,
+) -> dict[str, Any]:
+    """将用户 AppData preferences.json 中的读取范围配置同步为内置默认 JSON 文件。"""
+    if is_frozen():
+        raise RuntimeError("已打包环境下无法同步源码默认配置，请在源码运行模式下操作。")
+
+    normalized = normalize_book_type(workspace_type or "short")
+    is_script = normalized == "script"
+    valid_workspace = set(SCRIPT_STAGE_KEYS if is_script else SHORT_STAGE_KEYS)
+    valid_material = set(MATERIAL_STAGE_KEYS)
+
+    user_config = read_workspace_agent_read_access_for_type(normalized)
+
+    output: dict[str, Any] = {}
+    for agent_id in _READ_ACCESS_DEFAULT_AGENT_IDS:
+        raw_entry = user_config.get(agent_id)
+        if not isinstance(raw_entry, dict):
+            continue
+        validated = _validate_read_access_entry(
+            agent_id, raw_entry, valid_workspace, valid_material
+        )
+        if validated:
+            output[agent_id] = validated
+
+    target_path = _builtin_read_access_default_path(normalized)
+    target_path.parent.mkdir(parents=True, exist_ok=True)
+    text = json.dumps(output, ensure_ascii=False, indent=2)
+    fd, tmp = tempfile.mkstemp(
+        dir=str(target_path.parent),
+        prefix=".read_access_",
+        suffix=".json.tmp",
+    )
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(text)
+        os.replace(tmp, target_path)
+    except Exception:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+    return output
+
+
+def read_workspace_agent_read_access_defaults(
+    workspace_type: str | None = None,
+) -> dict[str, Any]:
+    """从内置默认 JSON 文件读取读取范围默认配置；文件不存在时返回空对象。"""
+    normalized = normalize_book_type(workspace_type or "short")
+    is_script = normalized == "script"
+    valid_workspace = set(SCRIPT_STAGE_KEYS if is_script else SHORT_STAGE_KEYS)
+    valid_material = set(MATERIAL_STAGE_KEYS)
+
+    target_path = _builtin_read_access_default_path(normalized)
+    if not target_path.is_file():
+        return {}
+
+    try:
+        raw = json.loads(target_path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return {}
+
+    if not isinstance(raw, dict):
+        return {}
+
+    output: dict[str, Any] = {}
+    for agent_id in _READ_ACCESS_DEFAULT_AGENT_IDS:
+        entry = raw.get(agent_id)
+        if not isinstance(entry, dict):
+            continue
+        validated = _validate_read_access_entry(
+            agent_id, entry, valid_workspace, valid_material
+        )
+        if validated:
+            output[agent_id] = validated
+    return output
 
 
 def _normalize_config_id(raw: str) -> str:
