@@ -4,10 +4,12 @@ import {
   WORKSPACE_AGENT_IDS,
   normalizeWorkspaceAgentReadAccess,
   resolveWorkspaceAgentIdForStage,
+  getDefaultWorkspaceAgentReadAccess,
   type WorkspaceAgentId,
 } from '../workspaces/short/stageReadAccess'
 import {
   normalizeWorkspaceAgentReadAccess as normalizeScriptWorkspaceAgentReadAccess,
+  getDefaultWorkspaceAgentReadAccess as getDefaultScriptWorkspaceAgentReadAccess,
 } from '../workspaces/script/stageReadAccess'
 import type {
   WorkspaceAgentReadAccessConfig,
@@ -483,6 +485,12 @@ declare global {
           config: Record<string, unknown>,
           workspace_type: string,
         ): Promise<void>
+        sync_workspace_agent_read_access_defaults(
+          workspace_type?: string,
+        ): Promise<Record<string, unknown>>
+        get_default_workspace_agent_read_access(
+          workspace_type?: string,
+        ): Promise<Record<string, unknown>>
         /** 本地配置中的默认文字模型与 Key；未配置完整时返回 null */
         get_ai_defaults(): Promise<AiModelDefaults | null>
         /** 本地模型配置，首次为空时由 Python 从旧 .env 导入。 */
@@ -835,6 +843,40 @@ export async function saveWorkspaceAgentReadAccess(
     )
   }
   return normalized
+}
+
+/** 将当前用户读取范围配置同步为内置默认 JSON 文件（仅源码运行模式可用）。 */
+export async function syncWorkspaceAgentReadAccessDefaults(
+  workspaceType: BookType = 'short',
+): Promise<WorkspaceAgentReadAccessConfig> {
+  const api = await getBridgeApi()
+  if (api?.sync_workspace_agent_read_access_defaults) {
+    const result = await api.sync_workspace_agent_read_access_defaults(workspaceType)
+    return workspaceType === 'script'
+      ? normalizeScriptWorkspaceAgentReadAccess(result)
+      : normalizeWorkspaceAgentReadAccess(result)
+  }
+  throw new Error('桌面端 API 不可用：无法同步读取范围默认配置')
+}
+
+/** 从磁盘默认 JSON 文件读取读取范围默认配置（桌面端），否则返回内嵌默认值。 */
+export async function getWorkspaceAgentReadAccessDefaults(
+  workspaceType: BookType = 'short',
+): Promise<WorkspaceAgentReadAccessConfig> {
+  const api = await getBridgeApi()
+  if (api?.get_default_workspace_agent_read_access) {
+    try {
+      const result = await api.get_default_workspace_agent_read_access(workspaceType)
+      return workspaceType === 'script'
+        ? normalizeScriptWorkspaceAgentReadAccess(result)
+        : normalizeWorkspaceAgentReadAccess(result)
+    } catch {
+      /* fall through */
+    }
+  }
+  return workspaceType === 'script'
+    ? getDefaultScriptWorkspaceAgentReadAccess()
+    : getDefaultWorkspaceAgentReadAccess()
 }
 
 function trimString(value: unknown): string {
@@ -2180,6 +2222,41 @@ export async function resetWorkspaceAgentPromptOverride(
   } catch {
     return false
   }
+}
+
+/** 一键还原当前创作空间类型的所有智能体提示词覆盖与读取范围到默认配置。 */
+export async function resetAllWorkspaceSettings(
+  workspaceType: BookType = 'short',
+): Promise<void> {
+  const api = await getBridgeApi()
+
+  // 1. 重置所有提示词覆盖
+  if (api?.reset_workspace_agent_prompt_override) {
+    await Promise.all(
+      WORKSPACE_AGENT_IDS.map((agentId) =>
+        api.reset_workspace_agent_prompt_override(agentId, workspaceType),
+      ),
+    )
+  } else {
+    ensureLocalSharedPromptMigrated()
+    ensureLocalPlotPromptMerged()
+    if (workspaceType === 'script') ensureLocalScriptPromptSeeded()
+    try {
+      const prefix =
+        workspaceType === 'script'
+          ? SCRIPT_SHARED_WORKSPACE_PROMPT_KIND
+          : SHARED_WORKSPACE_PROMPT_KIND
+      for (const agentId of WORKSPACE_AGENT_IDS) {
+        localStorage.removeItem(localPromptLsKey(prefix, agentId))
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+
+  // 2. 重置读取范围为默认值（优先从磁盘默认 JSON 读取，桌面端实时生效）
+  const defaults = await getWorkspaceAgentReadAccessDefaults(workspaceType)
+  await saveWorkspaceAgentReadAccess(defaults, workspaceType)
 }
 
 export async function getBookCover(book_id: string): Promise<{ cover_data: string | null }> {

@@ -9,6 +9,7 @@ export {
   getStoredAppearanceStyle,
   getStoredWorkspaceRoot,
   getWorkspaceAgentReadAccess,
+  getWorkspaceAgentReadAccessDefaults,
   loadPersistedWorkspaceRoot,
   normalizeAiModelSettings,
   normalizeAppearanceStyle,
@@ -16,6 +17,7 @@ export {
   saveAiModelConfig,
   saveAppearanceStyle,
   saveWorkspaceAgentReadAccess,
+  syncWorkspaceAgentReadAccessDefaults,
   setStoredAppearanceStyle,
   setStoredWorkspaceRoot,
 } from './legacy'

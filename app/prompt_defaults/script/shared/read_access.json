@@ -1,0 +1,51 @@
+{
+  "character_design": {
+    "workspace": [
+      "character_design",
+      "plot_design",
+      "plot_refine"
+    ],
+    "material": [
+      "character"
+    ]
+  },
+  "plot_design": {
+    "workspace": [
+      "character_design",
+      "plot_design",
+      "plot_refine"
+    ],
+    "material": [
+      "character",
+      "intro",
+      "gimmick",
+      "pacing",
+      "plot_refine"
+    ]
+  },
+  "expert_section_writer": {
+    "workspace": [
+      "outline",
+      "draft"
+    ],
+    "material": [
+      "draft_excerpt"
+    ]
+  },
+  "expert_draft_coordinator": {
+    "workspace": [
+      "outline",
+      "draft"
+    ],
+    "material": []
+  },
+  "outline": {
+    "workspace": [
+      "outline",
+      "character_design",
+      "plot_design",
+      "plot_refine"
+    ],
+    "material": []
+  }
+}

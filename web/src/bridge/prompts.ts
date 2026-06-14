@@ -12,6 +12,7 @@ export {
   resetMaterialPromptOverride,
   resetSkillAgentPromptOverride,
   resetWorkspaceAgentPromptOverride,
+  resetAllWorkspaceSettings,
   saveMaterialAgentPromptOverride,
   saveMaterialPromptOverride,
   saveSkillAgentPromptOverride,

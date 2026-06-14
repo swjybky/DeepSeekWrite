@@ -53,47 +53,71 @@ export const ALL_MATERIAL_STAGE_IDS: MaterialStageId[] = [
   'draft_excerpt',
 ]
 
-const DEFAULT_MATERIAL_BY_STAGE: Record<
-  WorkspaceStandardAgentId,
-  readonly MaterialStageId[]
-> = {
-  character_design: ['character'],
-  plot_design: ['character', 'intro', 'gimmick', 'pacing', 'plot_refine'],
-  outline: [],
+const BUILTIN_READ_ACCESS_MODULES = import.meta.glob(
+  '../../../../app/prompt_defaults/short/shared/read_access.json',
+  { eager: true, import: 'default' },
+) as Record<string, WorkspaceAgentReadAccessConfig>
+
+const FALLBACK_DEFAULTS: WorkspaceAgentReadAccessConfig = {
+  character_design: {
+    workspace: ['character_design', 'plot_design', 'plot_refine'],
+    material: ['character'],
+  },
+  plot_design: {
+    workspace: ['character_design', 'intro_design', 'plot_design', 'plot_refine'],
+    material: ['character', 'intro', 'gimmick', 'pacing', 'plot_refine'],
+  },
+  outline: {
+    workspace: ['intro_design', 'plot_design', 'plot_refine', 'outline', 'character_design'],
+    material: [],
+  },
+  expert_draft_coordinator: {
+    workspace: ['outline', 'draft'],
+    material: ['draft_excerpt'],
+  },
+  expert_section_writer: {
+    workspace: ['outline', 'draft'],
+    material: ['draft_excerpt'],
+  },
 }
 
-const DEFAULT_WORKSPACE_BY_STAGE: Record<
-  WorkspaceStandardAgentId,
-  readonly ShortStageId[]
-> = {
-  character_design: ['character_design', 'plot_design', 'plot_refine'],
-  plot_design: ['character_design', 'intro_design', 'plot_design', 'plot_refine'],
-  outline: ['intro_design', 'plot_design', 'plot_refine', 'outline', 'character_design'],
+function isShortStageId(id: string): id is ShortStageId {
+  return ALL_WORKSPACE_CONTENT_STAGE_IDS.includes(id as ShortStageId)
 }
 
-const DEFAULT_COORDINATOR_WORKSPACE: ShortStageId[] = ['outline', 'draft']
+function isMaterialStageId(id: string): id is MaterialStageId {
+  return ALL_MATERIAL_STAGE_IDS.includes(id as MaterialStageId)
+}
+
+function loadBuiltinDefaults(): WorkspaceAgentReadAccessConfig {
+  const json = Object.values(BUILTIN_READ_ACCESS_MODULES)[0] as
+    | WorkspaceAgentReadAccessConfig
+    | undefined
+  if (!json || typeof json !== 'object') {
+    return { ...FALLBACK_DEFAULTS }
+  }
+
+  const result: WorkspaceAgentReadAccessConfig = { ...FALLBACK_DEFAULTS }
+  for (const agentId of WORKSPACE_AGENT_IDS) {
+    const entry = json[agentId]
+    if (!entry || typeof entry !== 'object') continue
+    const workspace = Array.isArray(entry.workspace)
+      ? entry.workspace.filter((id) => isShortStageId(id))
+      : FALLBACK_DEFAULTS[agentId].workspace
+    const material = Array.isArray(entry.material)
+      ? entry.material.filter((id) => isMaterialStageId(id))
+      : FALLBACK_DEFAULTS[agentId].material
+    result[agentId] = { workspace, material }
+  }
+  return result
+}
+
+const BUILTIN_DEFAULTS = loadBuiltinDefaults()
 
 function defaultEntryForAgent(
   agentId: WorkspaceAgentId,
 ): WorkspaceAgentReadAccessEntry {
-  if (agentId === EXPERT_DRAFT_COORDINATOR_AGENT_ID) {
-    return {
-      workspace: [...DEFAULT_COORDINATOR_WORKSPACE],
-      material: ['draft_excerpt'],
-    }
-  }
-  if (agentId === EXPERT_SECTION_WRITER_AGENT_ID) {
-    return {
-      workspace: ['outline', 'draft'],
-      material: ['draft_excerpt'],
-    }
-  }
-  return {
-    workspace: [
-      ...DEFAULT_WORKSPACE_BY_STAGE[agentId as WorkspaceStandardAgentId],
-    ],
-    material: [...DEFAULT_MATERIAL_BY_STAGE[agentId as WorkspaceStandardAgentId]],
-  }
+  return BUILTIN_DEFAULTS[agentId] ?? FALLBACK_DEFAULTS[agentId]
 }
 
 export function getDefaultWorkspaceAgentReadAccess(): WorkspaceAgentReadAccessConfig {
@@ -129,14 +153,6 @@ export function resolveWorkspaceAgentIdForStage(
     return 'plot_design'
   }
   return stageId as WorkspaceAgentId
-}
-
-function isShortStageId(id: string): id is ShortStageId {
-  return ALL_WORKSPACE_CONTENT_STAGE_IDS.includes(id as ShortStageId)
-}
-
-function isMaterialStageId(id: string): id is MaterialStageId {
-  return ALL_MATERIAL_STAGE_IDS.includes(id as MaterialStageId)
 }
 
 function dedupe<T>(items: T[]): T[] {

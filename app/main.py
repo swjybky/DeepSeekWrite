@@ -163,7 +163,9 @@ from app.storage import (
     read_image_model_config,
     read_saved_workspace_root,
     read_workspace_agent_read_access,
+    read_workspace_agent_read_access_defaults,
     read_workspace_agent_read_access_for_type,
+    sync_workspace_agent_read_access_defaults,
     write_appearance_style,
     write_ai_model_config,
     write_saved_workspace_root,
@@ -505,6 +507,20 @@ class Api:
             write_workspace_agent_read_access_for_type(workspace_type, config)
             return
         write_workspace_agent_read_access(config)
+
+    def sync_workspace_agent_read_access_defaults(
+        self,
+        workspace_type: str | None = None,
+    ) -> dict[str, object]:
+        """将用户 AppData 中的读取范围覆盖同步为内置默认 JSON 文件。"""
+        return sync_workspace_agent_read_access_defaults(workspace_type)
+
+    def get_default_workspace_agent_read_access(
+        self,
+        workspace_type: str | None = None,
+    ) -> dict[str, object]:
+        """从内置默认 JSON 文件读取读取范围默认配置。"""
+        return read_workspace_agent_read_access_defaults(workspace_type)
 
     def get_ai_model_config(self) -> dict[str, object]:
         """读取本地模型配置，首次为空时从旧 `.env` 导入。"""
