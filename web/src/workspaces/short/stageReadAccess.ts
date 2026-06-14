@@ -58,17 +58,20 @@ const DEFAULT_MATERIAL_BY_STAGE: Record<
   readonly MaterialStageId[]
 > = {
   character_design: ['character'],
-  plot_design: ['character', 'intro', 'gimmick', 'plot_refine', 'pacing'],
+  plot_design: ['character', 'intro', 'gimmick', 'pacing', 'plot_refine'],
   outline: [],
 }
 
-const DEFAULT_COORDINATOR_WORKSPACE: ShortStageId[] = [
-  'character_design',
-  'plot_design',
-  'intro_design',
-  'plot_refine',
-  'outline',
-]
+const DEFAULT_WORKSPACE_BY_STAGE: Record<
+  WorkspaceStandardAgentId,
+  readonly ShortStageId[]
+> = {
+  character_design: ['character_design', 'plot_design', 'plot_refine'],
+  plot_design: ['character_design', 'intro_design', 'plot_design', 'plot_refine'],
+  outline: ['intro_design', 'plot_design', 'plot_refine', 'outline', 'character_design'],
+}
+
+const DEFAULT_COORDINATOR_WORKSPACE: ShortStageId[] = ['outline', 'draft']
 
 function defaultEntryForAgent(
   agentId: WorkspaceAgentId,
@@ -76,17 +79,19 @@ function defaultEntryForAgent(
   if (agentId === EXPERT_DRAFT_COORDINATOR_AGENT_ID) {
     return {
       workspace: [...DEFAULT_COORDINATOR_WORKSPACE],
-      material: [],
+      material: ['draft_excerpt'],
     }
   }
   if (agentId === EXPERT_SECTION_WRITER_AGENT_ID) {
     return {
-      workspace: [...ALL_WORKSPACE_CONTENT_STAGE_IDS],
-      material: [],
+      workspace: ['outline', 'draft'],
+      material: ['draft_excerpt'],
     }
   }
   return {
-    workspace: [...ALL_WORKSPACE_CONTENT_STAGE_IDS],
+    workspace: [
+      ...DEFAULT_WORKSPACE_BY_STAGE[agentId as WorkspaceStandardAgentId],
+    ],
     material: [...DEFAULT_MATERIAL_BY_STAGE[agentId as WorkspaceStandardAgentId]],
   }
 }

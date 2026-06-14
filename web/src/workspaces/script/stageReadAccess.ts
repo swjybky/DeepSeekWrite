@@ -58,8 +58,17 @@ const DEFAULT_MATERIAL_BY_STAGE: Record<
   readonly MaterialStageId[]
 > = {
   character_design: ['character'],
-  plot_design: ['character', 'gimmick', 'plot_refine', 'pacing'],
+  plot_design: ['character', 'intro', 'gimmick', 'pacing', 'plot_refine'],
   outline: [],
+}
+
+const DEFAULT_WORKSPACE_BY_STAGE: Record<
+  WorkspaceStandardAgentId,
+  readonly ScriptStageId[]
+> = {
+  character_design: ['character_design', 'plot_design', 'plot_refine'],
+  plot_design: ['character_design', 'plot_design', 'plot_refine'],
+  outline: ['outline', 'character_design', 'plot_design', 'plot_refine'],
 }
 
 const DEFAULT_COORDINATOR_WORKSPACE: ScriptStageId[] = [
@@ -80,12 +89,14 @@ function defaultEntryForAgent(
   }
   if (agentId === EXPERT_SECTION_WRITER_AGENT_ID) {
     return {
-      workspace: [...ALL_WORKSPACE_CONTENT_STAGE_IDS],
-      material: [],
+      workspace: ['outline', 'draft'],
+      material: ['draft_excerpt'],
     }
   }
   return {
-    workspace: [...ALL_WORKSPACE_CONTENT_STAGE_IDS],
+    workspace: [
+      ...DEFAULT_WORKSPACE_BY_STAGE[agentId as WorkspaceStandardAgentId],
+    ],
     material: [...DEFAULT_MATERIAL_BY_STAGE[agentId as WorkspaceStandardAgentId]],
   }
 }
