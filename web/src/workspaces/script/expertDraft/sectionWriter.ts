@@ -33,6 +33,7 @@ import {
   getPreferredWorkspaceThinkingLevel,
   resolvePreferredWorkspaceChatModel,
 } from '../../../pi/workspaceChatPreferences'
+import { createWorkspaceStreamFn } from '../../../pi/workspaceStreamFn'
 import { defineTool, textBlock } from '../../shared/piToolkit'
 import {
   buildSectionWriterSystemPrompt,
@@ -482,6 +483,7 @@ export async function runExpertDraftSectionWriter(
         ),
         convertToLlm: convertToLlmWithSkillAsUser,
         getApiKey: resolveWorkspaceProviderApiKey,
+        streamFn: createWorkspaceStreamFn(),
         toolExecution: 'sequential',
         initialState: {
           systemPrompt: buildSectionWriterSystemPrompt({

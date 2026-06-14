@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
-import { Link, useNavigate, useParams } from 'react-router-dom'
+import { Link, useParams } from 'react-router-dom'
 import {
   type Book,
   bookTypeLabel,
@@ -8,45 +8,16 @@ import {
   type BookSummary,
   type ExpertDraft,
   type StageId,
-  defaultExpertDraft,
-  mergeStagePatchIntoAll,
   normalizeExpertDraft,
   normalizeStagesForWorkspaceBook,
-  resolveWorkspaceStagesForBook,
-  resolveWorkspaceBookGenre,
-  getBook,
-  getMaterial,
   isWorkspaceBook,
-  listBooks,
-  saveBook,
   type Material,
   type Skill,
-  getBookCover,
-  pickFolder,
-  exportDocx,
-  getWorkspaceAgentReadAccess,
   type WorkspaceAgentReadAccessConfig,
-  getSkill,
 } from '../bridge'
-import type { ApplyToStageEditorPayload } from '../pi/workspaceStageAgents'
 import {
-  ExpertDraftEditor as ShortExpertDraftEditor,
-} from '../workspaces/short/expertDraft/ExpertDraftEditor'
-import {
-  runExpertDraftSectionWriter as runShortExpertDraftSectionWriter,
-  type GetExpertDraftSectionContent,
-  type RunExpertDraftSectionWriterOptions,
-} from '../workspaces/short/expertDraft/sectionWriter'
-import {
-  EXPERT_SECTION_WRITER_AGENT_ID,
   getDefaultWorkspaceAgentReadAccess,
 } from '../workspaces/short/stageReadAccess'
-import {
-  ExpertDraftEditor as ScriptExpertDraftEditor,
-} from '../workspaces/script/expertDraft/ExpertDraftEditor'
-import {
-  runExpertDraftSectionWriter as runScriptExpertDraftSectionWriter,
-} from '../workspaces/script/expertDraft/sectionWriter'
 import { PLOT_STAGE_ID } from '../workspaces/short/stages'
 import {
   MaterialSelectorDialog,
@@ -58,35 +29,22 @@ import {
   type BookWorkspaceSessionState,
 } from '../stores/workspaceStore'
 import {
-  combineExpertDraftSections,
-  defaultExpertDraftStateTitle,
-  expertDraftSectionTitleForIndex,
-  expertDraftSectionTreeLabel,
-  nextExpertDraftSectionId,
-} from './bookEditor/expertDraftUtils'
-import {
-  isPlotChildStageId,
-  plotChildStagesForBook,
-  resolvePlotEditorStageId,
-  resolveReadAccessForBook,
-  workspaceBookType,
-} from './bookEditor/stageEditing'
-import {
-  createBookPersistedSnapshot,
-  createBookWorkspaceSession,
-  hasAnyUnsavedWorkspaceChanges,
-  mergeWorkspaceBooksStable,
-} from './bookEditor/workspaceSession'
-import {
   EMPTY_STAGES,
-  WORKSPACE_LEAVE_CONFIRM_MESSAGE,
   type PlotChildStageId,
-  type SaveCurrentBookOptions,
 } from './bookEditor/workspaceTypes'
 import { useAiPanelWidth } from './bookEditor/useAiPanelWidth'
 import { useLibrarySelectors } from './bookEditor/useLibrarySelectors'
 import { useBookCoverRuntime } from './bookEditor/useBookCoverRuntime'
+import { useWorkspaceChatEpochs } from './bookEditor/useWorkspaceChatEpochs'
+import { useWorkspaceExportActions } from './bookEditor/useWorkspaceExportActions'
+import { useExpertDraftRuntime } from './bookEditor/useExpertDraftRuntime'
+import { useWorkspaceKeyboardShortcuts } from './bookEditor/useWorkspaceKeyboardShortcuts'
+import { useWorkspacePersistence } from './bookEditor/useWorkspacePersistence'
+import { useWorkspaceStageRuntime } from './bookEditor/useWorkspaceStageRuntime'
+import { useWorkspaceStreaming } from './bookEditor/useWorkspaceStreaming'
 import { useWorkspaceTitleEditing } from './bookEditor/useWorkspaceTitleEditing'
+import { useWorkspaceTreeNavigation } from './bookEditor/useWorkspaceTreeNavigation'
+import { useWorkspaceViewModel } from './bookEditor/useWorkspaceViewModel'
 import { WorkspaceAiPanel } from './bookEditor/WorkspaceAiPanel'
 import { WorkspaceCoverDialogs } from './bookEditor/WorkspaceCoverDialogs'
 import { WorkspaceEditorPane } from './bookEditor/WorkspaceEditorPane'
@@ -96,7 +54,6 @@ import './BookEditor.css'
 
 export function BookEditor() {
   const { id } = useParams<{ id: string }>()
-  const navigate = useNavigate()
   const [book, setBook] = useState<Book | null>(null)
   const [workspaceBooks, setWorkspaceBooks] = useState<BookSummary[]>([])
   const [stages, setStages] = useState<Record<StageId, string>>(() =>
@@ -280,31 +237,6 @@ export function BookEditor() {
     storeWorkspaceSession,
   })
 
-  const setEditorStreamingForBook = useCallback(
-    (bookId: string, stageId: StageId, next: boolean) => {
-      const current =
-        bookRef.current?.id === bookId
-          ? streamingStagesRef.current
-          : workspaceSessionsRef.current[bookId]?.streamingStages ?? {}
-      if (Boolean(current[stageId]) === next) return
-      const updated = { ...current }
-      if (next) {
-        updated[stageId] = true
-      } else {
-        delete updated[stageId]
-      }
-      commitWorkspaceSession(
-        bookId,
-        (session) => ({
-          ...session,
-          streamingStages: updated,
-        }),
-        true,
-      )
-    },
-    [commitWorkspaceSession],
-  )
-
   useEffect(() => {
     activeStageRef.current = activeStage
   }, [activeStage])
@@ -376,245 +308,57 @@ export function BookEditor() {
     [updateExpertDraftForBook],
   )
 
-  const updateStageForBook = useCallback(
-    (
-      bookId: string,
-      stageId: StageId,
-      updater: (current: string) => string,
-    ) => {
-      commitWorkspaceSession(bookId, (session) => {
-        const current = session.stages[stageId] ?? ''
-        const next = updater(current)
-        if (next === current) return session
-        const updatedStages = { ...session.stages, [stageId]: next }
-        return {
-          ...session,
-          stages: updatedStages,
-          book: {
-            ...session.book,
-            stages: mergeStagePatchIntoAll(session.book.stages, updatedStages),
-            content: updatedStages.draft ?? session.book.content,
-          },
-        }
-      })
-    },
-    [commitWorkspaceSession],
-  )
+  const {
+    applyToStageEditorForBook,
+    cancelTokenFlush,
+    flushAllTokenBuffersForBook,
+    updateStage,
+  } = useWorkspaceStreaming({
+    bookRef,
+    workspaceSessionsRef,
+    activeStageRef,
+    activePlotChildStageRef,
+    textareaRefsRef,
+    tokenBuffersRef,
+    tokenBufferRafRefsRef: tokenBufferRafRefs,
+    tokenBuffersByBookRef,
+    tokenBufferRafByBookRef,
+    streamingStagesRef,
+    commitWorkspaceSession,
+  })
 
-  // 细粒度的阶段更新函数（使用函数式更新避免不必要的重渲染）
-  const updateStage = useCallback(
-    (stageId: StageId, updater: (current: string) => string) => {
-      const currentBookId = bookRef.current?.id
-      if (!currentBookId) return
-      updateStageForBook(currentBookId, stageId, updater)
-    },
-    [updateStageForBook],
-  )
-
-  const cancelTokenFlushForBook = useCallback((bookId: string, stageId: StageId) => {
-    const stageRafs = { ...(tokenBufferRafByBookRef.current[bookId] ?? {}) }
-    const rafId = stageRafs[stageId]
-    if (rafId !== undefined) {
-      cancelAnimationFrame(rafId)
-      delete stageRafs[stageId]
-    }
-    tokenBufferRafByBookRef.current[bookId] = stageRafs
-    if (bookRef.current?.id === bookId) {
-      tokenBufferRafRefs.current = stageRafs
-    }
-  }, [])
-
-  const cancelTokenFlush = useCallback(
-    (stageId: StageId) => {
-      const currentBookId = bookRef.current?.id
-      if (!currentBookId) return
-      cancelTokenFlushForBook(currentBookId, stageId)
-    },
-    [cancelTokenFlushForBook],
-  )
-
-  // 将某个阶段缓冲区的 token 刷新到 state（使用 RAF 节流）
-  const flushTokenBufferForBook = useCallback(
-    (bookId: string, stageId: StageId) => {
-      const stageRafs = { ...(tokenBufferRafByBookRef.current[bookId] ?? {}) }
-      delete stageRafs[stageId]
-      tokenBufferRafByBookRef.current[bookId] = stageRafs
-
-      const buffers = { ...(tokenBuffersByBookRef.current[bookId] ?? {}) }
-      const buffer = buffers[stageId] ?? ''
-      if (!buffer) return
-      delete buffers[stageId]
-      tokenBuffersByBookRef.current[bookId] = buffers
-
-      if (bookRef.current?.id === bookId) {
-        tokenBuffersRef.current = buffers
-        tokenBufferRafRefs.current = stageRafs
-      }
-      updateStageForBook(bookId, stageId, (cur) => cur + buffer)
-    },
-    [updateStageForBook],
-  )
-
-  const flushAllTokenBuffersForBook = useCallback(
-    (bookId: string) => {
-      const rafIds = Object.values(tokenBufferRafByBookRef.current[bookId] ?? {})
-      tokenBufferRafByBookRef.current[bookId] = {}
-      rafIds.forEach((rafId) => {
-        if (rafId !== undefined) cancelAnimationFrame(rafId)
-      })
-
-      const buffers = tokenBuffersByBookRef.current[bookId] ?? {}
-      tokenBuffersByBookRef.current[bookId] = {}
-      if (bookRef.current?.id === bookId) {
-        tokenBuffersRef.current = {}
-        tokenBufferRafRefs.current = {}
-      }
-      for (const [stageId, buffer] of Object.entries(buffers) as [
-        StageId,
-        string | undefined,
-      ][]) {
-        if (!buffer) continue
-        updateStageForBook(bookId, stageId, (cur) => cur + buffer)
-      }
-    },
-    [updateStageForBook],
-  )
-
-  // 自动滚动 textarea 到底部（如果用户正在底部）
-  const autoScrollTextarea = useCallback((stageId: StageId) => {
-    const active = activeStageRef.current
-    const activePlotChild = activePlotChildStageRef.current
-    const visible =
-      active === stageId ||
-      (active === PLOT_STAGE_ID &&
-        isPlotChildStageId(stageId) &&
-        (!activePlotChild || activePlotChild === stageId))
-    if (!visible) return
-    const textarea = textareaRefsRef.current[stageId] ?? null
-    if (!textarea) return
-    const wasAtBottom =
-      textarea.scrollHeight - textarea.scrollTop <= textarea.clientHeight + 20
-    if (wasAtBottom) {
-      textarea.scrollTop = textarea.scrollHeight
-    }
-  }, [])
-
-  const applyToStageEditorForBook = useCallback(
-    (bookId: string, stage: StageId, payload: ApplyToStageEditorPayload) => {
-      const requestedTarget = String(payload.targetStageId ?? '').trim()
-      const targetStage =
-        stage === PLOT_STAGE_ID
-          ? isPlotChildStageId(requestedTarget)
-            ? requestedTarget
-            : workspaceSessionsRef.current[bookId]?.activePlotChildStage ||
-              PLOT_STAGE_ID
-          : stage
-      tokenBuffersByBookRef.current[bookId] =
-        tokenBuffersByBookRef.current[bookId] ?? {}
-      tokenBufferRafByBookRef.current[bookId] =
-        tokenBufferRafByBookRef.current[bookId] ?? {}
-      if (payload.mode === 'replace') {
-        // replace 模式立即执行，清空缓冲区
-        cancelTokenFlushForBook(bookId, targetStage)
-        tokenBuffersByBookRef.current[bookId] = {
-          ...(tokenBuffersByBookRef.current[bookId] ?? {}),
-          [targetStage]: undefined,
-        }
-        setEditorStreamingForBook(bookId, targetStage, false)
-        updateStageForBook(bookId, targetStage, () => payload.text.trim())
-        // DOM 更新后尝试自动滚动
-        if (bookRef.current?.id === bookId) {
-          requestAnimationFrame(() => autoScrollTextarea(targetStage))
-        }
-        return
-      }
-
-      if (payload.mode === 'append_token') {
-        if (!payload.text) return
-        setEditorStreamingForBook(bookId, targetStage, true)
-        const buffers = { ...(tokenBuffersByBookRef.current[bookId] ?? {}) }
-        buffers[targetStage] = (buffers[targetStage] ?? '') + payload.text
-        tokenBuffersByBookRef.current[bookId] = buffers
-        const rafs = { ...(tokenBufferRafByBookRef.current[bookId] ?? {}) }
-        if (rafs[targetStage] === undefined) {
-          rafs[targetStage] = requestAnimationFrame(() => {
-            flushTokenBufferForBook(bookId, targetStage)
-            if (bookRef.current?.id === bookId) {
-              requestAnimationFrame(() => autoScrollTextarea(targetStage))
-            }
-          })
-          tokenBufferRafByBookRef.current[bookId] = rafs
-        }
-        if (bookRef.current?.id === bookId) {
-          tokenBuffersRef.current = buffers
-          tokenBufferRafRefs.current = rafs
-        }
-        return
-      }
-
-      // 流式结束标记
-      if (payload.mode === 'streaming_end') {
-        cancelTokenFlushForBook(bookId, targetStage)
-        flushTokenBufferForBook(bookId, targetStage)
-        setEditorStreamingForBook(bookId, targetStage, false)
-        return
-      }
-
-      // 其他模式（append）立即执行
-      cancelTokenFlushForBook(bookId, targetStage)
-      tokenBuffersByBookRef.current[bookId] = {
-        ...(tokenBuffersByBookRef.current[bookId] ?? {}),
-        [targetStage]: undefined,
-      }
-      setEditorStreamingForBook(bookId, targetStage, false)
-      const trimmed = payload.text.trim()
-      if (!trimmed) return
-      updateStageForBook(bookId, targetStage, (cur) => {
-        const sep = cur.length === 0 ? '' : cur.endsWith('\n') ? '\n' : '\n\n'
-        return cur + sep + trimmed
-      })
-      if (bookRef.current?.id === bookId) {
-        requestAnimationFrame(() => autoScrollTextarea(targetStage))
-      }
-    },
-    [
-      updateStageForBook,
-      cancelTokenFlushForBook,
-      flushTokenBufferForBook,
-      autoScrollTextarea,
-      setEditorStreamingForBook,
-    ],
-  )
-
-  const refreshWorkspaceBooks = useCallback(async () => {
-    const list = await listBooks()
-    setWorkspaceBooks(mergeWorkspaceBooksStable(workspaceBookOrderRef, list))
-    return list
-  }, [])
-
-  const syncWorkspaceBookSummary = useCallback((next: Book) => {
-    const summary: BookSummary = {
-      id: next.id,
-      title: next.title,
-      book_type: next.book_type,
-      categories: next.categories,
-      status: next.status,
-      output_dir: next.output_dir,
-      linked_material_id: next.linked_material_id,
-      linked_skill_id: next.linked_skill_id,
-    }
-    setWorkspaceBooks((prev) => {
-      const index = prev.findIndex((item) => item.id === summary.id)
-      if (index < 0) {
-        workspaceBookOrderRef.current = [
-          ...(workspaceBookOrderRef.current ?? []),
-          summary.id,
-        ]
-        return [...prev, summary]
-      }
-      return prev.map((item) => (item.id === summary.id ? summary : item))
-    })
-  }, [])
+  const {
+    handleBackToShelf,
+    handleSave,
+    refreshWorkspaceBooks,
+    saveBookSession,
+    saveCurrentBook,
+    syncWorkspaceBookSummary,
+    waitForSaveIdle,
+  } = useWorkspacePersistence({
+    id,
+    book,
+    bookRef,
+    workspaceSessionsRef,
+    workspaceBookOrderRef,
+    pendingInitialStageRef,
+    hasLoadedOnceRef,
+    saveInFlightRef,
+    saveInFlightByBookRef,
+    tokenBuffersByBookRef,
+    setBook,
+    setWorkspaceBooks,
+    setWorkspaceAgentReadAccess,
+    setLoading,
+    setBookTransitioning,
+    setSaving,
+    setMessage,
+    setError,
+    commitWorkspaceSession,
+    storeWorkspaceSession,
+    syncActiveSessionState,
+    flushAllTokenBuffersForBook,
+  })
 
   const {
     editingTitle,
@@ -660,185 +404,14 @@ export function BookEditor() {
     syncWorkspaceBookSummary,
   })
 
-  const waitForSaveIdle = useCallback(async (timeoutMs = 8000): Promise<boolean> => {
-    const start = Date.now()
-    while (saveInFlightRef.current) {
-      if (Date.now() - start >= timeoutMs) return false
-      await new Promise((resolve) => setTimeout(resolve, 50))
-    }
-    return true
-  }, [])
-
-  const load = useCallback(async () => {
-    if (!id) return
-    setError(null)
-    const switching = hasLoadedOnceRef.current
-    if (!switching) {
-      setLoading(true)
-    } else {
-      setBookTransitioning(true)
-    }
-    try {
-      const cached = workspaceSessionsRef.current[id]
-      if (cached) {
-        const pending = pendingInitialStageRef.current
-        if (pending?.bookId === id) {
-          pendingInitialStageRef.current = null
-        }
-        const rows = resolveWorkspaceStagesForBook(cached.book)
-        let nextCached =
-          pending?.bookId === id && rows.some((row) => row.id === pending.stageId)
-            ? commitWorkspaceSession(
-                id,
-                (session) => ({
-                  ...session,
-                  activeStage: pending.stageId,
-                  activePlotChildStage:
-                    pending.stageId === PLOT_STAGE_ID
-                      ? pending.childId ?? ''
-                      : '',
-                }),
-                false,
-              ) ?? cached
-            : cached
-        if (!nextCached.persistedSnapshot) {
-          nextCached = {
-            ...nextCached,
-            persistedSnapshot: createBookPersistedSnapshot(
-              {
-                ...nextCached.book,
-                stages: mergeStagePatchIntoAll(
-                  nextCached.book.stages,
-                  nextCached.stages,
-                ),
-                expert_draft: nextCached.expertDraft,
-              },
-              nextCached.expertDraft,
-            ),
-          }
-        }
-        syncActiveSessionState(nextCached)
-        try {
-          const [readAccessConfig, bookSummaries] = await Promise.all([
-            getWorkspaceAgentReadAccess(workspaceBookType(cached.book)),
-            listBooks(),
-          ])
-          setWorkspaceAgentReadAccess(readAccessConfig)
-          setWorkspaceBooks(
-            mergeWorkspaceBooksStable(workspaceBookOrderRef, bookSummaries),
-          )
-        } catch {
-          /* 缓存可用时，列表刷新失败不阻塞切回旧书 */
-        }
-        return
-      }
-
-      const [b, bookSummaries] = await Promise.all([
-        getBook(id),
-        listBooks(),
-      ])
-      if (!b) {
-        setBook(null)
-        setError('未找到该书籍')
-        return
-      }
-      const readAccessConfig = await getWorkspaceAgentReadAccess(workspaceBookType(b))
-      setWorkspaceAgentReadAccess(readAccessConfig)
-      setWorkspaceBooks(
-        mergeWorkspaceBooksStable(workspaceBookOrderRef, bookSummaries),
-      )
-      const coverRes = await getBookCover(b.id)
-      const nextCoverData = coverRes.cover_data
-      let material: Material | null = null
-      if (b.linked_material_id) {
-        material = await getMaterial(b.linked_material_id)
-      }
-      let skill: Skill | null = null
-      if (b.linked_skill_id) {
-        skill = await getSkill(b.linked_skill_id)
-      }
-      const rows = resolveWorkspaceStagesForBook(b)
-      const pending = pendingInitialStageRef.current
-      const pendingStage =
-        pending?.bookId === b.id &&
-        rows.some((row) => row.id === pending.stageId)
-          ? pending.stageId
-          : null
-      const pendingPlotChild =
-        pendingStage === PLOT_STAGE_ID && pending?.childId
-          ? pending.childId
-          : ''
-      if (pending?.bookId === b.id) {
-        pendingInitialStageRef.current = null
-      }
-      const previous = workspaceSessionsRef.current[b.id]
-      const session = createBookWorkspaceSession({
-        book: b,
-        linkedMaterial: material,
-        linkedSkill: skill,
-        coverData: nextCoverData,
-        activeStage: pendingStage ?? previous?.activeStage ?? rows[0]!.id,
-        activePlotChildStage: pendingPlotChild || previous?.activePlotChildStage || '',
-        resetExpertRuntime: previous == null,
-        previous,
-      })
-      storeWorkspaceSession(session, true)
-    } catch (e) {
-      setError(e instanceof Error ? e.message : '加载失败')
-    } finally {
-      hasLoadedOnceRef.current = true
-      setLoading(false)
-      setBookTransitioning(false)
-    }
-  }, [
-    id,
-    commitWorkspaceSession,
-    storeWorkspaceSession,
-    syncActiveSessionState,
-  ])
-
-  useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- 进入书本页 mount 拉取数据
-    void load()
-  }, [load])
-
-  const exportStageDocx = useCallback(async (stageId: StageId, body: string) => {
-    if (!book) return
-    const folder = await pickFolder()
-    if (!folder) return
-    setMessage(null)
-    setError(null)
-    try {
-      const res = await exportDocx(
-        book.id,
-        stageId,
-        folder,
-        body,
-        coverData,
-      )
-      if (res.success) {
-        setMessage('导出成功')
-        window.setTimeout(() => setMessage(null), 2000)
-      } else {
-        setError(res.error || '导出失败')
-      }
-    } catch (e) {
-      setError(e instanceof Error ? e.message : '导出失败')
-    }
-  }, [book, coverData])
-
-  const handleExportExpertDraftDocx = useCallback(async () => {
-    const currentStageBody = stagesRef.current.draft ?? ''
-    const body = currentStageBody.trim()
-      ? currentStageBody
-      : combineExpertDraftSections(expertDraftRef.current)
-    if (!body) {
-      setMessage(null)
-      setError('正文编写没有可导出的正文')
-      return
-    }
-    await exportStageDocx('draft', body)
-  }, [exportStageDocx])
+  const { handleExportExpertDraftDocx } = useWorkspaceExportActions({
+    book,
+    coverData,
+    stagesRef,
+    expertDraftRef,
+    setMessage,
+    setError,
+  })
 
   const getRenderedWorkspaceStageBody = useCallback(
     (stageId: StageId): string | undefined => {
@@ -847,431 +420,85 @@ export function BookEditor() {
     [],
   )
 
-  const handleExpertDraftSectionTextareaRef = useCallback(
-    (
-      sectionId: string,
-      field: 'body' | 'character_state',
-      node: HTMLTextAreaElement | null,
-    ) => {
-      const slot = expertDraftActiveSectionEditorRef.current
-      slot.sectionId = sectionId
-      if (field === 'body') {
-        slot.body = node
-      } else {
-        slot.state = node
-      }
-    },
-    [],
-  )
+  const {
+    handleStageBodyChange,
+    selectPlotChildForBook,
+    setActiveBookStage,
+  } = useWorkspaceStageRuntime({
+    bookRef,
+    activeStageRef,
+    activePlotChildStageRef,
+    tokenBuffersByBookRef,
+    tokenBuffersRef,
+    setActiveStage,
+    setActivePlotChildStage,
+    commitWorkspaceSession,
+    cancelTokenFlush,
+    updateStage,
+  })
 
-  const getRenderedExpertDraftSectionContent = useCallback<
-    GetExpertDraftSectionContent
-  >((sectionId, field) => {
-    const slot = expertDraftActiveSectionEditorRef.current
-    if (slot.sectionId !== sectionId) return undefined
-    const node = field === 'body' ? slot.body : slot.state
-    if (!node) return undefined
-    return node.value
-  }, [])
+  const {
+    createExpertDraftSectionForBook,
+    getRenderedExpertDraftSectionContent,
+    handleExpertDraftSectionCreate,
+    handleExpertDraftSectionSelect,
+    handleExpertDraftSectionTextareaRef,
+    mergeExpertDraftToStage,
+    resetExpertDraft,
+    selectExpertDraftSectionForBook,
+    startExpertWritingForBook,
+    stopExpertWriting,
+  } = useExpertDraftRuntime({
+    bookRef,
+    workspaceSessionsRef,
+    expertDraftRef,
+    expertDraftActiveSectionEditorRef,
+    expertRunAbortRef,
+    expertRunPromiseRef,
+    expertRunAbortByBookRef,
+    expertRunPromiseByBookRef,
+    workspaceAgentReadAccess,
+    commitWorkspaceSession,
+    updateExpertDraftForBook,
+    updateStage,
+    setActiveBookStage,
+    setError,
+    setMessage,
+  })
 
-  const saveBookSession = useCallback(
-    async (
-      bookId: string,
-      options: SaveCurrentBookOptions = {},
-    ): Promise<Book | null> => {
-      const session = workspaceSessionsRef.current[bookId]
-      if (!session) return null
-      const isActiveBook = bookRef.current?.id === bookId
-      if (saveInFlightByBookRef.current[bookId]) {
-        if (isActiveBook) setError('正在保存，请稍后再试')
-        return null
-      }
-      saveInFlightByBookRef.current[bookId] = true
-      if (isActiveBook) {
-        saveInFlightRef.current = true
-        setSaving(true)
-        setMessage(null)
-        setError(null)
-      }
-      try {
-        flushAllTokenBuffersForBook(bookId)
-        const beforeSave = workspaceSessionsRef.current[bookId] ?? session
-        const merged = mergeStagePatchIntoAll(
-          beforeSave.book.stages,
-          beforeSave.stages,
-        )
-        const next = await saveBook(bookId, {
-          stages: merged,
-          expert_draft: beforeSave.expertDraft,
-          status: options.status,
-        })
-        if (!next) {
-          if (isActiveBook) setError('保存失败：书籍不存在')
-          return null
-        }
-        const latest = workspaceSessionsRef.current[bookId] ?? beforeSave
-        const nextSession: BookWorkspaceSessionState = {
-          ...latest,
-          book: {
-            ...next,
-            stages: mergeStagePatchIntoAll(next.stages, latest.stages),
-            expert_draft: latest.expertDraft,
-            content: latest.stages.draft ?? next.content,
-          },
-          stages: latest.stages,
-          expertDraft: latest.expertDraft,
-          persistedSnapshot: createBookPersistedSnapshot(
-            {
-              ...next,
-              stages: mergeStagePatchIntoAll(next.stages, latest.stages),
-              expert_draft: latest.expertDraft,
-              content: latest.stages.draft ?? next.content,
-            },
-            latest.expertDraft,
-          ),
-        }
-        storeWorkspaceSession(nextSession, isActiveBook)
-        syncWorkspaceBookSummary(next)
-        if (isActiveBook && options.successMessage) {
-          setMessage(options.successMessage)
-          window.setTimeout(() => setMessage(null), 2000)
-        }
-        return next
-      } catch (e) {
-        if (isActiveBook) setError(e instanceof Error ? e.message : '保存失败')
-        return null
-      } finally {
-        saveInFlightByBookRef.current[bookId] = false
-        if (isActiveBook) {
-          saveInFlightRef.current = false
-          setSaving(false)
-        }
-      }
-    },
-    [
-      flushAllTokenBuffersForBook,
-      storeWorkspaceSession,
-      syncWorkspaceBookSummary,
-    ],
-  )
+  const {
+    bumpActiveExpertChatEpoch,
+    bumpActiveStageChatEpoch,
+  } = useWorkspaceChatEpochs({
+    bookRef,
+    workspaceSessionsRef,
+    aiChatEpochByStage,
+    expertAiChatEpoch,
+    setAiChatEpochByStage,
+    setExpertAiChatEpoch,
+    commitWorkspaceSession,
+  })
 
-  const saveCurrentBook = useCallback(
-    async (options: SaveCurrentBookOptions = {}): Promise<Book | null> => {
-      const currentBookId = bookRef.current?.id
-      if (!currentBookId) return null
-      return saveBookSession(currentBookId, options)
-    },
-    [saveBookSession],
-  )
-
-  const handleSave = useCallback(async () => {
-    await saveCurrentBook({ successMessage: '已保存' })
-  }, [saveCurrentBook])
-
-  const hasUnsavedWorkspaceChanges = useCallback(() => {
-    return hasAnyUnsavedWorkspaceChanges(
-      workspaceSessionsRef.current,
-      tokenBuffersByBookRef.current,
-    )
-  }, [])
-
-  const confirmLeaveWorkspace = useCallback(() => {
-    if (!hasUnsavedWorkspaceChanges()) return true
-    return window.confirm(WORKSPACE_LEAVE_CONFIRM_MESSAGE)
-  }, [hasUnsavedWorkspaceChanges])
-
-  const handleBackToShelf = useCallback(() => {
-    if (!confirmLeaveWorkspace()) return
-    navigate('/')
-  }, [confirmLeaveWorkspace, navigate])
-
-  useEffect(() => {
-    const onBeforeUnload = (event: BeforeUnloadEvent) => {
-      if (!hasUnsavedWorkspaceChanges()) return
-      event.preventDefault()
-      event.returnValue = ''
-    }
-    window.addEventListener('beforeunload', onBeforeUnload)
-    return () => window.removeEventListener('beforeunload', onBeforeUnload)
-  }, [hasUnsavedWorkspaceChanges])
-
-  useEffect(() => {
-    if (!book || !isWorkspaceBook(book)) return
-    const onPopState = () => {
-      if (!hasUnsavedWorkspaceChanges()) return
-      const ok = window.confirm(WORKSPACE_LEAVE_CONFIRM_MESSAGE)
-      if (!ok) {
-        window.history.go(1)
-      }
-    }
-    window.addEventListener('popstate', onPopState)
-    return () => window.removeEventListener('popstate', onPopState)
-  }, [book, hasUnsavedWorkspaceChanges])
-
-  const setActiveBookStage = useCallback(
-    (stageId: StageId) => {
-      const currentBookId = bookRef.current?.id
-      const nextPlotChild = ''
-      activeStageRef.current = stageId
-      setActiveStage(stageId)
-      activePlotChildStageRef.current = nextPlotChild
-      setActivePlotChildStage(nextPlotChild)
-      if (currentBookId) {
-        commitWorkspaceSession(
-          currentBookId,
-          (session) => {
-            if (stageId !== 'draft' || !session.expertDraft.active_section_id) {
-              return {
-                ...session,
-                activeStage: stageId,
-                activePlotChildStage: nextPlotChild,
-              }
-            }
-            const nextExpertDraft = {
-              ...session.expertDraft,
-              active_section_id: '',
-            }
-            return {
-              ...session,
-              activeStage: stageId,
-              activePlotChildStage: nextPlotChild,
-              expertDraft: nextExpertDraft,
-              book: {
-                ...session.book,
-                expert_draft: nextExpertDraft,
-              },
-            }
-          },
-          true,
-        )
-      }
-    },
-    [commitWorkspaceSession],
-  )
-
-  const selectPlotChildForBook = useCallback(
-    (bookId: string, childId: PlotChildStageId) => {
-      if (!isPlotChildStageId(childId)) return
-      if (bookRef.current?.id === bookId) {
-        activeStageRef.current = PLOT_STAGE_ID
-        activePlotChildStageRef.current = childId
-        setActiveStage(PLOT_STAGE_ID)
-        setActivePlotChildStage(childId)
-      }
-      commitWorkspaceSession(
-        bookId,
-        (session) => ({
-          ...session,
-          activeStage: PLOT_STAGE_ID,
-          activePlotChildStage: childId,
-        }),
-        bookRef.current?.id === bookId,
-      )
-    },
-    [commitWorkspaceSession],
-  )
-
-  const selectExpertDraftSectionForBook = useCallback(
-    (bookId: string, sectionId: string) => {
-      updateExpertDraftForBook(bookId, (draft) => {
-        if (!draft.sections.some((section) => section.id === sectionId)) {
-          return draft
-        }
-        return {
-          ...draft,
-          active_section_id: sectionId,
-        }
-      })
-    },
-    [updateExpertDraftForBook],
-  )
-
-  const createExpertDraftSectionForBook = useCallback(
-    (bookId: string) => {
-      updateExpertDraftForBook(bookId, (draft) => {
-        if (draft.running) return draft
-        const session = workspaceSessionsRef.current[bookId]
-        const bookType = session?.book.book_type ?? 'short'
-        const id = nextExpertDraftSectionId(draft.sections)
-        const title = expertDraftSectionTitleForIndex(draft.sections.length, bookType)
-        return {
-          ...draft,
-          active_section_id: id,
-          sections: [
-            ...draft.sections,
-            { id, title, word_count_requirement: '', body: '' },
-          ],
-          character_states: [
-            ...draft.character_states,
-            {
-              section_id: id,
-              title: defaultExpertDraftStateTitle(title),
-              body: '',
-            },
-          ],
-        }
-      })
-    },
-    [updateExpertDraftForBook],
-  )
-
-  const handleExpertDraftSectionSelect = useCallback(
-    (sectionId: string) => {
-      const currentBookId = bookRef.current?.id
-      if (!currentBookId) return
-      setActiveBookStage('draft')
-      selectExpertDraftSectionForBook(currentBookId, sectionId)
-    },
-    [selectExpertDraftSectionForBook, setActiveBookStage],
-  )
-
-  const handleExpertDraftSectionCreate = useCallback(() => {
-    const currentBookId = bookRef.current?.id
-    if (!currentBookId) return
-    setActiveBookStage('draft')
-    createExpertDraftSectionForBook(currentBookId)
-  }, [createExpertDraftSectionForBook, setActiveBookStage])
-
-  const bumpActiveStageChatEpoch = useCallback(
-    (stageId: StageId) => {
-      const currentBookId = bookRef.current?.id
-      if (!currentBookId) return
-      const currentSession = workspaceSessionsRef.current[currentBookId]
-      const currentEpochs =
-        currentSession?.aiChatEpochByStage ?? aiChatEpochByStage
-      const nextEpochs = {
-        ...currentEpochs,
-        [stageId]: (currentEpochs[stageId] ?? 0) + 1,
-      }
-      setAiChatEpochByStage(nextEpochs)
-      commitWorkspaceSession(
-        currentBookId,
-        (session) => ({ ...session, aiChatEpochByStage: nextEpochs }),
-        false,
-      )
-    },
-    [aiChatEpochByStage, commitWorkspaceSession],
-  )
-
-  const bumpActiveExpertChatEpoch = useCallback(() => {
-    const currentBookId = bookRef.current?.id
-    if (!currentBookId) return
-    const currentSession = workspaceSessionsRef.current[currentBookId]
-    const nextEpoch = (currentSession?.expertAiChatEpoch ?? expertAiChatEpoch) + 1
-    setExpertAiChatEpoch(nextEpoch)
-    commitWorkspaceSession(
-      currentBookId,
-      (session) => ({ ...session, expertAiChatEpoch: nextEpoch }),
-      false,
-    )
-  }, [commitWorkspaceSession, expertAiChatEpoch])
-
-  const handleTreeBookStageSelect = useCallback(
-    async (targetBookId: string, targetStageId: StageId) => {
-      if (!book) return
-      if (
-        targetBookId === book.id &&
-        targetStageId === activeStageRef.current
-      ) {
-        if (targetStageId === PLOT_STAGE_ID) {
-          setActiveBookStage(PLOT_STAGE_ID)
-        }
-        if (targetStageId === 'draft') {
-          setActiveBookStage('draft')
-        }
-        return
-      }
-      if (targetBookId === book.id) {
-        setActiveBookStage(targetStageId)
-        return
-      }
-      pendingInitialStageRef.current = {
-        bookId: targetBookId,
-        stageId: targetStageId,
-      }
-      if (!(await waitForSaveIdle())) {
-        pendingInitialStageRef.current = null
-        setError('正在保存，请稍后再切换书籍')
-        return
-      }
-      const saved = await saveCurrentBook({ successMessage: null })
-      if (!saved) {
-        pendingInitialStageRef.current = null
-        return
-      }
-      navigate(`/book/${targetBookId}`)
-    },
-    [book, navigate, saveCurrentBook, setActiveBookStage, waitForSaveIdle],
-  )
-
-  const handleTreeBookStageChildSelect = useCallback(
-    async (targetBookId: string, targetStageId: StageId, childId: string) => {
-      if (targetStageId === PLOT_STAGE_ID && isPlotChildStageId(childId)) {
-        if (!book) return
-        if (targetBookId === book.id) {
-          selectPlotChildForBook(targetBookId, childId)
-          return
-        }
-        pendingInitialStageRef.current = {
-          bookId: targetBookId,
-          stageId: PLOT_STAGE_ID,
-          childId,
-        }
-        if (!(await waitForSaveIdle())) {
-          pendingInitialStageRef.current = null
-          setError('正在保存，请稍后再切换书籍')
-          return
-        }
-        const saved = await saveCurrentBook({ successMessage: null })
-        if (!saved) {
-          pendingInitialStageRef.current = null
-          return
-        }
-        navigate(`/book/${targetBookId}`)
-        return
-      }
-      if (targetStageId !== 'draft') {
-        await handleTreeBookStageSelect(targetBookId, targetStageId)
-        return
-      }
-      await handleTreeBookStageSelect(targetBookId, 'draft')
-      selectExpertDraftSectionForBook(targetBookId, childId)
-    },
-    [
-      handleTreeBookStageSelect,
-      book,
-      navigate,
-      saveCurrentBook,
-      selectExpertDraftSectionForBook,
-      selectPlotChildForBook,
-      waitForSaveIdle,
-    ],
-  )
-
-  const handleTreeBookStageChildCreate = useCallback(
-    (targetBookId: string, targetStageId: StageId) => {
-      if (targetStageId !== 'draft') return
-      if (targetBookId === bookRef.current?.id) {
-        setActiveBookStage('draft')
-      }
-      createExpertDraftSectionForBook(targetBookId)
-    },
-    [createExpertDraftSectionForBook, setActiveBookStage],
-  )
-
-  const handleTreeBookSelect = useCallback(
-    (targetBookId: string) => {
-      const cached = workspaceSessionsRef.current[targetBookId]
-      if (cached) {
-        void handleTreeBookStageSelect(targetBookId, cached.activeStage)
-        return
-      }
-      const summary = workspaceBooks.find((item) => item.id === targetBookId)
-      const rows = resolveWorkspaceStagesForBook(summary)
-      void handleTreeBookStageSelect(targetBookId, rows[0]!.id)
-    },
-    [handleTreeBookStageSelect, workspaceBooks],
-  )
+  const {
+    handleTreeBookSelect,
+    handleTreeBookStageChildCreate,
+    handleTreeBookStageChildSelect,
+    handleTreeBookStageSelect,
+  } = useWorkspaceTreeNavigation({
+    book,
+    workspaceBooks,
+    bookRef,
+    workspaceSessionsRef,
+    pendingInitialStageRef,
+    activeStageRef,
+    waitForSaveIdle,
+    saveCurrentBook,
+    setActiveBookStage,
+    selectPlotChildForBook,
+    selectExpertDraftSectionForBook,
+    createExpertDraftSectionForBook,
+    setError,
+  })
 
   const handleToggleBookStatus = useCallback(async () => {
     if (!book) return
@@ -1289,193 +516,34 @@ export function BookEditor() {
     }
   }, [book, refreshWorkspaceBooks, saveCurrentBook])
 
-  const startExpertWritingForBook = useCallback(
-    (
-      bookId: string,
-      sectionIds: string[],
-      options?: {
-        userWritingPrompt?: string
-        callbacks?: Pick<
-          RunExpertDraftSectionWriterOptions,
-          'onSectionAgentStart' | 'onRunFinish'
-        >
-      },
-    ) => {
-      const session = workspaceSessionsRef.current[bookId]
-      if (
-        !session ||
-        expertRunPromiseByBookRef.current[bookId] ||
-        session.expertDraft.running
-      ) {
-        return false
-      }
-      const available = new Set(session.expertDraft.sections.map((s) => s.id))
-      const ids = sectionIds
-        .map((sid) => sid.trim())
-        .filter((sid) => sid && available.has(sid))
-      if (ids.length === 0) return false
+  useWorkspaceKeyboardShortcuts({
+    id,
+    book,
+    handleSave,
+  })
 
-      const ac = new AbortController()
-      expertRunAbortByBookRef.current[bookId] = ac
-      if (bookRef.current?.id === bookId) {
-        expertRunAbortRef.current = ac
-      }
-      updateExpertDraftForBook(bookId, (draft) => ({
-        ...draft,
-        running: true,
-        active_section_id: ids[0] ?? '',
-      }))
-
-      const runExpertDraftSectionWriter =
-        session.book.book_type === 'script'
-          ? runScriptExpertDraftSectionWriter
-          : runShortExpertDraftSectionWriter
-      const run = runExpertDraftSectionWriter({
-        bookId: session.book.id,
-        bookTitle: session.book.title,
-        bookGenre: resolveWorkspaceBookGenre(session.book),
-        sectionIds: ids,
-        getDraft: () =>
-          workspaceSessionsRef.current[bookId]?.expertDraft ??
-          normalizeExpertDraft(null, false, session.book.book_type),
-        getWorkspaceStages: () =>
-          workspaceSessionsRef.current[bookId]?.stages ?? EMPTY_STAGES,
-        linkedMaterial: session.linkedMaterial,
-        linkedSkill: session.linkedSkill,
-        userWritingPrompt: options?.userWritingPrompt,
-        readAccess: resolveReadAccessForBook(
-          session.book,
-          workspaceAgentReadAccess,
-          EXPERT_SECTION_WRITER_AGENT_ID,
-        ),
-        getRenderedExpertDraftSectionContent,
-        updateDraft: (updater) => updateExpertDraftForBook(bookId, updater),
-        signal: ac.signal,
-        onError: setError,
-        onSectionAgentStart: options?.callbacks?.onSectionAgentStart,
-        onRunFinish: options?.callbacks?.onRunFinish,
-      })
-        .catch((e: unknown) => {
-          if (ac.signal.aborted) return
-          setError(e instanceof Error ? e.message : '专家模式后台写作失败')
-        })
-        .finally(() => {
-          if (expertRunPromiseByBookRef.current[bookId] === run) {
-            expertRunPromiseByBookRef.current[bookId] = null
-            expertRunAbortByBookRef.current[bookId] = null
-            if (bookRef.current?.id === bookId) {
-              expertRunPromiseRef.current = null
-              expertRunAbortRef.current = null
-            }
-            updateExpertDraftForBook(bookId, (draft) => ({
-              ...draft,
-              running: false,
-              active_section_id: '',
-            }))
-          }
-        })
-
-      expertRunPromiseByBookRef.current[bookId] = run
-      if (bookRef.current?.id === bookId) {
-        expertRunPromiseRef.current = run
-      }
-      void run
-      return true
-    },
-    [getRenderedExpertDraftSectionContent, updateExpertDraftForBook, workspaceAgentReadAccess],
-  )
-
-  const stopExpertWriting = useCallback(() => {
-    const currentBookId = bookRef.current?.id
-    if (!currentBookId) return
-    const controller = expertRunAbortByBookRef.current[currentBookId]
-    if (!controller || controller.signal.aborted) return
-    controller.abort()
-    updateExpertDraftForBook(currentBookId, (draft) => ({
-      ...draft,
-      running: false,
-      active_section_id: '',
-    }))
-  }, [updateExpertDraftForBook])
-
-  const resetExpertDraft = useCallback(() => {
-    if (expertDraftRef.current.running) return
-    const ok = window.confirm('清空正文编写内容，并恢复为第一节的初始状态？')
-    if (!ok) return
-    const currentBookId = bookRef.current?.id
-    if (!currentBookId) return
-    const bookType = bookRef.current?.book_type ?? 'short'
-    const next = normalizeExpertDraft(defaultExpertDraft(bookType), true, bookType)
-    commitWorkspaceSession(
-      currentBookId,
-      (session) => {
-        const updatedStages = { ...session.stages, draft: '' }
-        return {
-          ...session,
-          stages: updatedStages,
-          expertDraft: next,
-          book: {
-            ...session.book,
-            stages: mergeStagePatchIntoAll(session.book.stages, updatedStages),
-            content: '',
-            expert_draft: next,
-          },
-        }
-      },
-      true,
-    )
-    setMessage('正文编写已清空')
-    setError(null)
-    window.setTimeout(() => setMessage(null), 2000)
-  }, [commitWorkspaceSession])
-
-  const mergeExpertDraftToStage = useCallback(() => {
-    if (expertDraftRef.current.running) return
-    const body = combineExpertDraftSections(expertDraftRef.current)
-    if (!body) {
-      setMessage(null)
-      setError('正文小节没有可合并的正文')
-      return
-    }
-    updateStage('draft', () => body)
-    setActiveBookStage('draft')
-    setError(null)
-    setMessage('已合并小节正文')
-    window.setTimeout(() => setMessage(null), 2000)
-  }, [setActiveBookStage, updateStage])
-
-  useEffect(() => {
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (!(e.ctrlKey || e.metaKey) || e.key.toLowerCase() !== 's') return
-      if (!id || !book || !isWorkspaceBook(book)) return
-      e.preventDefault()
-      void handleSave()
-    }
-    window.addEventListener('keydown', onKeyDown)
-    return () => window.removeEventListener('keydown', onKeyDown)
-  }, [id, book, handleSave])
-
-  const handleStageBodyChange = (value: string, stageId?: StageId) => {
-    const targetStage = stageId ?? resolvePlotEditorStageId(
-      activeStageRef.current,
-      activePlotChildStageRef.current,
-    )
-    const currentBookId = bookRef.current?.id
-    cancelTokenFlush(targetStage)
-    if (currentBookId) {
-      const buffers = { ...(tokenBuffersByBookRef.current[currentBookId] ?? {}) }
-      delete buffers[targetStage]
-      tokenBuffersByBookRef.current[currentBookId] = buffers
-      tokenBuffersRef.current = buffers
-    }
-    updateStage(targetStage, () => value)
-  }
-
-  const activeContentStage = resolvePlotEditorStageId(
+  const {
+    ActiveExpertDraftEditor,
+    activeContentStage,
+    activeExpertDraftSectionId,
+    activePlotChildLabel,
+    activePlotChildStages,
+    expertDraftActive,
+    railStages,
+    renderedWorkspaceSessions,
+    stageBody,
+    workspaceTreeBooks,
+    workspaceTreeStages,
+  } = useWorkspaceViewModel({
+    book,
+    workspaceBooks,
+    workspaceSessions,
+    loadedBookIds,
+    expertDraft,
     activeStage,
     activePlotChildStage,
-  )
-  const activeStageBody = stages[activeContentStage] ?? ''
+    stages,
+  })
 
   if (!id) {
     return (
@@ -1544,57 +612,6 @@ export function BookEditor() {
       </div>
     )
   }
-
-  const railStages = resolveWorkspaceStagesForBook(book)
-  const activePlotChildStages = plotChildStagesForBook(book)
-  const workspaceTreeBaseStages = railStages.map((s) => ({
-    id: s.id,
-    label: s.label,
-    ...(s.id === PLOT_STAGE_ID
-      ? {
-          children: activePlotChildStages.map((child) => ({
-            id: child.id,
-            label: child.label,
-          })),
-        }
-      : {}),
-  }))
-  const activeTreeDraft = workspaceSessions[book.id]?.expertDraft ?? expertDraft
-  const workspaceTreeStages = workspaceTreeBaseStages.map((stage) => {
-    if (stage.id !== 'draft') return stage
-    return {
-      ...stage,
-      children: activeTreeDraft.sections.map((section) => ({
-        id: section.id,
-        label: expertDraftSectionTreeLabel(section),
-      })),
-      createChildLabel: '创建章节',
-      createChildDisabled: activeTreeDraft.running,
-    }
-  })
-  const workspaceTreeBooks = workspaceBooks
-    .filter((item) => item.book_type === book.book_type && isWorkspaceBook(item) && item.status !== 'completed')
-    .map((item) => ({
-      id: item.id,
-      title: item.title,
-      meta: item.categories.length > 0 ? item.categories.join('、') : '未分类',
-      stages: item.id === book.id ? workspaceTreeStages : workspaceTreeBaseStages,
-    }))
-  const renderedWorkspaceSessions = loadedBookIds
-    .map((bookId) => workspaceSessions[bookId])
-    .filter((session): session is BookWorkspaceSessionState => Boolean(session))
-    .filter((session) => isWorkspaceBook(session.book) && session.book.book_type === book.book_type)
-  const stageBody = activeStageBody
-  const expertDraftActive = activeStage === 'draft'
-  const activeExpertDraftSectionId = expertDraft.active_section_id || ''
-  const ActiveExpertDraftEditor =
-    book.book_type === 'script'
-      ? ScriptExpertDraftEditor
-      : ShortExpertDraftEditor
-  const activePlotChildLabel =
-    activeStage === PLOT_STAGE_ID && activePlotChildStage
-      ? activePlotChildStages.find((stage) => stage.id === activePlotChildStage)?.label
-      : ''
 
   return (
     <div className="editor-page editor-page--workspace">

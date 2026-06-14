@@ -22,6 +22,7 @@ import {
   getPreferredWorkspaceThinkingLevel,
   resolvePreferredWorkspaceChatModel,
 } from '../../../pi/workspaceChatPreferences'
+import { createWorkspaceStreamFn } from '../../../pi/workspaceStreamFn'
 import { buildExpertDraftCoordinatorTools } from './coordinatorTools'
 import {
   buildExpertDraftCoordinatorSystemPrompt,
@@ -446,6 +447,7 @@ export function ExpertDraftAiChat(props: Props) {
         ),
         convertToLlm: convertToLlmWithSkillAsUser,
         getApiKey: resolveWorkspaceProviderApiKey,
+        streamFn: createWorkspaceStreamFn(),
         toolExecution: 'sequential',
         initialState: {
           systemPrompt: buildExpertDraftCoordinatorSystemPrompt({
@@ -527,6 +529,7 @@ export function ExpertDraftAiChat(props: Props) {
           ),
           convertToLlm: convertToLlmWithSkillAsUser,
           getApiKey: resolveWorkspaceProviderApiKey,
+          streamFn: createWorkspaceStreamFn(),
           toolExecution: 'sequential',
           initialState: {
             systemPrompt: '',

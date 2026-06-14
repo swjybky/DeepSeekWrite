@@ -10,11 +10,39 @@ import subprocess
 import sys
 import tempfile
 import threading
+import socket
+import ssl
 import uuid
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from urllib.error import HTTPError, URLError
 from urllib.parse import urlparse
 from urllib.request import Request, urlopen
+
+# 桌面壳内浏览器/WebView 无法直连部分 LLM API（无 CORS）；经本地 HTTP 转发。
+_LLM_PROXY_UPSTREAM: dict[str, str] = {
+    "kimi-coding": "https://api.kimi.com/coding",
+    "moonshotai-cn": "https://api.moonshot.cn/v1",
+    "moonshotai": "https://api.moonshot.ai/v1",
+}
+_LLM_PROXY_SKIP_REQUEST_HEADERS = frozenset(
+    {
+        "host",
+        "connection",
+        "content-length",
+        "accept-encoding",
+        "transfer-encoding",
+    }
+)
+_LLM_PROXY_SKIP_RESPONSE_HEADERS = frozenset(
+    {
+        "transfer-encoding",
+        "connection",
+        "content-encoding",
+        "content-length",
+    }
+)
+_LLM_PROXY_STREAM_CHUNK_SIZE = 512
 
 
 def _configure_linux_pywebview_env() -> None:
@@ -264,11 +292,169 @@ def _dist_dir() -> Path:
     return dist
 
 
+def _resolve_llm_proxy_target(path: str, query: str) -> str | None:
+    """将 ``/llm-proxy/{alias}/...`` 映射到上游 LLM API URL。"""
+    if not path.startswith("/llm-proxy/"):
+        return None
+    remainder = path[len("/llm-proxy/") :]
+    slash = remainder.find("/")
+    if slash <= 0:
+        return None
+    alias = remainder[:slash]
+    upstream_base = _LLM_PROXY_UPSTREAM.get(alias)
+    if not upstream_base:
+        return None
+    subpath = remainder[slash + 1 :]
+    target = f"{upstream_base.rstrip('/')}/{subpath}"
+    if query:
+        target = f"{target}?{query}"
+    return target
+
+
+def _open_upstream_http_connection(
+    parsed_target: urlparse,
+) -> http.client.HTTPConnection | http.client.HTTPSConnection:
+    host = parsed_target.hostname
+    if not host:
+        raise URLError("missing upstream hostname")
+    port = parsed_target.port or (443 if parsed_target.scheme == "https" else 80)
+    if parsed_target.scheme == "https":
+        return http.client.HTTPSConnection(
+            host,
+            port,
+            timeout=600,
+            context=ssl.create_default_context(),
+        )
+    return http.client.HTTPConnection(host, port, timeout=600)
+
+
+def _stream_upstream_http_response(
+    handler: SimpleHTTPRequestHandler,
+    resp: http.client.HTTPResponse,
+) -> None:
+    handler.send_response(resp.status)
+    handler._send_cors_headers()
+    for key, value in resp.getheaders():
+        if key.lower() in _LLM_PROXY_SKIP_RESPONSE_HEADERS:
+            continue
+        handler.send_header(key, value)
+    handler.send_header("Cache-Control", "no-cache")
+    handler.send_header("X-Accel-Buffering", "no")
+    handler.end_headers()
+    try:
+        handler.connection.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+    except OSError:
+        pass
+    # 须走 wfile，让 BaseHTTPRequestHandler 自动做 chunked 分块；直接 sendall 会导致
+    # 客户端等到连接关闭才解析 SSE，表现为「非流式」。
+    while True:
+        chunk = resp.read(_LLM_PROXY_STREAM_CHUNK_SIZE)
+        if not chunk:
+            break
+        handler.wfile.write(chunk)
+        handler.wfile.flush()
+
+
 class DistHTTPRequestHandler(SimpleHTTPRequestHandler):
     """修补 Windows 等平台下 mimetypes / 注册表将 .js 标为 text/plain 的问题。
 
     Chromium 对 ``<script type=\"module\">`` 要求脚本为 JavaScript MIME，否则会拒绝执行（白屏）。
     """
+
+    def _send_cors_headers(self) -> None:
+        origin = self.headers.get("Origin")
+        if origin:
+            self.send_header("Access-Control-Allow-Origin", origin)
+            self.send_header("Access-Control-Allow-Credentials", "true")
+        self.send_header(
+            "Access-Control-Allow-Methods",
+            "GET, POST, PUT, PATCH, DELETE, OPTIONS",
+        )
+        self.send_header(
+            "Access-Control-Allow-Headers",
+            "Authorization, Content-Type, X-Api-Key, X-Requested-With, "
+            "Anthropic-Beta, Anthropic-Dangerous-Direct-Browser-Access, "
+            "Anthropic-Version, User-Agent",
+        )
+        self.send_header("Access-Control-Max-Age", "86400")
+
+    def _handle_llm_proxy(self, method: str) -> None:
+        parsed = urlparse(self.path)
+        target_url = _resolve_llm_proxy_target(parsed.path, parsed.query)
+        if not target_url:
+            self.send_error(404, "Unknown llm-proxy target")
+            return
+
+        content_length = int(self.headers.get("Content-Length", "0") or 0)
+        body = self.rfile.read(content_length) if content_length > 0 else None
+
+        forward_headers: dict[str, str] = {}
+        for key, value in self.headers.items():
+            if key.lower() in _LLM_PROXY_SKIP_REQUEST_HEADERS:
+                continue
+            forward_headers[key] = value
+
+        parsed_target = urlparse(target_url)
+        path = parsed_target.path or "/"
+        if parsed_target.query:
+            path = f"{path}?{parsed_target.query}"
+
+        conn: http.client.HTTPConnection | http.client.HTTPSConnection | None = None
+        try:
+            conn = _open_upstream_http_connection(parsed_target)
+            conn.request(method, path, body=body, headers=forward_headers)
+            resp = conn.getresponse()
+            _stream_upstream_http_response(self, resp)
+            resp.close()
+        except HTTPError as exc:
+            payload = exc.read()
+            self.send_response(exc.code)
+            self._send_cors_headers()
+            for key, value in exc.headers.items():
+                if key.lower() in _LLM_PROXY_SKIP_RESPONSE_HEADERS:
+                    continue
+                self.send_header(key, value)
+            self.end_headers()
+            if payload:
+                self.wfile.write(payload)
+                self.wfile.flush()
+        except (URLError, OSError, http.client.HTTPException) as exc:
+            message = str(getattr(exc, "reason", None) or exc)
+            body_bytes = json.dumps(
+                {"error": {"message": message, "type": "proxy_error"}},
+                ensure_ascii=False,
+            ).encode("utf-8")
+            self.send_response(502)
+            self._send_cors_headers()
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Length", str(len(body_bytes)))
+            self.end_headers()
+            self.wfile.write(body_bytes)
+            self.wfile.flush()
+        finally:
+            if conn is not None:
+                conn.close()
+
+    def do_OPTIONS(self) -> None:
+        parsed = urlparse(self.path)
+        if parsed.path.startswith("/llm-proxy/"):
+            self.send_response(204)
+            self._send_cors_headers()
+            self.end_headers()
+            return
+        self.send_error(405)
+
+    def do_POST(self) -> None:
+        if urlparse(self.path).path.startswith("/llm-proxy/"):
+            self._handle_llm_proxy("POST")
+            return
+        self.send_error(405)
+
+    def do_GET(self) -> None:
+        if urlparse(self.path).path.startswith("/llm-proxy/"):
+            self._handle_llm_proxy("GET")
+            return
+        return super().do_GET()
 
     def guess_type(self, path: str) -> str:
         """Python 3.12+ 的 ``SimpleHTTPRequestHandler.guess_type`` 只返回类型字符串（非元组）。"""
@@ -313,6 +499,19 @@ def _app_icon_path() -> str | None:
         return str(png.resolve()) if png.is_file() else None
     ico = assets / "app-icon.ico"
     return str(ico.resolve()) if ico.is_file() else None
+
+
+def _read_book_cover_data(output_dir: str) -> str | None:
+    if not output_dir:
+        return None
+    cover = Path(output_dir) / "cover.png"
+    if not cover.is_file():
+        return None
+    try:
+        data = cover.read_bytes()
+        return base64.b64encode(data).decode("utf-8")
+    except Exception:
+        return None
 
 
 class Api:
@@ -654,20 +853,26 @@ class Api:
         Returns:
             {"cover_data": str | None}  base64 编码的 PNG 图片，不含 data URI 前缀
         """
-        book = self._store.get_book(book_id)
-        if not book:
-            return {"cover_data": None}
-        output_dir = book.get("output_dir", "")
-        if not output_dir:
-            return {"cover_data": None}
-        cover = Path(output_dir) / "cover.png"
-        if cover.is_file():
-            try:
-                data = cover.read_bytes()
-                return {"cover_data": base64.b64encode(data).decode("utf-8")}
-            except Exception:
-                return {"cover_data": None}
-        return {"cover_data": None}
+        output_dir = self._store.get_book_output_dir(book_id)
+        return {"cover_data": _read_book_cover_data(output_dir)}
+
+    def get_book_covers(self, book_ids: list[str]) -> dict:
+        """批量获取书籍封面，避免首页 N 次 JS/Python 桥接调用。"""
+        ids: list[str] = []
+        seen: set[str] = set()
+        for raw_id in (book_ids if isinstance(book_ids, list) else []):
+            book_id = str(raw_id or "").strip()
+            if not book_id or book_id in seen:
+                continue
+            seen.add(book_id)
+            ids.append(book_id)
+        output_dirs = self._store.get_book_output_dirs(ids)
+        return {
+            "covers": {
+                book_id: _read_book_cover_data(output_dirs.get(book_id, ""))
+                for book_id in ids
+            }
+        }
 
     def generate_book_cover(self, book_id: str, prompt: str) -> dict:
         """调用图像生成 API 为书籍生成封面，保存到 output_dir/cover.png。

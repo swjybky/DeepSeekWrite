@@ -1461,6 +1461,63 @@ button.back-link:hover {
   box-shadow: 0 1px 0 rgb(255 255 255 / 36%) inset;
 }
 
+/* Write Claw 工具调用：古风/现代双图标 + 主题色（随 data-appearance 切换，无需重渲染） */
+.workspace-ai .write-claw-tool-glyph--modern {
+  display: none;
+}
+
+.workspace-ai .write-claw-tool-glyph--classic {
+  display: inline-block;
+}
+
+:root[data-appearance='modern'] .workspace-ai .write-claw-tool-glyph--classic {
+  display: none;
+}
+
+:root[data-appearance='modern'] .workspace-ai .write-claw-tool-glyph--modern {
+  display: inline-block;
+}
+
+.workspace-ai .write-claw-tool-header,
+.workspace-ai .write-claw-tool-header-btn {
+  color: var(--ink-faint);
+}
+
+.workspace-ai .write-claw-tool-header-btn:hover {
+  color: var(--ink);
+}
+
+.workspace-ai .write-claw-tool-summary {
+  color: var(--ink-faint);
+}
+
+.workspace-ai .write-claw-tool-header-btn:hover .write-claw-tool-summary {
+  color: var(--ink);
+}
+
+.workspace-ai .write-claw-tool-icon--complete,
+.workspace-ai .write-claw-tool-icon--progress {
+  color: var(--gold);
+}
+
+:root[data-appearance='modern'] .workspace-ai .write-claw-tool-icon--complete,
+:root[data-appearance='modern'] .workspace-ai .write-claw-tool-icon--progress {
+  color: var(--accent);
+}
+
+.workspace-ai .write-claw-tool-icon--error {
+  color: var(--danger);
+}
+
+.workspace-ai .write-claw-tool-spinner,
+.workspace-ai .write-claw-tool-chevron {
+  color: var(--ink-faint);
+}
+
+.workspace-ai .write-claw-tool-header-btn:hover .write-claw-tool-chevron {
+  color: var(--ink-soft);
+}
+
 .workspace-ai console-block > div,
 .workspace-ai code-block {
   border-color: color-mix(in oklab, var(--border-strong) 58%, var(--border));

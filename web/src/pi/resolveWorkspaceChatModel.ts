@@ -107,20 +107,58 @@ function resolveModel(provider: string, modelId: string): Model<Api> | null {
   return getModel(provider as KnownProvider, modelId as never) ?? null
 }
 
-function createOwnerModel(config: AiModelConfig): Model<Api> {
-  const api = (config.api || 'openai-completions') as Api
+function isZaiProvider(provider: string): boolean {
+  const normalized = provider.trim().toLowerCase()
+  return normalized === 'zai' || normalized === 'zai-coding-cn'
+}
+
+/** 与 pi-ai 内置 zai 注册表一致：glm-4.5-air 不支持 tool_stream，4.7+/5.x 支持。 */
+function inferZaiToolStream(modelId: string): boolean {
+  const normalized = modelId.trim().toLowerCase()
+  if (/glm-4\.5(?:-|$|\/)/.test(normalized)) return false
+  return true
+}
+
+function buildZaiOwnerCompat(
+  modelId: string,
+): NonNullable<Model<'openai-completions'>['compat']> {
   return {
+    supportsDeveloperRole: false,
+    thinkingFormat: 'zai',
+    zaiToolStream: inferZaiToolStream(modelId),
+  }
+}
+
+function createOwnerModel(config: AiModelConfig): Model<Api> {
+  const builtin = resolveModel(config.provider, config.model_id)
+  const api = (config.api || builtin?.api || 'openai-completions') as Api
+  const model: Model<Api> = {
     id: config.model_id,
     name: config.label || config.model_id,
     api,
     provider: config.id,
     baseUrl: config.base_url!,
-    reasoning: config.reasoning ?? inferReasoningSupport(config.model_id, api),
-    input: ['text'],
-    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-    contextWindow: 128000,
-    maxTokens: 8192,
+    reasoning:
+      config.reasoning ??
+      builtin?.reasoning ??
+      inferReasoningSupport(config.model_id, api),
+    input: builtin?.input ?? ['text'],
+    cost: builtin?.cost ?? { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+    contextWindow: builtin?.contextWindow ?? 128000,
+    maxTokens: builtin?.maxTokens ?? 8192,
   }
+  if (builtin?.thinkingLevelMap) {
+    model.thinkingLevelMap = builtin.thinkingLevelMap
+  }
+  if (builtin?.headers) {
+    model.headers = builtin.headers
+  }
+  if (builtin?.compat) {
+    model.compat = builtin.compat
+  } else if (isZaiProvider(config.provider) && api === 'openai-completions') {
+    model.compat = buildZaiOwnerCompat(config.model_id)
+  }
+  return model
 }
 
 type ConfiguredModelsPayload = {
@@ -350,6 +388,7 @@ const PROVIDER_CATEGORY_LABELS: Record<string, string> = {
   zai: '智谱 GLM',
   'moonshotai-cn': 'Kimi',
   moonshot: 'Kimi',
+  'kimi-coding': 'Kimi Coding',
   anthropic: 'Anthropic',
 }
 

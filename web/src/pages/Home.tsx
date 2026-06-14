@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Link, useLocation } from 'react-router-dom'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import { Link } from 'react-router-dom'
 import {
   SHORT_GENRE_OPTIONS,
   SCRIPT_GENRE_OPTIONS,
@@ -8,18 +8,15 @@ import {
   type AiModelSettings,
   type BookSummary,
   type BookType,
-  type MaterialSummary,
   type MaterialType,
-  type SkillSummary,
   type SkillType,
   bookTypeLabel,
   createBook,
   createSkill,
   deleteBook,
   deleteSkill,
-  getBookCover,
+  getBookCovers,
   getAiModelConfig,
-  getBridgeApi,
   getStoredWorkspaceRoot,
   isPywebviewDesktopBundle,
   listBooks,
@@ -42,6 +39,7 @@ import {
 import { APPEARANCE_STYLE_LABELS, useAppearance } from '../appearance'
 import { CardGrid, bookToCardItem, materialToCardItem, skillToCardItem } from '../components/CardGrid'
 import { refreshPreferredWorkspaceChatModel } from '../pi/workspaceChatPreferences'
+import { useHomeStore } from '../stores/homeStore'
 import './Home.css'
 
 function truncatePath(path: string, max = 42): string {
@@ -99,6 +97,10 @@ type ModelConfigDialogProps = {
   saving: boolean
   onClose: () => void
   onSave: (settings: AiModelSettings) => Promise<void>
+}
+
+type RefreshOptions = {
+  showLoading?: boolean
 }
 
 function ModelConfigDialog({
@@ -570,31 +572,44 @@ function AppearanceStyleDialog({
 }
 
 export function Home() {
-  const location = useLocation()
   const {
     appearanceStyle,
     savingAppearance,
     appearanceError,
     setAppearanceStyle,
   } = useAppearance()
+  const books = useHomeStore((state) => state.books)
+  const materials = useHomeStore((state) => state.materials)
+  const skills = useHomeStore((state) => state.skills)
+  const bookCovers = useHomeStore((state) => state.bookCovers)
+  const cachedWorkspaceRoot = useHomeStore((state) => state.workspaceRoot)
+  const cachedAiSettings = useHomeStore((state) => state.aiSettings)
+  const setBooks = useHomeStore((state) => state.setBooks)
+  const setMaterials = useHomeStore((state) => state.setMaterials)
+  const setSkills = useHomeStore((state) => state.setSkills)
+  const setBookCovers = useHomeStore((state) => state.setBookCovers)
+  const setWorkspaceRoot = useHomeStore((state) => state.setWorkspaceRoot)
+  const setAiSettings = useHomeStore((state) => state.setAiSettings)
+  const workspaceRoot = cachedWorkspaceRoot ?? getStoredWorkspaceRoot()
+  const aiSettings = cachedAiSettings ?? emptyAiModelSettings()
 
   // ==================== 创作空间状态 ====================
-  const [books, setBooks] = useState<BookSummary[]>([])
-  const [loadingBooks, setLoadingBooks] = useState(true)
+  const [loadingBooks, setLoadingBooks] = useState(
+    () => !useHomeStore.getState().hasBooks,
+  )
   const [showBookForm, setShowBookForm] = useState(false)
   const [bookTitle, setBookTitle] = useState('')
   const [bookType, setBookType] = useState<BookType>('short')
   const [shortGenre, setShortGenre] = useState<string>(SHORT_GENRE_OPTIONS[0])
   const [bookLinkedSkillId, setBookLinkedSkillId] = useState('')
-  const [workspaceRoot, setWorkspaceRoot] = useState<string | null>(() => getStoredWorkspaceRoot())
   const [submittingBook, setSubmittingBook] = useState(false)
   const [deletingBookId, setDeletingBookId] = useState<string | null>(null)
   const [bookError, setBookError] = useState<string | null>(null)
-  const [bookCovers, setBookCovers] = useState<Record<string, string>>({})
 
   // ==================== 素材库状态 ====================
-  const [materials, setMaterials] = useState<MaterialSummary[]>([])
-  const [loadingMaterials, setLoadingMaterials] = useState(true)
+  const [loadingMaterials, setLoadingMaterials] = useState(
+    () => !useHomeStore.getState().hasMaterials,
+  )
   const [showMaterialForm, setShowMaterialForm] = useState(false)
   const [materialTitle, setMaterialTitle] = useState('')
   const [materialType, setMaterialType] = useState<MaterialType>('short')
@@ -604,8 +619,9 @@ export function Home() {
   const [materialError, setMaterialError] = useState<string | null>(null)
 
   // ==================== 技能库状态 ====================
-  const [skills, setSkills] = useState<SkillSummary[]>([])
-  const [loadingSkills, setLoadingSkills] = useState(true)
+  const [loadingSkills, setLoadingSkills] = useState(
+    () => !useHomeStore.getState().hasSkills,
+  )
   const [showSkillForm, setShowSkillForm] = useState(false)
   const [skillTitle, setSkillTitle] = useState('')
   const [skillType, setSkillType] = useState<SkillType>('short')
@@ -621,8 +637,9 @@ export function Home() {
   const [importingSkill, setImportingSkill] = useState(false)
 
   // ==================== 模型配置状态 ====================
-  const [aiSettings, setAiSettings] = useState<AiModelSettings>(() => emptyAiModelSettings())
-  const [loadingAiSettings, setLoadingAiSettings] = useState(true)
+  const [loadingAiSettings, setLoadingAiSettings] = useState(
+    () => !useHomeStore.getState().hasAiSettings,
+  )
   const [modelConfigOpen, setModelConfigOpen] = useState(false)
   const [styleConfigOpen, setStyleConfigOpen] = useState(false)
   const [workspaceDrawerOpen, setWorkspaceDrawerOpen] = useState(false)
@@ -632,28 +649,21 @@ export function Home() {
 
   // ==================== 创作空间封面加载 ====================
   const loadBookCovers = useCallback(async (bookList: BookSummary[]) => {
-    const api = await getBridgeApi()
-    if (!api?.get_book_cover) return
-    const results = await Promise.all(
-      bookList.map(async (b) => {
-        try {
-          const res = await getBookCover(b.id)
-          return { id: b.id, data: res.cover_data }
-        } catch {
-          return { id: b.id, data: null as string | null }
-        }
-      }),
-    )
-    const map: Record<string, string> = {}
-    for (const r of results) {
-      if (r.data) map[r.id] = r.data
+    if (bookList.length === 0) {
+      setBookCovers({})
+      return
     }
-    setBookCovers(map)
-  }, [])
+    try {
+      setBookCovers(await getBookCovers(bookList.map((b) => b.id)))
+    } catch {
+      setBookCovers({})
+    }
+  }, [setBookCovers])
 
   // ==================== 创作空间数据加载 ====================
-  const refreshBooks = useCallback(async () => {
-    setLoadingBooks(true)
+  const refreshBooks = useCallback(async (options?: RefreshOptions) => {
+    const showLoading = options?.showLoading ?? !useHomeStore.getState().hasBooks
+    if (showLoading) setLoadingBooks(true)
     setBookError(null)
     try {
       const list = await listBooks()
@@ -664,12 +674,13 @@ export function Home() {
     } finally {
       setLoadingBooks(false)
     }
-  }, [loadBookCovers])
+  }, [loadBookCovers, setBooks])
 
   useEffect(() => {
     let cancelled = false
     void (async () => {
-      setLoadingBooks(true)
+      const showLoading = !useHomeStore.getState().hasBooks
+      if (showLoading) setLoadingBooks(true)
       setBookError(null)
       const w = await loadPersistedWorkspaceRoot()
       if (cancelled) return
@@ -691,8 +702,9 @@ export function Home() {
         if (cancelled) return
         void (async () => {
           const w = await loadPersistedWorkspaceRoot()
-          if (!cancelled && w != null) {
-            setWorkspaceRoot((prev) => prev ?? w)
+          const currentRoot = useHomeStore.getState().workspaceRoot
+          if (!cancelled && w != null && !currentRoot) {
+            setWorkspaceRoot(w)
           }
         })()
       }, 450)
@@ -702,12 +714,13 @@ export function Home() {
       cancelled = true
       if (lateTimer != null) window.clearTimeout(lateTimer)
     }
-  }, [loadBookCovers, location.pathname])
+  }, [loadBookCovers, setBooks, setWorkspaceRoot])
 
   useEffect(() => {
     let cancelled = false
     void (async () => {
-      setLoadingAiSettings(true)
+      const showLoading = !useHomeStore.getState().hasAiSettings
+      if (showLoading) setLoadingAiSettings(true)
       setModelConfigError(null)
       try {
         const settings = await getAiModelConfig()
@@ -723,11 +736,12 @@ export function Home() {
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [setAiSettings])
 
   // ==================== 素材库数据加载 ====================
-  const refreshMaterials = useCallback(async () => {
-    setLoadingMaterials(true)
+  const refreshMaterials = useCallback(async (options?: RefreshOptions) => {
+    const showLoading = options?.showLoading ?? !useHomeStore.getState().hasMaterials
+    if (showLoading) setLoadingMaterials(true)
     setMaterialError(null)
     try {
       const list = await listMaterials()
@@ -737,11 +751,12 @@ export function Home() {
     } finally {
       setLoadingMaterials(false)
     }
-  }, [])
+  }, [setMaterials])
 
   // ==================== 技能库数据加载 ====================
-  const refreshSkills = useCallback(async () => {
-    setLoadingSkills(true)
+  const refreshSkills = useCallback(async (options?: RefreshOptions) => {
+    const showLoading = options?.showLoading ?? !useHomeStore.getState().hasSkills
+    if (showLoading) setLoadingSkills(true)
     setSkillError(null)
     try {
       const list = await listSkills()
@@ -751,18 +766,16 @@ export function Home() {
     } finally {
       setLoadingSkills(false)
     }
-  }, [])
+  }, [setSkills])
 
-  // 初始加载素材与技能
-  const hasLoadedLibraries = useRef(false)
+  // 初始加载素材与技能；已有缓存时在后台刷新，避免回首页闪 loading。
   useEffect(() => {
-    if (!hasLoadedLibraries.current) {
-      hasLoadedLibraries.current = true
-      void refreshMaterials()
-      void refreshSkills()
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+    const timer = window.setTimeout(() => {
+      void refreshMaterials({ showLoading: !useHomeStore.getState().hasMaterials })
+      void refreshSkills({ showLoading: !useHomeStore.getState().hasSkills })
+    }, 0)
+    return () => window.clearTimeout(timer)
+  }, [refreshMaterials, refreshSkills])
 
   // ==================== 工作目录操作 ====================
   const handlePickWorkspace = async () => {

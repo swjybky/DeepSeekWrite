@@ -5,6 +5,9 @@ import '@earendil-works/pi-web-ui/app.css'
 import './index.css'
 import App from './App.tsx'
 import './bridge'
+import { registerWriteClawToolRenderers } from './pi/writeClawToolRenderers'
+
+registerWriteClawToolRenderers()
 
 const rootEl = document.getElementById('root')
 let appMounted = false

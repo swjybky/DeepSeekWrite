@@ -35,6 +35,7 @@ import {
   getPreferredWorkspaceThinkingLevel,
   resolvePreferredWorkspaceChatModel,
 } from '../pi/workspaceChatPreferences'
+import { createWorkspaceStreamFn } from '../pi/workspaceStreamFn'
 import { convertToLlmWithSkillAsUser } from '../pi/skillMessageTransform'
 import {
   EXPERT_DRAFT_COORDINATOR_AGENT_ID,
@@ -675,6 +676,7 @@ function WorkspaceAiChatInner({
       const agent = new Agent({
         sessionId,
         convertToLlm: convertToLlmWithSkillAsUser,
+        streamFn: createWorkspaceStreamFn(),
         initialState: {
           systemPrompt: systemPromptInitial,
           model: initialModel,

@@ -144,6 +144,17 @@ def default_skills_path() -> Path:
     return data_dir / "skills.json"
 
 
+_FILE_SIGNATURE_UNSET = object()
+
+
+def _file_signature(path: Path) -> tuple[int, int] | None:
+    try:
+        stat = path.stat()
+    except OSError:
+        return None
+    return (stat.st_mtime_ns, stat.st_size)
+
+
 def load_books(path: Path) -> dict[str, Book]:
     if not path.exists():
         return {}
@@ -891,24 +902,49 @@ class BookStore:
         self._materials_path = default_materials_path()
         # 技能数据存储
         self._skills_path = default_skills_path()
+        self._books_signature: object | tuple[int, int] | None = _FILE_SIGNATURE_UNSET
+        self._materials_signature: object | tuple[int, int] | None = _FILE_SIGNATURE_UNSET
+        self._skills_signature: object | tuple[int, int] | None = _FILE_SIGNATURE_UNSET
         with _data_file_lock():
             self._reload_all_unlocked()
 
     def _reload_all_unlocked(self) -> None:
-        self._books = load_books(self._path)
-        self._materials = load_materials(self._materials_path)
-        self._skills = load_skills(self._skills_path)
+        self._reload_books_unlocked()
+        self._reload_materials_unlocked()
+        self._reload_skills_unlocked()
         if not self._skills and not self._skills_path.exists():
             self._skills = _seed_default_skill(self._skills_path)
+            self._skills_signature = _file_signature(self._skills_path)
 
     def _reload_books_unlocked(self) -> None:
+        signature = _file_signature(self._path)
+        if self._books_signature == signature:
+            return
         self._books = load_books(self._path)
+        self._books_signature = signature
 
     def _reload_materials_unlocked(self) -> None:
+        signature = _file_signature(self._materials_path)
+        if self._materials_signature == signature:
+            return
         self._materials = load_materials(self._materials_path)
+        self._materials_signature = signature
 
     def _reload_skills_unlocked(self) -> None:
+        signature = _file_signature(self._skills_path)
+        if self._skills_signature == signature:
+            return
         self._skills = load_skills(self._skills_path)
+        self._skills_signature = signature
+
+    def _mark_books_saved_unlocked(self) -> None:
+        self._books_signature = _file_signature(self._path)
+
+    def _mark_materials_saved_unlocked(self) -> None:
+        self._materials_signature = _file_signature(self._materials_path)
+
+    def _mark_skills_saved_unlocked(self) -> None:
+        self._skills_signature = _file_signature(self._skills_path)
 
     @property
     def path(self) -> Path:
@@ -942,6 +978,22 @@ class BookStore:
             if b is None:
                 return None
             return b.to_dict()
+
+    def get_book_output_dir(self, book_id: str) -> str:
+        with _data_file_lock():
+            self._reload_books_unlocked()
+            b = self._books.get((book_id or "").strip())
+            return b.output_dir if b is not None else ""
+
+    def get_book_output_dirs(self, book_ids: list[str]) -> dict[str, str]:
+        cleaned_ids = [str(book_id or "").strip() for book_id in book_ids]
+        with _data_file_lock():
+            self._reload_books_unlocked()
+            return {
+                book_id: self._books[book_id].output_dir
+                for book_id in cleaned_ids
+                if book_id in self._books
+            }
 
     def create_book(
         self,
@@ -992,6 +1044,7 @@ class BookStore:
             )
             self._books[bid] = b
             save_books_atomic(self._path, self._books)
+            self._mark_books_saved_unlocked()
             _write_stages_to_disk(b)
             return b.to_dict()
 
@@ -1033,6 +1086,7 @@ class BookStore:
                 b.status = normalize_book_status(status)
             b.updated_at = _utc_now_iso()
             save_books_atomic(self._path, self._books)
+            self._mark_books_saved_unlocked()
             _write_stages_to_disk(b)
             return b.to_dict()
 
@@ -1045,6 +1099,7 @@ class BookStore:
                 return False
             del self._books[bid]
             save_books_atomic(self._path, self._books)
+            self._mark_books_saved_unlocked()
             return True
 
     # ==================== 素材管理方法 ====================
@@ -1124,6 +1179,7 @@ class BookStore:
             )
             self._materials[mid] = m
             save_materials_atomic(self._materials_path, self._materials)
+            self._mark_materials_saved_unlocked()
             _write_material_stages_to_disk(m)
             return m.to_dict()
 
@@ -1145,6 +1201,7 @@ class BookStore:
                 m.title = title.strip()
             m.updated_at = _utc_now_iso()
             save_materials_atomic(self._materials_path, self._materials)
+            self._mark_materials_saved_unlocked()
             _write_material_stages_to_disk(m)
             return m.to_dict()
 
@@ -1159,6 +1216,7 @@ class BookStore:
             output_dir = m.output_dir
             del self._materials[mid]
             save_materials_atomic(self._materials_path, self._materials)
+            self._mark_materials_saved_unlocked()
             changed_books = False
             for book in self._books.values():
                 if book.linked_material_id == mid:
@@ -1167,6 +1225,7 @@ class BookStore:
                     changed_books = True
             if changed_books:
                 save_books_atomic(self._path, self._books)
+                self._mark_books_saved_unlocked()
             _remove_output_dir(output_dir)
             return True
 
@@ -1251,6 +1310,7 @@ class BookStore:
             )
             self._skills[sid] = s
             save_skills_atomic(self._skills_path, self._skills)
+            self._mark_skills_saved_unlocked()
             _write_skill_stages_to_disk(s)
             return s.to_dict()
 
@@ -1275,6 +1335,7 @@ class BookStore:
                 s.stages = normalize_skill_stages_from_storage(stages)
             s.updated_at = _utc_now_iso()
             save_skills_atomic(self._skills_path, self._skills)
+            self._mark_skills_saved_unlocked()
             _write_skill_stages_to_disk(s)
             return s.to_dict()
 
@@ -1289,6 +1350,7 @@ class BookStore:
             output_dir = s.output_dir
             del self._skills[sid]
             save_skills_atomic(self._skills_path, self._skills)
+            self._mark_skills_saved_unlocked()
             changed_books = False
             for book in self._books.values():
                 if book.linked_skill_id == sid:
@@ -1297,5 +1359,6 @@ class BookStore:
                     changed_books = True
             if changed_books:
                 save_books_atomic(self._path, self._books)
+                self._mark_books_saved_unlocked()
             _remove_output_dir(output_dir)
             return True
