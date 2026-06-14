@@ -1,0 +1,33 @@
+export {
+  bookTypeLabel,
+  createBook,
+  deleteBook,
+  getBook,
+  isWorkspaceBook,
+  isWorkspaceShortBook,
+  listBooks,
+  mergeStagePatchIntoAll,
+  normalizeAllBookStages,
+  normalizeBookStatus,
+  normalizeBookType,
+  normalizeExpertDraft,
+  normalizeStages,
+  normalizeStagesForWorkspaceBook,
+  resolveWorkspaceBookGenre,
+  resolveWorkspaceStagesForBook,
+  saveBook,
+} from './legacy'
+
+export type {
+  Book,
+  BookStatus,
+  BookSummary,
+  BookType,
+  ExpertDraft,
+  ExpertDraftCharacterState,
+  ExpertDraftSection,
+  SaveBookOptions,
+  ScriptStageId,
+  ShortStageId,
+  StageId,
+} from './legacy'

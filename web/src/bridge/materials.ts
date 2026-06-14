@@ -1,0 +1,30 @@
+export {
+  LIBRARY_TYPE_LABELS,
+  MATERIAL_MANAGER_AGENT_ID,
+  MATERIAL_MANAGER_PROMPT_KIND,
+  MATERIAL_STAGE_LABELS,
+  SCRIPT_MATERIAL_GENRES,
+  SHORT_MATERIAL_GENRES,
+  createMaterial,
+  deleteMaterial,
+  getMaterial,
+  getMaterialGenres,
+  getMaterialParentGenres,
+  getMaterialSubGenres,
+  libraryTypeLabel,
+  listMaterials,
+  materialTypeLabel,
+  normalizeMaterialStages,
+  normalizeMaterialType,
+  resolveMaterialParentGenre,
+  saveMaterial,
+} from './legacy'
+
+export type {
+  Material,
+  MaterialPromptKind,
+  MaterialStageId,
+  MaterialSummary,
+  MaterialType,
+  SaveMaterialOptions,
+} from './legacy'

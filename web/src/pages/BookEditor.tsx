@@ -6,44 +6,29 @@ import {
   bookTypeLabel,
   type BookStatus,
   type BookSummary,
-  type BookType,
   type ExpertDraft,
-  type ExpertDraftSection,
   type StageId,
   defaultExpertDraft,
   mergeStagePatchIntoAll,
   normalizeExpertDraft,
   normalizeStagesForWorkspaceBook,
-  WORKSPACE_CONTENT_STAGES,
   resolveWorkspaceStagesForBook,
   resolveWorkspaceBookGenre,
   getBook,
+  getMaterial,
   isWorkspaceBook,
   listBooks,
   saveBook,
-  listMaterials,
-  getMaterial,
-  MATERIAL_STAGE_LABELS,
-  materialTypeLabel,
   type Material,
-  type MaterialSummary,
   type Skill,
-  type SkillSummary,
-  generateBookCover,
   getBookCover,
   pickFolder,
   exportDocx,
   getWorkspaceAgentReadAccess,
   type WorkspaceAgentReadAccessConfig,
-  listSkills,
   getSkill,
-  skillTypeLabel,
 } from '../bridge'
-import { WorkspaceAiChat } from '../components/WorkspaceAiChat'
 import type { ApplyToStageEditorPayload } from '../pi/workspaceStageAgents'
-import {
-  ExpertDraftAiChat as ShortExpertDraftAiChat,
-} from '../workspaces/short/expertDraft/ExpertDraftAiChat'
 import {
   ExpertDraftEditor as ShortExpertDraftEditor,
 } from '../workspaces/short/expertDraft/ExpertDraftEditor'
@@ -53,355 +38,61 @@ import {
   type RunExpertDraftSectionWriterOptions,
 } from '../workspaces/short/expertDraft/sectionWriter'
 import {
-  EXPERT_DRAFT_COORDINATOR_AGENT_ID,
   EXPERT_SECTION_WRITER_AGENT_ID,
   getDefaultWorkspaceAgentReadAccess,
-  resolveWorkspaceAgentReadAccess as resolveShortWorkspaceAgentReadAccess,
 } from '../workspaces/short/stageReadAccess'
-import {
-  ExpertDraftAiChat as ScriptExpertDraftAiChat,
-} from '../workspaces/script/expertDraft/ExpertDraftAiChat'
 import {
   ExpertDraftEditor as ScriptExpertDraftEditor,
 } from '../workspaces/script/expertDraft/ExpertDraftEditor'
 import {
   runExpertDraftSectionWriter as runScriptExpertDraftSectionWriter,
 } from '../workspaces/script/expertDraft/sectionWriter'
+import { PLOT_STAGE_ID } from '../workspaces/short/stages'
 import {
-  resolveWorkspaceAgentReadAccess as resolveScriptWorkspaceAgentReadAccess,
-} from '../workspaces/script/stageReadAccess'
+  MaterialSelectorDialog,
+  SkillSelectorDialog,
+} from './bookEditor/LibrarySelectorDialogs'
+import { WorkspaceBookHeader } from './bookEditor/WorkspaceBookHeader'
 import {
-  PLOT_CHILD_STAGES as SHORT_PLOT_CHILD_STAGES,
-  PLOT_STAGE_ID,
-  type PlotChildStageId as ShortPlotChildStageId,
-} from '../workspaces/short/stages'
+  useWorkspaceStore,
+  type BookWorkspaceSessionState,
+} from '../stores/workspaceStore'
 import {
-  PLOT_CHILD_STAGES as SCRIPT_PLOT_CHILD_STAGES,
-  type PlotChildStageId as ScriptPlotChildStageId,
-} from '../workspaces/script/stages'
-import { WorkspaceTreeNav } from '../components/WorkspaceTreeNav'
+  combineExpertDraftSections,
+  defaultExpertDraftStateTitle,
+  expertDraftSectionTitleForIndex,
+  expertDraftSectionTreeLabel,
+  nextExpertDraftSectionId,
+} from './bookEditor/expertDraftUtils'
+import {
+  isPlotChildStageId,
+  plotChildStagesForBook,
+  resolvePlotEditorStageId,
+  resolveReadAccessForBook,
+  workspaceBookType,
+} from './bookEditor/stageEditing'
+import {
+  createBookPersistedSnapshot,
+  createBookWorkspaceSession,
+  hasAnyUnsavedWorkspaceChanges,
+  mergeWorkspaceBooksStable,
+} from './bookEditor/workspaceSession'
+import {
+  EMPTY_STAGES,
+  WORKSPACE_LEAVE_CONFIRM_MESSAGE,
+  type PlotChildStageId,
+  type SaveCurrentBookOptions,
+} from './bookEditor/workspaceTypes'
+import { useAiPanelWidth } from './bookEditor/useAiPanelWidth'
+import { useLibrarySelectors } from './bookEditor/useLibrarySelectors'
+import { useBookCoverRuntime } from './bookEditor/useBookCoverRuntime'
+import { useWorkspaceTitleEditing } from './bookEditor/useWorkspaceTitleEditing'
+import { WorkspaceAiPanel } from './bookEditor/WorkspaceAiPanel'
+import { WorkspaceCoverDialogs } from './bookEditor/WorkspaceCoverDialogs'
+import { WorkspaceEditorPane } from './bookEditor/WorkspaceEditorPane'
+import { WorkspaceRailPanel } from './bookEditor/WorkspaceRailPanel'
+import { WorkspaceSplitter } from './bookEditor/WorkspaceSplitter'
 import './BookEditor.css'
-
-/** 空 stages 对象，用于非激活阶段的稳定引用，避免不必要的重渲染 */
-const EMPTY_STAGES: Record<StageId, string> = {} as Record<StageId, string>
-
-type SaveCurrentBookOptions = {
-  status?: BookStatus
-  successMessage?: string | null
-}
-
-type BookPersistedSnapshot = {
-  stages: Record<StageId, string>
-  expertDraft: ExpertDraft
-}
-
-type BookWorkspaceSessionState = {
-  book: Book
-  stages: Record<StageId, string>
-  expertDraft: ExpertDraft
-  persistedSnapshot: BookPersistedSnapshot
-  activeStage: StageId
-  activePlotChildStage: PlotChildStageId | ''
-  linkedMaterial: Material | null
-  linkedSkill: Skill | null
-  coverData: string | null
-  aiChatEpochByStage: Partial<Record<StageId, number>>
-  expertAiChatEpoch: number
-  streamingStages: Partial<Record<StageId, boolean>>
-}
-
-type PlotChildStageId = ShortPlotChildStageId | ScriptPlotChildStageId
-type PlotChildStageDefinition = { id: PlotChildStageId; label: string }
-
-const WORKSPACE_LEAVE_CONFIRM_MESSAGE =
-  '当前有未保存的修改，确定离开创作空间吗？未保存的内容将丢失。'
-
-function workspaceBookType(book: Pick<Book, 'book_type'> | BookSummary | null | undefined): 'short' | 'script' {
-  return book?.book_type === 'script' ? 'script' : 'short'
-}
-
-function plotChildStagesForBook(
-  book: Pick<Book, 'book_type'> | BookSummary | null | undefined,
-): readonly PlotChildStageDefinition[] {
-  return workspaceBookType(book) === 'script'
-    ? SCRIPT_PLOT_CHILD_STAGES
-    : SHORT_PLOT_CHILD_STAGES
-}
-
-function resolveReadAccessForBook(
-  book: Pick<Book, 'book_type'> | BookSummary | null | undefined,
-  config: WorkspaceAgentReadAccessConfig | null | undefined,
-  agentId: typeof EXPERT_DRAFT_COORDINATOR_AGENT_ID | typeof EXPERT_SECTION_WRITER_AGENT_ID,
-) {
-  return workspaceBookType(book) === 'script'
-    ? resolveScriptWorkspaceAgentReadAccess(config, agentId)
-    : resolveShortWorkspaceAgentReadAccess(config, agentId)
-}
-
-function expertDraftPersistedFingerprint(draft: ExpertDraft): string {
-  return JSON.stringify({
-    sections: draft.sections.map((section) => ({
-      id: section.id,
-      title: section.title,
-      word_count_requirement: section.word_count_requirement ?? '',
-      body: section.body,
-    })),
-    character_states: draft.character_states.map((state) => ({
-      section_id: state.section_id,
-      title: state.title,
-      body: state.body,
-    })),
-  })
-}
-
-function createBookPersistedSnapshot(
-  book: Book,
-  expertDraft?: ExpertDraft,
-): BookPersistedSnapshot {
-  return {
-    stages: normalizeStagesForWorkspaceBook(book, book.stages),
-    expertDraft: normalizeExpertDraft(
-      expertDraft ?? book.expert_draft,
-      true,
-      book.book_type,
-    ),
-  }
-}
-
-function resolvePersistedSnapshot(
-  session: BookWorkspaceSessionState,
-): BookPersistedSnapshot {
-  return (
-    session.persistedSnapshot ??
-    createBookPersistedSnapshot(session.book, session.expertDraft)
-  )
-}
-
-function bookSessionHasUnsavedChanges(
-  session: BookWorkspaceSessionState,
-  tokenBuffers: Partial<Record<StageId, string>> | undefined,
-): boolean {
-  if (
-    tokenBuffers &&
-    Object.values(tokenBuffers).some((value) => (value ?? '').length > 0)
-  ) {
-    return true
-  }
-  const snapshot = resolvePersistedSnapshot(session)
-  for (const stage of WORKSPACE_CONTENT_STAGES) {
-    if ((session.stages[stage.id] ?? '') !== (snapshot.stages[stage.id] ?? '')) {
-      return true
-    }
-  }
-  return (
-    expertDraftPersistedFingerprint(session.expertDraft) !==
-    expertDraftPersistedFingerprint(snapshot.expertDraft)
-  )
-}
-
-function hasAnyUnsavedWorkspaceChanges(
-  sessions: Record<string, BookWorkspaceSessionState>,
-  tokenBuffersByBook: Record<string, Partial<Record<StageId, string>>>,
-): boolean {
-  return Object.entries(sessions).some(([bookId, session]) =>
-    bookSessionHasUnsavedChanges(
-      session,
-      tokenBuffersByBook[bookId],
-    ),
-  )
-}
-
-const AI_PANEL_WIDTH_KEY = 'write-claw:workspace-ai-width'
-const AI_PANEL_MIN = 240
-/** 超宽屏下的绝对上限，避免 AI 栏占满整屏 */
-const AI_PANEL_HARD_MAX = 1000
-/** Pi ChatPanel 会注入 artifacts；false 则从 Agent 工具列表移除（对话流式优先）。改为 true 可恢复侧栏工件面板能力。 */
-const WORKSPACE_AI_INCLUDE_PI_ARTIFACTS = false
-const WORKSPACE_SPLITTER_W = 6
-/** 三栏份额：左 : 中 : 右（AI）= 18 : 36 : 36，可分配宽 = 视口宽 − 分割条 */
-const WORKSPACE_COL_L = 18
-const WORKSPACE_COL_R = 36
-const WORKSPACE_COL_SUM = 18 + 36 + 36
-/** 为中间编辑区保留的近似最小宽度（用于计算 AI 栏在当前窗口下最大能拉多宽） */
-const EDITOR_MIN_FOR_LAYOUT = 160
-
-function usableWidthLessSplitter(viewportWidth: number): number {
-  return Math.max(0, viewportWidth - WORKSPACE_SPLITTER_W)
-}
-
-function approxRailWidthPx(viewportWidth: number): number {
-  return Math.round(
-    (usableWidthLessSplitter(viewportWidth) * WORKSPACE_COL_L) /
-      WORKSPACE_COL_SUM,
-  )
-}
-
-function defaultAiPanelWidthPx(viewportWidth: number): number {
-  return Math.round(
-    (usableWidthLessSplitter(viewportWidth) * WORKSPACE_COL_R) /
-      WORKSPACE_COL_SUM,
-  )
-}
-
-function maxAiWidthForViewport(viewportWidth: number): number {
-  const rail = approxRailWidthPx(viewportWidth)
-  const raw =
-    viewportWidth - rail - WORKSPACE_SPLITTER_W - EDITOR_MIN_FOR_LAYOUT
-  return Math.min(
-    AI_PANEL_HARD_MAX,
-    Math.max(AI_PANEL_MIN, Math.floor(raw)),
-  )
-}
-
-function clampAiPanelWidth(width: number, viewportWidth: number): number {
-  const cap = maxAiWidthForViewport(viewportWidth)
-  return Math.min(cap, Math.max(AI_PANEL_MIN, width))
-}
-
-/** 总字符长度与不含 Unicode 空白类字符的字数（换行不计入后者） */
-function stageTextCounts(text: string): { total: number; nonSpace: number } {
-  return {
-    total: text.length,
-    nonSpace: text.replace(/\p{White_Space}/gu, '').length,
-  }
-}
-
-function combineExpertDraftSections(draft: ExpertDraft): string {
-  return draft.sections
-    .map((section) => {
-      const body = section.body.trim()
-      if (!body) return ''
-      const title = section.title.trim()
-      return title ? `${title}\n${body}` : body
-    })
-    .filter(Boolean)
-    .join('\n\n')
-}
-
-function chineseSectionNumber(n: number): string {
-  const digits = ['零', '一', '二', '三', '四', '五', '六', '七', '八', '九']
-  if (n <= 10) return n === 10 ? '十' : digits[n]!
-  if (n < 20) return `十${digits[n - 10]}`
-  if (n < 100) {
-    const tens = Math.floor(n / 10)
-    const ones = n % 10
-    return `${digits[tens]}十${ones ? digits[ones] : ''}`
-  }
-  return String(n)
-}
-
-function expertDraftSectionTitleForIndex(
-  index: number,
-  bookType: BookType = 'short',
-): string {
-  if (bookType !== 'script' && index <= 0) return '导语'
-  return `第${chineseSectionNumber(bookType === 'script' ? index + 1 : index)}节`
-}
-
-function nextExpertDraftSectionId(sections: ExpertDraftSection[]): string {
-  let n = sections.length
-  const used = new Set(sections.map((s) => s.id))
-  while (used.has(`section-${n}`)) n += 1
-  return `section-${n}`
-}
-
-function defaultExpertDraftStateTitle(sectionTitle: string): string {
-  return `${sectionTitle.trim() || '小节'}人物状态`
-}
-
-function expertDraftSectionTreeLabel(section: ExpertDraftSection): string {
-  const title = section.title.trim()
-  return title || '未命名小节'
-}
-
-function isPlotChildStageId(stageId: string): stageId is PlotChildStageId {
-  return (
-    SHORT_PLOT_CHILD_STAGES.some((stage) => stage.id === stageId) ||
-    SCRIPT_PLOT_CHILD_STAGES.some((stage) => stage.id === stageId)
-  )
-}
-
-function resolvePlotEditorStageId(
-  activeStage: StageId,
-  activePlotChildStage: PlotChildStageId | '',
-): StageId {
-  if (activeStage !== PLOT_STAGE_ID) return activeStage
-  return activePlotChildStage || PLOT_STAGE_ID
-}
-
-/** 左侧树书籍列表保持进入工作台时的顺序，不因保存/切换导致按更新时间重排 */
-function mergeWorkspaceBooksStable(
-  orderRef: { current: string[] | null },
-  incoming: BookSummary[],
-): BookSummary[] {
-  const byId = new Map(incoming.map((b) => [b.id, b]))
-  let order = orderRef.current
-  if (!order?.length) {
-    order = incoming.map((b) => b.id)
-  } else {
-    for (const b of incoming) {
-      if (!order.includes(b.id)) order.push(b.id)
-    }
-    order = order.filter((bookId) => byId.has(bookId))
-  }
-  orderRef.current = order
-  return order
-    .map((bookId) => byId.get(bookId))
-    .filter((b): b is BookSummary => b != null)
-}
-
-function readStoredAiWidth(): number {
-  const vw =
-    typeof window !== 'undefined' ? window.innerWidth : 1280
-  try {
-    const raw = localStorage.getItem(AI_PANEL_WIDTH_KEY)
-    const n = raw ? Number.parseInt(raw, 10) : NaN
-    if (!Number.isFinite(n))
-      return clampAiPanelWidth(defaultAiPanelWidthPx(vw), vw)
-    return clampAiPanelWidth(n, vw)
-  } catch {
-    return clampAiPanelWidth(defaultAiPanelWidthPx(vw), vw)
-  }
-}
-
-function createBookWorkspaceSession(input: {
-  book: Book
-  linkedMaterial: Material | null
-  linkedSkill: Skill | null
-  coverData: string | null
-  activeStage: StageId
-  activePlotChildStage?: PlotChildStageId | ''
-  resetExpertRuntime: boolean
-  previous?: BookWorkspaceSessionState
-}): BookWorkspaceSessionState {
-  const stages = normalizeStagesForWorkspaceBook(input.book, input.book.stages)
-  const expertDraft = normalizeExpertDraft(
-    input.book.expert_draft,
-    input.resetExpertRuntime,
-    input.book.book_type,
-  )
-  const persistedSnapshot =
-    input.previous?.persistedSnapshot ??
-    createBookPersistedSnapshot(input.book, expertDraft)
-  return {
-    book: input.book,
-    stages,
-    expertDraft,
-    persistedSnapshot,
-    activeStage: input.activeStage,
-    activePlotChildStage:
-      input.activeStage === PLOT_STAGE_ID
-        ? input.activePlotChildStage ?? input.previous?.activePlotChildStage ?? ''
-        : '',
-    linkedMaterial: input.linkedMaterial,
-    linkedSkill: input.linkedSkill,
-    coverData: input.coverData,
-    aiChatEpochByStage: input.previous?.aiChatEpochByStage ?? {},
-    expertAiChatEpoch: input.previous?.expertAiChatEpoch ?? 0,
-    streamingStages: input.previous?.streamingStages ?? {},
-  }
-}
-
 
 export function BookEditor() {
   const { id } = useParams<{ id: string }>()
@@ -423,7 +114,7 @@ export function BookEditor() {
   const [saving, setSaving] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const [aiPanelWidth, setAiPanelWidth] = useState(readStoredAiWidth)
+  const [aiPanelWidth, setAiPanelWidth] = useAiPanelWidth()
   /** 当前阶段 AI 侧栏「对话轮次」：递增后重建 Pi 会话并清空该阶段对话历史 */
   const [linkedMaterial, setLinkedMaterial] = useState<Material | null>(null)
   const [linkedSkill, setLinkedSkill] = useState<Skill | null>(null)
@@ -431,33 +122,17 @@ export function BookEditor() {
     useState<WorkspaceAgentReadAccessConfig>(
       () => getDefaultWorkspaceAgentReadAccess(),
   )
-  const [materialSelectorOpen, setMaterialSelectorOpen] = useState(false)
-  const [materialSummaries, setMaterialSummaries] = useState<MaterialSummary[]>([])
-  const [materialSelectorLoading, setMaterialSelectorLoading] = useState(false)
-  const [materialSelectorSaving, setMaterialSelectorSaving] = useState(false)
-  const [skillSelectorOpen, setSkillSelectorOpen] = useState(false)
-  const [skillSummaries, setSkillSummaries] = useState<SkillSummary[]>([])
-  const [skillSelectorLoading, setSkillSelectorLoading] = useState(false)
-  const [skillSelectorSaving, setSkillSelectorSaving] = useState(false)
-  const [editingTitle, setEditingTitle] = useState(false)
-  const [titleDraft, setTitleDraft] = useState('')
   const [aiChatEpochByStage, setAiChatEpochByStage] = useState<
     Partial<Record<StageId, number>>
   >({})
   const [expertAiChatEpoch, setExpertAiChatEpoch] = useState(0)
-  /** 封面相关状态 */
   const [coverData, setCoverData] = useState<string | null>(null)
-  const [coverGenerating, setCoverGenerating] = useState(false)
-  const [coverDialogOpen, setCoverDialogOpen] = useState(false)
-  const [coverPromptDraft, setCoverPromptDraft] = useState('')
-  const [coverViewerOpen, setCoverViewerOpen] = useState(false)
-  const [workspaceSessions, setWorkspaceSessions] = useState<
-    Record<string, BookWorkspaceSessionState>
-  >({})
-  const [loadedBookIds, setLoadedBookIds] = useState<string[]>([])
-  const splitDragRef = useRef<{ startX: number; startWidth: number } | null>(
-    null,
-  )
+  const workspaceSessions = useWorkspaceStore((state) => state.sessions)
+  const loadedBookIds = useWorkspaceStore((state) => state.loadedBookIds)
+  const replaceWorkspaceSessions = useWorkspaceStore((state) => state.replaceSessions)
+  const markWorkspaceBookLoaded = useWorkspaceStore((state) => state.markBookLoaded)
+  const setActiveWorkspaceBookId = useWorkspaceStore((state) => state.setActiveBookId)
+  const resetWorkspaceRuntime = useWorkspaceStore((state) => state.resetWorkspaceRuntime)
   /** 防止连按保存或 Ctrl+S 与按钮并发触发两次提交 */
   const saveInFlightRef = useRef(false)
   const activeStageRef = useRef<StageId>(activeStage)
@@ -508,13 +183,11 @@ export function BookEditor() {
   const streamingStagesRef = useRef<Partial<Record<StageId, boolean>>>({})
 
   const rememberLoadedBookId = useCallback((bookId: string) => {
-    setLoadedBookIds((prev) => {
-      if (prev.includes(bookId)) return prev
-      return [...prev, bookId]
-    })
-  }, [])
+    markWorkspaceBookLoaded(bookId)
+  }, [markWorkspaceBookLoaded])
 
   const syncActiveSessionState = useCallback((session: BookWorkspaceSessionState) => {
+    setActiveWorkspaceBookId(session.book.id)
     bookRef.current = session.book
     setBook(session.book)
     stagesRef.current = session.stages
@@ -540,7 +213,7 @@ export function BookEditor() {
     tokenBufferRafRefs.current = tokenBufferRafByBookRef.current[session.book.id]
     expertRunAbortRef.current = expertRunAbortByBookRef.current[session.book.id] ?? null
     expertRunPromiseRef.current = expertRunPromiseByBookRef.current[session.book.id] ?? null
-  }, [])
+  }, [setActiveWorkspaceBookId])
 
   const commitWorkspaceSession = useCallback(
     (
@@ -558,13 +231,13 @@ export function BookEditor() {
         [bookId]: nextSession,
       }
       workspaceSessionsRef.current = nextSessions
-      setWorkspaceSessions(nextSessions)
+      replaceWorkspaceSessions(nextSessions)
       if (syncActive && bookRef.current?.id === bookId) {
         syncActiveSessionState(nextSession)
       }
       return nextSession
     },
-    [syncActiveSessionState],
+    [replaceWorkspaceSessions, syncActiveSessionState],
   )
 
   const storeWorkspaceSession = useCallback(
@@ -574,7 +247,7 @@ export function BookEditor() {
         [session.book.id]: session,
       }
       workspaceSessionsRef.current = nextSessions
-      setWorkspaceSessions(nextSessions)
+      replaceWorkspaceSessions(nextSessions)
       rememberLoadedBookId(session.book.id)
       tokenBuffersByBookRef.current[session.book.id] =
         tokenBuffersByBookRef.current[session.book.id] ?? {}
@@ -584,8 +257,28 @@ export function BookEditor() {
         syncActiveSessionState(session)
       }
     },
-    [rememberLoadedBookId, syncActiveSessionState],
+    [rememberLoadedBookId, replaceWorkspaceSessions, syncActiveSessionState],
   )
+
+  const {
+    coverGenerating,
+    coverDialogOpen,
+    setCoverDialogOpen,
+    coverPromptDraft,
+    setCoverPromptDraft,
+    coverViewerOpen,
+    setCoverViewerOpen,
+    openCoverGenerateDialog,
+    clearCoverDataForActiveBook,
+    confirmCoverGeneration,
+  } = useBookCoverRuntime({
+    bookRef,
+    workspaceSessionsRef,
+    setCoverData,
+    setError,
+    setMessage,
+    storeWorkspaceSession,
+  })
 
   const setEditorStreamingForBook = useCallback(
     (bookId: string, stageId: StageId, next: boolean) => {
@@ -648,9 +341,10 @@ export function BookEditor() {
       Object.values(expertRunAbortByBookRef.current).forEach((controller) => {
         controller?.abort()
       })
+      resetWorkspaceRuntime()
     }
     return cleanupWorkspaceRuntime
-  }, [])
+  }, [resetWorkspaceRuntime])
 
   const updateExpertDraftForBook = useCallback(
     (bookId: string, updater: (current: ExpertDraft) => ExpertDraft) => {
@@ -892,22 +586,6 @@ export function BookEditor() {
     ],
   )
 
-  useEffect(() => {
-    try {
-      localStorage.setItem(AI_PANEL_WIDTH_KEY, String(aiPanelWidth))
-    } catch {
-      /* ignore */
-    }
-  }, [aiPanelWidth])
-
-  useEffect(() => {
-    const onResize = () => {
-      setAiPanelWidth((w) => clampAiPanelWidth(w, window.innerWidth))
-    }
-    window.addEventListener('resize', onResize)
-    return () => window.removeEventListener('resize', onResize)
-  }, [])
-
   const refreshWorkspaceBooks = useCallback(async () => {
     const list = await listBooks()
     setWorkspaceBooks(mergeWorkspaceBooksStable(workspaceBookOrderRef, list))
@@ -937,6 +615,50 @@ export function BookEditor() {
       return prev.map((item) => (item.id === summary.id ? summary : item))
     })
   }, [])
+
+  const {
+    editingTitle,
+    titleDraft,
+    setTitleDraft,
+    handleTitleEditStart,
+    handleTitleEditEnd,
+    handleTitleEditCancel,
+  } = useWorkspaceTitleEditing({
+    bookRef,
+    workspaceSessionsRef,
+    setBook,
+    setError,
+    setMessage,
+    storeWorkspaceSession,
+    syncWorkspaceBookSummary,
+  })
+
+  const {
+    materialSelectorOpen,
+    setMaterialSelectorOpen,
+    materialSummaries,
+    materialSelectorLoading,
+    materialSelectorSaving,
+    openMaterialSelector,
+    saveLinkedMaterial,
+    skillSelectorOpen,
+    setSkillSelectorOpen,
+    skillSummaries,
+    skillSelectorLoading,
+    skillSelectorSaving,
+    openSkillSelector,
+    saveLinkedSkill,
+  } = useLibrarySelectors({
+    book,
+    bookRef,
+    workspaceSessionsRef,
+    setBook,
+    setLinkedMaterial,
+    setLinkedSkill,
+    setError,
+    storeWorkspaceSession,
+    syncWorkspaceBookSummary,
+  })
 
   const waitForSaveIdle = useCallback(async (timeoutMs = 8000): Promise<boolean> => {
     const start = Date.now()
@@ -1874,239 +1596,26 @@ export function BookEditor() {
       ? activePlotChildStages.find((stage) => stage.id === activePlotChildStage)?.label
       : ''
 
-  const openMaterialSelector = async () => {
-    setMaterialSelectorOpen(true)
-    setMaterialSelectorLoading(true)
-    setError(null)
-    try {
-      setMaterialSummaries(await listMaterials())
-    } catch (e) {
-      setError(e instanceof Error ? e.message : '无法加载素材库列表')
-    } finally {
-      setMaterialSelectorLoading(false)
-    }
-  }
-
-  const saveLinkedMaterial = async (materialId: string | null) => {
-    if (!book) return
-    setMaterialSelectorSaving(true)
-    setError(null)
-    try {
-      const next = await saveBook(book.id, { linked_material_id: materialId ?? '' })
-      if (!next) {
-        setError('关联素材库失败：书籍不存在')
-        return
-      }
-      const material = next.linked_material_id
-        ? await getMaterial(next.linked_material_id)
-        : null
-      const currentSession = workspaceSessionsRef.current[next.id]
-      if (currentSession) {
-        storeWorkspaceSession(
-          {
-            ...currentSession,
-            book: next,
-            linkedMaterial: material,
-          },
-          bookRef.current?.id === next.id,
-        )
-      } else {
-        setBook(next)
-        setLinkedMaterial(material)
-      }
-      syncWorkspaceBookSummary(next)
-      setMaterialSelectorOpen(false)
-    } catch (e) {
-      setError(e instanceof Error ? e.message : '关联素材库失败')
-    } finally {
-      setMaterialSelectorSaving(false)
-    }
-  }
-
-  const openSkillSelector = async () => {
-    setSkillSelectorOpen(true)
-    setSkillSelectorLoading(true)
-    setError(null)
-    try {
-      setSkillSummaries(await listSkills())
-    } catch (e) {
-      setError(e instanceof Error ? e.message : '无法加载技能库列表')
-    } finally {
-      setSkillSelectorLoading(false)
-    }
-  }
-
-  const saveLinkedSkill = async (skillId: string | null) => {
-    if (!book) return
-    setSkillSelectorSaving(true)
-    setError(null)
-    try {
-      const next = await saveBook(book.id, { linked_skill_id: skillId ?? '' })
-      if (!next) {
-        setError('绑定技能库失败：书籍不存在')
-        return
-      }
-      const skill = next.linked_skill_id ? await getSkill(next.linked_skill_id) : null
-      const currentSession = workspaceSessionsRef.current[next.id]
-      if (currentSession) {
-        storeWorkspaceSession(
-          {
-            ...currentSession,
-            book: next,
-            linkedSkill: skill,
-          },
-          bookRef.current?.id === next.id,
-        )
-      } else {
-        setBook(next)
-        setLinkedSkill(skill)
-      }
-      syncWorkspaceBookSummary(next)
-      setSkillSelectorOpen(false)
-    } catch (e) {
-      setError(e instanceof Error ? e.message : '绑定技能库失败')
-    } finally {
-      setSkillSelectorSaving(false)
-    }
-  }
-
-  const { total: stageCharTotal, nonSpace: stageCharNonSpace } =
-    stageTextCounts(stageBody)
-
   return (
     <div className="editor-page editor-page--workspace">
-      <header className="editor-header editor-header--agent">
-        <button type="button" className="back-link" onClick={handleBackToShelf}>
-          ← 返回
-        </button>
-        <div className="editor-header-meta muted">
-          <span className="editor-header-meta-inner">
-            <span className="editor-header-meta-text">
-              {book?.title || '未命名'}
-              {' · '}
-              {book ? bookTypeLabel(book.book_type) : '书籍'}
-              {book && isWorkspaceBook(book) && (book.categories?.length ?? 0) > 0
-                ? ` · ${(book.categories ?? []).join('、')}`
-                : ''}
-              {book?.status === 'completed' ? ' · 已完成' : ''}
-            </span>
-            {error || message ? (
-              <span
-                className={
-                  error
-                    ? 'editor-header-flash editor-header-flash--error'
-                    : 'editor-header-flash editor-header-flash--ok'
-                }
-                aria-live="polite"
-              >
-                {error ?? message}
-              </span>
-            ) : null}
-          </span>
-        </div>
-        <div className="editor-header-actions">
-          {coverData ? (
-            <button
-              type="button"
-              className="btn-cover-view"
-              title="查看封面"
-              onClick={() => setCoverViewerOpen(true)}
-            >
-              <img
-                src={`data:image/png;base64,${coverData}`}
-                alt="封面"
-                className="btn-cover-thumb"
-                onError={() => {
-                  const currentBookId = bookRef.current?.id
-                  if (!currentBookId) {
-                    setCoverData(null)
-                    return
-                  }
-                  const currentSession = workspaceSessionsRef.current[currentBookId]
-                  if (currentSession) {
-                    storeWorkspaceSession(
-                      { ...currentSession, coverData: null },
-                      true,
-                    )
-                  } else {
-                    setCoverData(null)
-                  }
-                }}
-              />
-            </button>
-          ) : null}
-          <button
-            type="button"
-            className="btn-cover-generate"
-            onClick={() => {
-              const defaultPrompt = `基于下面的书内容介绍，给我生成一个具有吸引力的书封面，封面不要有小字，给出合适配图，加上书名\n书名：${book?.title ?? ''}`
-              setCoverPromptDraft(defaultPrompt)
-              setCoverDialogOpen(true)
-            }}
-            disabled={coverGenerating}
-          >
-            {coverGenerating ? '生成中…' : '生成封面'}
-          </button>
-          <span
-            className="editor-header-material-name"
-            title={linkedMaterial ? `已关联：${linkedMaterial.title}` : '未关联素材库'}
-          >
-            {linkedMaterial ? linkedMaterial.title : '未关联素材'}
-          </span>
-          <button
-            type="button"
-            className={
-              linkedMaterial
-                ? 'editor-header-material-select editor-header-material-select--active'
-                : 'editor-header-material-select'
-            }
-            aria-label="选择关联素材库"
-            title={linkedMaterial ? `已关联：${linkedMaterial.title}` : '选择关联素材库'}
-            onClick={() => void openMaterialSelector()}
-          >
-            素材库选择
-          </button>
-          <span
-            className="editor-header-material-name"
-            title={linkedSkill ? `已绑定：${linkedSkill.title}` : '未绑定技能库'}
-          >
-            {linkedSkill ? linkedSkill.title : '未绑定技能'}
-          </span>
-          <button
-            type="button"
-            className={
-              linkedSkill
-                ? 'editor-header-material-select editor-header-material-select--active'
-                : 'editor-header-material-select'
-            }
-            aria-label="选择绑定技能库"
-            title={linkedSkill ? `已绑定：${linkedSkill.title}` : '选择绑定技能库'}
-            onClick={() => void openSkillSelector()}
-          >
-            技能库选择
-          </button>
-          <button
-            type="button"
-            className="btn-save"
-            onClick={() => void handleSave()}
-            disabled={saving}
-          >
-            {saving ? '保存中…' : '保存'}
-          </button>
-          <button
-            type="button"
-            className={
-              book.status === 'completed'
-                ? 'btn-book-status btn-book-status--completed'
-                : 'btn-book-status'
-            }
-            onClick={() => void handleToggleBookStatus()}
-            disabled={saving}
-          >
-            {book.status === 'completed' ? '修改' : '完成'}
-          </button>
-        </div>
-      </header>
+      <WorkspaceBookHeader
+        book={book}
+        coverData={coverData}
+        coverGenerating={coverGenerating}
+        linkedMaterial={linkedMaterial}
+        linkedSkill={linkedSkill}
+        saving={saving}
+        error={error}
+        message={message}
+        onBack={handleBackToShelf}
+        onViewCover={() => setCoverViewerOpen(true)}
+        onGenerateCover={openCoverGenerateDialog}
+        onCoverError={clearCoverDataForActiveBook}
+        onOpenMaterialSelector={() => void openMaterialSelector()}
+        onOpenSkillSelector={() => void openSkillSelector()}
+        onSave={() => void handleSave()}
+        onToggleStatus={() => void handleToggleBookStatus()}
+      />
 
       <div
         className={
@@ -2125,800 +1634,123 @@ export function BookEditor() {
             正在切换书籍…
           </div>
         ) : null}
-        <aside className="workspace-rail workspace-rail--tree">
-          {book.status === 'completed' ? (
-            <WorkspaceTreeNav
-              rootLabel={book.title}
-              stages={workspaceTreeStages}
-              defaultExpanded
-              activeStageId={activeStage}
-              activeStageChildId={
-                activeStage === PLOT_STAGE_ID
-                  ? activePlotChildStage || undefined
-                  : activeStage === 'draft'
-                    ? activeExpertDraftSectionId
-                    : undefined
-              }
-              onStageSelect={(stageId) => setActiveBookStage(stageId as StageId)}
-              onStageChildSelect={(stageId, childId) => {
-                if (stageId === PLOT_STAGE_ID && isPlotChildStageId(childId)) {
-                  selectPlotChildForBook(book.id, childId)
-                }
-                if (stageId === 'draft') handleExpertDraftSectionSelect(childId)
-              }}
-              onStageChildCreate={(stageId) => {
-                if (stageId === 'draft') handleExpertDraftSectionCreate()
-              }}
-              editingTitle={editingTitle}
-              titleDraft={titleDraft}
-              onTitleDraftChange={setTitleDraft}
-              onTitleEditStart={() => {
-                setTitleDraft(book.title)
-                setEditingTitle(true)
-              }}
-              onTitleEditEnd={() => {
-                const trimmed = titleDraft.trim()
-                if (trimmed && trimmed !== book.title) {
-                  void (async () => {
-                    try {
-                      const next = await saveBook(book.id, { title: trimmed })
-                      if (next) {
-                        const currentSession = workspaceSessionsRef.current[next.id]
-                        if (currentSession) {
-                          storeWorkspaceSession(
-                            { ...currentSession, book: next },
-                            bookRef.current?.id === next.id,
-                          )
-                        } else {
-                          setBook(next)
-                        }
-                        syncWorkspaceBookSummary(next)
-                        setMessage('书名已修改')
-                        window.setTimeout(() => setMessage(null), 2000)
-                      } else {
-                        setError('保存书名失败')
-                      }
-                    } catch (e) {
-                      setError(e instanceof Error ? e.message : '保存书名失败')
-                    }
-                  })()
-                }
-                setEditingTitle(false)
-                setTitleDraft('')
-              }}
-              onTitleEditCancel={() => {
-                setEditingTitle(false)
-                setTitleDraft('')
-              }}
-            />
-          ) : (
-            <WorkspaceTreeNav
-              books={workspaceTreeBooks}
-              defaultExpanded={false}
-              activeBookId={book.id}
-              activeStageId={activeStage}
-              activeStageChildId={
-                activeStage === PLOT_STAGE_ID
-                  ? activePlotChildStage || undefined
-                  : activeStage === 'draft'
-                    ? activeExpertDraftSectionId
-                    : undefined
-              }
-              onStageSelect={(stageId) =>
-                void handleTreeBookStageSelect(book.id, stageId as StageId)
-              }
-              onBookSelect={(bookId) => handleTreeBookSelect(bookId)}
-              onBookStageSelect={(bookId, stageId) =>
-                void handleTreeBookStageSelect(bookId, stageId as StageId)
-              }
-              onBookStageChildSelect={(bookId, stageId, childId) =>
-                void handleTreeBookStageChildSelect(
-                  bookId,
-                  stageId as StageId,
-                  childId,
-                )
-              }
-              onBookStageChildCreate={(bookId, stageId) =>
-                handleTreeBookStageChildCreate(bookId, stageId as StageId)
-              }
-              editingTitle={editingTitle}
-              titleDraft={titleDraft}
-              onTitleDraftChange={setTitleDraft}
-              onTitleEditStart={() => {
-                setTitleDraft(book?.title ?? '')
-                setEditingTitle(true)
-              }}
-              onTitleEditEnd={() => {
-                const trimmed = titleDraft.trim()
-                if (trimmed && trimmed !== book?.title && book) {
-                  void (async () => {
-                    try {
-                      const next = await saveBook(book.id, { title: trimmed })
-                      if (next) {
-                        const currentSession = workspaceSessionsRef.current[next.id]
-                        if (currentSession) {
-                          storeWorkspaceSession(
-                            { ...currentSession, book: next },
-                            bookRef.current?.id === next.id,
-                          )
-                        } else {
-                          setBook(next)
-                        }
-                        syncWorkspaceBookSummary(next)
-                        setMessage('书名已修改')
-                        window.setTimeout(() => setMessage(null), 2000)
-                      } else {
-                        setError('保存书名失败')
-                      }
-                    } catch (e) {
-                      setError(e instanceof Error ? e.message : '保存书名失败')
-                    }
-                  })()
-                }
-                setEditingTitle(false)
-                setTitleDraft('')
-              }}
-              onTitleEditCancel={() => {
-                setEditingTitle(false)
-                setTitleDraft('')
-              }}
-            />
-          )}
-        </aside>
-
-        <aside className="workspace-ai workspace-ai--center" aria-label="AI 对话">
-          <div className="workspace-ai-header workspace-ai-header-row">
-            <span className="workspace-ai-header-title">智能体</span>
-            {book ? (
-              <div className="workspace-ai-header-actions">
-                <button
-                  type="button"
-                  className="workspace-ai-new-chat"
-                  aria-label={
-                    expertDraftActive
-                      ? activeExpertDraftSectionId
-                        ? '清空当前小节分节写手对话并开始新会话'
-                        : '清空专家总控智能体对话并开始新会话'
-                      : '清空当前阶段 AI 对话并开始新会话'
-                  }
-                  title={
-                    expertDraftActive
-                      ? activeExpertDraftSectionId
-                        ? '仅清空当前小节的分节写手会话，其它小节各自保留独立历史'
-                        : '仅清空专家总控智能体上下文，不影响后台分节写作任务'
-                      : '仅影响当前左侧阶段对应的助手会话，其他阶段各有一份独立历史'
-                  }
-                  disabled={expertDraftActive && expertDraft.running}
-                  onClick={() => {
-                    if (expertDraftActive) {
-                      bumpActiveExpertChatEpoch()
-                      return
-                    }
-                    bumpActiveStageChatEpoch(activeStage)
-                  }}
-                >
-                  新建对话
-                </button>
-              </div>
-            ) : null}
-          </div>
-          <div className="workspace-ai-hint muted">
-            {railStages.find((s) => s.id === activeStage)?.label}
-            {activePlotChildLabel ? ` · ${activePlotChildLabel}` : ''}
-            {expertDraftActive
-              ? activeExpertDraftSectionId
-                ? ' · 分节写手'
-                : ' · 专家总控'
-              : ''}
-            {' · '}
-            {book?.categories.join('、') || '未分类'}
-            {linkedMaterial ? ` · 素材：${linkedMaterial.title}` : ''}
-            {linkedSkill ? ` · 技能：${linkedSkill.title}` : ''}
-          </div>
-          {book ? (
-            <div className="workspace-ai-chat-stack">
-              {renderedWorkspaceSessions.flatMap((session) => {
-                const sessionBookGenre = resolveWorkspaceBookGenre(session.book)
-                const sessionStages = resolveWorkspaceStagesForBook(session.book)
-                const sessionExpertActive =
-                  session.activeStage === 'draft'
-                const isVisibleBook = session.book.id === book.id
-                const SessionExpertDraftAiChat =
-                  session.book.book_type === 'script'
-                    ? ScriptExpertDraftAiChat
-                    : ShortExpertDraftAiChat
-                const stageLayers = sessionStages
-                  .filter((s) => s.id !== 'draft')
-                  .map((s) => {
-                    const epoch = session.aiChatEpochByStage[s.id] ?? 0
-                    const activeContentStageForLayer =
-                      s.id === PLOT_STAGE_ID
-                        ? session.activePlotChildStage || PLOT_STAGE_ID
-                        : s.id
-                    const layerKey =
-                      epoch > 0
-                        ? `${session.book.id}-shared-${s.id}-${epoch}`
-                        : `${session.book.id}-shared-${s.id}`
-                    const isActive =
-                      isVisibleBook &&
-                      session.activeStage === s.id &&
-                      !sessionExpertActive
-                    return (
-                      <div
-                        key={layerKey}
-                        className={
-                          isActive
-                            ? 'workspace-ai-chat-layer workspace-ai-chat-layer--active'
-                            : 'workspace-ai-chat-layer'
-                        }
-                        aria-hidden={!isActive}
-                      >
-                        <WorkspaceAiChat
-                          sessionBookId={session.book.id}
-                          sessionEpoch={epoch}
-                          bookType={session.book.book_type}
-                          bookTitle={session.book.title}
-                          bookGenre={sessionBookGenre}
-                          stageId={s.id}
-                          activeStageContentId={activeContentStageForLayer}
-                          stageBody={
-                            session.stages[activeContentStageForLayer] ?? ''
-                          }
-                          getCurrentStageBody={(stageId) => {
-                            const sid = (stageId ?? s.id) as StageId
-                            if (isVisibleBook) {
-                              const rendered = getRenderedWorkspaceStageBody(sid)
-                              if (rendered !== undefined) return rendered
-                            }
-                            return workspaceSessionsRef.current[session.book.id]?.stages[sid]
-                          }}
-                          allStages={session.stages}
-                          linkedMaterial={session.linkedMaterial}
-                          linkedSkill={session.linkedSkill}
-                          workspaceAgentReadAccess={workspaceAgentReadAccess}
-                          includePiArtifacts={WORKSPACE_AI_INCLUDE_PI_ARTIFACTS}
-                          applyToStageEditor={(payload) =>
-                            applyToStageEditorForBook(session.book.id, s.id, payload)
-                          }
-                          onRequestSave={async () => {
-                            await saveBookSession(session.book.id)
-                          }}
-                          isPaused={!isActive}
-                        />
-                      </div>
-                    )
-                  })
-
-                const expertLayerActive = isVisibleBook && sessionExpertActive
-                const expertLayer = (
-                  <div
-                    key={`${session.book.id}-expert-draft-layer`}
-                    className={
-                      expertLayerActive
-                        ? 'workspace-ai-chat-layer workspace-ai-chat-layer--active'
-                        : 'workspace-ai-chat-layer'
-                    }
-                    aria-hidden={!expertLayerActive}
-                  >
-                    <SessionExpertDraftAiChat
-                      key={`${session.book.id}-shared-expert-draft-${session.expertAiChatEpoch}`}
-                      bookId={session.book.id}
-                      bookTitle={session.book.title}
-                      bookGenre={sessionBookGenre}
-                      sessionEpoch={session.expertAiChatEpoch}
-                      stages={session.stages}
-                      linkedMaterial={session.linkedMaterial}
-                      linkedSkill={session.linkedSkill}
-                      readAccess={resolveReadAccessForBook(
-                        session.book,
-                        workspaceAgentReadAccess,
-                        EXPERT_DRAFT_COORDINATOR_AGENT_ID,
-                      )}
-                      writerReadAccess={resolveReadAccessForBook(
-                        session.book,
-                        workspaceAgentReadAccess,
-                        EXPERT_SECTION_WRITER_AGENT_ID,
-                      )}
-                      expertDraft={session.expertDraft}
-                      updateDraft={(updater) =>
-                        updateExpertDraftForBook(session.book.id, updater)
-                      }
-                      startWriting={(sectionIds, options) =>
-                        startExpertWritingForBook(
-                          session.book.id,
-                          sectionIds,
-                          options,
-                        )
-                      }
-                      getRenderedExpertDraftSectionContent={
-                        isVisibleBook
-                          ? getRenderedExpertDraftSectionContent
-                          : undefined
-                      }
-                    />
-                  </div>
-                )
-                return [...stageLayers, expertLayer]
-              })}
-            </div>
-          ) : null}
-        </aside>
-
-        <div
-          className="workspace-splitter"
-          role="separator"
-          aria-orientation="vertical"
-          aria-label="调整对话区宽度"
-          tabIndex={0}
-          onPointerDown={(e) => {
-            if (e.button !== 0) return
-            e.preventDefault()
-            splitDragRef.current = {
-              startX: e.clientX,
-              startWidth: aiPanelWidth,
-            }
-            ;(e.currentTarget as HTMLDivElement).setPointerCapture(e.pointerId)
-          }}
-          onPointerMove={(e) => {
-            const drag = splitDragRef.current
-            if (!drag) return
-            const delta = e.clientX - drag.startX
-            const next = drag.startWidth + delta
-            setAiPanelWidth(clampAiPanelWidth(next, window.innerWidth))
-          }}
-          onPointerUp={(e) => {
-            splitDragRef.current = null
-            try {
-              ;(e.currentTarget as HTMLDivElement).releasePointerCapture(
-                e.pointerId,
-              )
-            } catch {
-              /* ignore */
-            }
-          }}
-          onPointerCancel={(e) => {
-            splitDragRef.current = null
-            try {
-              ;(e.currentTarget as HTMLDivElement).releasePointerCapture(
-                e.pointerId,
-              )
-            } catch {
-              /* ignore */
-            }
-          }}
-          onKeyDown={(e) => {
-            const step = 16
-            if (e.key === 'ArrowLeft') {
-              e.preventDefault()
-              setAiPanelWidth((w) =>
-                clampAiPanelWidth(w - step, window.innerWidth),
-              )
-            } else if (e.key === 'ArrowRight') {
-              e.preventDefault()
-              setAiPanelWidth((w) =>
-                clampAiPanelWidth(w + step, window.innerWidth),
-              )
-            }
-          }}
+        <WorkspaceRailPanel
+          book={book}
+          workspaceTreeStages={workspaceTreeStages}
+          workspaceTreeBooks={workspaceTreeBooks}
+          activeStage={activeStage}
+          activePlotChildStage={activePlotChildStage}
+          activeExpertDraftSectionId={activeExpertDraftSectionId}
+          editingTitle={editingTitle}
+          titleDraft={titleDraft}
+          onTitleDraftChange={setTitleDraft}
+          onTitleEditStart={handleTitleEditStart}
+          onTitleEditEnd={handleTitleEditEnd}
+          onTitleEditCancel={handleTitleEditCancel}
+          onActiveStageSelect={setActiveBookStage}
+          onPlotChildSelect={(childId) => selectPlotChildForBook(book.id, childId)}
+          onExpertDraftSectionSelect={handleExpertDraftSectionSelect}
+          onExpertDraftSectionCreate={handleExpertDraftSectionCreate}
+          onTreeBookSelect={handleTreeBookSelect}
+          onTreeBookStageSelect={(bookId, stageId) =>
+            void handleTreeBookStageSelect(bookId, stageId)
+          }
+          onTreeBookStageChildSelect={(bookId, stageId, childId) =>
+            void handleTreeBookStageChildSelect(bookId, stageId, childId)
+          }
+          onTreeBookStageChildCreate={handleTreeBookStageChildCreate}
         />
 
-        <div className="workspace-editor-pane workspace-editor-pane--primary">
-          {expertDraftActive ? (
-            <ActiveExpertDraftEditor
-              draft={expertDraft}
-              stageBody={stageBody}
-              stageBodyReadOnly={Boolean(streamingStages.draft)}
-              onStageBodyChange={handleStageBodyChange}
-              updateDraft={updateExpertDraft}
-              onSectionTextareaRef={handleExpertDraftSectionTextareaRef}
-              stopWriting={stopExpertWriting}
-              resetDraft={resetExpertDraft}
-              mergeSectionsToDraft={mergeExpertDraftToStage}
-              exportDraft={handleExportExpertDraftDocx}
-            />
-          ) : activeStage === PLOT_STAGE_ID ? (
-            <div
-              className={
-                activePlotChildStage
-                  ? 'workspace-plot-editor workspace-plot-editor--single'
-                  : 'workspace-plot-editor'
-              }
-            >
-              {(activePlotChildStage
-                ? activePlotChildStages.filter(
-                    (stage) => stage.id === activePlotChildStage,
-                  )
-                : activePlotChildStages
-              ).map((plotStage) => {
-                const body = stages[plotStage.id] ?? ''
-                const counts = stageTextCounts(body)
-                return (
-                  <section
-                    key={plotStage.id}
-                    className="workspace-plot-editor-section"
-                  >
-                    <div className="workspace-stage-heading">
-                      <label
-                        className="workspace-stage-label"
-                        htmlFor={`stage-body-${plotStage.id}`}
-                      >
-                        {plotStage.label}
-                      </label>
-                      <span
-                        className="workspace-char-count muted"
-                        aria-live="polite"
-                        title={`不含空白字数 ${counts.nonSpace.toLocaleString('zh-CN')}；总字符（含空格与换行）${counts.total.toLocaleString('zh-CN')}`}
-                      >
-                        {counts.nonSpace.toLocaleString('zh-CN')} 字
-                        <span className="workspace-char-count-sep" aria-hidden>
-                          {' · '}
-                        </span>
-                        <span className="workspace-char-count-detail">
-                          {counts.total.toLocaleString('zh-CN')} 字符
-                        </span>
-                      </span>
-                    </div>
-                    <textarea
-                      id={`stage-body-${plotStage.id}`}
-                      ref={(node) => {
-                        textareaRefsRef.current[plotStage.id] = node
-                        if (plotStage.id === activeContentStage) {
-                          textareaRef.current = node
-                        }
-                      }}
-                      className="editor-body workspace-textarea"
-                      value={body}
-                      onChange={(e) =>
-                        handleStageBodyChange(e.target.value, plotStage.id)
-                      }
-                      placeholder="在此编辑当前剧情内容..."
-                      spellCheck={false}
-                      readOnly={Boolean(streamingStages[plotStage.id])}
-                    />
-                  </section>
-                )
-              })}
-            </div>
-          ) : (
-            <>
-              <div className="workspace-stage-heading">
-                <label className="workspace-stage-label" htmlFor="stage-body">
-                  {railStages.find((s) => s.id === activeStage)?.label}
-                </label>
-                <span
-                  className="workspace-char-count muted"
-                  aria-live="polite"
-                  title={`不含空白字数 ${stageCharNonSpace.toLocaleString('zh-CN')}；总字符（含空格与换行）${stageCharTotal.toLocaleString('zh-CN')}`}
-                >
-                  {stageCharNonSpace.toLocaleString('zh-CN')} 字
-                  <span className="workspace-char-count-sep" aria-hidden>
-                    {' · '}
-                  </span>
-                  <span className="workspace-char-count-detail">
-                    {stageCharTotal.toLocaleString('zh-CN')} 字符
-                  </span>
-                </span>
-              </div>
-              <textarea
-                id="stage-body"
-                ref={(node) => {
-                  textareaRef.current = node
-                  textareaRefsRef.current[activeContentStage] = node
-                }}
-                className="editor-body workspace-textarea"
-                value={stageBody}
-                onChange={(e) => handleStageBodyChange(e.target.value)}
-                placeholder="在此编辑当前阶段内容..."
-                spellCheck={false}
-                readOnly={Boolean(streamingStages[activeContentStage])}
-              />
-            </>
-          )}
-        </div>
+        <WorkspaceAiPanel
+          book={book}
+          railStages={railStages}
+          activeStage={activeStage}
+          activePlotChildLabel={activePlotChildLabel ?? ''}
+          expertDraftActive={expertDraftActive}
+          activeExpertDraftSectionId={activeExpertDraftSectionId}
+          expertDraft={expertDraft}
+          renderedWorkspaceSessions={renderedWorkspaceSessions}
+          workspaceAgentReadAccess={workspaceAgentReadAccess}
+          linkedMaterialTitle={linkedMaterial?.title}
+          linkedSkillTitle={linkedSkill?.title}
+          workspaceSessionsRef={workspaceSessionsRef}
+          getRenderedWorkspaceStageBody={getRenderedWorkspaceStageBody}
+          applyToStageEditorForBook={applyToStageEditorForBook}
+          saveBookSession={saveBookSession}
+          updateExpertDraftForBook={updateExpertDraftForBook}
+          startExpertWritingForBook={startExpertWritingForBook}
+          getRenderedExpertDraftSectionContent={
+            getRenderedExpertDraftSectionContent
+          }
+          bumpActiveExpertChatEpoch={bumpActiveExpertChatEpoch}
+          bumpActiveStageChatEpoch={bumpActiveStageChatEpoch}
+        />
+
+        <WorkspaceSplitter
+          aiPanelWidth={aiPanelWidth}
+          setAiPanelWidth={setAiPanelWidth}
+        />
+
+        <WorkspaceEditorPane
+          expertDraftActive={expertDraftActive}
+          ActiveExpertDraftEditor={ActiveExpertDraftEditor}
+          expertDraft={expertDraft}
+          stageBody={stageBody}
+          streamingStages={streamingStages}
+          onStageBodyChange={handleStageBodyChange}
+          updateExpertDraft={updateExpertDraft}
+          onSectionTextareaRef={handleExpertDraftSectionTextareaRef}
+          stopExpertWriting={stopExpertWriting}
+          resetExpertDraft={resetExpertDraft}
+          mergeExpertDraftToStage={mergeExpertDraftToStage}
+          exportExpertDraft={handleExportExpertDraftDocx}
+          activeStage={activeStage}
+          activeContentStage={activeContentStage}
+          activePlotChildStage={activePlotChildStage}
+          activePlotChildStages={activePlotChildStages}
+          stages={stages}
+          railStages={railStages}
+          textareaRef={textareaRef}
+          textareaRefsRef={textareaRefsRef}
+        />
 
         {materialSelectorOpen ? (
-          <div
-            className="workspace-material-selector-backdrop"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="wc-material-selector-title"
-          >
-            <div className="workspace-material-selector-panel">
-              <div className="workspace-material-selector-head">
-                <h2 id="wc-material-selector-title" className="workspace-material-selector-title">
-                  选择关联素材库
-                </h2>
-                <button
-                  type="button"
-                  className="workspace-material-selector-close"
-                  aria-label="关闭"
-                  disabled={materialSelectorSaving}
-                  onClick={() => setMaterialSelectorOpen(false)}
-                >
-                  ×
-                </button>
-              </div>
-              <div className="workspace-material-current">
-                当前关联：
-                <strong>{linkedMaterial ? linkedMaterial.title : '未关联'}</strong>
-                {linkedMaterial?.output_dir ? (
-                  <span title={linkedMaterial.output_dir}>
-                    {` · ${linkedMaterial.output_dir.length > 42
-                      ? `${linkedMaterial.output_dir.slice(0, 22)}…${linkedMaterial.output_dir.slice(-16)}`
-                      : linkedMaterial.output_dir}`}
-                  </span>
-                ) : null}
-              </div>
-              <div className="workspace-material-stage-note">
-                可供 AI 读取的阶段：{Object.values(MATERIAL_STAGE_LABELS).join('、')}
-              </div>
-              <div className="workspace-material-list">
-                {materialSelectorLoading ? (
-                  <p className="muted workspace-material-empty">加载中…</p>
-                ) : materialSummaries.length === 0 ? (
-                  <p className="muted workspace-material-empty">暂无素材库</p>
-                ) : (
-                  materialSummaries.map((material) => {
-                    const selected = material.id === book.linked_material_id
-                    const genre = [
-                      materialTypeLabel(material.material_type),
-                      material.parent_genre,
-                    ].filter(Boolean).join(' · ')
-                    return (
-                      <button
-                        key={material.id}
-                        type="button"
-                        className={
-                          selected
-                            ? 'workspace-material-item workspace-material-item--selected'
-                            : 'workspace-material-item'
-                        }
-                        disabled={materialSelectorSaving}
-                        onClick={() => void saveLinkedMaterial(material.id)}
-                      >
-                        <span className="workspace-material-item-main">
-                          <span className="workspace-material-item-title">{material.title}</span>
-                          <span className="workspace-material-item-meta">{genre || '素材'}</span>
-                        </span>
-                        <span className="workspace-material-item-state">
-                          {selected ? '已关联' : '关联'}
-                        </span>
-                      </button>
-                    )
-                  })
-                )}
-              </div>
-              <div className="workspace-material-selector-foot">
-                <button
-                  type="button"
-                  className="btn-material-clear"
-                  disabled={materialSelectorSaving || !book.linked_material_id}
-                  onClick={() => void saveLinkedMaterial(null)}
-                >
-                  取消关联
-                </button>
-                <button
-                  type="button"
-                  className="btn-material-close"
-                  disabled={materialSelectorSaving}
-                  onClick={() => setMaterialSelectorOpen(false)}
-                >
-                  关闭
-                </button>
-              </div>
-            </div>
-          </div>
+          <MaterialSelectorDialog
+            book={book}
+            linkedMaterial={linkedMaterial}
+            summaries={materialSummaries}
+            loading={materialSelectorLoading}
+            saving={materialSelectorSaving}
+            onClose={() => setMaterialSelectorOpen(false)}
+            onSelect={(materialId) => void saveLinkedMaterial(materialId)}
+            onClear={() => void saveLinkedMaterial(null)}
+          />
         ) : null}
 
         {skillSelectorOpen ? (
-          <div
-            className="workspace-material-selector-backdrop"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="wc-skill-selector-title"
-          >
-            <div className="workspace-material-selector-panel">
-              <div className="workspace-material-selector-head">
-                <h2 id="wc-skill-selector-title" className="workspace-material-selector-title">
-                  选择绑定技能库
-                </h2>
-                <button
-                  type="button"
-                  className="workspace-material-selector-close"
-                  aria-label="关闭"
-                  disabled={skillSelectorSaving}
-                  onClick={() => setSkillSelectorOpen(false)}
-                >
-                  ×
-                </button>
-              </div>
-              <div className="workspace-material-current">
-                当前绑定：
-                <strong>{linkedSkill ? linkedSkill.title : '未绑定'}</strong>
-                {linkedSkill?.output_dir ? (
-                  <span title={linkedSkill.output_dir}>
-                    {` · ${linkedSkill.output_dir.length > 42
-                      ? `${linkedSkill.output_dir.slice(0, 22)}…${linkedSkill.output_dir.slice(-16)}`
-                      : linkedSkill.output_dir}`}
-                  </span>
-                ) : null}
-              </div>
-              <div className="workspace-material-stage-note">
-                AI 会按当前阶段展示可加载技能，并通过 load_skill 读取完整技能内容。
-              </div>
-              <div className="workspace-material-list">
-                {skillSelectorLoading ? (
-                  <p className="muted workspace-material-empty">加载中…</p>
-                ) : skillSummaries.length === 0 ? (
-                  <p className="muted workspace-material-empty">暂无技能库</p>
-                ) : (
-                  skillSummaries.map((skill) => {
-                    const selected = skill.id === book.linked_skill_id
-                    const count = skill.stage_skill_count ?? 0
-                    return (
-                      <button
-                        key={skill.id}
-                        type="button"
-                        className={
-                          selected
-                            ? 'workspace-material-item workspace-material-item--selected'
-                            : 'workspace-material-item'
-                        }
-                        disabled={skillSelectorSaving}
-                        onClick={() => void saveLinkedSkill(skill.id)}
-                      >
-                        <span className="workspace-material-item-main">
-                          <span className="workspace-material-item-title">{skill.title}</span>
-                          <span className="workspace-material-item-meta">
-                            {skillTypeLabel(skill.skill_type)} · {count > 0 ? `${count} 条阶段技能` : '暂无阶段技能'}
-                          </span>
-                        </span>
-                        <span className="workspace-material-item-state">
-                          {selected ? '已绑定' : '绑定'}
-                        </span>
-                      </button>
-                    )
-                  })
-                )}
-              </div>
-              <div className="workspace-material-selector-foot">
-                <button
-                  type="button"
-                  className="btn-material-clear"
-                  disabled={skillSelectorSaving || !book.linked_skill_id}
-                  onClick={() => void saveLinkedSkill(null)}
-                >
-                  取消绑定
-                </button>
-                <button
-                  type="button"
-                  className="btn-material-close"
-                  disabled={skillSelectorSaving}
-                  onClick={() => setSkillSelectorOpen(false)}
-                >
-                  关闭
-                </button>
-              </div>
-            </div>
-          </div>
+          <SkillSelectorDialog
+            book={book}
+            linkedSkill={linkedSkill}
+            summaries={skillSummaries}
+            loading={skillSelectorLoading}
+            saving={skillSelectorSaving}
+            onClose={() => setSkillSelectorOpen(false)}
+            onSelect={(skillId) => void saveLinkedSkill(skillId)}
+            onClear={() => void saveLinkedSkill(null)}
+          />
         ) : null}
 
-        {/* 封面生成弹窗 */}
-        {coverDialogOpen ? (
-          <div
-            className="workspace-cover-dialog-backdrop"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="wc-cover-dialog-title"
-          >
-            <div className="workspace-cover-dialog-panel">
-              <div className="workspace-cover-dialog-head">
-                <h2 id="wc-cover-dialog-title" className="workspace-cover-dialog-title">
-                  生成封面
-                </h2>
-                <button
-                  type="button"
-                  className="workspace-cover-dialog-close"
-                  aria-label="关闭"
-                  disabled={coverGenerating}
-                  onClick={() => setCoverDialogOpen(false)}
-                >
-                  ×
-                </button>
-              </div>
-              <div className="workspace-cover-dialog-body">
-                <label className="workspace-cover-dialog-label" htmlFor="cover-prompt">
-                  提示词（可修改）
-                </label>
-                <textarea
-                  id="cover-prompt"
-                  className="workspace-cover-dialog-area"
-                  value={coverPromptDraft}
-                  spellCheck={false}
-                  disabled={coverGenerating}
-                  onChange={(e) => setCoverPromptDraft(e.target.value)}
-                />
-              </div>
-              <div className="workspace-cover-dialog-foot">
-                <button
-                  type="button"
-                  className="btn-cover-dialog-cancel"
-                  disabled={coverGenerating}
-                  onClick={() => setCoverDialogOpen(false)}
-                >
-                  取消
-                </button>
-                <button
-                  type="button"
-                  className="btn-cover-dialog-confirm"
-                  disabled={coverGenerating || !coverPromptDraft.trim()}
-                  onClick={() => {
-                    if (!book || !coverPromptDraft.trim()) return
-                    setCoverGenerating(true)
-                    setCoverDialogOpen(false)
-                    generateBookCover(book.id, coverPromptDraft.trim())
-                      .then(async (res) => {
-                        if (res.success) {
-                          const refreshed = await getBookCover(book.id)
-                          const currentSession = workspaceSessionsRef.current[book.id]
-                          if (currentSession) {
-                            storeWorkspaceSession(
-                              {
-                                ...currentSession,
-                                coverData: refreshed.cover_data,
-                              },
-                              bookRef.current?.id === book.id,
-                            )
-                          } else {
-                            setCoverData(refreshed.cover_data)
-                          }
-                          setMessage('封面生成成功')
-                          window.setTimeout(() => setMessage(null), 2000)
-                        } else {
-                          setError(res.error || '封面生成失败')
-                        }
-                      })
-                      .catch((e) => {
-                        setError(e instanceof Error ? e.message : '封面生成失败')
-                      })
-                      .finally(() => {
-                        setCoverGenerating(false)
-                      })
-                  }}
-                >
-                  {coverGenerating ? '生成中…' : '确认生成'}
-                </button>
-              </div>
-            </div>
-          </div>
-        ) : null}
-
-        {/* 封面查看弹窗 */}
-        {coverViewerOpen && coverData ? (
-          <div
-            className="workspace-cover-viewer-backdrop"
-            role="dialog"
-            aria-modal="true"
-            onClick={() => setCoverViewerOpen(false)}
-          >
-            <div className="workspace-cover-viewer-panel">
-              <button
-                type="button"
-                className="workspace-cover-viewer-close"
-                aria-label="关闭"
-                onClick={() => setCoverViewerOpen(false)}
-              >
-                ×
-              </button>
-              <img
-                src={`data:image/png;base64,${coverData}`}
-                alt="书籍封面"
-                className="workspace-cover-viewer-img"
-                onClick={(e) => e.stopPropagation()}
-              />
-            </div>
-          </div>
-        ) : null}
+        <WorkspaceCoverDialogs
+          coverData={coverData}
+          coverDialogOpen={coverDialogOpen}
+          coverGenerating={coverGenerating}
+          coverPromptDraft={coverPromptDraft}
+          coverViewerOpen={coverViewerOpen}
+          setCoverDialogOpen={setCoverDialogOpen}
+          setCoverPromptDraft={setCoverPromptDraft}
+          setCoverViewerOpen={setCoverViewerOpen}
+          confirmCoverGeneration={confirmCoverGeneration}
+        />
       </div>
     </div>
   )

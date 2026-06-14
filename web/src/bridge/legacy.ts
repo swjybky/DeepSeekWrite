@@ -1,0 +1,2307 @@
+import { getEmbeddedPromptTemplate } from '../prompt/embeddedDefaults'
+import { renderPromptFromTemplateRaw } from '../prompt/renderTemplate'
+import {
+  WORKSPACE_AGENT_IDS,
+  normalizeWorkspaceAgentReadAccess,
+  resolveWorkspaceAgentIdForStage,
+  type WorkspaceAgentId,
+} from '../workspaces/short/stageReadAccess'
+import {
+  normalizeWorkspaceAgentReadAccess as normalizeScriptWorkspaceAgentReadAccess,
+} from '../workspaces/script/stageReadAccess'
+import type {
+  WorkspaceAgentReadAccessConfig,
+} from '../workspaces/shared/readAccess'
+import { appendLoadableSkillsToPrompt } from '../workspaces/short/loadSkill'
+import { getBridgeApi, isPywebviewDesktopBundle } from './runtime'
+import {
+  defaultExpertDraft,
+  isWorkspaceBook,
+  mergeStagePatchIntoAll,
+  normalizeAllBookStages,
+  normalizeExpertDraft,
+  primaryDraftStageId,
+} from '../domain/workspaceCore'
+import type {
+  Book,
+  BookStatus,
+  BookSummary,
+  BookType,
+  ExpertDraft,
+  StageId,
+} from '../domain/workspaceCore'
+
+const DEFAULT_SKILL_TEMPLATE_MODULES = import.meta.glob(
+  '../../../app/prompt_defaults/skill/default_skill_template.json',
+  { eager: true, import: 'default' },
+) as Record<string, { title?: string; stages?: Record<string, unknown> }>
+
+const defaultSkillTemplate = Object.values(DEFAULT_SKILL_TEMPLATE_MODULES)[0] ?? null
+
+export type {
+  WorkspaceAgentId,
+} from '../workspaces/short/stageReadAccess'
+export type {
+  WorkspaceAgentReadAccessConfig,
+  WorkspaceAgentReadAccessEntry,
+} from '../workspaces/shared/readAccess'
+export type {
+  Book,
+  BookStatus,
+  BookSummary,
+  BookType,
+  ExpertDraft,
+  ExpertDraftCharacterState,
+  ExpertDraftSection,
+  ScriptStageId,
+  ShortStageId,
+  StageId,
+} from '../domain/workspaceCore'
+export {
+  SCRIPT_GENRE_OPTIONS,
+  SHORT_GENRE_OPTIONS,
+  WORKSPACE_CONTENT_STAGES,
+  WORKSPACE_STAGES,
+  bookTypeLabel,
+  defaultExpertDraft,
+  isWorkspaceBook,
+  isWorkspaceShortBook,
+  mergeStagePatchIntoAll,
+  normalizeAllBookStages,
+  normalizeExpertDraft,
+  normalizeStages,
+  normalizeStagesForWorkspaceBook,
+  resolveWorkspaceBookGenre,
+  resolveWorkspaceStagesForBook,
+} from '../domain/workspaceCore'
+
+// ==================== 素材提示词类型 ====================
+export const MATERIAL_MANAGER_AGENT_ID = 'material_manager' as const
+export const MATERIAL_MANAGER_PROMPT_KIND = 'material_manager' as const
+export type MaterialPromptKind = typeof MATERIAL_MANAGER_PROMPT_KIND
+export const SKILL_MANAGER_AGENT_ID = 'skill_manager' as const
+export const SKILL_MANAGER_PROMPT_KIND = 'skill_manager' as const
+export type SkillPromptKind = typeof SKILL_MANAGER_PROMPT_KIND
+
+// ==================== 素材类型定义 ====================
+
+export type MaterialType = 'long' | 'short' | 'script'
+export type SkillType = 'long' | 'short' | 'script'
+
+export const LIBRARY_TYPE_LABELS: Record<MaterialType, string> = {
+  short: '短篇',
+  long: '长篇',
+  script: '剧本',
+}
+
+export type MaterialStageId =
+  | 'character'
+  | 'intro'
+  | 'gimmick'
+  | 'plot_refine'
+  | 'pacing'
+  | 'draft_excerpt'
+
+export const MATERIAL_STAGE_LABELS: Record<MaterialStageId, string> = {
+  character: '人设素材',
+  intro: '导语素材',
+  gimmick: '梗素材',
+  plot_refine: '剧情细化素材',
+  pacing: '剧情设计素材',
+  draft_excerpt: '正文片段',
+}
+
+export const SHORT_MATERIAL_GENRES: Record<string, string[]> = {
+  '世情': ['家庭', '职场', '婚恋', '邻里', '亲子', '继承', '养老'],
+  '追妻': ['甜宠', '虐恋', '重生', '穿越', '暗恋', '破镜重圆', '先婚后爱'],
+  '科幻': ['未来都市', '星际', '人工智能', '赛博朋克', '末日', '时间旅行', '异星文明'],
+  '悬疑': ['刑侦', '推理', '惊悚', '密室', '民俗', '心理', '反转'],
+  '其他': [],
+}
+
+export const SCRIPT_MATERIAL_GENRES: Record<string, string[]> = {
+  '世情': ['家庭', '职场', '婚恋', '邻里', '亲子', '继承', '养老'],
+  '追妻': ['甜宠', '虐恋', '重生', '穿越', '暗恋', '破镜重圆', '先婚后爱'],
+  '科幻': ['未来都市', '星际', '人工智能', '赛博朋克', '末日', '时间旅行', '异星文明'],
+  '悬疑': ['刑侦', '推理', '惊悚', '密室', '民俗', '心理', '反转'],
+  '其他': [],
+}
+
+export function libraryTypeLabel(type: MaterialType | SkillType): string {
+  return LIBRARY_TYPE_LABELS[type]
+}
+
+export function materialTypeLabel(type: MaterialType): string {
+  return `${libraryTypeLabel(type)}素材`
+}
+
+export function skillTypeLabel(type: SkillType): string {
+  return `${libraryTypeLabel(type)}技能`
+}
+
+/** 素材大分类兼容映射（旧名称 → 新名称） */
+const MATERIAL_GENRE_COMPAT: Record<string, string> = {
+  '现实情感': '追妻',
+  '情感': '追妻',
+}
+
+/** 将旧素材大分类名称映射为新名称 */
+export function resolveMaterialParentGenre(genre: string): string {
+  return MATERIAL_GENRE_COMPAT[genre] || genre
+}
+
+/** 获取指定大分类下的子分类（兼容旧名称） */
+export function getMaterialSubGenres(genre: string): string[] {
+  return SHORT_MATERIAL_GENRES[resolveMaterialParentGenre(genre)] || []
+}
+
+export function getMaterialParentGenres(type: MaterialType): string[] {
+  if (type === 'script') return Object.keys(SCRIPT_MATERIAL_GENRES)
+  if (type === 'short') return Object.keys(SHORT_MATERIAL_GENRES)
+  return []
+}
+
+export interface MaterialSummary {
+  id: string
+  title: string
+  material_type: MaterialType
+  parent_genre?: string  // 世情/追妻（short/script 时有效）
+  sub_genre?: string     // legacy: 旧版子分类
+  output_dir?: string
+}
+
+export interface Material extends MaterialSummary {
+  stages?: Partial<Record<MaterialStageId, string>>
+  created_at?: string
+  updated_at?: string
+}
+
+export function normalizeMaterialStages(
+  raw?: Partial<Record<MaterialStageId, string>> | null,
+): Record<MaterialStageId, string> {
+  const out: Record<MaterialStageId, string> = {
+    character: '',
+    intro: '',
+    gimmick: '',
+    plot_refine: '',
+    pacing: '',
+    draft_excerpt: '',
+  }
+  if (!raw) return out
+  for (const k of Object.keys(out) as MaterialStageId[]) {
+    if (k in raw) out[k] = String(raw[k] ?? '')
+  }
+  return out
+}
+
+// ==================== 技能类型定义 ====================
+
+export type SkillStageId =
+  | 'character_design'
+  | 'plot_design'
+  | 'outline'
+  | 'draft'
+  | 'expert_section_writer'
+
+type LegacySkillStageId =
+  | 'intro_design'
+  | 'plot_refine'
+  | 'draft_review'
+  | 'format_conversion'
+  | 'expert_draft_coordinator'
+
+export const SKILL_STAGE_LABELS: Record<SkillStageId, string> = {
+  character_design: '人物设计技能',
+  plot_design: '剧情技能',
+  outline: '大纲技能',
+  draft: '正文专家编写技能',
+  expert_section_writer: '分节写手技能',
+}
+
+export const SKILL_STAGE_KEYS = Object.keys(SKILL_STAGE_LABELS) as SkillStageId[]
+const LEGACY_SKILL_STAGES_TO_PLOT: LegacySkillStageId[] = [
+  'intro_design',
+  'plot_refine',
+]
+const LEGACY_SKILL_STAGES_TO_DRAFT: LegacySkillStageId[] = [
+  'draft_review',
+  'format_conversion',
+  'expert_draft_coordinator',
+]
+
+export interface SkillSummary {
+  id: string
+  title: string
+  skill_type: SkillType
+  stage_counts?: Partial<Record<SkillStageId, number>>
+  stage_skill_count?: number
+  output_dir?: string
+}
+
+export interface Skill extends SkillSummary {
+  stages: Record<SkillStageId, SkillStageEntry[]>
+  created_at?: string
+  updated_at?: string
+}
+
+export interface SkillStageEntry {
+  id: string
+  title: string
+  body: string
+  created_at?: string
+  updated_at?: string
+}
+
+function newLocalSkillStageEntryId(): string {
+  return globalThis.crypto?.randomUUID?.() ?? Math.random().toString(36).slice(2)
+}
+
+export function normalizeSkillStages(
+  raw?: Partial<Record<SkillStageId | LegacySkillStageId, unknown>> | null,
+): Record<SkillStageId, SkillStageEntry[]> {
+  const out = {} as Record<SkillStageId, SkillStageEntry[]>
+  for (const k of SKILL_STAGE_KEYS) {
+    out[k] = normalizeSkillStageEntries(k, raw?.[k])
+  }
+  if (raw) {
+    out.plot_design = [
+      ...out.plot_design,
+      ...LEGACY_SKILL_STAGES_TO_PLOT.flatMap((stageId) =>
+        normalizeSkillStageEntries('plot_design', raw[stageId]),
+      ),
+    ]
+    out.draft = [
+      ...out.draft,
+      ...LEGACY_SKILL_STAGES_TO_DRAFT.flatMap((stageId) =>
+        normalizeSkillStageEntries('draft', raw[stageId]),
+      ),
+    ]
+  }
+  return out
+}
+
+export function normalizeSkillStageId(raw: unknown): SkillStageId {
+  if (SKILL_STAGE_KEYS.includes(raw as SkillStageId)) {
+    return raw as SkillStageId
+  }
+  if (LEGACY_SKILL_STAGES_TO_PLOT.includes(raw as LegacySkillStageId)) {
+    return 'plot_design'
+  }
+  if (LEGACY_SKILL_STAGES_TO_DRAFT.includes(raw as LegacySkillStageId)) {
+    return 'draft'
+  }
+  return 'character_design'
+}
+
+function normalizeSkillStageEntries(
+  stageId: SkillStageId,
+  raw: unknown,
+): SkillStageEntry[] {
+  const fallbackTitle = SKILL_STAGE_LABELS[stageId]
+  if (raw == null) return []
+  if (typeof raw === 'string') {
+    return raw.trim()
+      ? [{ id: newLocalSkillStageEntryId(), title: fallbackTitle, body: raw }]
+      : []
+  }
+  if (Array.isArray(raw)) {
+    return raw.flatMap((item, index) => normalizeSkillStageEntry(stageId, item, index))
+  }
+  return normalizeSkillStageEntry(stageId, raw, 0)
+}
+
+function normalizeSkillStageEntry(
+  stageId: SkillStageId,
+  raw: unknown,
+  index: number,
+): SkillStageEntry[] {
+  const fallbackTitle =
+    index > 0 ? `${SKILL_STAGE_LABELS[stageId]} ${index + 1}` : SKILL_STAGE_LABELS[stageId]
+  if (typeof raw === 'string') {
+    return raw.trim()
+      ? [{ id: newLocalSkillStageEntryId(), title: fallbackTitle, body: raw }]
+      : []
+  }
+  if (!raw || typeof raw !== 'object') return []
+  const item = raw as Partial<SkillStageEntry>
+  const body = typeof item.body === 'string' ? item.body : ''
+  const explicitTitle = typeof item.title === 'string' ? item.title.trim() : ''
+  if (!body.trim() && !explicitTitle && !item.id) return []
+  const title = explicitTitle || fallbackTitle
+  return [
+    {
+      id: typeof item.id === 'string' && item.id ? item.id : newLocalSkillStageEntryId(),
+      title,
+      body,
+      created_at: typeof item.created_at === 'string' ? item.created_at : undefined,
+      updated_at: typeof item.updated_at === 'string' ? item.updated_at : undefined,
+    },
+  ]
+}
+
+/** 本地模型配置，由桌面壳 preferences.json 或浏览器 localStorage 提供。 */
+export interface AiModelConfig {
+  /** 配置项 ID，如 deepseekflash / kimi */
+  id: string
+  /** 显示名称，未配置时等于 id */
+  label: string
+  /** pi-ai provider，如 deepseek / moonshotai-cn；owner 模式下作为标识 */
+  provider: string
+  /** pi-ai model id，如 deepseek-v4-flash */
+  model_id: string
+  /** 该模型配置对应的 API Key */
+  api_key: string
+  /** 自定义 API 地址（owner 模式） */
+  base_url?: string
+  /** 底层 API 类型：openai-completions / openai-responses / anthropic-messages / google-generative-ai */
+  api?: string
+  /** 是否支持 Pi 的思考/推理等级选择器 */
+  reasoning?: boolean
+  /** 兼容旧 `.env` 的流式开关；当前 Pi 调用链暂不消费。 */
+  stream?: boolean
+}
+
+export interface AiModelDefaults {
+  provider: string
+  model_id: string
+  api_key: string
+  /** 固定模型配置列表；存在时 AI 侧栏模型选择器只展示这些模型 */
+  models?: AiModelConfig[]
+  /** 默认选中的配置项 ID；未设置时使用 models[0] */
+  default_model_id?: string
+}
+
+export interface ImageModelConfig {
+  /** 图像模型 ID，如 dall-e-3 或服务商自定义名称 */
+  model: string
+  /** 图像模型 API Key */
+  api_key: string
+  /** 自定义图像 API 地址；未设置时后端使用默认地址 */
+  base_url?: string
+}
+
+export interface AiModelSettings {
+  text: {
+    models: AiModelConfig[]
+    default_model_id: string
+  }
+  image: ImageModelConfig | null
+}
+
+/** 项目内置图像模型（与 app/ai_env.py 保持一致） */
+const BUILTIN_IMAGE_MODEL_DEFAULTS: ImageModelConfig = {
+  model: 'gpt-image-2',
+  api_key: 'sk-Q8qafUnyk8v31PR1sBYz1UEcK696foGAF4Jut4exAfTnVOEG',
+  base_url: 'https://sucloud.vip',
+}
+
+/** 项目内置文字模型（与 app/ai_env.py 保持一致） */
+const BUILTIN_TEXT_MODEL_DEFAULTS: AiModelSettings['text'] = {
+  models: [
+    {
+      id: 'deepseek_pro',
+      label: 'DeepSeek V4 Pro',
+      provider: 'deepseek',
+      model_id: 'deepseek-v4-pro',
+      api_key: '',
+    },
+    {
+      id: 'deepseekflash',
+      label: 'DeepSeek V4 Flash',
+      provider: 'deepseek',
+      model_id: 'deepseek-v4-flash',
+      api_key: '',
+    },
+  ],
+  default_model_id: 'deepseek_pro',
+}
+
+/** 文字模型 API Key 输入框占位提示 */
+export const TEXT_MODEL_API_KEY_PLACEHOLDER =
+  '请到 DeepSeek 官方平台获取 Key（https://platform.deepseek.com/）'
+
+function applyBuiltinDefaults(settings: AiModelSettings): AiModelSettings {
+  let result = settings
+  if (!result.text.models.length) {
+    result = {
+      ...result,
+      text: {
+        models: BUILTIN_TEXT_MODEL_DEFAULTS.models.map((model) => ({ ...model })),
+        default_model_id: BUILTIN_TEXT_MODEL_DEFAULTS.default_model_id,
+      },
+    }
+  }
+  if (!result.image) {
+    result = { ...result, image: { ...BUILTIN_IMAGE_MODEL_DEFAULTS } }
+  }
+  return result
+}
+
+export type AppearanceStyle = 'classic' | 'modern'
+
+declare global {
+  interface Window {
+    /** API 在 pywebviewready 之后才可用 */
+    pywebview?: {
+      api?: {
+        list_books(): Promise<BookSummary[]>
+        pick_folder(): Promise<string | null>
+        create_book(
+          title: string,
+          book_type: string,
+          categories: string[],
+          workspace_root?: string | null,
+          linked_skill_id?: string | null,
+        ): Promise<Book>
+        get_book(book_id: string): Promise<Book | null>
+        save_book(
+          book_id: string,
+          content?: string | null,
+          stages?: Record<string, string> | null,
+          linked_material_id?: string | null,
+          expert_draft?: ExpertDraft | null,
+          title?: string | null,
+          status?: BookStatus | null,
+          linked_skill_id?: string | null,
+        ): Promise<Book | null>
+        delete_book(book_id: string): Promise<boolean>
+        /** 上次选定的工作文件夹（持久化在用户数据 .data/preferences.json） */
+        get_workspace_root(): Promise<string | null>
+        set_workspace_root(path: string | null): Promise<void>
+        /** 全软件外观风格（持久化在用户数据 .data/preferences.json） */
+        get_appearance_style(): Promise<AppearanceStyle | string>
+        set_appearance_style(style: AppearanceStyle): Promise<AppearanceStyle | string>
+        /** 全局创作空间智能体可读配置 */
+        get_workspace_agent_read_access(): Promise<Record<string, unknown>>
+        get_workspace_agent_read_access(
+          workspace_type: string,
+        ): Promise<Record<string, unknown>>
+        set_workspace_agent_read_access(
+          config: Record<string, unknown>,
+        ): Promise<void>
+        set_workspace_agent_read_access(
+          config: Record<string, unknown>,
+          workspace_type: string,
+        ): Promise<void>
+        /** 本地配置中的默认文字模型与 Key；未配置完整时返回 null */
+        get_ai_defaults(): Promise<AiModelDefaults | null>
+        /** 本地模型配置，首次为空时由 Python 从旧 .env 导入。 */
+        get_ai_model_config(): Promise<AiModelSettings>
+        save_ai_model_config(config: AiModelSettings): Promise<AiModelSettings>
+
+        /** 渲染工作台系统提示词（磁盘默认 + 用户数据 `.data/prompt_overrides`，占位符服务端替换）。 */
+        get_workspace_system_prompt(
+          stage_id: string,
+          context_json: string,
+          workspace_type?: string | null,
+        ): Promise<string>
+        /** 读取当前生效的共享创作空间智能体模板原文。 */
+        read_workspace_agent_prompt_template(
+          agent_id: string,
+          workspace_type?: string | null,
+        ): Promise<string>
+        save_workspace_agent_prompt_override(
+          agent_id: string,
+          body: string,
+          workspace_type?: string | null,
+        ): Promise<void>
+        reset_workspace_agent_prompt_override(
+          agent_id: string,
+          workspace_type?: string | null,
+        ): Promise<boolean>
+
+        // ==================== 素材库 API ====================
+        list_materials(): Promise<MaterialSummary[]>
+        get_material(material_id: string): Promise<Material | null>
+        create_material(
+          title: string,
+          material_type: string,
+          parent_genre?: string | null,
+          sub_genre?: string | null,
+          workspace_root?: string | null,
+        ): Promise<Material>
+        save_material(
+          material_id: string,
+          stages?: Record<string, string> | null,
+          title?: string | null,
+        ): Promise<Material | null>
+        delete_material(material_id: string): Promise<boolean>
+        get_material_genres(): Promise<Record<string, string[]>>
+
+        // ==================== 技能库 API ====================
+        list_skills(): Promise<SkillSummary[]>
+        get_skill(skill_id: string): Promise<Skill | null>
+        create_skill(
+          title: string,
+          skill_type?: string | null,
+          workspace_root?: string | null,
+        ): Promise<Skill>
+        save_skill(
+          skill_id: string,
+          payload?: Record<string, unknown> | null,
+        ): Promise<Skill | null>
+        delete_skill(skill_id: string): Promise<boolean>
+
+        // ==================== 素材库提示词 API ====================
+        get_material_system_prompt(
+          material_kind: string,
+          stage_id: string,
+          context_json: string,
+          material_type?: string | null,
+        ): Promise<string>
+        read_material_prompt_template(
+          material_kind: string,
+          stage_id: string,
+        ): Promise<string>
+        save_material_prompt_override(
+          material_kind: string,
+          stage_id: string,
+          body: string,
+        ): Promise<void>
+        reset_material_prompt_override(
+          material_kind: string,
+          stage_id: string,
+        ): Promise<boolean>
+        read_material_agent_prompt_template(material_type?: string | null): Promise<string>
+        save_material_agent_prompt_override(
+          body: string,
+          material_type?: string | null,
+        ): Promise<void>
+        reset_material_agent_prompt_override(material_type?: string | null): Promise<boolean>
+
+        // ==================== 技能库提示词 API ====================
+        get_skill_system_prompt(
+          stage_id: string,
+          context_json: string,
+          skill_type?: string | null,
+        ): Promise<string>
+        read_skill_agent_prompt_template(skill_type?: string | null): Promise<string>
+        save_skill_agent_prompt_override(
+          body: string,
+          skill_type?: string | null,
+        ): Promise<void>
+        reset_skill_agent_prompt_override(skill_type?: string | null): Promise<boolean>
+
+        // ==================== 封面 API ====================
+        get_book_cover(book_id: string): Promise<{ cover_data: string | null }>
+        generate_book_cover(
+          book_id: string,
+          prompt: string,
+        ): Promise<{ cover_path: string | null; success: boolean; error: string | null }>
+
+        // ==================== 素材/技能导入导出 API ====================
+        export_library(
+          library_type: string,
+          item_id: string,
+        ): Promise<{ success: boolean; error: string | null; path: string | null }>
+        import_library(
+          library_type: string,
+          workspace_root: string | null,
+        ): Promise<{ success: boolean; error: string | null; item: Record<string, unknown> | null }>
+
+        // ==================== 导出 API ====================
+        export_docx(
+          book_id: string,
+          stage_id: string,
+          folder_path: string,
+          content: string,
+          cover_data: string | null,
+        ): Promise<{ success: boolean; error: string | null; path: string | null }>
+      }
+    }
+  }
+}
+
+const MOCK_STORAGE_KEY = 'write_claw_dev_books'
+
+/** 书架「工作文件夹」持久化键（浏览器 / pywebview 同源存储） */
+export const WORKSPACE_ROOT_STORAGE_KEY = 'write_claw_workspace_root'
+
+/** 全局创作空间智能体读取配置（浏览器开发模式 localStorage） */
+export const WORKSPACE_AGENT_READ_ACCESS_STORAGE_KEY =
+  'write-claw:workspace_agent_read_access'
+const LEGACY_STAGE_READ_ACCESS_STORAGE_KEY = 'write-claw:stage_read_access'
+const AI_MODEL_CONFIG_STORAGE_KEY = 'write-claw:ai_model_config'
+export const APPEARANCE_STYLE_STORAGE_KEY = 'write-claw:appearance_style'
+
+export function getStoredWorkspaceRoot(): string | null {
+  try {
+    const v = localStorage.getItem(WORKSPACE_ROOT_STORAGE_KEY)
+    return v?.trim() ? v.trim() : null
+  } catch {
+    return null
+  }
+}
+
+export function setStoredWorkspaceRoot(path: string | null): void {
+  try {
+    if (path?.trim()) localStorage.setItem(WORKSPACE_ROOT_STORAGE_KEY, path.trim())
+    else localStorage.removeItem(WORKSPACE_ROOT_STORAGE_KEY)
+  } catch {
+    /* ignore */
+  }
+}
+
+export function normalizeAppearanceStyle(raw: unknown): AppearanceStyle {
+  return raw === 'modern' ? 'modern' : 'classic'
+}
+
+export function getStoredAppearanceStyle(): AppearanceStyle {
+  try {
+    return normalizeAppearanceStyle(localStorage.getItem(APPEARANCE_STYLE_STORAGE_KEY))
+  } catch {
+    return 'classic'
+  }
+}
+
+export function setStoredAppearanceStyle(style: AppearanceStyle): void {
+  try {
+    localStorage.setItem(
+      APPEARANCE_STYLE_STORAGE_KEY,
+      normalizeAppearanceStyle(style),
+    )
+  } catch {
+    /* ignore */
+  }
+}
+
+export async function getAppearanceStyle(): Promise<AppearanceStyle> {
+  const api = await getBridgeApi()
+  if (api?.get_appearance_style) {
+    try {
+      const style = normalizeAppearanceStyle(await api.get_appearance_style())
+      setStoredAppearanceStyle(style)
+      return style
+    } catch {
+      /* fall through */
+    }
+  }
+  return getStoredAppearanceStyle()
+}
+
+export async function saveAppearanceStyle(
+  style: AppearanceStyle,
+): Promise<AppearanceStyle> {
+  const normalized = normalizeAppearanceStyle(style)
+  const api = await getBridgeApi()
+  if (api?.set_appearance_style) {
+    const saved = normalizeAppearanceStyle(await api.set_appearance_style(normalized))
+    setStoredAppearanceStyle(saved)
+    return saved
+  }
+  setStoredAppearanceStyle(normalized)
+  return normalized
+}
+
+/**
+ * 启动时解析工作文件夹：桌面端以 Python 持久化为准；若无则从 localStorage 读取并写回磁盘。
+ * 纯浏览器开发仅使用 localStorage。
+ *
+ * 桌面壳里偶发首帧早于 `api` 注入：先让出 1～2 帧再取桥接；若 `get_workspace_root` 抛错则短重试（避免误显示「未选择」）。
+ * 不在「无 api」时循环调用 getBridgeApi，以免重复触发长时间解析。
+ */
+export async function loadPersistedWorkspaceRoot(): Promise<string | null> {
+  const fromLs = getStoredWorkspaceRoot()
+  const desktop = isPywebviewDesktopBundle()
+  if (desktop) {
+    await new Promise<void>((r) => requestAnimationFrame(() => r()))
+    await new Promise<void>((r) => requestAnimationFrame(() => r()))
+  }
+
+  const api = await getBridgeApi()
+  if (!api?.get_workspace_root || !api?.set_workspace_root) {
+    return fromLs
+  }
+
+  const attempts = desktop ? 8 : 1
+  const delayMs = 100
+
+  for (let i = 0; i < attempts; i++) {
+    try {
+      const fromDisk = await api.get_workspace_root()
+      if (typeof fromDisk === 'string' && fromDisk.trim()) {
+        const t = fromDisk.trim()
+        setStoredWorkspaceRoot(t)
+        return t
+      }
+      if (fromLs) {
+        await api.set_workspace_root(fromLs)
+        return fromLs
+      }
+      return null
+    } catch {
+      if (desktop && i < attempts - 1) {
+        await new Promise<void>((r) => setTimeout(r, delayMs))
+        continue
+      }
+      return fromLs
+    }
+  }
+  return fromLs
+}
+
+/** 选择或更改工作文件夹后调用，同步 localStorage 与桌面端 preferences.json */
+export async function persistWorkspaceRoot(path: string | null): Promise<void> {
+  setStoredWorkspaceRoot(path)
+  const api = await getBridgeApi()
+  if (api?.set_workspace_root) {
+    await api.set_workspace_root(path)
+  }
+}
+
+function workspaceAgentReadAccessStorageKey(workspaceType: BookType): string {
+  return workspaceType === 'script'
+    ? `${WORKSPACE_AGENT_READ_ACCESS_STORAGE_KEY}:script`
+    : WORKSPACE_AGENT_READ_ACCESS_STORAGE_KEY
+}
+
+function getStoredWorkspaceAgentReadAccessRaw(workspaceType: BookType = 'short'): unknown {
+  try {
+    const raw =
+      localStorage.getItem(workspaceAgentReadAccessStorageKey(workspaceType)) ??
+      (workspaceType === 'short'
+        ? localStorage.getItem(LEGACY_STAGE_READ_ACCESS_STORAGE_KEY)
+        : localStorage.getItem(WORKSPACE_AGENT_READ_ACCESS_STORAGE_KEY))
+    if (!raw?.trim()) return null
+    return JSON.parse(raw) as unknown
+  } catch {
+    return null
+  }
+}
+
+function setStoredWorkspaceAgentReadAccess(
+  config: WorkspaceAgentReadAccessConfig,
+  workspaceType: BookType = 'short',
+): void {
+  try {
+    localStorage.setItem(
+      workspaceAgentReadAccessStorageKey(workspaceType),
+      JSON.stringify(config),
+    )
+  } catch {
+    /* ignore */
+  }
+}
+
+/** 读取全局创作空间智能体可读配置；桌面端以 preferences.json 为准。 */
+export async function getWorkspaceAgentReadAccess(
+  workspaceType: BookType = 'short',
+): Promise<WorkspaceAgentReadAccessConfig> {
+  const api = await getBridgeApi()
+  if (api?.get_workspace_agent_read_access) {
+    try {
+      const fromDisk = await api.get_workspace_agent_read_access(workspaceType)
+      const normalized =
+        workspaceType === 'script'
+          ? normalizeScriptWorkspaceAgentReadAccess(fromDisk)
+          : normalizeWorkspaceAgentReadAccess(fromDisk)
+      setStoredWorkspaceAgentReadAccess(normalized, workspaceType)
+      try {
+        await api.set_workspace_agent_read_access(
+          normalized as unknown as Record<string, unknown>,
+          workspaceType,
+        )
+      } catch {
+        /* 读取结果仍可使用；保存失败由后续设置修改重试 */
+      }
+      return normalized
+    } catch {
+      /* fall through */
+    }
+  }
+  const normalized =
+    workspaceType === 'script'
+      ? normalizeScriptWorkspaceAgentReadAccess(getStoredWorkspaceAgentReadAccessRaw(workspaceType))
+      : normalizeWorkspaceAgentReadAccess(getStoredWorkspaceAgentReadAccessRaw(workspaceType))
+  setStoredWorkspaceAgentReadAccess(normalized, workspaceType)
+  return normalized
+}
+
+/** 保存全局创作空间智能体可读配置，同步 localStorage 与桌面 preferences。 */
+export async function saveWorkspaceAgentReadAccess(
+  config: WorkspaceAgentReadAccessConfig,
+  workspaceType: BookType = 'short',
+): Promise<WorkspaceAgentReadAccessConfig> {
+  const normalized =
+    workspaceType === 'script'
+      ? normalizeScriptWorkspaceAgentReadAccess(config)
+      : normalizeWorkspaceAgentReadAccess(config)
+  setStoredWorkspaceAgentReadAccess(normalized, workspaceType)
+  const api = await getBridgeApi()
+  if (api?.set_workspace_agent_read_access) {
+    await api.set_workspace_agent_read_access(
+      normalized as unknown as Record<string, unknown>,
+      workspaceType,
+    )
+  }
+  return normalized
+}
+
+function trimString(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : ''
+}
+
+function normalizeConfigId(raw: string): string {
+  return raw
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+}
+
+function coerceAiBoolean(value: unknown): boolean | undefined {
+  if (typeof value === 'boolean') return value
+  if (typeof value !== 'string') return undefined
+  const normalized = value.trim().toLowerCase()
+  if (['1', 'true', 'yes', 'y', 'on', '支持', '开启'].includes(normalized)) {
+    return true
+  }
+  if (['0', 'false', 'no', 'n', 'off', '不支持', '关闭'].includes(normalized)) {
+    return false
+  }
+  return undefined
+}
+
+function normalizeAiModelEntry(raw: unknown): AiModelConfig | null {
+  if (!raw || typeof raw !== 'object') return null
+  const o = raw as Record<string, unknown>
+  const provider = trimString(o.provider ?? o.model_source).toLowerCase()
+  const model_id = trimString(o.model_id ?? o.modelId ?? o.model_name)
+  const api_key = trimString(o.api_key ?? o.apiKey ?? o.model_key)
+  const rawId = trimString(o.id) || model_id || provider
+  const id = normalizeConfigId(rawId)
+  if (!id || !provider || !model_id) return null
+
+  const out: AiModelConfig = {
+    id,
+    label: trimString(o.label ?? o.display_name ?? o.title) || rawId || model_id,
+    provider,
+    model_id,
+    api_key,
+  }
+  const base_url = trimString(o.base_url ?? o.baseUrl ?? o.model_url)
+  const api = trimString(o.api ?? o.model_like ?? o.modelLike)
+  const reasoning = coerceAiBoolean(o.reasoning ?? o.model_reasoning)
+  const stream = coerceAiBoolean(o.stream ?? o.model_stream)
+  if (base_url) out.base_url = base_url
+  if (api) out.api = api
+  if (reasoning !== undefined) out.reasoning = reasoning
+  if (stream !== undefined) out.stream = stream
+  return out
+}
+
+function normalizeImageModelConfig(raw: unknown): ImageModelConfig | null {
+  if (!raw || typeof raw !== 'object') return null
+  const o = raw as Record<string, unknown>
+  const model = trimString(o.model ?? o.image_model)
+  const api_key = trimString(o.api_key ?? o.apiKey ?? o.image_model_key)
+  if (!model || !api_key) return null
+  const out: ImageModelConfig = { model, api_key }
+  const base_url = trimString(
+    o.base_url ?? o.baseUrl ?? o.image_model_url ?? o.image_url ?? o.image_base_url,
+  )
+  if (base_url) out.base_url = base_url
+  return out
+}
+
+export function normalizeAiModelSettings(raw: unknown): AiModelSettings {
+  const source = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {}
+  const text =
+    source.text && typeof source.text === 'object'
+      ? (source.text as Record<string, unknown>)
+      : source
+  const modelsRaw = Array.isArray(text.models) ? text.models : []
+  const models: AiModelConfig[] = []
+  const seen = new Set<string>()
+  for (const item of modelsRaw) {
+    const normalized = normalizeAiModelEntry(item)
+    if (!normalized) continue
+    const baseId = normalized.id
+    let id = baseId
+    let suffix = 2
+    while (seen.has(id)) {
+      id = `${baseId}_${suffix}`
+      suffix += 1
+    }
+    seen.add(id)
+    models.push({ ...normalized, id })
+  }
+  let default_model_id = normalizeConfigId(
+    trimString(
+      text.default_model_id ??
+        text.defaultModelId ??
+        source.default_model_id ??
+        source.default_model,
+    ),
+  )
+  if (!seen.has(default_model_id)) {
+    default_model_id = models[0]?.id ?? ''
+  }
+
+  return {
+    text: { models, default_model_id },
+    image: normalizeImageModelConfig(source.image),
+  }
+}
+
+function storedAiModelConfig(): AiModelSettings {
+  try {
+    const raw = localStorage.getItem(AI_MODEL_CONFIG_STORAGE_KEY)
+    if (!raw?.trim()) {
+      return applyBuiltinDefaults(normalizeAiModelSettings(null))
+    }
+    return applyBuiltinDefaults(
+      normalizeAiModelSettings(JSON.parse(raw) as unknown),
+    )
+  } catch {
+    return applyBuiltinDefaults(normalizeAiModelSettings(null))
+  }
+}
+
+function setStoredAiModelConfig(config: AiModelSettings): void {
+  try {
+    localStorage.setItem(AI_MODEL_CONFIG_STORAGE_KEY, JSON.stringify(config))
+  } catch {
+    /* ignore */
+  }
+}
+
+export async function getAiModelConfig(): Promise<AiModelSettings> {
+  const api = await getBridgeApi()
+  if (api?.get_ai_model_config) {
+    try {
+      const normalized = applyBuiltinDefaults(
+        normalizeAiModelSettings(await api.get_ai_model_config()),
+      )
+      setStoredAiModelConfig(normalized)
+      return normalized
+    } catch {
+      /* fall through */
+    }
+  }
+  return storedAiModelConfig()
+}
+
+export async function saveAiModelConfig(
+  config: AiModelSettings,
+): Promise<AiModelSettings> {
+  const normalized = normalizeAiModelSettings(config)
+  const api = await getBridgeApi()
+  if (api?.save_ai_model_config) {
+    const saved = normalizeAiModelSettings(await api.save_ai_model_config(normalized))
+    setStoredAiModelConfig(saved)
+    return saved
+  }
+  setStoredAiModelConfig(normalized)
+  return normalized
+}
+
+export async function getAiModelDefaults(): Promise<AiModelDefaults | null> {
+  const settings = await getAiModelConfig()
+  const models = settings.text.models
+  if (!models.length) return null
+  const first = models[0]
+  return {
+    provider: first.provider,
+    model_id: first.model_id,
+    api_key: first.api_key,
+    models,
+    default_model_id: settings.text.default_model_id,
+  }
+}
+
+function loadMock(): Map<string, Book> {
+  try {
+    const raw = localStorage.getItem(MOCK_STORAGE_KEY)
+    if (!raw) return new Map()
+    const arr = JSON.parse(raw) as Array<Partial<Book> & { id: string }>
+    return new Map(arr.map((b) => [b.id, normalizeBook(b)]))
+  } catch {
+    return new Map()
+  }
+}
+
+function saveMock(map: Map<string, Book>) {
+  localStorage.setItem(MOCK_STORAGE_KEY, JSON.stringify([...map.values()]))
+}
+
+function randomId() {
+  return crypto.randomUUID()
+}
+
+export function normalizeBookStatus(raw: unknown): BookStatus {
+  return raw === 'completed' ? 'completed' : 'editing'
+}
+
+export function normalizeBookType(raw: unknown): BookType {
+  if (raw === 'short' || raw === 'long' || raw === 'script') return raw
+  return 'short'
+}
+
+export function normalizeMaterialType(raw: unknown): MaterialType {
+  if (raw === 'short' || raw === 'long' || raw === 'script') return raw
+  return 'short'
+}
+
+export function normalizeSkillType(raw: unknown): SkillType {
+  if (raw === 'short' || raw === 'long' || raw === 'script') return raw
+  return 'short'
+}
+
+function normalizeBookSummary(raw: Partial<BookSummary> & { id: string }): BookSummary {
+  const book_type = normalizeBookType(raw.book_type)
+  return {
+    id: raw.id,
+    title: typeof raw.title === 'string' ? raw.title : '未命名',
+    book_type,
+    categories: Array.isArray(raw.categories) ? [...raw.categories] : [],
+    status: normalizeBookStatus(raw.status),
+    output_dir: typeof raw.output_dir === 'string' ? raw.output_dir : undefined,
+    linked_material_id:
+      typeof raw.linked_material_id === 'string' ? raw.linked_material_id : undefined,
+    linked_skill_id:
+      typeof raw.linked_skill_id === 'string' ? raw.linked_skill_id : undefined,
+  }
+}
+
+function normalizeBook(raw: Partial<Book> & { id: string }): Book {
+  const summary = normalizeBookSummary(raw)
+  return {
+    ...summary,
+    content: typeof raw.content === 'string' ? raw.content : '',
+    stages: raw.stages,
+    expert_draft: raw.expert_draft,
+    created_at: typeof raw.created_at === 'string' ? raw.created_at : undefined,
+    updated_at: typeof raw.updated_at === 'string' ? raw.updated_at : undefined,
+  }
+}
+
+function normalizeMaterialSummary(
+  raw: Partial<MaterialSummary> & { id: string },
+): MaterialSummary {
+  return {
+    id: raw.id,
+    title: typeof raw.title === 'string' ? raw.title : '未命名素材',
+    material_type: normalizeMaterialType(raw.material_type),
+    parent_genre: typeof raw.parent_genre === 'string' ? raw.parent_genre : '',
+    sub_genre: typeof raw.sub_genre === 'string' ? raw.sub_genre : '',
+    output_dir: typeof raw.output_dir === 'string' ? raw.output_dir : undefined,
+  }
+}
+
+function normalizeMaterial(raw: Partial<Material> & { id: string }): Material {
+  const summary = normalizeMaterialSummary(raw)
+  return {
+    ...summary,
+    stages: normalizeMaterialStages(raw.stages),
+    created_at: typeof raw.created_at === 'string' ? raw.created_at : undefined,
+    updated_at: typeof raw.updated_at === 'string' ? raw.updated_at : undefined,
+  }
+}
+
+function normalizeSkillSummary(raw: Partial<SkillSummary> & { id: string }): SkillSummary {
+  const stage_counts: Partial<Record<SkillStageId, number>> = {}
+  if (raw.stage_counts && typeof raw.stage_counts === 'object') {
+    for (const stageId of SKILL_STAGE_KEYS) {
+      const count = Number(raw.stage_counts[stageId])
+      if (Number.isFinite(count) && count > 0) stage_counts[stageId] = count
+    }
+  }
+  const stage_skill_count =
+    typeof raw.stage_skill_count === 'number'
+      ? raw.stage_skill_count
+      : SKILL_STAGE_KEYS.reduce((sum, stageId) => sum + (stage_counts[stageId] ?? 0), 0)
+  return {
+    id: raw.id,
+    title: typeof raw.title === 'string' ? raw.title : '未命名技能',
+    skill_type: normalizeSkillType(raw.skill_type),
+    stage_counts,
+    stage_skill_count,
+    output_dir: typeof raw.output_dir === 'string' ? raw.output_dir : undefined,
+  }
+}
+
+function normalizeSkill(
+  raw: Partial<Skill> & { id: string } & { stages?: unknown; stage_id?: unknown; body?: unknown },
+): Skill {
+  const stages = normalizeSkillStages(raw.stages as Partial<Record<SkillStageId, unknown>>)
+  if (raw.stage_id != null) {
+    const stageId = normalizeSkillStageId(raw.stage_id)
+    if (stages[stageId].length === 0) {
+      stages[stageId] = [
+        {
+          id: newLocalSkillStageEntryId(),
+          title: typeof raw.title === 'string' && raw.title.trim() ? raw.title.trim() : SKILL_STAGE_LABELS[stageId],
+          body: typeof raw.body === 'string' ? raw.body : '',
+          created_at: typeof raw.created_at === 'string' ? raw.created_at : undefined,
+          updated_at: typeof raw.updated_at === 'string' ? raw.updated_at : undefined,
+        },
+      ]
+    }
+  }
+  const stage_counts = Object.fromEntries(
+    SKILL_STAGE_KEYS.map((stageId) => [stageId, stages[stageId].length]),
+  ) as Partial<Record<SkillStageId, number>>
+  const summary = normalizeSkillSummary({
+    ...raw,
+    stage_counts,
+    stage_skill_count: SKILL_STAGE_KEYS.reduce(
+      (sum, stageId) => sum + stages[stageId].length,
+      0,
+    ),
+  })
+  return {
+    ...summary,
+    stages,
+    created_at: typeof raw.created_at === 'string' ? raw.created_at : undefined,
+    updated_at: typeof raw.updated_at === 'string' ? raw.updated_at : undefined,
+  }
+}
+
+async function mockListBooks(): Promise<BookSummary[]> {
+  const map = loadMock()
+  return [...map.values()]
+    .sort((a, b) => (b.updated_at || '').localeCompare(a.updated_at || ''))
+    .map(({ id, title, book_type, categories, status, output_dir, linked_material_id, linked_skill_id }) => ({
+      id,
+      title,
+      book_type,
+      categories,
+      status: normalizeBookStatus(status),
+      output_dir,
+      linked_material_id,
+      linked_skill_id,
+    }))
+}
+
+async function mockCreateBook(
+  title: string,
+  book_type: string,
+  categories: string[],
+  workspace_root?: string | null,
+  linked_skill_id?: string | null,
+): Promise<Book> {
+  const map = loadMock()
+  const now = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z')
+  const bt = normalizeBookType(book_type)
+  const ws = (workspace_root ?? '').trim()
+  const safeName = (title.trim() || '未命名').replace(/[<>:"/\\|?*\n\r\t]/g, '_').trim() || '未命名'
+  const output_dir =
+    ws.length > 0
+      ? `${ws.replace(/[/\\]+$/, '')}${typeof window !== 'undefined' && window.navigator.userAgent.includes('Win') ? '\\' : '/'}${safeName}`
+      : undefined
+  const book: Book = {
+    id: randomId(),
+    title: title.trim() || '未命名',
+    book_type: bt,
+    categories: bt === 'short' || bt === 'script' ? [...categories] : [],
+    status: 'editing',
+    content: '',
+    output_dir,
+    linked_material_id: '',
+    linked_skill_id:
+      isWorkspaceBook({ book_type: bt, categories: [] }) &&
+        linked_skill_id &&
+        loadMockSkills().has(linked_skill_id)
+        ? linked_skill_id
+        : '',
+    stages: normalizeAllBookStages({}),
+    expert_draft: defaultExpertDraft(bt),
+    created_at: now,
+    updated_at: now,
+  }
+  map.set(book.id, book)
+  saveMock(map)
+  return book
+}
+
+async function mockGetBook(book_id: string): Promise<Book | null> {
+  const book = loadMock().get(book_id) ?? null
+  if (!book) return null
+  return {
+    ...book,
+    status: normalizeBookStatus(book.status),
+    expert_draft: normalizeExpertDraft(book.expert_draft, false, book.book_type),
+  }
+}
+
+async function mockSaveBook(
+  book_id: string,
+  options: {
+    content?: string | null
+    stages?: Record<string, string> | null
+    linked_material_id?: string | null
+    linked_skill_id?: string | null
+    expert_draft?: ExpertDraft | null
+    title?: string | null
+    status?: BookStatus | null
+  },
+): Promise<Book | null> {
+  const map = loadMock()
+  const b = map.get(book_id)
+  if (!b) return null
+  const now = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z')
+  let next: Book = { ...b, updated_at: now }
+  if (options.title != null) {
+    next = { ...next, title: options.title.trim() }
+  }
+  if (options.stages != null) {
+    const merged = mergeStagePatchIntoAll(b.stages, options.stages as Partial<Record<StageId, string>>)
+    next = { ...next, stages: merged, content: merged[primaryDraftStageId(next)] ?? '' }
+  } else if (options.content != null) {
+    next = { ...next, content: options.content }
+  }
+  if (options.linked_material_id !== undefined) {
+    const mid = options.linked_material_id?.trim() ?? ''
+    next = { ...next, linked_material_id: mid && loadMockMaterials().has(mid) ? mid : '' }
+  }
+  if (options.linked_skill_id !== undefined) {
+    const sid = options.linked_skill_id?.trim() ?? ''
+    next = {
+      ...next,
+      linked_skill_id:
+        isWorkspaceBook(next) && sid && loadMockSkills().has(sid) ? sid : '',
+    }
+  }
+  if (options.expert_draft != null) {
+    next = {
+      ...next,
+      expert_draft: normalizeExpertDraft(
+        options.expert_draft,
+        false,
+        next.book_type,
+      ),
+    }
+  }
+  if (options.status != null) {
+    next = { ...next, status: normalizeBookStatus(options.status) }
+  }
+  map.set(book_id, next)
+  saveMock(map)
+  return next
+}
+
+async function mockDeleteBook(book_id: string): Promise<boolean> {
+  const map = loadMock()
+  const ok = map.delete(book_id)
+  if (ok) saveMock(map)
+  return ok
+}
+
+// ==================== 素材 Mock 数据 ====================
+
+const MOCK_MATERIALS_KEY = 'write_claw_dev_materials'
+
+function loadMockMaterials(): Map<string, Material> {
+  try {
+    const raw = localStorage.getItem(MOCK_MATERIALS_KEY)
+    if (!raw) return new Map()
+    const arr = JSON.parse(raw) as Array<Partial<Material> & { id: string }>
+    return new Map(arr.map((m) => [m.id, normalizeMaterial(m)]))
+  } catch {
+    return new Map()
+  }
+}
+
+function saveMockMaterials(map: Map<string, Material>) {
+  localStorage.setItem(MOCK_MATERIALS_KEY, JSON.stringify([...map.values()]))
+}
+
+async function mockListMaterials(): Promise<MaterialSummary[]> {
+  const map = loadMockMaterials()
+  return [...map.values()]
+    .sort((a, b) => (b.updated_at || '').localeCompare(a.updated_at || ''))
+    .map(({ id, title, material_type, parent_genre, sub_genre, output_dir }) => ({
+      id,
+      title,
+      material_type,
+      parent_genre,
+      sub_genre,
+      output_dir,
+    }))
+}
+
+async function mockGetMaterial(material_id: string): Promise<Material | null> {
+  return loadMockMaterials().get(material_id) ?? null
+}
+
+async function mockCreateMaterial(
+  title: string,
+  material_type: string,
+  parent_genre?: string | null,
+  sub_genre?: string | null,
+): Promise<Material> {
+  void sub_genre
+  const map = loadMockMaterials()
+  const now = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z')
+  const mt = normalizeMaterialType(material_type)
+  const material: Material = {
+    id: randomId(),
+    title: title.trim() || '未命名素材',
+    material_type: mt,
+    parent_genre: mt === 'short' || mt === 'script' ? (parent_genre || '') : '',
+    sub_genre: '',
+    stages: normalizeMaterialStages({}),
+    created_at: now,
+    updated_at: now,
+  }
+  map.set(material.id, material)
+  saveMockMaterials(map)
+  return material
+}
+
+async function mockSaveMaterial(
+  material_id: string,
+  stages?: Record<string, string> | null,
+  title?: string,
+): Promise<Material | null> {
+  const map = loadMockMaterials()
+  const m = map.get(material_id)
+  if (!m) return null
+  const now = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z')
+  let next: Material = { ...m, updated_at: now }
+  if (title != null) {
+    next = { ...next, title: title.trim() }
+  }
+  if (stages != null) {
+    const normalized = normalizeMaterialStages(stages as Partial<Record<MaterialStageId, string>>)
+    next = { ...next, stages: normalized }
+  }
+  map.set(material_id, next)
+  saveMockMaterials(map)
+  return next
+}
+
+async function mockDeleteMaterial(material_id: string): Promise<boolean> {
+  const map = loadMockMaterials()
+  const ok = map.delete(material_id)
+  if (ok) {
+    saveMockMaterials(map)
+    const books = loadMock()
+    let changed = false
+    for (const [bookId, book] of books) {
+      if (book.linked_material_id === material_id) {
+        books.set(bookId, { ...book, linked_material_id: '' })
+        changed = true
+      }
+    }
+    if (changed) saveMock(books)
+  }
+  return ok
+}
+
+async function mockGetMaterialGenres(): Promise<Record<string, string[]>> {
+  return {
+    short: Object.keys(SHORT_MATERIAL_GENRES),
+    script: Object.keys(SCRIPT_MATERIAL_GENRES),
+  }
+}
+
+// ==================== 技能 Mock 数据 ====================
+
+const MOCK_SKILLS_KEY = 'write_claw_dev_skills'
+
+function loadMockSkills(): Map<string, Skill> {
+  try {
+    const raw = localStorage.getItem(MOCK_SKILLS_KEY)
+    if (!raw) {
+      const seeded = seedDefaultMockSkill()
+      if (seeded.size > 0) {
+        saveMockSkills(seeded)
+        return seeded
+      }
+      return new Map()
+    }
+    const arr = JSON.parse(raw) as Array<Partial<Skill> & { id: string; stages?: unknown }>
+    return new Map(arr.map((s) => [s.id, normalizeSkill(s)]))
+  } catch {
+    return new Map()
+  }
+}
+
+function seedDefaultMockSkill(): Map<string, Skill> {
+  try {
+    const tpl = defaultSkillTemplate
+    if (!tpl?.stages) return new Map()
+    const now = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z')
+    const skill = normalizeSkill({
+      id: randomId(),
+      title: tpl.title || '参考技能',
+      skill_type: 'short',
+      stages: tpl.stages,
+      created_at: now,
+      updated_at: now,
+    } as Parameters<typeof normalizeSkill>[0])
+    return new Map([[skill.id, skill]])
+  } catch {
+    return new Map()
+  }
+}
+
+function saveMockSkills(map: Map<string, Skill>) {
+  localStorage.setItem(MOCK_SKILLS_KEY, JSON.stringify([...map.values()]))
+}
+
+async function mockListSkills(): Promise<SkillSummary[]> {
+  const map = loadMockSkills()
+  return [...map.values()]
+    .sort((a, b) => (b.updated_at || '').localeCompare(a.updated_at || ''))
+    .map(({ id, title, skill_type, stages, output_dir }) => ({
+      id,
+      title,
+      skill_type,
+      stage_counts: Object.fromEntries(
+        SKILL_STAGE_KEYS.map((stageId) => [stageId, stages[stageId]?.length ?? 0]),
+      ) as Partial<Record<SkillStageId, number>>,
+      stage_skill_count: SKILL_STAGE_KEYS.reduce(
+        (sum, stageId) => sum + (stages[stageId]?.length ?? 0),
+        0,
+      ),
+      output_dir,
+    }))
+}
+
+async function mockGetSkill(skill_id: string): Promise<Skill | null> {
+  return loadMockSkills().get(skill_id) ?? null
+}
+
+async function mockCreateSkill(
+  title: string,
+  skill_type = 'short',
+): Promise<Skill> {
+  const map = loadMockSkills()
+  const now = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z')
+  const skill: Skill = {
+    id: randomId(),
+    title: title.trim() || '未命名技能',
+    skill_type: normalizeSkillType(skill_type),
+    stages: normalizeSkillStages({}),
+    stage_counts: {},
+    stage_skill_count: 0,
+    created_at: now,
+    updated_at: now,
+  }
+  map.set(skill.id, skill)
+  saveMockSkills(map)
+  return skill
+}
+
+async function mockSaveSkill(
+  skill_id: string,
+  options?: SaveSkillOptions,
+): Promise<Skill | null> {
+  const map = loadMockSkills()
+  const s = map.get(skill_id)
+  if (!s) return null
+  const now = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z')
+  let next: Skill = { ...s, updated_at: now }
+  if (options?.title != null) {
+    next = { ...next, title: options.title.trim() || '未命名技能' }
+  }
+  if (options?.skill_type != null) {
+    next = { ...next, skill_type: normalizeSkillType(options.skill_type) }
+  }
+  if (options?.stages != null) {
+    const stages = normalizeSkillStages(
+      options.stages as Partial<Record<SkillStageId, unknown>>,
+    )
+    next = {
+      ...next,
+      stages,
+      stage_counts: Object.fromEntries(
+        SKILL_STAGE_KEYS.map((stageId) => [stageId, stages[stageId]?.length ?? 0]),
+      ) as Partial<Record<SkillStageId, number>>,
+      stage_skill_count: SKILL_STAGE_KEYS.reduce(
+        (sum, stageId) => sum + (stages[stageId]?.length ?? 0),
+        0,
+      ),
+    }
+  }
+  map.set(skill_id, next)
+  saveMockSkills(map)
+  return next
+}
+
+async function mockDeleteSkill(skill_id: string): Promise<boolean> {
+  const map = loadMockSkills()
+  const ok = map.delete(skill_id)
+  if (ok) {
+    saveMockSkills(map)
+    const books = loadMock()
+    let changed = false
+    for (const [bookId, book] of books) {
+      if (book.linked_skill_id === skill_id) {
+        books.set(bookId, { ...book, linked_skill_id: '' })
+        changed = true
+      }
+    }
+    if (changed) saveMock(books)
+  }
+  return ok
+}
+
+export async function pickFolder(): Promise<string | null> {
+  const api = await getBridgeApi()
+  if (api?.pick_folder) return api.pick_folder()
+  // 浏览器开发：用 prompt 模拟路径，取消返回 null
+  const v = window.prompt('开发模式：请输入模拟文件夹路径（留空取消）', '')
+  if (v == null || v.trim() === '') return null
+  return v.trim()
+}
+
+export async function listBooks(): Promise<BookSummary[]> {
+  const api = await getBridgeApi()
+  if (api) {
+    const list = await api.list_books() as BookSummary[]
+    return list.map((item) => normalizeBookSummary(item))
+  }
+  return mockListBooks()
+}
+
+export async function createBook(
+  title: string,
+  book_type: BookType,
+  categories: string[],
+  workspace_root?: string | null,
+  linked_skill_id?: string | null,
+): Promise<Book> {
+  const api = await getBridgeApi()
+  if (api) {
+    return normalizeBook(
+      await api.create_book(
+        title,
+        book_type,
+        categories,
+        workspace_root ?? null,
+        linked_skill_id ?? null,
+      ),
+    )
+  }
+  return mockCreateBook(title, book_type, categories, workspace_root, linked_skill_id)
+}
+
+export async function getBook(book_id: string): Promise<Book | null> {
+  const api = await getBridgeApi()
+  if (api) {
+    const raw = await api.get_book(book_id)
+    return raw ? normalizeBook(raw) : null
+  }
+  return mockGetBook(book_id)
+}
+
+export type SaveBookOptions = {
+  content?: string | null
+  stages?: Record<string, string> | null
+  linked_material_id?: string | null
+  linked_skill_id?: string | null
+  expert_draft?: ExpertDraft | null
+  title?: string | null
+  status?: BookStatus | null
+}
+
+export async function saveBook(
+  book_id: string,
+  contentOrOptions?: string | SaveBookOptions,
+): Promise<Book | null> {
+  const api = await getBridgeApi()
+  if (typeof contentOrOptions === 'string') {
+    if (api) {
+      const raw = await api.save_book(book_id, contentOrOptions, null)
+      return raw ? normalizeBook(raw) : null
+    }
+    return mockSaveBook(book_id, { content: contentOrOptions })
+  }
+  const opts = contentOrOptions ?? {}
+  if (api) {
+    const raw = await api.save_book(
+      book_id,
+      opts.content ?? null,
+      opts.stages ?? null,
+      opts.linked_material_id ?? undefined,
+      opts.expert_draft ?? undefined,
+      opts.title ?? undefined,
+      opts.status ?? undefined,
+      opts.linked_skill_id ?? undefined,
+    )
+    return raw ? normalizeBook(raw) : null
+  }
+  return mockSaveBook(book_id, opts)
+}
+
+export async function deleteBook(book_id: string): Promise<boolean> {
+  const api = await getBridgeApi()
+  if (api?.delete_book) return api.delete_book(book_id)
+  return mockDeleteBook(book_id)
+}
+
+// ==================== 素材 Bridge 函数 ====================
+
+export async function listMaterials(): Promise<MaterialSummary[]> {
+  const api = await getBridgeApi()
+  if (api?.list_materials) {
+    const list = await api.list_materials() as MaterialSummary[]
+    return list.map((item) => normalizeMaterialSummary(item))
+  }
+  return mockListMaterials()
+}
+
+export async function getMaterial(material_id: string): Promise<Material | null> {
+  const api = await getBridgeApi()
+  if (api?.get_material) {
+    const raw = await api.get_material(material_id)
+    return raw ? normalizeMaterial(raw) : null
+  }
+  return mockGetMaterial(material_id)
+}
+
+export async function createMaterial(
+  title: string,
+  material_type: MaterialType,
+  parent_genre?: string | null,
+  sub_genre?: string | null,
+  workspace_root?: string | null,
+): Promise<Material> {
+  const api = await getBridgeApi()
+  if (api?.create_material) {
+    return normalizeMaterial(
+      await api.create_material(
+        title,
+        material_type,
+        parent_genre ?? null,
+        sub_genre ?? null,
+        workspace_root ?? null,
+      ),
+    )
+  }
+  return mockCreateMaterial(title, material_type, parent_genre, sub_genre)
+}
+
+export type SaveMaterialOptions = {
+  stages?: Record<string, string> | null
+  title?: string
+}
+
+export async function saveMaterial(
+  material_id: string,
+  options?: SaveMaterialOptions,
+): Promise<Material | null> {
+  const api = await getBridgeApi()
+  const opts = options ?? {}
+  if (api?.save_material) {
+    const raw = await api.save_material(material_id, opts.stages ?? null, opts.title ?? null)
+    return raw ? normalizeMaterial(raw) : null
+  }
+  return mockSaveMaterial(material_id, opts.stages, opts.title)
+}
+
+export async function deleteMaterial(material_id: string): Promise<boolean> {
+  const api = await getBridgeApi()
+  if (api?.delete_material) return api.delete_material(material_id)
+  return mockDeleteMaterial(material_id)
+}
+
+export async function getMaterialGenres(): Promise<Record<string, string[]>> {
+  const api = await getBridgeApi()
+  if (api?.get_material_genres) return api.get_material_genres()
+  return mockGetMaterialGenres()
+}
+
+// ==================== 技能 Bridge 函数 ====================
+
+export async function listSkills(): Promise<SkillSummary[]> {
+  const api = await getBridgeApi()
+  if (api?.list_skills) {
+    const list = await api.list_skills() as SkillSummary[]
+    return list.map((item) => normalizeSkillSummary(item))
+  }
+  return mockListSkills()
+}
+
+export async function getSkill(skill_id: string): Promise<Skill | null> {
+  const api = await getBridgeApi()
+  if (api?.get_skill) {
+    const raw = await api.get_skill(skill_id)
+    return raw ? normalizeSkill(raw) : null
+  }
+  return mockGetSkill(skill_id)
+}
+
+export async function createSkill(
+  title: string,
+  skill_type: SkillType = 'short',
+  workspace_root?: string | null,
+): Promise<Skill> {
+  const api = await getBridgeApi()
+  if (api?.create_skill) {
+    return normalizeSkill(
+      await api.create_skill(title, skill_type, workspace_root ?? null),
+    )
+  }
+  return mockCreateSkill(title, skill_type)
+}
+
+export type SaveSkillOptions = {
+  title?: string
+  skill_type?: SkillType | string | null
+  stages?: Partial<Record<SkillStageId, SkillStageEntry[]>> | null
+}
+
+export async function saveSkill(
+  skill_id: string,
+  options?: SaveSkillOptions,
+): Promise<Skill | null> {
+  const api = await getBridgeApi()
+  const opts = options ?? {}
+  if (api?.save_skill) {
+    const raw = await api.save_skill(skill_id, opts as Record<string, unknown>)
+    return raw ? normalizeSkill(raw) : null
+  }
+  return mockSaveSkill(skill_id, opts)
+}
+
+export async function deleteSkill(skill_id: string): Promise<boolean> {
+  const api = await getBridgeApi()
+  if (api?.delete_skill) return api.delete_skill(skill_id)
+  return mockDeleteSkill(skill_id)
+}
+
+// ==================== 素材提示词 Bridge 函数 ====================
+
+export async function getMaterialSystemPrompt(
+  promptKind: MaterialPromptKind,
+  stageId: MaterialStageId,
+  input: {
+    materialTitle: string
+    materialTypeKey?: MaterialType
+    materialType?: string
+    materialGenre?: string
+    stageBody: string
+    allStages: Partial<Record<MaterialStageId, string>>
+  },
+): Promise<string> {
+  const stagesObj: Record<string, string> = {}
+  for (const [k, v] of Object.entries(input.allStages ?? {})) {
+    stagesObj[k] = String(v ?? '')
+  }
+
+  const api = await getBridgeApi()
+  if (api?.get_material_system_prompt) {
+    return api.get_material_system_prompt(
+      promptKind,
+      stageId,
+      JSON.stringify({
+        material_title: input.materialTitle,
+        book_title: input.materialTitle,
+        material_type_key: input.materialTypeKey ?? 'short',
+        material_type: input.materialType ?? '',
+        material_genre: input.materialGenre ?? '',
+        stage_body: input.stageBody,
+        all_stages: stagesObj,
+      }),
+      input.materialTypeKey ?? 'short',
+    )
+  }
+
+  const raw = await readMaterialAgentPromptTemplateForType(input.materialTypeKey ?? 'short')
+  return renderPromptFromTemplateRaw(raw, {
+    bookTitle: input.materialTitle,
+    materialType: input.materialType,
+    materialGenre: input.materialGenre,
+    stageBody: input.stageBody,
+    allStages: input.allStages,
+    promptKind,
+    stageId,
+  })
+}
+
+export async function readMaterialAgentPromptTemplate(): Promise<string> {
+  return readMaterialAgentPromptTemplateForType('short')
+}
+
+export async function readMaterialAgentPromptTemplateForType(
+  materialType: MaterialType = 'short',
+): Promise<string> {
+  const api = await getBridgeApi()
+  if (api?.read_material_agent_prompt_template) {
+    const t = await api.read_material_agent_prompt_template(materialType)
+    return t.endsWith('\n') ? t.slice(0, -1) : t
+  }
+  const typedKey = localPromptLsKey(`material_${materialType}`, MATERIAL_MANAGER_AGENT_ID)
+  try {
+    const ls =
+      localStorage.getItem(typedKey) ??
+      (materialType === 'short'
+        ? localStorage.getItem(
+            localPromptLsKey(MATERIAL_MANAGER_PROMPT_KIND, MATERIAL_MANAGER_AGENT_ID),
+          )
+        : null)
+    if (ls != null && ls.trim() !== '')
+      return ls.endsWith('\n') ? ls.slice(0, -1) : ls
+  } catch {
+    /* ignore */
+  }
+  return getEmbeddedPromptTemplate(
+    `material_${materialType}`,
+    MATERIAL_MANAGER_AGENT_ID,
+  )
+}
+
+export async function saveMaterialAgentPromptOverride(
+  body: string,
+  materialType: MaterialType = 'short',
+): Promise<void> {
+  const api = await getBridgeApi()
+  if (api?.save_material_agent_prompt_override) {
+    await api.save_material_agent_prompt_override(body, materialType)
+    return
+  }
+  try {
+    localStorage.setItem(
+      localPromptLsKey(`material_${materialType}`, MATERIAL_MANAGER_AGENT_ID),
+      body,
+    )
+  } catch {
+    console.warn('[DeepseekWrite] 无法保存素材库智能体提示词覆盖：无桌面桥接且无可用 localStorage')
+  }
+}
+
+export async function resetMaterialAgentPromptOverride(
+  materialType: MaterialType = 'short',
+): Promise<boolean> {
+  const api = await getBridgeApi()
+  if (api?.reset_material_agent_prompt_override) {
+    return api.reset_material_agent_prompt_override(materialType)
+  }
+  try {
+    const k = localPromptLsKey(`material_${materialType}`, MATERIAL_MANAGER_AGENT_ID)
+    const had = localStorage.getItem(k) != null
+    localStorage.removeItem(k)
+    return had
+  } catch {
+    return false
+  }
+}
+
+export async function readMaterialPromptTemplate(
+  promptKind: MaterialPromptKind,
+  stageId: MaterialStageId,
+): Promise<string> {
+  void promptKind
+  void stageId
+  return readMaterialAgentPromptTemplate()
+}
+
+export async function saveMaterialPromptOverride(
+  promptKind: MaterialPromptKind,
+  stageId: MaterialStageId,
+  body: string,
+): Promise<void> {
+  void promptKind
+  void stageId
+  await saveMaterialAgentPromptOverride(body)
+}
+
+export async function resetMaterialPromptOverride(
+  promptKind: MaterialPromptKind,
+  stageId: MaterialStageId,
+): Promise<boolean> {
+  void promptKind
+  void stageId
+  return resetMaterialAgentPromptOverride()
+}
+
+// ==================== 技能提示词 Bridge 函数 ====================
+
+export async function getSkillSystemPrompt(
+  stageId: SkillStageId,
+  input: {
+    skillTitle: string
+    skillType?: SkillType
+    stageBody: string
+    allStages: Partial<Record<SkillStageId, string>>
+  },
+): Promise<string> {
+  const stagesObj: Record<string, string> = {}
+  for (const [k, v] of Object.entries(input.allStages ?? {})) {
+    stagesObj[k] = String(v ?? '')
+  }
+
+  const api = await getBridgeApi()
+  if (api?.get_skill_system_prompt) {
+    return api.get_skill_system_prompt(
+      stageId,
+      JSON.stringify({
+        skill_title: input.skillTitle,
+        book_title: input.skillTitle,
+        skill_type: input.skillType ?? 'short',
+        stage_body: input.stageBody,
+        all_stages: stagesObj,
+      }),
+      input.skillType ?? 'short',
+    )
+  }
+
+  const raw = await readSkillAgentPromptTemplateForType(input.skillType ?? 'short')
+  return renderPromptFromTemplateRaw(raw, {
+    bookTitle: input.skillTitle,
+    skillType: skillTypeLabel(input.skillType ?? 'short'),
+    stageBody: input.stageBody,
+    allStages: input.allStages,
+    promptKind: SKILL_MANAGER_PROMPT_KIND,
+    stageId,
+  })
+}
+
+export async function readSkillAgentPromptTemplate(): Promise<string> {
+  return readSkillAgentPromptTemplateForType('short')
+}
+
+export async function readSkillAgentPromptTemplateForType(
+  skillType: SkillType = 'short',
+): Promise<string> {
+  const api = await getBridgeApi()
+  if (api?.read_skill_agent_prompt_template) {
+    const t = await api.read_skill_agent_prompt_template(skillType)
+    return t.endsWith('\n') ? t.slice(0, -1) : t
+  }
+  const typedKey = localPromptLsKey(`skill_${skillType}`, SKILL_MANAGER_AGENT_ID)
+  try {
+    const ls =
+      localStorage.getItem(typedKey) ??
+      (skillType === 'short'
+        ? localStorage.getItem(
+            localPromptLsKey(SKILL_MANAGER_PROMPT_KIND, SKILL_MANAGER_AGENT_ID),
+          )
+        : null)
+    if (ls != null && ls.trim() !== '')
+      return ls.endsWith('\n') ? ls.slice(0, -1) : ls
+  } catch {
+    /* ignore */
+  }
+  return getEmbeddedPromptTemplate(
+    `skill_${skillType}`,
+    SKILL_MANAGER_AGENT_ID,
+  )
+}
+
+export async function saveSkillAgentPromptOverride(
+  body: string,
+  skillType: SkillType = 'short',
+): Promise<void> {
+  const api = await getBridgeApi()
+  if (api?.save_skill_agent_prompt_override) {
+    await api.save_skill_agent_prompt_override(body, skillType)
+    return
+  }
+  try {
+    localStorage.setItem(
+      localPromptLsKey(`skill_${skillType}`, SKILL_MANAGER_AGENT_ID),
+      body,
+    )
+  } catch {
+    console.warn('[DeepseekWrite] 无法保存技能库智能体提示词覆盖：无桌面桥接且无可用 localStorage')
+  }
+}
+
+export async function resetSkillAgentPromptOverride(
+  skillType: SkillType = 'short',
+): Promise<boolean> {
+  const api = await getBridgeApi()
+  if (api?.reset_skill_agent_prompt_override) {
+    return api.reset_skill_agent_prompt_override(skillType)
+  }
+  try {
+    const k = localPromptLsKey(`skill_${skillType}`, SKILL_MANAGER_AGENT_ID)
+    const had = localStorage.getItem(k) != null
+    localStorage.removeItem(k)
+    return had
+  } catch {
+    return false
+  }
+}
+
+const PROMPT_TEMPLATE_LS_PREFIX = 'write_claw_prompt_template_override:'
+const SHARED_WORKSPACE_PROMPT_KIND = 'shared'
+const SCRIPT_SHARED_WORKSPACE_PROMPT_KIND = 'script_shared'
+const LEGACY_QINGGAN_PROMPT_KIND = 'qinggan'
+const SHARED_PROMPT_LS_MIGRATION_MARKER =
+  'write_claw_shared_prompt_migration_from_qinggan_v1'
+const PLOT_PROMPT_LS_MERGE_MARKER = 'write_claw_plot_prompt_merge_v1'
+const SCRIPT_PROMPT_LS_SEED_MARKER = 'write_claw_script_prompt_seed_from_short_v1'
+
+function localPromptLsKey(promptKind: string, stage: string): string {
+  return PROMPT_TEMPLATE_LS_PREFIX + `${promptKind}:${stage}`
+}
+
+function ensureLocalSharedPromptMigrated(): void {
+  try {
+    if (localStorage.getItem(SHARED_PROMPT_LS_MIGRATION_MARKER)) return
+    for (const agentId of [
+      ...WORKSPACE_AGENT_IDS,
+      'intro_design',
+      'plot_refine',
+    ]) {
+      const target = localPromptLsKey(SHARED_WORKSPACE_PROMPT_KIND, agentId)
+      const source = localPromptLsKey(LEGACY_QINGGAN_PROMPT_KIND, agentId)
+      if (localStorage.getItem(target) == null) {
+        const legacy = localStorage.getItem(source)
+        if (legacy != null) localStorage.setItem(target, legacy)
+      }
+    }
+    localStorage.setItem(SHARED_PROMPT_LS_MIGRATION_MARKER, '1')
+  } catch {
+    /* ignore */
+  }
+}
+
+function ensureLocalPlotPromptMerged(): void {
+  try {
+    if (localStorage.getItem(PLOT_PROMPT_LS_MERGE_MARKER)) return
+    const sections = [
+      ['plot_design', '剧情设计'],
+      ['intro_design', '导语设计'],
+      ['plot_refine', '剧情细化'],
+    ].flatMap(([agentId, label]) => {
+      const body =
+        localStorage.getItem(
+          localPromptLsKey(SHARED_WORKSPACE_PROMPT_KIND, agentId),
+        )?.trim() ?? ''
+      return body ? [`## ${label}\n\n${body}`] : []
+    })
+    if (sections.length > 0) {
+      localStorage.setItem(
+        localPromptLsKey(SHARED_WORKSPACE_PROMPT_KIND, 'plot_design'),
+        sections.join('\n\n---\n\n'),
+      )
+    }
+    localStorage.setItem(PLOT_PROMPT_LS_MERGE_MARKER, '1')
+  } catch {
+    /* ignore */
+  }
+}
+
+function ensureLocalScriptPromptSeeded(): void {
+  try {
+    if (localStorage.getItem(SCRIPT_PROMPT_LS_SEED_MARKER)) return
+    ensureLocalSharedPromptMigrated()
+    ensureLocalPlotPromptMerged()
+    for (const agentId of WORKSPACE_AGENT_IDS) {
+      const target = localPromptLsKey(SCRIPT_SHARED_WORKSPACE_PROMPT_KIND, agentId)
+      if (localStorage.getItem(target) != null) continue
+      const shortOverride = localStorage.getItem(
+        localPromptLsKey(SHARED_WORKSPACE_PROMPT_KIND, agentId),
+      )
+      localStorage.setItem(
+        target,
+        shortOverride ?? getEmbeddedPromptTemplate(SHARED_WORKSPACE_PROMPT_KIND, agentId),
+      )
+    }
+    localStorage.setItem(SCRIPT_PROMPT_LS_SEED_MARKER, '1')
+  } catch {
+    /* ignore */
+  }
+}
+
+/** 磁盘 / 嵌入式默认 + （浏览器）localStorage 覆盖；供集中设置页使用。 */
+export async function readWorkspaceAgentPromptTemplate(
+  agentId: WorkspaceAgentId,
+  workspaceType: BookType = 'short',
+): Promise<string> {
+  const api = await getBridgeApi()
+  if (api?.read_workspace_agent_prompt_template) {
+    const t = await api.read_workspace_agent_prompt_template(agentId, workspaceType)
+    return t.endsWith('\n') ? t.slice(0, -1) : t
+  }
+  ensureLocalSharedPromptMigrated()
+  ensureLocalPlotPromptMerged()
+  if (workspaceType === 'script') ensureLocalScriptPromptSeeded()
+  try {
+    const ls = localStorage.getItem(
+      localPromptLsKey(
+        workspaceType === 'script' ? SCRIPT_SHARED_WORKSPACE_PROMPT_KIND : SHARED_WORKSPACE_PROMPT_KIND,
+        agentId,
+      ),
+    )
+    if (ls != null) return ls.endsWith('\n') ? ls.slice(0, -1) : ls
+  } catch {
+    /* ignore */
+  }
+  return getEmbeddedPromptTemplate(
+    workspaceType === 'script' ? SCRIPT_SHARED_WORKSPACE_PROMPT_KIND : SHARED_WORKSPACE_PROMPT_KIND,
+    agentId,
+  )
+}
+
+export async function saveWorkspaceAgentPromptOverride(
+  agentId: WorkspaceAgentId,
+  body: string,
+  workspaceType: BookType = 'short',
+): Promise<void> {
+  const api = await getBridgeApi()
+  if (api?.save_workspace_agent_prompt_override) {
+    await api.save_workspace_agent_prompt_override(agentId, body, workspaceType)
+    return
+  }
+  ensureLocalSharedPromptMigrated()
+  ensureLocalPlotPromptMerged()
+  if (workspaceType === 'script') ensureLocalScriptPromptSeeded()
+  try {
+    localStorage.setItem(
+      localPromptLsKey(
+        workspaceType === 'script' ? SCRIPT_SHARED_WORKSPACE_PROMPT_KIND : SHARED_WORKSPACE_PROMPT_KIND,
+        agentId,
+      ),
+      body,
+    )
+  } catch {
+    console.warn('[DeepseekWrite] 无法保存创作空间提示词覆盖：无桌面桥接且无可用 localStorage')
+  }
+}
+
+export async function resetWorkspaceAgentPromptOverride(
+  agentId: WorkspaceAgentId,
+  workspaceType: BookType = 'short',
+): Promise<boolean> {
+  const api = await getBridgeApi()
+  if (api?.reset_workspace_agent_prompt_override) {
+    return api.reset_workspace_agent_prompt_override(agentId, workspaceType)
+  }
+  ensureLocalSharedPromptMigrated()
+  ensureLocalPlotPromptMerged()
+  if (workspaceType === 'script') ensureLocalScriptPromptSeeded()
+  try {
+    const k = localPromptLsKey(
+      workspaceType === 'script' ? SCRIPT_SHARED_WORKSPACE_PROMPT_KIND : SHARED_WORKSPACE_PROMPT_KIND,
+      agentId,
+    )
+    const had = localStorage.getItem(k) != null
+    localStorage.removeItem(k)
+    return had
+  } catch {
+    return false
+  }
+}
+
+export async function getBookCover(book_id: string): Promise<{ cover_data: string | null }> {
+  const api = await getBridgeApi()
+  if (api?.get_book_cover) {
+    return api.get_book_cover(book_id)
+  }
+  return { cover_data: null }
+}
+
+export async function generateBookCover(
+  book_id: string,
+  prompt: string,
+): Promise<{ cover_path: string | null; success: boolean; error: string | null }> {
+  const api = await getBridgeApi()
+  if (api?.generate_book_cover) {
+    return api.generate_book_cover(book_id, prompt)
+  }
+  // 浏览器开发模式：模拟成功
+  console.warn('[DeepseekWrite] 浏览器开发模式：封面生成 API 不可用，返回模拟数据')
+  return { cover_path: null, success: false, error: '浏览器开发模式暂不支持封面生成' }
+}
+
+export async function exportDocx(
+  book_id: string,
+  stage_id: string,
+  folder_path: string,
+  content: string,
+  cover_data: string | null,
+): Promise<{ success: boolean; error: string | null; path: string | null }> {
+  const api = await getBridgeApi()
+  if (api?.export_docx) {
+    return api.export_docx(book_id, stage_id, folder_path, content, cover_data)
+  }
+  // 浏览器开发模式：提供下载
+  try {
+    const title = content.slice(0, 20).replace(/[\\/:*?"<>|\n\r\t]/g, '_') || '未命名'
+    const blob = new Blob([content], { type: 'text/plain;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `${title}.txt`
+    a.click()
+    URL.revokeObjectURL(url)
+    return { success: true, error: null, path: null }
+  } catch (e) {
+    return { success: false, error: e instanceof Error ? e.message : '导出失败', path: null }
+  }
+}
+
+// ==================== 导入导出 Bridge 函数 ====================
+
+export async function exportLibrary(
+  libraryType: 'material' | 'skill',
+  itemId: string,
+): Promise<{ success: boolean; error: string | null; path: string | null }> {
+  const api = await getBridgeApi()
+  if (api?.export_library) {
+    return api.export_library(libraryType, itemId)
+  }
+  return { success: false, error: '浏览器开发模式暂不支持导出', path: null }
+}
+
+export async function importLibrary(
+  libraryType: 'material' | 'skill',
+  workspaceRoot: string | null,
+): Promise<{ success: boolean; error: string | null; item: Record<string, unknown> | null }> {
+  const api = await getBridgeApi()
+  if (api?.import_library) {
+    return api.import_library(libraryType, workspaceRoot)
+  }
+  return { success: false, error: '浏览器开发模式暂不支持导入', item: null }
+}
+
+export async function getWorkspaceSystemPrompt(
+  stageId: StageId,
+  input: {
+    workspaceType?: BookType
+    bookTitle: string
+    bookGenre: string
+    stageBody: string
+    allStages: Partial<Record<StageId, string>>
+    allowedWorkspaceStages: readonly StageId[]
+    linkedSkill?: Skill | null
+  },
+): Promise<string> {
+  const stagesObj: Record<string, string> = {}
+  for (const [k, v] of Object.entries(input.allStages ?? {})) {
+    stagesObj[k] = String(v ?? '')
+  }
+
+  const api = await getBridgeApi()
+  const workspaceType = input.workspaceType ?? 'short'
+  if (api?.get_workspace_system_prompt) {
+    const prompt = await api.get_workspace_system_prompt(
+      stageId,
+      JSON.stringify({
+        workspace_type: workspaceType,
+        book_title: input.bookTitle,
+        book_genre: input.bookGenre,
+        stage_body: input.stageBody,
+        all_stages: stagesObj,
+        allowed_workspace_stages: input.allowedWorkspaceStages,
+      }),
+      workspaceType,
+    )
+    return appendLoadableSkillsToPrompt(prompt, input.linkedSkill, stageId)
+  }
+
+  const allowed = new Set(input.allowedWorkspaceStages)
+  const filteredStages = Object.fromEntries(
+    Object.entries(input.allStages).filter(([id]) => allowed.has(id as StageId)),
+  ) as Partial<Record<StageId, string>>
+  const promptAgentId = resolveWorkspaceAgentIdForStage(stageId)
+  const raw = await readWorkspaceAgentPromptTemplate(promptAgentId, workspaceType)
+  const prompt = renderPromptFromTemplateRaw(raw, {
+    bookTitle: input.bookTitle,
+    bookGenre: input.bookGenre,
+    stageBody: input.stageBody,
+    allStages: filteredStages,
+    promptKind: 'workspace',
+    stageId,
+  })
+  return appendLoadableSkillsToPrompt(prompt, input.linkedSkill, stageId)
+}

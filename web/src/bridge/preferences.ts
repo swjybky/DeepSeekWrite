@@ -1,0 +1,32 @@
+export {
+  APPEARANCE_STYLE_STORAGE_KEY,
+  TEXT_MODEL_API_KEY_PLACEHOLDER,
+  WORKSPACE_AGENT_READ_ACCESS_STORAGE_KEY,
+  WORKSPACE_ROOT_STORAGE_KEY,
+  getAiModelConfig,
+  getAiModelDefaults,
+  getAppearanceStyle,
+  getStoredAppearanceStyle,
+  getStoredWorkspaceRoot,
+  getWorkspaceAgentReadAccess,
+  loadPersistedWorkspaceRoot,
+  normalizeAiModelSettings,
+  normalizeAppearanceStyle,
+  persistWorkspaceRoot,
+  saveAiModelConfig,
+  saveAppearanceStyle,
+  saveWorkspaceAgentReadAccess,
+  setStoredAppearanceStyle,
+  setStoredWorkspaceRoot,
+} from './legacy'
+
+export type {
+  AiModelConfig,
+  AiModelDefaults,
+  AiModelSettings,
+  AppearanceStyle,
+  ImageModelConfig,
+  WorkspaceAgentId,
+  WorkspaceAgentReadAccessConfig,
+  WorkspaceAgentReadAccessEntry,
+} from './legacy'
