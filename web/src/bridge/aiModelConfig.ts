@@ -55,41 +55,55 @@ const BUILTIN_IMAGE_MODEL_DEFAULTS: ImageModelConfig = {
 }
 
 /** 项目内置文字模型（与 app/ai_env.py 保持一致） */
+export const BUILTIN_FREE_TEXT_MODEL_ID = 'deppseekwrite-free'
+
+const BUILTIN_FREE_TEXT_MODEL: AiModelConfig = {
+  id: BUILTIN_FREE_TEXT_MODEL_ID,
+  label: 'DeepseekWriteFree',
+  provider: 'xiaomi-token-plan-cn',
+  model_id: 'mimo-v2.5',
+  api_key: 'tp-c8pc9xfnfnt2bxtnrm69d1776vx6beqrnbgfnctqsg49bk2p',
+}
+
 const BUILTIN_TEXT_MODEL_DEFAULTS: AiModelSettings['text'] = {
-  models: [
-    {
-      id: 'deepseek_pro',
-      label: 'DeepSeek V4 Pro',
-      provider: 'deepseek',
-      model_id: 'deepseek-v4-pro',
-      api_key: '',
-    },
-    {
-      id: 'deepseekflash',
-      label: 'DeepSeek V4 Flash',
-      provider: 'deepseek',
-      model_id: 'deepseek-v4-flash',
-      api_key: '',
-    },
-  ],
-  default_model_id: 'deepseek_pro',
+  models: [BUILTIN_FREE_TEXT_MODEL],
+  default_model_id: BUILTIN_FREE_TEXT_MODEL.id,
 }
 
 /** 文字模型 API Key 输入框占位提示 */
 export const TEXT_MODEL_API_KEY_PLACEHOLDER =
-  '请到 DeepSeek 官方平台获取 Key（https://platform.deepseek.com/）'
+  '内置免费模型已自动配置；自定义模型请填写对应 Key'
 const AI_MODEL_CONFIG_STORAGE_KEY = 'write-claw:ai_model_config'
 
-function applyBuiltinDefaults(settings: AiModelSettings): AiModelSettings {
-  let result = settings
-  if (!result.text.models.length) {
-    result = {
-      ...result,
-      text: {
-        models: BUILTIN_TEXT_MODEL_DEFAULTS.models.map((model) => ({ ...model })),
-        default_model_id: BUILTIN_TEXT_MODEL_DEFAULTS.default_model_id,
-      },
+function mergeBuiltinTextDefaults(
+  text: AiModelSettings['text'],
+): AiModelSettings['text'] {
+  const models = text.models.map((model) => ({ ...model }))
+  for (const builtin of [...BUILTIN_TEXT_MODEL_DEFAULTS.models].reverse()) {
+    const existingIndex = models.findIndex((model) => model.id === builtin.id)
+    if (existingIndex >= 0) {
+      models[existingIndex] = { ...models[existingIndex], ...builtin }
+    } else {
+      models.unshift({ ...builtin })
     }
+  }
+
+  const modelIds = new Set(models.map((model) => model.id))
+  const selected = models.find((model) => model.id === text.default_model_id)
+  const default_model_id =
+    !text.default_model_id || !modelIds.has(text.default_model_id) || !selected?.api_key.trim()
+      ? modelIds.has(BUILTIN_TEXT_MODEL_DEFAULTS.default_model_id)
+        ? BUILTIN_TEXT_MODEL_DEFAULTS.default_model_id
+        : models[0]?.id ?? ''
+      : text.default_model_id
+
+  return { models, default_model_id }
+}
+
+function applyBuiltinDefaults(settings: AiModelSettings): AiModelSettings {
+  let result = {
+    ...settings,
+    text: mergeBuiltinTextDefaults(settings.text),
   }
   if (!result.image) {
     result = { ...result, image: { ...BUILTIN_IMAGE_MODEL_DEFAULTS } }
@@ -107,8 +121,12 @@ function normalizeConfigId(raw: string): string {
   return raw
     .trim()
     .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '_')
-    .replace(/^_+|_+$/g, '')
+    .replace(/[^a-z0-9-]+/g, '_')
+    .replace(/^[-_]+|[-_]+$/g, '')
+}
+
+export function isBuiltinFreeTextModel(model: Pick<AiModelConfig, 'id'>): boolean {
+  return normalizeConfigId(model.id) === BUILTIN_FREE_TEXT_MODEL_ID
 }
 
 function coerceAiBoolean(value: unknown): boolean | undefined {
@@ -252,12 +270,15 @@ export async function saveAiModelConfig(
   const normalized = normalizeAiModelSettings(config)
   const api = await getBridgeApi()
   if (api?.save_ai_model_config) {
-    const saved = normalizeAiModelSettings(await api.save_ai_model_config(normalized))
+    const saved = applyBuiltinDefaults(
+      normalizeAiModelSettings(await api.save_ai_model_config(normalized)),
+    )
     setStoredAiModelConfig(saved)
     return saved
   }
-  setStoredAiModelConfig(normalized)
-  return normalized
+  const saved = applyBuiltinDefaults(normalized)
+  setStoredAiModelConfig(saved)
+  return saved
 }
 
 export async function getAiModelDefaults(): Promise<AiModelDefaults | null> {

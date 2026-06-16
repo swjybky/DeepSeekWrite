@@ -15,9 +15,9 @@ type ExpertDraftEditorProps = {
     field: 'body' | 'character_state',
     node: HTMLTextAreaElement | null,
   ) => void
+  onMainStageTextareaRef?: (node: HTMLTextAreaElement | null) => void
   stopWriting: () => void
   resetDraft: () => void
-  mergeSectionsToDraft: () => void
   exportDraft: () => void
 }
 
@@ -36,7 +36,6 @@ type Props = {
   ) => void
   stopExpertWriting: () => void
   resetExpertDraft: () => void
-  mergeExpertDraftToStage: () => void
   exportExpertDraft: () => void
   activeStage: StageId
   activeContentStage: StageId
@@ -80,7 +79,6 @@ export function WorkspaceEditorPane({
   onSectionTextareaRef,
   stopExpertWriting,
   resetExpertDraft,
-  mergeExpertDraftToStage,
   exportExpertDraft,
   activeStage,
   activeContentStage,
@@ -98,12 +96,17 @@ export function WorkspaceEditorPane({
           draft={expertDraft}
           stageBody={stageBody}
           stageBodyReadOnly={Boolean(streamingStages.draft)}
-          onStageBodyChange={onStageBodyChange}
+          onStageBodyChange={(value) => onStageBodyChange(value, 'draft')}
           updateDraft={updateExpertDraft}
           onSectionTextareaRef={onSectionTextareaRef}
+          onMainStageTextareaRef={(node) => {
+            textareaRefsRef.current.draft = node
+            if (node) {
+              textareaRef.current = node
+            }
+          }}
           stopWriting={stopExpertWriting}
           resetDraft={resetExpertDraft}
-          mergeSectionsToDraft={mergeExpertDraftToStage}
           exportDraft={exportExpertDraft}
         />
       ) : activeStage === PLOT_STAGE_ID ? (

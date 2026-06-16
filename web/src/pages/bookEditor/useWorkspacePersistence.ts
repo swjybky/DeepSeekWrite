@@ -24,6 +24,7 @@ import { PLOT_STAGE_ID } from '../../workspaces/short/stages'
 import {
   createBookPersistedSnapshot,
   createBookWorkspaceSession,
+  ensurePlotChildSelection,
   hasAnyUnsavedWorkspaceChanges,
   mergeWorkspaceBooksStable,
 } from './workspaceSession'
@@ -167,22 +168,37 @@ export function useWorkspacePersistence({
                   activeStage: pending.stageId,
                   activePlotChildStage:
                     pending.stageId === PLOT_STAGE_ID
-                      ? pending.childId ?? ''
+                      ? pending.childId ?? session.activePlotChildStage
                       : '',
                 }),
                 false,
               ) ?? cached
             : cached
+        const ensuredCached = ensurePlotChildSelection(nextCached)
+        nextCached =
+          ensuredCached === nextCached
+            ? nextCached
+            : commitWorkspaceSession(id, () => ensuredCached, false) ??
+              ensuredCached
         if (!nextCached.persistedSnapshot) {
+          const cachedStages = nextCached.stages
           nextCached = {
             ...nextCached,
+            stages: cachedStages,
+            book: {
+              ...nextCached.book,
+              stages: mergeStagePatchIntoAll(nextCached.book.stages, cachedStages),
+              content: cachedStages.draft,
+              expert_draft: nextCached.expertDraft,
+            },
             persistedSnapshot: createBookPersistedSnapshot(
               {
                 ...nextCached.book,
                 stages: mergeStagePatchIntoAll(
                   nextCached.book.stages,
-                  nextCached.stages,
+                  cachedStages,
                 ),
+                content: cachedStages.draft,
                 expert_draft: nextCached.expertDraft,
               },
               nextCached.expertDraft,
@@ -305,9 +321,10 @@ export function useWorkspacePersistence({
       try {
         flushAllTokenBuffersForBook(bookId)
         const beforeSave = workspaceSessionsRef.current[bookId] ?? session
+        const stagesForSave = beforeSave.stages
         const merged = mergeStagePatchIntoAll(
           beforeSave.book.stages,
-          beforeSave.stages,
+          stagesForSave,
         )
         const next = await saveBook(bookId, {
           stages: merged,
@@ -319,22 +336,24 @@ export function useWorkspacePersistence({
           return null
         }
         const latest = workspaceSessionsRef.current[bookId] ?? beforeSave
+        const latestStages = latest.stages
+        const nextBookStages = mergeStagePatchIntoAll(next.stages, latestStages)
         const nextSession: BookWorkspaceSessionState = {
           ...latest,
           book: {
             ...next,
-            stages: mergeStagePatchIntoAll(next.stages, latest.stages),
+            stages: nextBookStages,
             expert_draft: latest.expertDraft,
-            content: latest.stages.draft ?? next.content,
+            content: latestStages.draft,
           },
-          stages: latest.stages,
+          stages: latestStages,
           expertDraft: latest.expertDraft,
           persistedSnapshot: createBookPersistedSnapshot(
             {
               ...next,
-              stages: mergeStagePatchIntoAll(next.stages, latest.stages),
+              stages: nextBookStages,
               expert_draft: latest.expertDraft,
-              content: latest.stages.draft ?? next.content,
+              content: latestStages.draft,
             },
             latest.expertDraft,
           ),

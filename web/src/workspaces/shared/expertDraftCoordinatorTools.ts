@@ -1,0 +1,283 @@
+import type { AgentTool } from '@earendil-works/pi-agent-core'
+import { Type } from 'typebox'
+
+import type {
+  ExpertDraft,
+  ExpertDraftCharacterState,
+  ExpertDraftSection,
+} from '../../bridge'
+import { defineTool, textBlock } from './piToolkit'
+import {
+  applyExpertDraftSectionBodyReplacements,
+  type ExpertDraftUpdater,
+} from './expertDraftSectionTools'
+
+const MAX_EXPERT_DRAFT_TEXT_REPLACE_CHARS = 2400
+
+export type ExpertDraftCoordinatorCoreToolContext = {
+  bookTitle: string
+  getDraft: () => ExpertDraft
+  updateDraft: ExpertDraftUpdater
+  /** 读取当前专家正文编辑区（合并视图）内容 */
+  getExpertDraftStageBody: () => string
+  /** 写回专家正文并自动同步到各小节 */
+  applyExpertDraftStageBody: (body: string) => void
+  startWriting: (input: {
+    sectionIds: string[]
+    userWritingPrompt?: string
+  }) => boolean
+  /** 短篇默认跳过 intro；剧本默认写全部小节 */
+  skipIntroByDefault?: boolean
+  /** 第一节默认标题：短篇可用「导语」，剧本可用「第一节」 */
+  firstSectionFallbackTitle?: string
+}
+
+function defaultStateTitle(sectionTitle: string): string {
+  return `${sectionTitle.trim() || '小节'}人物状态`
+}
+
+function normalizeWordCountRequirement(raw: unknown): string {
+  return String(raw ?? '').trim()
+}
+
+function sectionIdForIndex(index: number): string {
+  return index === 0 ? 'intro' : `section-${index}`
+}
+
+function normalizeSectionId(
+  rawId: string | undefined,
+  index: number,
+  used: Set<string>,
+): string {
+  const preferred = rawId?.trim() || sectionIdForIndex(index)
+  if (!used.has(preferred)) return preferred
+  let suffix = 1
+  while (used.has(`${preferred}-${suffix}`)) suffix += 1
+  return `${preferred}-${suffix}`
+}
+
+function buildCharacterStatesForSections(
+  sections: ExpertDraftSection[],
+  items: Array<{ character_state_body?: string }>,
+  previous: ExpertDraftCharacterState[],
+): ExpertDraftCharacterState[] {
+  const previousById = new Map(previous.map((s) => [s.section_id, s]))
+  return sections.map((section, index) => {
+    const old = previousById.get(section.id)
+    const rawStateBody = items[index]?.character_state_body
+    const body =
+      typeof rawStateBody === 'string'
+        ? rawStateBody
+        : old?.body ?? ''
+    return {
+      section_id: section.id,
+      title: old?.title || defaultStateTitle(section.title),
+      body,
+    }
+  })
+}
+
+export function buildInitializeExpertDraftTool(
+  ctx: ExpertDraftCoordinatorCoreToolContext,
+): AgentTool {
+  const firstTitle = ctx.firstSectionFallbackTitle?.trim() || '导语'
+  return defineTool({
+    name: 'initialize_expert_draft',
+    label: '初始化正文',
+    description:
+      '根据大纲一次性创建或重建专家正文小节列表，并同步生成与之一一对应的人物状态槽位。每个小节会映射到独立正文编辑框；修改会写回对应小节。仅用于初始化或用户明确要求重建正文结构；已有正文需局部修改时请用 edit_expert_draft_section。可把已知导语/首章正文填入 body，把已知人物状态填入 character_state_body。',
+    parameters: Type.Object({
+      sections: Type.Array(
+        Type.Object({
+          id: Type.Optional(
+            Type.String({
+              description: '可选小节 id；导语建议 intro，第一节建议 section-1',
+            }),
+          ),
+          title: Type.String({ description: '小节标题，如 导语、第一节' }),
+          word_count_requirement: Type.Optional(
+            Type.String({
+              description:
+                '本小节字数要求，优先从大纲「预估字数」「字数规划」读取；可填 800、800-1000、约1000字等。',
+            }),
+          ),
+          body: Type.Optional(
+            Type.String({ description: '可选：该小节正文；未知时留空' }),
+          ),
+          character_state_body: Type.Optional(
+            Type.String({
+              description:
+                '可选：该小节结束时的人物状态；未知时留空，由分节写手后续写入',
+            }),
+          ),
+        }),
+        { minItems: 1 },
+      ),
+    }),
+    execute: async (_id, params) => {
+      ctx.updateDraft((draft) => {
+        const previousById = new Map(draft.sections.map((s) => [s.id, s]))
+        const used = new Set<string>()
+        const sections = params.sections.map((item, index) => {
+          const id = normalizeSectionId(item.id, index, used)
+          used.add(id)
+          const previous = previousById.get(id)
+          return {
+            id,
+            title:
+              item.title.trim() ||
+              previous?.title ||
+              (index === 0 ? firstTitle : `第${index}节`),
+            word_count_requirement: normalizeWordCountRequirement(
+              item.word_count_requirement ?? previous?.word_count_requirement,
+            ),
+            body:
+              typeof item.body === 'string'
+                ? item.body
+                : previous?.body ?? '',
+          }
+        })
+        return {
+          ...draft,
+          sections,
+          character_states: buildCharacterStatesForSections(
+            sections,
+            params.sections,
+            draft.character_states,
+          ),
+          active_section_id: sections.some((s) => s.id === draft.active_section_id)
+            ? draft.active_section_id
+            : '',
+        }
+      })
+      return textBlock(
+        `已初始化 ${params.sections.length} 个正文小节，并同步创建对应人物状态槽位。`,
+      )
+    },
+    executionMode: 'sequential',
+  })
+}
+
+export function buildEditExpertDraftSectionTool(
+  ctx: ExpertDraftCoordinatorCoreToolContext,
+): AgentTool {
+  return defineTool({
+    name: 'edit_expert_draft_section',
+    label: '编辑正文',
+    description:
+      '专家正文统一编辑工具：直接读写当前专家正文编辑区（与小节映射，写回后会自动同步到各小节）。不传 replacements 时读取当前正文；传 replacements 时按原文片段局部替换。总控不负责修改人物状态。不要用它重建小节列表，初始化请用 initialize_expert_draft；不要为了局部修改重新调用 start_expert_writing，除非用户明确要求重写或重跑分节写作。',
+    parameters: Type.Object({
+      replacements: Type.Optional(
+        Type.Array(
+          Type.Object({
+            original_text: Type.String({
+              maxLength: MAX_EXPERT_DRAFT_TEXT_REPLACE_CHARS,
+              description:
+                '要被替换的正文原文片段。须来自本工具读取结果或 read_workspace_content（draft），并包含足够上下文以唯一定位。',
+            }),
+            new_text: Type.String({
+              maxLength: MAX_EXPERT_DRAFT_TEXT_REPLACE_CHARS,
+              description:
+                '替换后的新正文片段。只放这个片段的新内容，可包含换行；不要放整篇正文。',
+            }),
+          }),
+          {
+            minItems: 1,
+            maxItems: 20,
+            description:
+              '需要替换的正文片段列表。省略时仅读取当前专家正文，不写入。',
+          },
+        ),
+      ),
+    }),
+    execute: async (_id, params) => {
+      const currentBody = ctx.getExpertDraftStageBody()
+      const replacements = params.replacements ?? []
+      if (replacements.length === 0) {
+        const body = currentBody.trim()
+        const header = `书名：《${ctx.bookTitle}》\n【专家正文】（draft）\n正文来源：当前专家正文编辑区`
+        return textBlock(`${header}\n\n${body || '（空）'}`)
+      }
+
+      if (!currentBody.trim()) {
+        return textBlock(
+          '当前正文为空。请使用 initialize_expert_draft 初始化，或调用 start_expert_writing 启动分节写作。',
+        )
+      }
+      const result = applyExpertDraftSectionBodyReplacements(
+        currentBody,
+        replacements,
+      )
+      if ('error' in result) return textBlock(`未替换：${result.error}`)
+
+      ctx.applyExpertDraftStageBody(result.next)
+      const flexibleNote =
+        result.flexibleCount > 0
+          ? `（其中 ${result.flexibleCount} 处经引号/标点归一化后定位）`
+          : ''
+      return textBlock(
+        `已替换正文 ${result.count} 个片段${flexibleNote}，并同步到各小节。`,
+      )
+    },
+    executionMode: 'sequential',
+  })
+}
+
+export function buildStartExpertWritingTool(
+  ctx: ExpertDraftCoordinatorCoreToolContext,
+): AgentTool {
+  return defineTool({
+    name: 'start_expert_writing',
+    label: '开始写书',
+    description:
+      '异步启动分节写手智能体。工具会立即返回，后台会按传入 section_ids 串行写入正文和人物状态。它不是已有正文的修改工具；当用户要求修改、润色、去 AI 味或局部替换已有正文时，使用 edit_expert_draft_section，不要重新启动分节写作，除非用户明确要求重写/重跑小节。',
+    parameters: Type.Object({
+      section_ids: Type.Optional(
+        Type.Array(
+          Type.String({
+            description: '要串行编写的小节 id 列表；不传时按工作台默认范围写全部正文列表',
+          }),
+        ),
+      ),
+      user_writing_prompt: Type.Optional(
+        Type.String({
+          description:
+            '用户写作提示：用户希望全文偏向的文风、情绪、爽点、节奏、人设表达或其它写作倾向；没有明确要求可留空。',
+        }),
+      ),
+    }),
+    execute: async (_id, params) => {
+      const draft = ctx.getDraft()
+      const defaultIds = ctx.skipIntroByDefault
+        ? draft.sections.filter((s) => s.id !== 'intro').map((s) => s.id)
+        : draft.sections.map((s) => s.id)
+      const ids = (params.section_ids?.length ? params.section_ids : defaultIds)
+        .map((id) => String(id).trim())
+        .filter(Boolean)
+      const valid = ids.filter((id) => draft.sections.some((s) => s.id === id))
+      if (valid.length === 0) {
+        return textBlock('未启动：没有可写的小节。')
+      }
+      const started = ctx.startWriting({
+        sectionIds: valid,
+        userWritingPrompt: String(params.user_writing_prompt ?? '').trim(),
+      })
+      return textBlock(
+        started
+          ? '调用成功，正在写书中。后台小节智能体会按顺序串行编写。'
+          : '未启动：当前已经有后台分节写作任务在运行。',
+      )
+    },
+    executionMode: 'sequential',
+  })
+}
+
+export function buildExpertDraftCoordinatorCoreTools(
+  ctx: ExpertDraftCoordinatorCoreToolContext,
+): AgentTool[] {
+  return [
+    buildInitializeExpertDraftTool(ctx),
+    buildEditExpertDraftSectionTool(ctx),
+    buildStartExpertWritingTool(ctx),
+  ]
+}

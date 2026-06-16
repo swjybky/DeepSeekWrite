@@ -53,9 +53,8 @@ export function useWorkspaceExportActions({
 
   const handleExportExpertDraftDocx = useCallback(async () => {
     const currentStageBody = stagesRef.current.draft ?? ''
-    const body = currentStageBody.trim()
-      ? currentStageBody
-      : combineExpertDraftSections(expertDraftRef.current)
+    const combinedBody = combineExpertDraftSections(expertDraftRef.current)
+    const body = currentStageBody.trim() ? currentStageBody : combinedBody
     if (!body) {
       setMessage(null)
       setError('正文编写没有可导出的正文')

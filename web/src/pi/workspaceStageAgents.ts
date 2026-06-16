@@ -75,12 +75,16 @@ export type WorkspaceStageAgentContext = {
   getCurrentStageBody?: (
     stageId?: StageId | MaterialStageId | SkillStageId,
   ) => string | undefined
+  /** 剧情等父阶段：解析当前应写入的子槽位（运行时读取，避免快照过期） */
+  getDefaultWriteStageId?: () => StageId
   allStages: Partial<Record<StageId | MaterialStageId | SkillStageId, string>>
   linkedMaterial?: Material | null
   linkedSkill?: Skill | null
   /** 全局创作空间智能体可读配置（短篇创作空间） */
   workspaceAgentReadAccess?: WorkspaceAgentReadAccessConfig | null
   applyToStageEditor?: (payload: ApplyToStageEditorPayload) => void
+  /** 剧情父阶段专用：切换左侧剧情子方向。 */
+  selectPlotChildStage?: (stageId: StageId) => void
   /** 查询某 toolCallId 是否已在流式生成阶段同步到编辑器 */
   isToolCallStreamed?: (toolCallId: string) => boolean
   /** 请求上层保存当前书籍/素材；用于复制工具写入后自动落盘 */
@@ -147,6 +151,9 @@ export function getWorkspaceStageAdditionalTools(
       bookTitle: ctx.bookTitle,
       stageId: scriptStageId,
       defaultWriteStageId: ctx.activeStageContentId as ScriptStageId | undefined,
+      getDefaultWriteStageId: ctx.getDefaultWriteStageId
+        ? () => ctx.getDefaultWriteStageId!() as ScriptStageId
+        : undefined,
       stageBody: ctx.stageBody,
       getCurrentStageBody: (stageId) => ctx.getCurrentStageBody?.(stageId),
       allStages: ctx.allStages as Partial<Record<ScriptStageId, string>>,
@@ -156,6 +163,9 @@ export function getWorkspaceStageAdditionalTools(
       allowedWorkspaceStages: readAccess?.workspace as readonly ScriptStageId[] | undefined,
       allowedMaterialStages: readAccess?.material as readonly MaterialStageId[] | undefined,
       applyToStageEditor: ctx.applyToStageEditor,
+      selectPlotChildStage: ctx.selectPlotChildStage
+        ? (stageId) => ctx.selectPlotChildStage?.(stageId)
+        : undefined,
       onRequestSave: ctx.onRequestSave,
       isToolCallStreamed: ctx.isToolCallStreamed,
     }
@@ -173,6 +183,9 @@ export function getWorkspaceStageAdditionalTools(
     bookTitle: ctx.bookTitle,
     stageId: shortStageId,
     defaultWriteStageId: ctx.activeStageContentId as ShortStageId | undefined,
+    getDefaultWriteStageId: ctx.getDefaultWriteStageId
+      ? () => ctx.getDefaultWriteStageId!() as ShortStageId
+      : undefined,
     stageBody: ctx.stageBody,
     getCurrentStageBody: (stageId) => ctx.getCurrentStageBody?.(stageId),
     allStages: ctx.allStages as Partial<Record<ShortWorkspaceStageAgentContext['stageId'], string>>,
@@ -182,6 +195,9 @@ export function getWorkspaceStageAdditionalTools(
     allowedWorkspaceStages: readAccess?.workspace as readonly ShortStageId[] | undefined,
     allowedMaterialStages: readAccess?.material as readonly MaterialStageId[] | undefined,
     applyToStageEditor: ctx.applyToStageEditor,
+    selectPlotChildStage: ctx.selectPlotChildStage
+      ? (stageId) => ctx.selectPlotChildStage?.(stageId)
+      : undefined,
     onRequestSave: ctx.onRequestSave,
     isToolCallStreamed: ctx.isToolCallStreamed,
   }

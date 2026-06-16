@@ -34,7 +34,7 @@ const MATERIAL_ORDER: Record<string, readonly { id: string; label: string }[]> =
 
 const SKILL_ORDER: Record<string, readonly { id: string; label: string }[]> = {
   skill_manager: [
-    { id: 'character_design', label: '人物设计技能' },
+    { id: 'character_design', label: '人物技能' },
     { id: 'plot_design', label: '剧情技能' },
     { id: 'outline', label: '大纲技能' },
     { id: 'draft', label: '正文专家编写技能' },

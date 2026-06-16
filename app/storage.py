@@ -340,6 +340,33 @@ _READ_ACCESS_DEFAULT_AGENT_IDS = {
     "expert_section_writer",
 }
 
+_READ_ACCESS_REQUIRED_WORKSPACE_STAGES: dict[str, dict[str, tuple[str, ...]]] = {
+    "short": {
+        "character_design": ("character_design",),
+        "plot_design": ("plot_design", "intro_design", "plot_refine"),
+        "outline": ("outline",),
+        "expert_draft_coordinator": ("draft",),
+        "expert_section_writer": ("draft",),
+    },
+    "script": {
+        "character_design": ("character_design",),
+        "plot_design": ("plot_design", "plot_refine"),
+        "outline": ("outline",),
+        "expert_draft_coordinator": ("draft",),
+        "expert_section_writer": ("draft",),
+    },
+}
+
+
+def _required_workspace_stages_for_read_access(
+    workspace_type: str,
+    agent_id: str,
+) -> tuple[str, ...]:
+    normalized = (
+        "script" if normalize_book_type(workspace_type) == "script" else "short"
+    )
+    return _READ_ACCESS_REQUIRED_WORKSPACE_STAGES.get(normalized, {}).get(agent_id, ())
+
 
 def _builtin_read_access_default_path(workspace_type: str) -> Path:
     normalized = normalize_book_type(workspace_type)
@@ -354,16 +381,23 @@ def _validate_read_access_entry(
     entry: dict[str, Any],
     valid_workspace_stages: set[str],
     valid_material_stages: set[str],
+    required_workspace_stages: tuple[str, ...] = (),
 ) -> dict[str, Any] | None:
     if not isinstance(entry, dict):
         return None
     workspace_raw = entry.get("workspace")
     material_raw = entry.get("material")
     out: dict[str, Any] = {}
+    workspace: list[str] = []
     if isinstance(workspace_raw, list):
-        out["workspace"] = [
+        workspace = [
             str(x) for x in workspace_raw if str(x) in valid_workspace_stages
         ]
+    for stage_id in required_workspace_stages:
+        if stage_id in valid_workspace_stages and stage_id not in workspace:
+            workspace.append(stage_id)
+    if workspace:
+        out["workspace"] = workspace
     if isinstance(material_raw, list):
         out["material"] = [
             str(x) for x in material_raw if str(x) in valid_material_stages
@@ -391,7 +425,11 @@ def sync_workspace_agent_read_access_defaults(
         if not isinstance(raw_entry, dict):
             continue
         validated = _validate_read_access_entry(
-            agent_id, raw_entry, valid_workspace, valid_material
+            agent_id,
+            raw_entry,
+            valid_workspace,
+            valid_material,
+            _required_workspace_stages_for_read_access(normalized, agent_id),
         )
         if validated:
             output[agent_id] = validated
@@ -445,7 +483,11 @@ def read_workspace_agent_read_access_defaults(
         if not isinstance(entry, dict):
             continue
         validated = _validate_read_access_entry(
-            agent_id, entry, valid_workspace, valid_material
+            agent_id,
+            entry,
+            valid_workspace,
+            valid_material,
+            _required_workspace_stages_for_read_access(normalized, agent_id),
         )
         if validated:
             output[agent_id] = validated
@@ -453,7 +495,10 @@ def read_workspace_agent_read_access_defaults(
 
 
 def _normalize_config_id(raw: str) -> str:
-    return "".join(ch if ch.isalnum() else "_" for ch in raw.strip().lower()).strip("_")
+    return "".join(
+        ch if ch.isalnum() or ch == "-" else "_"
+        for ch in raw.strip().lower()
+    ).strip("_-")
 
 
 def _read_string(raw: Any) -> str:
@@ -592,17 +637,52 @@ def _ai_model_config_has_values(config: dict[str, Any]) -> bool:
 
 def _apply_builtin_text_default(config: dict[str, Any]) -> dict[str, Any]:
     text = config.get("text")
-    models = text.get("models") if isinstance(text, dict) else []
-    if models:
-        return config
     from app.ai_env import load_text_model_defaults
 
     text_defaults = load_text_model_defaults()
+    builtin_models = [
+        normalized
+        for item in text_defaults["models"]
+        if (normalized := _normalize_ai_model_entry(item))
+    ]
+    if not builtin_models:
+        return config
+
+    models = list(text.get("models", [])) if isinstance(text, dict) else []
+    default_model_id = _read_string(text.get("default_model_id")) if isinstance(text, dict) else ""
+
+    for builtin in reversed(builtin_models):
+        index = next(
+            (i for i, model in enumerate(models) if model.get("id") == builtin["id"]),
+            -1,
+        )
+        if index >= 0:
+            models[index] = {**models[index], **builtin}
+        else:
+            models.insert(0, dict(builtin))
+
+    model_ids = {model.get("id") for model in models}
+    selected = next(
+        (model for model in models if model.get("id") == default_model_id),
+        None,
+    )
+    builtin_default_id = _normalize_config_id(text_defaults["default_model_id"])
+    if (
+        not default_model_id
+        or default_model_id not in model_ids
+        or not _read_string(selected.get("api_key") if isinstance(selected, dict) else "")
+    ):
+        default_model_id = (
+            builtin_default_id
+            if builtin_default_id in model_ids
+            else _read_string(models[0].get("id")) if models else ""
+        )
+
     return {
         **config,
         "text": {
-            "models": text_defaults["models"],
-            "default_model_id": text_defaults["default_model_id"],
+            "models": models,
+            "default_model_id": default_model_id,
         },
     }
 
@@ -641,7 +721,7 @@ def read_ai_model_config() -> dict[str, Any]:
 
 
 def write_ai_model_config(config: dict[str, Any]) -> dict[str, Any]:
-    normalized = normalize_ai_model_config(config)
+    normalized = _apply_builtin_defaults(normalize_ai_model_config(config))
     with _data_file_lock():
         prefs = _load_preferences_unlocked()
         prefs[AI_MODEL_CONFIG_PREF_KEY] = normalized

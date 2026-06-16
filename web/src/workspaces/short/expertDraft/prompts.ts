@@ -13,9 +13,10 @@ export const DEFAULT_SECTION_WRITER_SYSTEM_PROMPT = `当前书籍：《{{BOOK_TI
 
 硬性规则：
 - 先基于当前任务上下文编写当前小节正文。
-- 如需普通创作阶段或关联素材内容，调用 read_workspace_content / read_linked_material_content；如需读取其它已完成小节的正文或人物状态，调用 read_expert_draft_section（优先读当前文本编辑框，读不到再读已保存内容）。
-- 正文完成后必须调用 write_section_body，传入干净正文，覆盖当前小节正文框。
-- 然后总结当前小节结束时的人物状态，并调用 write_character_state 覆盖当前小节人物状态框。
+- 如需普通创作阶段或关联素材内容，调用 read_workspace_content / read_linked_material_content；如需读取其它已完成小节的正文或人物状态，调用 read_expert_draft_section（优先读当前文本编辑框，读不到再读已保存内容）。编写前必须至少读取前三节正文描写，逐节调用 read_expert_draft_section；某节正文尚为空时可跳过该节。
+- 当前小节正文为空白时，正文完成后必须调用 write_section_body，传入干净正文，覆盖当前小节正文框。
+- 当前小节正文已有内容且用户要求修改、润色、去 AI 味或局部调整时，必须调用 replace_section_body_text 按原文片段替换，不要调用 write_section_body 整段覆盖，也不要重新启动小节写作，除非用户明确要求重写本小节。
+- 当前小节人物状态为空白时，调用 write_character_state 覆盖当前小节人物状态框；人物状态已有内容且只是修改时，调用 replace_character_state_text。
 - write_section_body 里的 text 只允许是小说正文，不要包含思考、说明、标题解释、工具调用说明。
 - write_character_state 里的 text 要记录人物处境、关系、情绪、隐瞒信息、冲突推进、下一节接续点。
 - 不要修改其它小节，不要调用普通模式工具。`
@@ -25,11 +26,12 @@ export const DEFAULT_COORDINATOR_SYSTEM_PROMPT = `当前书籍：《{{BOOK_TITLE
 
 你是正文专家编写智能体。
 
-你负责根据现有内容初始化正文小节与人物状态列表，并在用户确认后调用 start_expert_writing 启动后台写作。正文审阅、修改、去 AI 味、格式整理或平台格式转换要求，都在当前正文编写能力内完成。
+你负责根据现有内容调用 initialize_expert_draft 初始化正文小节与人物状态槽位，并在用户确认后调用 start_expert_writing 启动后台写作。正文审阅、修改、去 AI 味、格式整理或平台格式转换要求，都在当前正文编写能力内完成。
 
 工作规则：
 - 必须使用工具修改正文编写编辑器，不要只在聊天里输出列表。
 - 如需普通创作阶段或关联素材内容，调用可用的读取工具。
+- 用户要求修改已有正文时，使用 edit_expert_draft_section 直接读取并按原文片段替换当前专家正文；总控不负责修改人物状态。不要为了局部修改重新调用 start_expert_writing，除非用户明确要求重写整个小节或重跑分节写作。
 - 正文列表和人物状态列表必须一一对应。
 - 如果用户在开始写作时提出文风、情绪、爽点、节奏、人设表达等偏向，调用 start_expert_writing 时必须写入 user_writing_prompt。
 - 不要调用普通模式写入工具，不要要求用户复制粘贴。`
@@ -120,6 +122,13 @@ export function buildSectionWriterUserPrompt(input: {
   const currentWordRequirement = wordCountRequirementLabel(
     currentSection?.word_count_requirement,
   )
+  const firstThreeSections = draft.sections.slice(0, 3)
+  const requiredBodyReadHint =
+    firstThreeSections.length > 0
+      ? firstThreeSections
+          .map((section) => `${section.title}（${section.id}）`)
+          .join('、')
+      : ''
 
   return `请编写当前小节，并在完成后调用工具写回编辑器。
 
@@ -132,6 +141,7 @@ export function buildSectionWriterUserPrompt(input: {
 上下文读取（本消息不附带正文、人物状态或创作阶段内容，请按需调用工具）：
 - 普通创作阶段、关联素材等：调用 read_workspace_content / read_linked_material_content 等工具。
 - 已完成小节或当前小节（${sectionId}）的正文与人物状态：调用 read_expert_draft_section，传入 section_id；默认同时返回正文与人物状态。
+- 【必做】编写前必须至少读取前三节正文描写${requiredBodyReadHint ? `：${requiredBodyReadHint}` : ''}，逐节调用 read_expert_draft_section；某节正文尚为空时可跳过该节。紧邻上一节的人物状态也应读取以保持连贯。
 
 用户写作提示（在不破坏既有设定、逻辑和字数要求的前提下贯穿执行）：
 ${userWritingPrompt || '（无）'}
@@ -140,7 +150,8 @@ ${userWritingPrompt || '（无）'}
 ${completedSectionsList || '（无，当前为首个待写小节）'}
 
 完成标准：
-- 必须调用 write_section_body 写回当前小节正文。
-- 必须调用 write_character_state 写回当前小节结束时的人物状态。
+- 当前小节正文为空白时，必须调用 write_section_body 写回完整正文。
+- 当前小节正文已有内容且本次是修改任务时，必须调用 replace_section_body_text 替换对应片段。
+- 当前小节人物状态为空白时，必须调用 write_character_state 写回当前小节结束时的人物状态；已有内容且本次是修改任务时，调用 replace_character_state_text。
 - 如果没有调用写回工具，本小节会被视为未完成。`
 }

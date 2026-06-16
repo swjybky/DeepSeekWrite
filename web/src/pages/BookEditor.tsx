@@ -11,6 +11,7 @@ import {
   normalizeExpertDraft,
   normalizeStagesForWorkspaceBook,
   isWorkspaceBook,
+  mergeStagePatchIntoAll,
   type Material,
   type Skill,
   type WorkspaceAgentReadAccessConfig,
@@ -38,6 +39,7 @@ import { useBookCoverRuntime } from './bookEditor/useBookCoverRuntime'
 import { useWorkspaceChatEpochs } from './bookEditor/useWorkspaceChatEpochs'
 import { useWorkspaceExportActions } from './bookEditor/useWorkspaceExportActions'
 import { useExpertDraftRuntime } from './bookEditor/useExpertDraftRuntime'
+import { resolveLiveWorkspaceStageBody } from './bookEditor/liveStageBody'
 import { useWorkspaceKeyboardShortcuts } from './bookEditor/useWorkspaceKeyboardShortcuts'
 import { useWorkspacePersistence } from './bookEditor/useWorkspacePersistence'
 import { useWorkspaceStageRuntime } from './bookEditor/useWorkspaceStageRuntime'
@@ -50,6 +52,10 @@ import { WorkspaceCoverDialogs } from './bookEditor/WorkspaceCoverDialogs'
 import { WorkspaceEditorPane } from './bookEditor/WorkspaceEditorPane'
 import { WorkspaceRailPanel } from './bookEditor/WorkspaceRailPanel'
 import { WorkspaceSplitter } from './bookEditor/WorkspaceSplitter'
+import {
+  combineExpertDraftSections,
+  mapExpertDraftToDraftStage,
+} from './bookEditor/expertDraftUtils'
 import './BookEditor.css'
 
 export function BookEditor() {
@@ -286,11 +292,20 @@ export function BookEditor() {
           false,
           session.book.book_type,
         )
+        const previousDraftBody = combineExpertDraftSections(session.expertDraft)
+        const nextDraftBody = combineExpertDraftSections(nextExpertDraft)
+        const nextStages =
+          previousDraftBody === nextDraftBody
+            ? session.stages
+            : mapExpertDraftToDraftStage(session.stages, nextExpertDraft)
         return {
           ...session,
+          stages: nextStages,
           expertDraft: nextExpertDraft,
           book: {
             ...session.book,
+            stages: mergeStagePatchIntoAll(session.book.stages, nextStages),
+            content: nextStages.draft ?? session.book.content,
             expert_draft: nextExpertDraft,
           },
         }
@@ -420,6 +435,22 @@ export function BookEditor() {
     [],
   )
 
+  const getCurrentWorkspaceStageBody = useCallback(
+    (stageId: StageId): string | undefined => {
+      const bookId = bookRef.current?.id
+      if (!bookId) return undefined
+      return resolveLiveWorkspaceStageBody({
+        sessionBookId: bookId,
+        activeBookId: bookId,
+        stageId,
+        fallbackStages: workspaceSessionsRef.current[bookId]?.stages ?? {},
+        workspaceSessionsRef,
+        getRenderedWorkspaceStageBody,
+      })
+    },
+    [bookRef, workspaceSessionsRef, getRenderedWorkspaceStageBody],
+  )
+
   const {
     handleStageBodyChange,
     selectPlotChildForBook,
@@ -435,15 +466,16 @@ export function BookEditor() {
     commitWorkspaceSession,
     cancelTokenFlush,
     updateStage,
+    textareaRefsRef,
   })
 
   const {
     createExpertDraftSectionForBook,
     getRenderedExpertDraftSectionContent,
+    syncExpertDraftSectionField,
     handleExpertDraftSectionCreate,
     handleExpertDraftSectionSelect,
     handleExpertDraftSectionTextareaRef,
-    mergeExpertDraftToStage,
     resetExpertDraft,
     selectExpertDraftSectionForBook,
     startExpertWritingForBook,
@@ -460,7 +492,7 @@ export function BookEditor() {
     workspaceAgentReadAccess,
     commitWorkspaceSession,
     updateExpertDraftForBook,
-    updateStage,
+    getCurrentWorkspaceStageBody,
     setActiveBookStage,
     setError,
     setMessage,
@@ -693,11 +725,16 @@ export function BookEditor() {
           workspaceSessionsRef={workspaceSessionsRef}
           getRenderedWorkspaceStageBody={getRenderedWorkspaceStageBody}
           applyToStageEditorForBook={applyToStageEditorForBook}
+          selectPlotChildForBook={selectPlotChildForBook}
           saveBookSession={saveBookSession}
           updateExpertDraftForBook={updateExpertDraftForBook}
           startExpertWritingForBook={startExpertWritingForBook}
           getRenderedExpertDraftSectionContent={
             getRenderedExpertDraftSectionContent
+          }
+          syncExpertDraftSectionField={syncExpertDraftSectionField}
+          onExpertDraftStageBodyChange={(body) =>
+            handleStageBodyChange(body, 'draft')
           }
           bumpActiveExpertChatEpoch={bumpActiveExpertChatEpoch}
           bumpActiveStageChatEpoch={bumpActiveStageChatEpoch}
@@ -719,7 +756,6 @@ export function BookEditor() {
           onSectionTextareaRef={handleExpertDraftSectionTextareaRef}
           stopExpertWriting={stopExpertWriting}
           resetExpertDraft={resetExpertDraft}
-          mergeExpertDraftToStage={mergeExpertDraftToStage}
           exportExpertDraft={handleExportExpertDraftDocx}
           activeStage={activeStage}
           activeContentStage={activeContentStage}

@@ -81,6 +81,17 @@ const FALLBACK_DEFAULTS: WorkspaceAgentReadAccessConfig = {
   },
 }
 
+const REQUIRED_WORKSPACE_STAGE_IDS: Record<
+  WorkspaceAgentId,
+  readonly ScriptStageId[]
+> = {
+  character_design: ['character_design'],
+  plot_design: ['plot_design', 'plot_refine'],
+  outline: ['outline'],
+  expert_draft_coordinator: ['draft'],
+  expert_section_writer: ['draft'],
+}
+
 function isScriptStageId(id: string): id is ScriptStageId {
   return ALL_WORKSPACE_CONTENT_STAGE_IDS.includes(id as ScriptStageId)
 }
@@ -107,7 +118,10 @@ function loadBuiltinDefaults(): WorkspaceAgentReadAccessConfig {
     const material = Array.isArray(entry.material)
       ? entry.material.filter((id) => isMaterialStageId(id))
       : FALLBACK_DEFAULTS[agentId].material
-    result[agentId] = { workspace, material }
+    result[agentId] = {
+      workspace: ensureRequiredWorkspaceStages(agentId, workspace),
+      material,
+    }
   }
   return result
 }
@@ -145,6 +159,21 @@ export function isWorkspaceStageAgentId(
   return (WORKSPACE_STANDARD_AGENT_IDS as readonly string[]).includes(id)
 }
 
+export function getRequiredWorkspaceStageIdsForAgent(
+  agentId: WorkspaceAgentId,
+): readonly ScriptStageId[] {
+  return REQUIRED_WORKSPACE_STAGE_IDS[agentId] ?? []
+}
+
+export function isRequiredWorkspaceStageForAgent(
+  agentId: WorkspaceAgentId,
+  stageId: string,
+): boolean {
+  return getRequiredWorkspaceStageIdsForAgent(agentId).includes(
+    stageId as ScriptStageId,
+  )
+}
+
 export function resolveWorkspaceAgentIdForStage(
   stageId: ScriptStageId,
 ): WorkspaceAgentId {
@@ -157,6 +186,16 @@ export function resolveWorkspaceAgentIdForStage(
 
 function dedupe<T>(items: T[]): T[] {
   return [...new Set(items)]
+}
+
+function ensureRequiredWorkspaceStages(
+  agentId: WorkspaceAgentId,
+  workspace: readonly string[],
+): ScriptStageId[] {
+  return dedupe([
+    ...workspace.filter(isScriptStageId),
+    ...getRequiredWorkspaceStageIdsForAgent(agentId),
+  ])
 }
 
 function normalizeEntry(
@@ -176,7 +215,10 @@ function normalizeEntry(
     materialRaw === null
       ? fallback.material
       : dedupe(materialRaw.map(String).filter(isMaterialStageId))
-  return { workspace, material }
+  return {
+    workspace: ensureRequiredWorkspaceStages(agentId, workspace),
+    material,
+  }
 }
 
 function mergePlotAgentReadAccessInput(

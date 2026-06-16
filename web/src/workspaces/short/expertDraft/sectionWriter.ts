@@ -1,12 +1,10 @@
 import { Agent } from '@earendil-works/pi-agent-core'
 import type { AgentMessage, AgentTool } from '@earendil-works/pi-agent-core'
 import { ApiKeyPromptDialog } from '@earendil-works/pi-web-ui'
-import { Type } from 'typebox'
 
 import {
   readWorkspaceAgentPromptTemplate,
   type ExpertDraft,
-  type ExpertDraftSection,
   type Material,
   type MaterialStageId,
   type Skill,
@@ -34,21 +32,20 @@ import {
   resolvePreferredWorkspaceChatModel,
 } from '../../../pi/workspaceChatPreferences'
 import { createWorkspaceStreamFn } from '../../../pi/workspaceStreamFn'
-import { defineTool, textBlock } from '../../shared/piToolkit'
+import {
+  buildExpertDraftSectionEditTools,
+  buildReadExpertDraftSectionTool,
+  type ExpertDraftUpdater,
+  type ExpertDraftSectionContentField,
+  type GetExpertDraftSectionContent,
+  updateExpertDraftSectionBody,
+} from '../../shared/expertDraftSectionTools'
 import {
   buildSectionWriterSystemPrompt,
   buildSectionWriterUserPrompt,
 } from './prompts'
 
-type ExpertDraftUpdater = (updater: (draft: ExpertDraft) => ExpertDraft) => void
-
-export type ExpertDraftSectionContentField = 'body' | 'character_state'
-
-/** 优先读当前文本编辑框；读不到时由工具内部回退到 getDraft 已保存内容。 */
-export type GetExpertDraftSectionContent = (
-  sectionId: string,
-  field: ExpertDraftSectionContentField,
-) => string | undefined
+export type { ExpertDraftSectionContentField, GetExpertDraftSectionContent }
 
 export type RunExpertDraftSectionWriterOptions = {
   bookId: string
@@ -57,6 +54,12 @@ export type RunExpertDraftSectionWriterOptions = {
   sectionIds: string[]
   getDraft: () => ExpertDraft
   getWorkspaceStages: () => Partial<Record<StageId, string>>
+  getCurrentWorkspaceStageBody?: (stageId: StageId) => string | undefined
+  syncExpertDraftSectionField?: (
+    sectionId: string,
+    field: ExpertDraftSectionContentField,
+    body: string,
+  ) => void
   /** 书籍关联的素材库 */
   linkedMaterial?: Material | null
   /** 书籍绑定的技能库 */
@@ -78,38 +81,6 @@ export type RunExpertDraftSectionWriterOptions = {
     userPrompt: string
   }) => void | Promise<void>
   onRunFinish?: (info: { aborted: boolean }) => void | Promise<void>
-}
-
-function replaceSectionBody(
-  draft: ExpertDraft,
-  sectionId: string,
-  body: string,
-): ExpertDraft {
-  return {
-    ...draft,
-    sections: draft.sections.map((section) =>
-      section.id === sectionId ? { ...section, body } : section,
-    ),
-  }
-}
-
-function replaceCharacterState(
-  draft: ExpertDraft,
-  sectionId: string,
-  body: string,
-): ExpertDraft {
-  const title =
-    draft.character_states.find((s) => s.section_id === sectionId)?.title ||
-    `${draft.sections.find((s) => s.id === sectionId)?.title || '小节'}人物状态`
-  const exists = draft.character_states.some((s) => s.section_id === sectionId)
-  return {
-    ...draft,
-    character_states: exists
-      ? draft.character_states.map((state) =>
-          state.section_id === sectionId ? { ...state, body } : state,
-        )
-      : [...draft.character_states, { section_id: sectionId, title, body }],
-  }
 }
 
 function messageText(message: AgentMessage): string {
@@ -170,147 +141,7 @@ function extractFallbackSectionBody(messages: AgentMessage[]): string {
   return ''
 }
 
-/** 将模型常见变体（section_1、section1）归一化为 section-1 等标准 id */
-function canonicalizeSectionId(raw: string): string {
-  const trimmed = String(raw ?? '').trim()
-  const numbered = trimmed.match(/^section[_-]?(\d+)$/i)
-  if (numbered) return `section-${numbered[1]}`
-  return trimmed
-}
-
-function sectionIdMatchesExpected(raw: string, expectedSectionId: string): boolean {
-  const trimmed = String(raw ?? '').trim()
-  if (!trimmed) return false
-  if (trimmed === expectedSectionId) return true
-  return canonicalizeSectionId(trimmed) === canonicalizeSectionId(expectedSectionId)
-}
-
-function resolveExpertDraftSection(
-  draft: ExpertDraft,
-  rawSectionId: string,
-): ExpertDraftSection | undefined {
-  const trimmed = String(rawSectionId ?? '').trim()
-  if (!trimmed) return undefined
-  const direct = draft.sections.find((section) => section.id === trimmed)
-  if (direct) return direct
-  const canonical = canonicalizeSectionId(trimmed)
-  return draft.sections.find(
-    (section) =>
-      section.id === canonical ||
-      canonicalizeSectionId(section.id) === canonical,
-  )
-}
-
-function readExpertDraftSectionField(
-  sectionId: string,
-  field: ExpertDraftSectionContentField,
-  getDraft: () => ExpertDraft,
-  getRendered?: GetExpertDraftSectionContent,
-): { text: string; source: 'editor' | 'saved' } {
-  const section = resolveExpertDraftSection(getDraft(), sectionId)
-  if (!section) return { text: '', source: 'saved' }
-  const resolvedId = section.id
-
-  try {
-    const rendered = getRendered?.(resolvedId, field)
-    if (rendered !== undefined) {
-      return { text: rendered, source: 'editor' }
-    }
-  } catch {
-    /* fallback below */
-  }
-
-  const draft = getDraft()
-  if (field === 'body') {
-    const saved =
-      draft.sections.find((item) => item.id === resolvedId)?.body ?? ''
-    return { text: saved, source: 'saved' }
-  }
-  const saved =
-    draft.character_states.find((item) => item.section_id === resolvedId)
-      ?.body ?? ''
-  return { text: saved, source: 'saved' }
-}
-
-export function buildReadExpertDraftSectionTool(input: {
-  bookTitle: string
-  getDraft: () => ExpertDraft
-  getRenderedSectionContent?: GetExpertDraftSectionContent
-}): AgentTool {
-  const { bookTitle, getDraft, getRenderedSectionContent } = input
-
-  return defineTool({
-    name: 'read_expert_draft_section',
-    label: '读取其它小节',
-    description:
-      '读取正文编写专家模式中指定小节的正文和人物状态。优先读取当前文本编辑框中的内容；该小节未在当前文本编辑框中打开时，回退到已加载/已保存的小节内容。每次只读一个小节。',
-    parameters: Type.Object({
-      section_id: Type.String({
-        description: '目标小节 id，如 intro、section-1、section-2',
-      }),
-      include_character_state: Type.Optional(
-        Type.Boolean({
-          description: '是否同时返回人物状态，默认 true',
-        }),
-      ),
-    }),
-    execute: async (_id, params) => {
-      const section = resolveExpertDraftSection(getDraft(), params.section_id)
-      if (!section) {
-        const available = getDraft()
-          .sections.map((item) => `${item.title}（${item.id}）`)
-          .join('、')
-        return textBlock(
-          `未找到小节「${params.section_id}」。当前列表：${available || '（空）'}`,
-        )
-      }
-
-      const includeState = params.include_character_state !== false
-      const bodyResult = readExpertDraftSectionField(
-        section.id,
-        'body',
-        getDraft,
-        getRenderedSectionContent,
-      )
-      const body = bodyResult.text.trim()
-      const bodySource =
-        bodyResult.source === 'editor' ? '当前文本编辑框' : '已保存内容'
-      const header = `书名：《${bookTitle}》\n【${section.title}】（${section.id}）\n正文来源：${bodySource}`
-
-      if (!includeState) {
-        if (!body) {
-          return textBlock(`${header}\n\n该小节正文当前为空。`)
-        }
-        return textBlock(`${header}\n\n${body}`)
-      }
-
-      const stateResult = readExpertDraftSectionField(
-        section.id,
-        'character_state',
-        getDraft,
-        getRenderedSectionContent,
-      )
-      const stateBody = stateResult.text.trim()
-      const stateTitle =
-        getDraft().character_states.find(
-          (item) => item.section_id === section.id,
-        )?.title || `${section.title}人物状态`
-      const stateSource =
-        stateResult.source === 'editor' ? '当前文本编辑框' : '已保存内容'
-
-      const parts = [header]
-      parts.push(`\n## 正文\n${body || '（空）'}`)
-      parts.push(
-        `\n## ${stateTitle}\n人物状态来源：${stateSource}\n${stateBody || '（空）'}`,
-      )
-      const wordRequirement = String(section.word_count_requirement ?? '').trim()
-      if (wordRequirement) {
-        parts.push(`\n## 字数要求\n${wordRequirement}`)
-      }
-      return textBlock(parts.join('\n'))
-    },
-  })
-}
+export { buildReadExpertDraftSectionTool }
 
 export function buildSectionWriterTools(input: {
   bookTitle: string
@@ -322,6 +153,12 @@ export function buildSectionWriterTools(input: {
   readAccess: WorkspaceAgentReadAccessEntry
   getDraft: () => ExpertDraft
   getRenderedSectionContent?: GetExpertDraftSectionContent
+  getCurrentWorkspaceStageBody?: (stageId: StageId) => string | undefined
+  syncExpertDraftSectionField?: (
+    sectionId: string,
+    field: ExpertDraftSectionContentField,
+    body: string,
+  ) => void
   updateDraft: ExpertDraftUpdater
   onSectionBodyWritten?: (text: string) => void
   onCharacterStateWritten?: (text: string) => void
@@ -335,16 +172,24 @@ export function buildSectionWriterTools(input: {
     readAccess,
     getDraft,
     getRenderedSectionContent,
+    getCurrentWorkspaceStageBody,
+    syncExpertDraftSectionField,
     updateDraft,
     onSectionBodyWritten,
     onCharacterStateWritten,
   } = input
+  const readLiveStageBody = (stageId: ShortStageId): string => {
+    const live = getCurrentWorkspaceStageBody?.(stageId)
+    if (live !== undefined) return live
+    return allStages[stageId] ?? ''
+  }
   const toolCtx = {
     bookTitle,
     stageId: 'draft' as const,
     stageBody: '',
     allStages,
     linkedMaterial: linkedMaterial ?? null,
+    getCurrentStageBody: readLiveStageBody,
   }
   const readTools: AgentTool[] = []
   if (readAccess.workspace.length > 0) {
@@ -383,49 +228,16 @@ export function buildSectionWriterTools(input: {
       getDraft,
       getRenderedSectionContent,
     }),
-    defineTool({
-      name: 'write_section_body',
-      label: '写入正文',
-      description:
-        '删除当前节正文文本框中的内容，并写入干净正文。只能用于当前正在编写的小节。',
-      parameters: Type.Object({
-        section_id: Type.String({ description: '当前小节 id' }),
-        text: Type.String({ description: '当前小节干净正文，不含思考过程' }),
-      }),
-      execute: async (_id, params) => {
-        if (!sectionIdMatchesExpected(params.section_id, sectionId)) {
-          return textBlock(`未写入：当前只能写入 ${sectionTitle}（${sectionId}）。`)
-        }
-        const text = params.text.trim()
-        if (!text) return textBlock('未写入：正文为空。')
-        onSectionBodyWritten?.(text)
-        updateDraft((draft) => replaceSectionBody(draft, sectionId, text))
-        return textBlock(`已覆盖写入「${sectionTitle}」正文。`)
-      },
-      executionMode: 'sequential',
-    }),
-    defineTool({
-      name: 'write_character_state',
-      label: '写入人物状态',
-      description:
-        '覆盖当前小节对应的人物状态编辑框。只能用于当前正在编写的小节。',
-      parameters: Type.Object({
-        section_id: Type.String({ description: '当前小节 id' }),
-        text: Type.String({
-          description: '当前小节结束时的人物状态、关系变化、冲突推进与接续点',
-        }),
-      }),
-      execute: async (_id, params) => {
-        if (!sectionIdMatchesExpected(params.section_id, sectionId)) {
-          return textBlock(`未写入：当前只能写入 ${sectionTitle}（${sectionId}）。`)
-        }
-        const text = params.text.trim()
-        if (!text) return textBlock('未写入：人物状态为空。')
-        onCharacterStateWritten?.(text)
-        updateDraft((draft) => replaceCharacterState(draft, sectionId, text))
-        return textBlock(`已覆盖写入「${sectionTitle}」人物状态。`)
-      },
-      executionMode: 'sequential',
+    ...buildExpertDraftSectionEditTools({
+      getDraft,
+      getRenderedSectionContent,
+      updateDraft,
+      syncExpertDraftSectionField,
+      scope: 'section_writer',
+      restrictToSectionId: sectionId,
+      restrictToSectionTitle: sectionTitle,
+      onSectionBodyWritten,
+      onCharacterStateWritten,
     }),
   ]
 }
@@ -507,6 +319,12 @@ export async function runExpertDraftSectionWriter(
             readAccess: opts.readAccess,
             getDraft: opts.getDraft,
             getRenderedSectionContent: opts.getRenderedExpertDraftSectionContent,
+            getCurrentWorkspaceStageBody: (stageId) => {
+              const live = opts.getCurrentWorkspaceStageBody?.(stageId)
+              if (live !== undefined) return live
+              return opts.getWorkspaceStages()[stageId]
+            },
+            syncExpertDraftSectionField: opts.syncExpertDraftSectionField,
             updateDraft: opts.updateDraft,
             onSectionBodyWritten: (text) => {
               sectionBodyWritten = text
@@ -566,7 +384,7 @@ export async function runExpertDraftSectionWriter(
           if (fallback) {
             sectionBodyWritten = fallback
             opts.updateDraft((draft) =>
-              replaceSectionBody(draft, sectionId, fallback),
+              updateExpertDraftSectionBody(draft, sectionId, fallback),
             )
           }
         }

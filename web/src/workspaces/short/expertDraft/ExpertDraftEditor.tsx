@@ -15,9 +15,9 @@ type Props = {
     field: 'body' | 'character_state',
     node: HTMLTextAreaElement | null,
   ) => void
+  onMainStageTextareaRef?: (node: HTMLTextAreaElement | null) => void
   stopWriting: () => void
   resetDraft: () => void
-  mergeSectionsToDraft: () => void
   exportDraft: () => void
 }
 
@@ -70,9 +70,9 @@ export function ExpertDraftEditor({
   onStageBodyChange,
   updateDraft,
   onSectionTextareaRef,
+  onMainStageTextareaRef,
   stopWriting,
   resetDraft,
-  mergeSectionsToDraft,
   exportDraft,
 }: Props) {
   const selectedSection = draft.sections.find(
@@ -147,14 +147,6 @@ export function ExpertDraftEditor({
                 disabled={draft.running}
               >
                 清空
-              </button>
-              <button
-                type="button"
-                className="expert-draft-action"
-                onClick={mergeSectionsToDraft}
-                disabled={draft.running}
-              >
-                合并小节正文
               </button>
               <button
                 type="button"
@@ -288,6 +280,7 @@ export function ExpertDraftEditor({
               className="editor-body workspace-textarea expert-draft-main-textarea"
               value={stageBody}
               aria-label="正文编写正文"
+              ref={(node) => onMainStageTextareaRef?.(node)}
               onChange={(e) => onStageBodyChange(e.target.value)}
               placeholder="在此编辑正文..."
               spellCheck={false}

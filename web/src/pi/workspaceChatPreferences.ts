@@ -4,6 +4,7 @@ import type { Agent, ThinkingLevel } from '@earendil-works/pi-agent-core'
 import {
   clearWorkspaceModelConfigCache,
   resolveWorkspaceChatModel,
+  workspaceModelIdentity,
 } from './resolveWorkspaceChatModel'
 
 type WorkspaceChatPreferences = {
@@ -24,7 +25,7 @@ function sameModel(
   a: Model<Api> | null | undefined,
   b: Model<Api> | null | undefined,
 ) {
-  return a?.provider === b?.provider && a?.id === b?.id
+  return workspaceModelIdentity(a) === workspaceModelIdentity(b)
 }
 
 function snapshot(): WorkspaceChatPreferences {

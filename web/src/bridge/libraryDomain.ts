@@ -141,7 +141,7 @@ type LegacySkillStageId =
   | 'expert_draft_coordinator'
 
 export const SKILL_STAGE_LABELS: Record<SkillStageId, string> = {
-  character_design: '人物设计技能',
+  character_design: '人物技能',
   plot_design: '剧情技能',
   outline: '大纲技能',
   draft: '正文专家编写技能',

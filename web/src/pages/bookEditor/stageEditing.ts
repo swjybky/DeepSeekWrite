@@ -37,6 +37,12 @@ export function plotChildStagesForBook(
     : SHORT_PLOT_CHILD_STAGES
 }
 
+export function defaultPlotChildStageForBook(
+  book: Pick<Book, 'book_type'> | BookSummary | null | undefined,
+): PlotChildStageId | '' {
+  return plotChildStagesForBook(book)[0]?.id ?? ''
+}
+
 export function resolveReadAccessForBook(
   book: Pick<Book, 'book_type'> | BookSummary | null | undefined,
   config: WorkspaceAgentReadAccessConfig | null | undefined,

@@ -34,6 +34,7 @@ export type ScriptWorkspaceStageAgentContext = {
   bookTitle: string
   stageId: ScriptStageId
   defaultWriteStageId?: ScriptStageId
+  getDefaultWriteStageId?: () => ScriptStageId
   stageBody: string
   getCurrentStageBody?: (stageId: ScriptStageId) => string | undefined
   allStages: Partial<Record<ScriptStageId, string>>
@@ -49,6 +50,8 @@ export type ScriptWorkspaceStageAgentContext = {
     text: string
     targetStageId?: ScriptStageId
   }) => void
+  /** 剧情父阶段：切换左侧树选中的剧情子方向。 */
+  selectPlotChildStage?: (stageId: PlotChildStageId) => void
   isToolCallStreamed?: (toolCallId: string) => boolean
   /** 请求上层保存当前书籍；用于复制工具写入后自动落盘 */
   onRequestSave?: () => void | Promise<void>
@@ -100,8 +103,9 @@ function isPlotChildStageId(id: string): id is PlotChildStageId {
 }
 
 function defaultWriteStageId(ctx: ScriptWorkspaceStageAgentContext): ScriptStageId {
-  if (ctx.stageId === PLOT_STAGE_ID && ctx.defaultWriteStageId) {
-    return ctx.defaultWriteStageId
+  if (ctx.stageId === PLOT_STAGE_ID) {
+    const resolved = ctx.getDefaultWriteStageId?.() ?? ctx.defaultWriteStageId
+    if (resolved) return resolved
   }
   return ctx.stageId
 }
@@ -126,6 +130,48 @@ function targetStageIdSchema() {
       },
     ),
   )
+}
+
+function plotChildStageIdSchema() {
+  return Type.Union(
+    PLOT_CHILD_STAGES.map((stage) => Type.Literal(stage.id)),
+    {
+      description:
+        '剧情子方向：plot_design=剧情设计，plot_refine=剧情细化。',
+    },
+  )
+}
+
+export function buildSelectPlotChildStageTool(
+  ctx: ScriptWorkspaceStageAgentContext,
+): AgentTool {
+  return defineTool({
+    name: 'switch_storyline_stage',
+    label: '切换剧情方向',
+    description:
+      '切换左侧树中「剧情」下的选中子方向，并同步右侧正文编辑框。'
+      + '当用户在剧情智能体里要求处理剧情设计或剧情细化中的另一个方向时，先调用本工具。'
+      + '本工具只负责页面跳转/选中态切换，不写入内容；切换后，未传 target_stage_id 的写入工具会默认写入新选中的剧情方向。',
+    parameters: Type.Object({
+      target_stage_id: plotChildStageIdSchema(),
+    }),
+    execute: async (_toolCallId, params) => {
+      if (ctx.stageId !== PLOT_STAGE_ID) {
+        return textBlock('当前不是剧情智能体，无法切换剧情子方向。')
+      }
+      const targetStageId = params.target_stage_id as PlotChildStageId
+      if (!isPlotChildStageId(targetStageId)) {
+        return textBlock('目标剧情方向不存在。')
+      }
+      if (!ctx.selectPlotChildStage) {
+        return textBlock('（当前环境无法切换左侧选中：未连接界面）')
+      }
+      ctx.selectPlotChildStage(targetStageId)
+      return textBlock(
+        `已切换左侧选中到「${SCRIPT_STAGE_LABELS[targetStageId]}」。`,
+      )
+    },
+  })
 }
 
 export function buildReadWorkspaceContentTool(
@@ -473,13 +519,12 @@ export function buildCopyStageToFormatTool(
         ],
         {
           description:
-            '源阶段键名：人物设计（character_design）、剧情设计（plot_design）、剧情细化（plot_refine）、大纲（outline）、正文编写（draft）、正文审阅（draft_review）、格式转换（format_conversion）',
+            '源阶段键名：人物（character_design）、剧情设计（plot_design）、剧情细化（plot_refine）、大纲（outline）、正文编写（draft）、正文审阅（draft_review）、格式转换（format_conversion）',
         },
       ),
-      mode: Type.Union(
-        [Type.Literal('replace'), Type.Literal('append')],
-        { description: 'replace：覆盖格式转换编辑区全文；append：在格式转换编辑区文末追加' },
-      ),
+      mode: Type.Literal('replace', {
+        description: '只能填写 replace：覆盖格式转换编辑区全文；不支持追加。',
+      }),
     }),
     execute: async (_toolCallId, params) => {
       const sid = params.source_stage_id as ScriptStageId
@@ -500,9 +545,7 @@ export function buildCopyStageToFormatTool(
       }
       const targetLabel = SCRIPT_STAGE_LABELS[ctx.stageId]
       return textBlock(
-        params.mode === 'replace'
-          ? `已将【${label}】内容覆盖到「${targetLabel}」编辑区，并已自动保存。`
-          : `已将【${label}】内容追加到「${targetLabel}」编辑区文末，并已自动保存。`,
+        `已将【${label}】内容覆盖到「${targetLabel}」编辑区，并已自动保存。`,
       )
     },
   })
@@ -611,7 +654,7 @@ export function buildReplaceCurrentStageTextTool(
     name: 'replace_current_stage_text',
     label: '替换当前阶段文本',
     description:
-      '根据当前文本编辑框中的原文片段替换成新文本，不使用行号。'
+      '编辑替换工具：目标阶段已有内容且只是局部修改时，必须优先使用本工具，不要调用 write_workspace_editor 整段覆盖。根据当前文本编辑框中的原文片段替换成新文本，不使用行号。'
       + '\n【必做】先调用 read_workspace_content 读取当前阶段，从工具返回正文中原样复制待改片段到 original_text；不要从对话摘要、系统提示词或旧回复中抄写。'
       + '\noriginal_text 须在正文中唯一匹配；系统会自动容忍直引号"与弯引号“”、全角/半角逗号分号、破折号等常见差异，但语义内容必须一致。'
       + '\n匹配失败时会返回当前文本编辑框中最接近的片段与可能差异；请据此修正后重试。'
@@ -676,23 +719,31 @@ export function buildReplaceCurrentStageTextTool(
 export function buildWriteWorkspaceEditorTool(
   ctx: ScriptWorkspaceStageAgentContext,
 ): AgentTool {
-  const modeSchema = Type.Union(
-    [Type.Literal('replace'), Type.Literal('append')],
-    { description: 'replace：覆盖当前文本编辑框全文；append：在文末追加' },
-  )
+  const modeSchema = Type.Literal('replace', {
+    description: '只能填写 replace：覆盖目标文本编辑框全文；不支持追加。',
+  })
   return defineTool({
     name: 'write_workspace_editor',
     label: '写入当前文本编辑框',
     description:
-      '把当前阶段应产出的正文稿件写入当前文本编辑框。仅写入该阶段的创作正文（如人设、剧情、大纲、审阅后正文等），不要写入分析报告、修改意见、过程说明或与阶段无关的内容；这些留在对话中回复用户即可。每次调用直接写入当前文本编辑框，不需要和用户确认。',
+      '覆盖写入工具：只在目标文本编辑框为空白时，用它写入一份完整稿件。目标已有内容时，用户只是要求局部修改、润色、扩写某段或替换片段，必须使用 replace_current_stage_text，不能调用本工具整段覆盖。只有用户明确要求整体覆盖、重写、重新生成或替换全文时，才允许设置 allow_overwrite_existing=true 后覆盖写入。仅写入该阶段的创作正文（如人设、剧情、大纲等），不要写入分析报告、修改意见、过程说明或与阶段无关的内容；这些留在对话中回复用户即可。',
     parameters: Type.Object({
       target_stage_id: targetStageIdSchema(),
       text: Type.String({
         description: '当前阶段正文稿件（建议 Markdown）。不含分析报告、修改意见或过程说明。',
       }),
+      allow_overwrite_existing: Type.Optional(
+        Type.Boolean({
+          description:
+            '仅当用户明确要求整体覆盖、重写、重新生成或替换全文时设为 true。目标已有内容但只是局部修改时不能设 true，必须改用 replace_current_stage_text。',
+        }),
+      ),
       mode: modeSchema,
     }),
-    execute: async (toolCallId, { text, mode, target_stage_id }) => {
+    execute: async (
+      toolCallId,
+      { text, mode, target_stage_id },
+    ) => {
       const apply = ctx.applyToStageEditor
       if (!apply) {
         return textBlock('（当前环境无法写入编辑区：未连接界面）')
@@ -701,21 +752,15 @@ export function buildWriteWorkspaceEditorTool(
       const label = SCRIPT_STAGE_LABELS[targetStageId]
       // 若该 tool call 已在流式生成阶段同步到编辑器，避免重复写入
       if (ctx.isToolCallStreamed?.(toolCallId)) {
-        return textBlock(
-          mode === 'replace'
-            ? `已用新内容覆盖「${label}」编辑区。`
-            : `已将内容追加到「${label}」编辑区文末。`,
-        )
+        return textBlock(`已用新内容覆盖「${label}」编辑区。`)
       }
       const t = text.trim()
       if (!t) {
         return textBlock('（未写入：文本为空）')
       }
-      apply({ text: t, mode, targetStageId })
+      apply({ text: t, mode: mode === 'replace' ? mode : 'replace', targetStageId })
       return textBlock(
-        mode === 'replace'
-          ? `已用新内容覆盖「${label}」编辑区。`
-          : `已将内容追加到「${label}」编辑区文末。`,
+        `已用新内容覆盖「${label}」编辑区。`,
       )
     },
   })
@@ -758,6 +803,8 @@ export function buildScriptWorkspaceAdditionalTools(
 
   const writeWorkspace = buildWriteWorkspaceEditorTool(ctx)
   const replaceCurrentStageText = buildReplaceCurrentStageTextTool(ctx)
+  const selectPlotChildStage =
+    ctx.stageId === PLOT_STAGE_ID ? [buildSelectPlotChildStageTool(ctx)] : []
   switch (ctx.stageId) {
     case 'character_design':
     case 'plot_design':
@@ -766,6 +813,7 @@ export function buildScriptWorkspaceAdditionalTools(
         searchWorkspaceText,
         ...readMaterial,
         loadSkill,
+        ...selectPlotChildStage,
         writeWorkspace,
         replaceCurrentStageText,
       ]

@@ -2,6 +2,7 @@ import type {
   BookType,
   ExpertDraft,
   ExpertDraftSection,
+  StageId,
 } from '../../domain/workspace'
 
 export function combineExpertDraftSections(draft: ExpertDraft): string {
@@ -14,6 +15,125 @@ export function combineExpertDraftSections(draft: ExpertDraft): string {
     })
     .filter(Boolean)
     .join('\n\n')
+}
+
+function trimBlankBoundaryLines(lines: string[]): string[] {
+  let start = 0
+  let end = lines.length
+  while (start < end && !lines[start]!.trim()) start += 1
+  while (end > start && !lines[end - 1]!.trim()) end -= 1
+  return lines.slice(start, end)
+}
+
+function firstDraftBodySectionIndex(
+  sections: ExpertDraftSection[],
+  bookType: BookType,
+): number {
+  const bodyIndex = sections.findIndex((section) =>
+    bookType === 'script' ? true : section.id !== 'intro',
+  )
+  return bodyIndex >= 0 ? bodyIndex : 0
+}
+
+export function syncExpertDraftFromDraftStage(
+  draft: ExpertDraft,
+  draftStageBody: string,
+  bookType: BookType = 'short',
+): ExpertDraft {
+  if (draft.sections.length === 0) return draft
+
+  const normalizedBody = draftStageBody.replace(/\r\n?/g, '\n')
+  const lines = normalizedBody.split('\n')
+  const markers: Array<{ sectionIndex: number; lineIndex: number }> = []
+  let cursor = 0
+
+  draft.sections.forEach((section, sectionIndex) => {
+    const title = section.title.trim()
+    if (!title) return
+    for (let lineIndex = cursor; lineIndex < lines.length; lineIndex += 1) {
+      if (lines[lineIndex]!.trim() !== title) continue
+      markers.push({ sectionIndex, lineIndex })
+      cursor = lineIndex + 1
+      break
+    }
+  })
+
+  if (markers.length === 0) {
+    const targetIndex = firstDraftBodySectionIndex(draft.sections, bookType)
+    return {
+      ...draft,
+      sections: draft.sections.map((section, index) => ({
+        ...section,
+        body: index === targetIndex ? normalizedBody : '',
+      })),
+    }
+  }
+
+  const bodiesBySectionId = new Map(
+    draft.sections.map((section) => [section.id, '']),
+  )
+
+  markers.forEach((marker, markerIndex) => {
+    const nextMarker = markers[markerIndex + 1]
+    const bodyLines = trimBlankBoundaryLines(
+      lines.slice(marker.lineIndex + 1, nextMarker?.lineIndex ?? lines.length),
+    )
+    bodiesBySectionId.set(
+      draft.sections[marker.sectionIndex]!.id,
+      bodyLines.join('\n'),
+    )
+  })
+
+  const firstMarker = markers[0]!
+  const preambleLines = trimBlankBoundaryLines(lines.slice(0, firstMarker.lineIndex))
+  if (preambleLines.length > 0) {
+    const preamble = preambleLines.join('\n')
+    const targetIndex =
+      firstMarker.sectionIndex > 0 ? firstMarker.sectionIndex - 1 : firstMarker.sectionIndex
+    const targetSection = draft.sections[targetIndex]
+    if (targetSection) {
+      const current = bodiesBySectionId.get(targetSection.id) ?? ''
+      bodiesBySectionId.set(
+        targetSection.id,
+        current ? `${preamble}\n\n${current}` : preamble,
+      )
+    }
+  }
+
+  return {
+    ...draft,
+    sections: draft.sections.map((section) => ({
+      ...section,
+      body: bodiesBySectionId.get(section.id) ?? '',
+    })),
+  }
+}
+
+export function mapExpertDraftToDraftStage(
+  stages: Record<StageId, string>,
+  draft: ExpertDraft,
+): Record<StageId, string> {
+  return {
+    ...stages,
+    draft: combineExpertDraftSections(draft),
+  }
+}
+
+export function hydrateExpertDraftFromDraftStage(
+  draft: ExpertDraft,
+  draftStageBody: string,
+  bookType: BookType = 'short',
+): ExpertDraft {
+  const legacyBody = draftStageBody.trim()
+  if (!legacyBody || combineExpertDraftSections(draft).trim()) return draft
+
+  const targetIndex = draft.sections.findIndex((section) =>
+    bookType === 'script' ? true : section.id !== 'intro',
+  )
+  const safeIndex = targetIndex >= 0 ? targetIndex : 0
+  if (!draft.sections[safeIndex]) return draft
+
+  return syncExpertDraftFromDraftStage(draft, draftStageBody, bookType)
 }
 
 function chineseSectionNumber(n: number): string {

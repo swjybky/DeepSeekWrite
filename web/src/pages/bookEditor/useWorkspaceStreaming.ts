@@ -9,6 +9,7 @@ import type { ApplyToStageEditorPayload } from '../../pi/workspaceStageAgents'
 import type { BookWorkspaceSessionState } from '../../stores/workspaceStore'
 import { PLOT_STAGE_ID } from '../../workspaces/short/stages'
 import { isPlotChildStageId } from './stageEditing'
+import { syncWorkspaceStageTextarea } from './liveStageBody'
 
 type CommitWorkspaceSession = (
   bookId: string,
@@ -80,7 +81,7 @@ export function useWorkspaceStreaming({
       stageId: StageId,
       updater: (current: string) => string,
     ) => {
-      commitWorkspaceSession(bookId, (session) => {
+      const session = commitWorkspaceSession(bookId, (session) => {
         const current = session.stages[stageId] ?? ''
         const next = updater(current)
         if (next === current) return session
@@ -95,8 +96,15 @@ export function useWorkspaceStreaming({
           },
         }
       })
+      if (session && bookRef.current?.id === bookId) {
+        syncWorkspaceStageTextarea(
+          textareaRefsRef,
+          stageId,
+          session.stages[stageId] ?? '',
+        )
+      }
     },
-    [commitWorkspaceSession],
+    [bookRef, commitWorkspaceSession, textareaRefsRef],
   )
 
   const updateStage = useCallback(

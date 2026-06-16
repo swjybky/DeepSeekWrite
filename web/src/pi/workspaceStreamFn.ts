@@ -2,6 +2,7 @@ import { streamSimple } from '@earendil-works/pi-ai'
 import type { Api, Context, Model, SimpleStreamOptions } from '@earendil-works/pi-ai'
 import type { StreamFn } from '@earendil-works/pi-agent-core'
 import { createStreamFn } from '@earendil-works/pi-web-ui'
+import { toWorkspaceRequestModel } from './resolveWorkspaceChatModel'
 
 /** 浏览器/WebView 内无法直连、需走桌面壳本地转发的 provider。 */
 const CORS_PROXY_ALIASES = new Set([
@@ -50,11 +51,12 @@ export function createWorkspaceStreamFn(
     context: Context,
     options?: SimpleStreamOptions,
   ) => {
-    const proxied = applyWorkspaceCorsProxy(model)
-    if (proxied !== model) {
+    const requestModel = toWorkspaceRequestModel(model)
+    const proxied = applyWorkspaceCorsProxy(requestModel)
+    if (proxied !== requestModel) {
       return streamSimple(proxied, context, options)
     }
-    return piStreamFn(model, context, options)
+    return piStreamFn(requestModel, context, options)
   }
   return fn as StreamFn
 }

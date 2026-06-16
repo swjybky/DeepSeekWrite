@@ -18,6 +18,7 @@ import {
   getBookCovers,
   getAiModelConfig,
   getStoredWorkspaceRoot,
+  isBuiltinFreeTextModel,
   isPywebviewDesktopBundle,
   listBooks,
   listSkills,
@@ -288,126 +289,147 @@ function ModelConfigDialog({
                 <div className="model-config-empty">未配置文字模型</div>
               ) : (
                 <div className="model-config-list">
-                  {draft.text.models.map((model, index) => (
-                    <article className="model-config-item" key={`${model.id}-${index}`}>
-                      <div className="model-config-item-head">
-                        <label className="model-config-default">
-                          <input
-                            type="radio"
-                            name="defaultTextModel"
-                            checked={draft.text.default_model_id === model.id}
-                            onChange={() =>
-                              setDraft((prev) => ({
-                                ...prev,
-                                text: { ...prev.text, default_model_id: model.id },
-                              }))
-                            }
-                          />
-                          默认
-                        </label>
-                        <button
-                          type="button"
-                          className="btn-secondary btn-small"
-                          disabled={saving}
-                          onClick={() => removeModel(index)}
-                        >
-                          删除
-                        </button>
-                      </div>
-
-                      <div className="model-config-grid">
-                        <label className="field">
-                          <span className="field-label">配置 ID</span>
-                          <input
-                            type="text"
-                            value={model.id}
-                            onChange={(e) => updateModel(index, { id: e.target.value })}
-                            placeholder="deepseekflash"
-                          />
-                        </label>
-                        <label className="field">
-                          <span className="field-label">显示名称</span>
-                          <input
-                            type="text"
-                            value={model.label}
-                            onChange={(e) => updateModel(index, { label: e.target.value })}
-                            placeholder="DeepSeek Flash"
-                          />
-                        </label>
-                        <label className="field">
-                          <span className="field-label">模型来源</span>
-                          <input
-                            type="text"
-                            value={model.provider}
-                            onChange={(e) => updateModel(index, { provider: e.target.value })}
-                            placeholder="deepseek"
-                          />
-                        </label>
-                        <label className="field">
-                          <span className="field-label">模型名称</span>
-                          <input
-                            type="text"
-                            value={model.model_id}
-                            onChange={(e) => updateModel(index, { model_id: e.target.value })}
-                            placeholder="deepseek-v4-flash"
-                          />
-                        </label>
-                        <label className="field">
-                          <span className="field-label">API Key</span>
-                          <input
-                            type="password"
-                            value={model.api_key}
-                            onChange={(e) => updateModel(index, { api_key: e.target.value })}
-                            placeholder={TEXT_MODEL_API_KEY_PLACEHOLDER}
-                          />
-                        </label>
-                        <label className="field">
-                          <span className="field-label">API 地址</span>
-                          <input
-                            type="text"
-                            value={model.base_url ?? ''}
-                            onChange={(e) => updateModel(index, { base_url: e.target.value })}
-                            placeholder="https://api.example.com/v1"
-                          />
-                        </label>
-                        <label className="field">
-                          <span className="field-label">API 类型</span>
-                          <select
-                            value={model.api ?? ''}
-                            onChange={(e) => updateModel(index, { api: e.target.value })}
-                          >
-                            <option value="">默认</option>
-                            <option value="openai-completions">openai-completions</option>
-                            <option value="openai-responses">openai-responses</option>
-                            <option value="anthropic-messages">anthropic-messages</option>
-                            <option value="google-generative-ai">google-generative-ai</option>
-                          </select>
-                        </label>
-                        <div className="model-config-switches">
-                          <label className="model-config-check">
+                  {draft.text.models.map((model, index) => {
+                    const builtinFreeModel = isBuiltinFreeTextModel(model)
+                    return (
+                      <article
+                        className={
+                          builtinFreeModel
+                            ? 'model-config-item model-config-item--locked'
+                            : 'model-config-item'
+                        }
+                        key={`${model.id}-${index}`}
+                      >
+                        <div className="model-config-item-head">
+                          <label className="model-config-default">
                             <input
-                              type="checkbox"
-                              checked={Boolean(model.reasoning)}
-                              onChange={(e) =>
-                                updateModel(index, { reasoning: e.target.checked })
+                              type="radio"
+                              name="defaultTextModel"
+                              checked={draft.text.default_model_id === model.id}
+                              onChange={() =>
+                                setDraft((prev) => ({
+                                  ...prev,
+                                  text: { ...prev.text, default_model_id: model.id },
+                                }))
                               }
                             />
-                            推理
+                            默认
                           </label>
-                          <label className="model-config-check">
-                            <input
-                              type="checkbox"
-                              checked={Boolean(model.stream)}
-                              onChange={(e) =>
-                                updateModel(index, { stream: e.target.checked })
-                              }
-                            />
-                            流式
-                          </label>
+                          {builtinFreeModel ? (
+                            <span className="model-config-lock-tag">内置</span>
+                          ) : (
+                            <button
+                              type="button"
+                              className="btn-secondary btn-small"
+                              disabled={saving}
+                              onClick={() => removeModel(index)}
+                            >
+                              删除
+                            </button>
+                          )}
                         </div>
-                      </div>
-                    </article>
-                  ))}
+
+                        {builtinFreeModel ? (
+                          <div className="model-config-locked-summary">
+                            <strong>{model.label || 'DeepseekWriteFree'}</strong>
+                            <span>{model.model_id}</span>
+                          </div>
+                        ) : (
+                          <div className="model-config-grid">
+                            <label className="field">
+                              <span className="field-label">配置 ID</span>
+                              <input
+                                type="text"
+                                value={model.id}
+                                onChange={(e) => updateModel(index, { id: e.target.value })}
+                                placeholder="deepseekflash"
+                              />
+                            </label>
+                            <label className="field">
+                              <span className="field-label">显示名称</span>
+                              <input
+                                type="text"
+                                value={model.label}
+                                onChange={(e) => updateModel(index, { label: e.target.value })}
+                                placeholder="DeepSeek Flash"
+                              />
+                            </label>
+                            <label className="field">
+                              <span className="field-label">模型来源</span>
+                              <input
+                                type="text"
+                                value={model.provider}
+                                onChange={(e) => updateModel(index, { provider: e.target.value })}
+                                placeholder="deepseek"
+                              />
+                            </label>
+                            <label className="field">
+                              <span className="field-label">模型名称</span>
+                              <input
+                                type="text"
+                                value={model.model_id}
+                                onChange={(e) => updateModel(index, { model_id: e.target.value })}
+                                placeholder="deepseek-v4-flash"
+                              />
+                            </label>
+                            <label className="field">
+                              <span className="field-label">API Key</span>
+                              <input
+                                type="password"
+                                value={model.api_key}
+                                onChange={(e) => updateModel(index, { api_key: e.target.value })}
+                                placeholder={TEXT_MODEL_API_KEY_PLACEHOLDER}
+                              />
+                            </label>
+                            <label className="field">
+                              <span className="field-label">API 地址</span>
+                              <input
+                                type="text"
+                                value={model.base_url ?? ''}
+                                onChange={(e) => updateModel(index, { base_url: e.target.value })}
+                                placeholder="https://api.example.com/v1"
+                              />
+                            </label>
+                            <label className="field">
+                              <span className="field-label">API 类型</span>
+                              <select
+                                value={model.api ?? ''}
+                                onChange={(e) => updateModel(index, { api: e.target.value })}
+                              >
+                                <option value="">默认</option>
+                                <option value="openai-completions">openai-completions</option>
+                                <option value="openai-responses">openai-responses</option>
+                                <option value="anthropic-messages">anthropic-messages</option>
+                                <option value="google-generative-ai">google-generative-ai</option>
+                              </select>
+                            </label>
+                            <div className="model-config-switches">
+                              <label className="model-config-check">
+                                <input
+                                  type="checkbox"
+                                  checked={Boolean(model.reasoning)}
+                                  onChange={(e) =>
+                                    updateModel(index, { reasoning: e.target.checked })
+                                  }
+                                />
+                                推理
+                              </label>
+                              <label className="model-config-check">
+                                <input
+                                  type="checkbox"
+                                  checked={Boolean(model.stream)}
+                                  onChange={(e) =>
+                                    updateModel(index, { stream: e.target.checked })
+                                  }
+                                />
+                                流式
+                              </label>
+                            </div>
+                          </div>
+                        )}
+                      </article>
+                    )
+                  })}
                 </div>
               )}
             </section>

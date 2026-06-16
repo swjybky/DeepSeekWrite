@@ -14,6 +14,16 @@ type ResolvedModelConfig = AiModelConfig & {
   model: Model<Api>
 }
 
+const WORKSPACE_MODEL_REAL_ID_KEY = '__writeClawRealModelId'
+const WORKSPACE_MODEL_CONFIG_ID_KEY = '__writeClawConfigId'
+
+type LegacyWorkspaceDisplayModel = Model<Api> & {
+  [WORKSPACE_MODEL_REAL_ID_KEY]?: string
+  [WORKSPACE_MODEL_CONFIG_ID_KEY]?: string
+}
+
+const workspaceModelButtonLabels = new WeakMap<ParentNode, string>()
+
 type CustomProviderStoreApi =
   | 'openai-completions'
   | 'openai-responses'
@@ -161,6 +171,106 @@ function createOwnerModel(config: AiModelConfig): Model<Api> {
   return model
 }
 
+function applyConfiguredModelLabel(
+  config: AiModelConfig,
+  model: Model<Api>,
+): Model<Api> {
+  const displayModel = {
+    ...model,
+    [WORKSPACE_MODEL_CONFIG_ID_KEY]: config.id,
+  } as LegacyWorkspaceDisplayModel
+  const label = config.label.trim()
+  if (label) displayModel.name = label
+  return displayModel
+}
+
+export function toWorkspaceRequestModel(model: Model<Api>): Model<Api> {
+  const displayModel = model as LegacyWorkspaceDisplayModel
+  const realId = displayModel[WORKSPACE_MODEL_REAL_ID_KEY]
+  if (!realId || realId === model.id) return model
+
+  const requestModel = { ...displayModel }
+  delete requestModel[WORKSPACE_MODEL_REAL_ID_KEY]
+  delete requestModel[WORKSPACE_MODEL_CONFIG_ID_KEY]
+  return { ...requestModel, id: realId } as Model<Api>
+}
+
+function sameConfiguredModel(
+  config: ResolvedModelConfig,
+  currentModel: Model<Api> | null,
+): boolean {
+  const current = currentModel as LegacyWorkspaceDisplayModel | null
+  if (current?.[WORKSPACE_MODEL_CONFIG_ID_KEY]) {
+    return config.id === current[WORKSPACE_MODEL_CONFIG_ID_KEY]
+  }
+  const requestModel = currentModel ? toWorkspaceRequestModel(currentModel) : null
+  return (
+    config.model.provider === requestModel?.provider &&
+    config.model.id === requestModel?.id
+  )
+}
+
+export function workspaceModelIdentity(
+  model: Model<Api> | null | undefined,
+): string {
+  if (!model) return ''
+  const current = model as LegacyWorkspaceDisplayModel
+  if (current[WORKSPACE_MODEL_CONFIG_ID_KEY]) {
+    return `config:${current[WORKSPACE_MODEL_CONFIG_ID_KEY]}`
+  }
+  const requestModel = toWorkspaceRequestModel(model)
+  return `${requestModel.provider}:${requestModel.id}`
+}
+
+export function workspaceModelDisplayName(
+  model: Model<Api> | null | undefined,
+): string {
+  return trimString(model?.name) || trimString(model?.id)
+}
+
+export function syncWorkspaceModelButtonLabel(
+  root: ParentNode | null | undefined,
+  model: Model<Api> | null | undefined,
+): void {
+  if (!root || typeof window === 'undefined' || !model) return
+  const label = workspaceModelDisplayName(model)
+  if (!label) return
+
+  const requestModel = toWorkspaceRequestModel(model)
+  const candidates = new Set(
+    [trimString(model.id), trimString(requestModel.id)].filter(Boolean),
+  )
+  const previousLabel = workspaceModelButtonLabels.get(root)
+  if (previousLabel && previousLabel !== label) {
+    candidates.add(previousLabel)
+  }
+  configuredModelsCache?.configs.forEach((config) => {
+    const configuredLabel = workspaceModelDisplayName(config.model)
+    if (configuredLabel) candidates.add(configuredLabel)
+    if (config.model.id) candidates.add(config.model.id)
+    const configuredRequestModel = toWorkspaceRequestModel(config.model)
+    if (configuredRequestModel.id) candidates.add(configuredRequestModel.id)
+  })
+
+  if (!candidates.size) return
+
+  const apply = () => {
+    root
+      .querySelectorAll<HTMLSpanElement>('message-editor button span.ml-1')
+      .forEach((span) => {
+        const current = span.textContent?.trim() ?? ''
+        if (candidates.has(current) && current !== label) {
+          span.textContent = label
+        }
+      })
+  }
+
+  apply()
+  window.requestAnimationFrame(apply)
+  window.setTimeout(apply, 50)
+  workspaceModelButtonLabels.set(root, label)
+}
+
 type ConfiguredModelsPayload = {
   defaults: AiModelDefaults
   configs: ResolvedModelConfig[]
@@ -256,11 +366,14 @@ async function buildConfiguredModels(
   const configs: ResolvedModelConfig[] = []
   for (const config of defaults.models) {
     if (config.base_url) {
-      configs.push({ ...config, model: createOwnerModel(config) })
+      configs.push({
+        ...config,
+        model: applyConfiguredModelLabel(config, createOwnerModel(config)),
+      })
     } else {
       const model = resolveModel(config.provider, config.model_id)
       if (!model) continue
-      configs.push({ ...config, model })
+      configs.push({ ...config, model: applyConfiguredModelLabel(config, model) })
     }
   }
   if (!configs.length) return null
@@ -380,61 +493,6 @@ export async function resolveWorkspaceChatModel(): Promise<Model<Api>> {
   }
 }
 
-const PROVIDER_CATEGORY_LABELS: Record<string, string> = {
-  deepseek: 'DeepSeek',
-  xiaomi: '小米 MiMo',
-  openai: 'OpenAI',
-  google: 'Google Gemini',
-  zai: '智谱 GLM',
-  'moonshotai-cn': 'Kimi',
-  moonshot: 'Kimi',
-  'kimi-coding': 'Kimi Coding',
-  anthropic: 'Anthropic',
-}
-
-const PROVIDER_GROUP_ORDER = [
-  'deepseek',
-  'xiaomi',
-  'openai',
-  'google',
-  'zai',
-  'moonshotai-cn',
-  'moonshot',
-  'anthropic',
-]
-
-function providerCategoryLabel(provider: string): string {
-  const key = provider.trim().toLowerCase()
-  if (PROVIDER_CATEGORY_LABELS[key]) return PROVIDER_CATEGORY_LABELS[key]
-  if (!key) return '其他'
-  return key.charAt(0).toUpperCase() + key.slice(1)
-}
-
-function groupConfigsByProvider(
-  configs: ResolvedModelConfig[],
-): { provider: string; label: string; items: { config: ResolvedModelConfig; index: number }[] }[] {
-  const buckets = new Map<string, { config: ResolvedModelConfig; index: number }[]>()
-  configs.forEach((config, index) => {
-    const key = config.provider.trim().toLowerCase() || 'other'
-    const list = buckets.get(key) ?? []
-    list.push({ config, index })
-    buckets.set(key, list)
-  })
-
-  const orderedKeys = [
-    ...PROVIDER_GROUP_ORDER.filter((key) => buckets.has(key)),
-    ...[...buckets.keys()]
-      .filter((key) => !PROVIDER_GROUP_ORDER.includes(key))
-      .sort((a, b) => providerCategoryLabel(a).localeCompare(providerCategoryLabel(b), 'zh')),
-  ]
-
-  return orderedKeys.map((provider) => ({
-    provider,
-    label: providerCategoryLabel(provider),
-    items: buckets.get(provider) ?? [],
-  }))
-}
-
 function createModelDialogItem(
   config: ResolvedModelConfig,
   index: number,
@@ -455,7 +513,7 @@ function createModelDialogItem(
 
   const meta = document.createElement('span')
   meta.className = 'wc-model-dialog-item-meta'
-  meta.textContent = config.model_id
+  meta.textContent = `${config.provider} / ${config.model_id}`
 
   const badge = document.createElement('span')
   badge.className = 'wc-model-dialog-item-badge'
@@ -478,9 +536,7 @@ export async function openWorkspaceConfiguredModelSelector(
   if (!configured) return false
 
   const currentIndex = configured.configs.findIndex(
-    (config) =>
-      config.model.provider === currentModel?.provider &&
-      config.model.id === currentModel?.id,
+    (config) => sameConfiguredModel(config, currentModel),
   )
   return new Promise<boolean>((resolve) => {
     const overlay = document.createElement('div')
@@ -527,26 +583,15 @@ export async function openWorkspaceConfiguredModelSelector(
       }
     }
 
-    for (const group of groupConfigsByProvider(configured.configs)) {
-      const section = document.createElement('section')
-      section.className = 'wc-model-dialog-group'
+    const list = document.createElement('div')
+    list.className = 'wc-model-dialog-list'
 
-      const groupTitle = document.createElement('h3')
-      groupTitle.className = 'wc-model-dialog-group-title'
-      groupTitle.textContent = group.label
-
-      const list = document.createElement('div')
-      list.className = 'wc-model-dialog-list'
-
-      for (const { config, index } of group.items) {
-        list.appendChild(
-          createModelDialogItem(config, index, currentIndex, selectModel),
-        )
-      }
-
-      section.append(groupTitle, list)
-      body.appendChild(section)
-    }
+    configured.configs.forEach((config, index) => {
+      list.appendChild(
+        createModelDialogItem(config, index, currentIndex, selectModel),
+      )
+    })
+    body.appendChild(list)
 
     close.addEventListener('click', cleanup)
     overlay.addEventListener('click', (event) => {

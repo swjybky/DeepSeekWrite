@@ -15,7 +15,9 @@ import {
   ExpertDraftEditor as ScriptExpertDraftEditor,
 } from '../../workspaces/script/expertDraft/ExpertDraftEditor'
 import { PLOT_STAGE_ID } from '../../workspaces/short/stages'
-import { expertDraftSectionTreeLabel } from './expertDraftUtils'
+import {
+  expertDraftSectionTreeLabel,
+} from './expertDraftUtils'
 import {
   plotChildStagesForBook,
   resolvePlotEditorStageId,
@@ -78,6 +80,7 @@ export function useWorkspaceViewModel({
               id: child.id,
               label: child.label,
             })),
+            branchClickBehavior: 'toggle' as const,
           }
         : {}),
     }))

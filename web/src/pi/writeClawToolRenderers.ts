@@ -30,6 +30,7 @@ const WRITE_CLAW_TOOL_NAMES = [
   'read_workspace_content',
   'search_workspace_text',
   'read_linked_material_content',
+  'switch_storyline_stage',
   'copy_stage_to_format_conversion',
   'global_text_replace',
   'replace_current_stage_text',
@@ -40,9 +41,13 @@ const WRITE_CLAW_TOOL_NAMES = [
   'write_skill_editor',
   'create_draft_sections',
   'create_character_state_sections',
+  'initialize_expert_draft',
+  'edit_expert_draft_section',
   'start_expert_writing',
   'read_expert_draft_section',
+  'replace_section_body_text',
   'write_section_body',
+  'replace_character_state_text',
   'write_character_state',
   'narrative_template',
   'logline_expansion_prompts',
@@ -126,6 +131,13 @@ function summarizeToolCall(
         ? verb('正在读取关联素材', '已读取关联素材') + `「${label}」`
         : verb('正在读取关联素材', '已读取关联素材')
     }
+    case 'switch_storyline_stage': {
+      const stageId = pickString(params, 'target_stage_id', 'stage_id')
+      const label = resolveStageLabel(stageId)
+      return label
+        ? verb('正在切换剧情方向', '已切换剧情方向') + `「${label}」`
+        : verb('正在切换剧情方向', '已切换剧情方向')
+    }
     case 'copy_stage_to_format_conversion':
       return verb('正在复制到格式转换', '已复制到格式转换')
     case 'global_text_replace':
@@ -177,6 +189,21 @@ function summarizeToolCall(
         ? verb('正在创建人物状态', '已创建人物状态') + `（${count} 项）`
         : verb('正在创建人物状态列表', '已创建人物状态列表')
     }
+    case 'initialize_expert_draft': {
+      const sections = params?.sections
+      const count = Array.isArray(sections) ? sections.length : 0
+      return count > 0
+        ? verb('正在初始化正文', '已初始化正文') + `（${count} 节）`
+        : verb('正在初始化正文', '已初始化正文')
+    }
+    case 'edit_expert_draft_section': {
+      const hasReplacements =
+        Array.isArray(params?.replacements) && params.replacements.length > 0
+      if (!done) {
+        return '正在编辑正文'
+      }
+      return hasReplacements ? '已编辑正文' : '已读取正文'
+    }
     case 'start_expert_writing':
       return verb('正在启动专家分节写作', '已启动专家分节写作')
     case 'read_expert_draft_section': {
@@ -185,8 +212,12 @@ function summarizeToolCall(
         ? verb('正在读取分节', '已读取分节') + `「${sectionId}」`
         : verb('正在读取专家分节', '已读取专家分节')
     }
+    case 'replace_section_body_text':
+      return verb('正在替换正文片段', '正文片段已替换')
     case 'write_section_body':
       return verb('正在写入正文', '正文已写入')
+    case 'replace_character_state_text':
+      return verb('正在替换人物状态片段', '人物状态片段已替换')
     case 'write_character_state':
       return verb('正在写入人物状态', '人物状态已写入')
     case 'narrative_template': {

@@ -4,9 +4,16 @@ import type {
   Book,
   StageId,
 } from '../../bridge'
+import {
+  mergeStagePatchIntoAll,
+  normalizeExpertDraft,
+} from '../../bridge'
 import type { BookWorkspaceSessionState } from '../../stores/workspaceStore'
 import { PLOT_STAGE_ID } from '../../workspaces/short/stages'
+import { syncExpertDraftFromDraftStage } from './expertDraftUtils'
+import { syncWorkspaceStageTextarea } from './liveStageBody'
 import {
+  defaultPlotChildStageForBook,
   isPlotChildStageId,
   resolvePlotEditorStageId,
 } from './stageEditing'
@@ -31,6 +38,9 @@ type UseWorkspaceStageRuntimeInput = {
   commitWorkspaceSession: CommitWorkspaceSession
   cancelTokenFlush: (stageId: StageId) => void
   updateStage: (stageId: StageId, updater: (current: string) => string) => void
+  textareaRefsRef: MutableRefObject<
+    Partial<Record<StageId, HTMLTextAreaElement | null>>
+  >
 }
 
 export function useWorkspaceStageRuntime({
@@ -44,11 +54,15 @@ export function useWorkspaceStageRuntime({
   commitWorkspaceSession,
   cancelTokenFlush,
   updateStage,
+  textareaRefsRef,
 }: UseWorkspaceStageRuntimeInput) {
   const setActiveBookStage = useCallback(
     (stageId: StageId) => {
       const currentBookId = bookRef.current?.id
-      const nextPlotChild = ''
+      const nextPlotChild =
+        stageId === PLOT_STAGE_ID
+          ? defaultPlotChildStageForBook(bookRef.current)
+          : ''
       activeStageRef.current = stageId
       setActiveStage(stageId)
       activePlotChildStageRef.current = nextPlotChild
@@ -138,6 +152,35 @@ export function useWorkspaceStageRuntime({
         tokenBuffersByBookRef.current[currentBookId] = buffers
         tokenBuffersRef.current = buffers
       }
+      if (targetStage === 'draft' && currentBookId) {
+        const session = commitWorkspaceSession(currentBookId, (session) => {
+          const updatedStages = { ...session.stages, draft: value }
+          const nextExpertDraft = normalizeExpertDraft(
+            syncExpertDraftFromDraftStage(
+              session.expertDraft,
+              value,
+              session.book.book_type,
+            ),
+            false,
+            session.book.book_type,
+          )
+          return {
+            ...session,
+            stages: updatedStages,
+            expertDraft: nextExpertDraft,
+            book: {
+              ...session.book,
+              stages: mergeStagePatchIntoAll(session.book.stages, updatedStages),
+              content: value,
+              expert_draft: nextExpertDraft,
+            },
+          }
+        })
+        if (session && bookRef.current?.id === currentBookId) {
+          syncWorkspaceStageTextarea(textareaRefsRef, 'draft', value)
+        }
+        return
+      }
       updateStage(targetStage, () => value)
     },
     [
@@ -145,6 +188,8 @@ export function useWorkspaceStageRuntime({
       activeStageRef,
       bookRef,
       cancelTokenFlush,
+      commitWorkspaceSession,
+      textareaRefsRef,
       tokenBuffersByBookRef,
       tokenBuffersRef,
       updateStage,

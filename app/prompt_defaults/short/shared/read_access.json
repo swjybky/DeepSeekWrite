@@ -1,9 +1,15 @@
 {
+  "expert_draft_coordinator": {
+    "workspace": [
+      "outline",
+      "draft"
+    ],
+    "material": []
+  },
   "character_design": {
     "workspace": [
       "character_design",
-      "plot_design",
-      "plot_refine"
+      "plot_design"
     ],
     "material": [
       "character"
@@ -12,15 +18,7 @@
   "expert_section_writer": {
     "workspace": [
       "outline",
-      "draft"
-    ],
-    "material": [
-      "draft_excerpt"
-    ]
-  },
-  "expert_draft_coordinator": {
-    "workspace": [
-      "outline",
+      "plot_refine",
       "draft"
     ],
     "material": [
@@ -30,8 +28,8 @@
   "plot_design": {
     "workspace": [
       "character_design",
-      "intro_design",
       "plot_design",
+      "intro_design",
       "plot_refine"
     ],
     "material": [
@@ -44,8 +42,8 @@
   },
   "outline": {
     "workspace": [
-      "intro_design",
       "plot_design",
+      "intro_design",
       "plot_refine",
       "outline",
       "character_design"

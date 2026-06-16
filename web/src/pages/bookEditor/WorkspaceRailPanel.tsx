@@ -10,6 +10,7 @@ type TreeStage = {
   children?: { id: string; label: string }[]
   createChildLabel?: string
   createChildDisabled?: boolean
+  branchClickBehavior?: 'select' | 'toggle'
 }
 
 type TreeBook = {

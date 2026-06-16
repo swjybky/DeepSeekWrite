@@ -13,10 +13,10 @@ export type PlotChildStageId = (typeof PLOT_CHILD_STAGES)[number]['id']
  * 「剧情」在 UI 上是父阶段，内容仍拆分保存在 PLOT_CHILD_STAGES 三个槽位。
  */
 export const SHORT_WORKSPACE_STAGES = [
-  { id: 'character_design', label: '人物设计' },
+  { id: 'character_design', label: '人物' },
   { id: 'plot_design', label: '剧情' },
   { id: 'outline', label: '大纲' },
-  { id: 'draft', label: '正文编写' },
+  { id: 'draft', label: '正文' },
 ] as const
 
 /**
@@ -24,7 +24,7 @@ export const SHORT_WORKSPACE_STAGES = [
  * 不直接等同左侧可见阶段，因为「剧情」父阶段包含三个子文本。
  */
 export const SHORT_WORKSPACE_CONTENT_STAGES = [
-  { id: 'character_design', label: '人物设计' },
+  { id: 'character_design', label: '人物' },
   ...PLOT_CHILD_STAGES,
   { id: 'outline', label: '大纲' },
   { id: 'draft', label: '正文编写' },

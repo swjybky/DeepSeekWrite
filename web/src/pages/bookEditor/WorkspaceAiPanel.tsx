@@ -14,6 +14,7 @@ import {
   ExpertDraftAiChat as ScriptExpertDraftAiChat,
 } from '../../workspaces/script/expertDraft/ExpertDraftAiChat'
 import type {
+  ExpertDraftSectionContentField,
   GetExpertDraftSectionContent,
   RunExpertDraftSectionWriterOptions,
 } from '../../workspaces/short/expertDraft/sectionWriter'
@@ -23,12 +24,18 @@ import {
 } from '../../workspaces/short/stageReadAccess'
 import { PLOT_STAGE_ID } from '../../workspaces/short/stages'
 import type { BookWorkspaceSessionState } from '../../stores/workspaceStore'
+import { resolveLiveWorkspaceStageBody } from './liveStageBody'
 import {
   resolveWorkspaceBookGenre,
   resolveWorkspaceStagesForBook,
 } from '../../domain/workspace'
-import { resolveReadAccessForBook } from './stageEditing'
+import {
+  isPlotChildStageId,
+  plotChildStagesForBook,
+  resolveReadAccessForBook,
+} from './stageEditing'
 import { WORKSPACE_AI_INCLUDE_PI_ARTIFACTS } from './workspaceTypes'
+import type { PlotChildStageId } from './workspaceTypes'
 
 type StartExpertWriting = (
   bookId: string,
@@ -61,6 +68,7 @@ type Props = {
     stage: StageId,
     payload: ApplyToStageEditorPayload,
   ) => void
+  selectPlotChildForBook: (bookId: string, childId: PlotChildStageId) => void
   saveBookSession: (bookId: string) => Promise<Book | null>
   updateExpertDraftForBook: (
     bookId: string,
@@ -68,6 +76,12 @@ type Props = {
   ) => void
   startExpertWritingForBook: StartExpertWriting
   getRenderedExpertDraftSectionContent: GetExpertDraftSectionContent
+  syncExpertDraftSectionField?: (
+    sectionId: string,
+    field: ExpertDraftSectionContentField,
+    body: string,
+  ) => void
+  onExpertDraftStageBodyChange: (body: string) => void
   bumpActiveExpertChatEpoch: () => void
   bumpActiveStageChatEpoch: (stageId: StageId) => void
 }
@@ -87,10 +101,13 @@ export function WorkspaceAiPanel({
   workspaceSessionsRef,
   getRenderedWorkspaceStageBody,
   applyToStageEditorForBook,
+  selectPlotChildForBook,
   saveBookSession,
   updateExpertDraftForBook,
   startExpertWritingForBook,
   getRenderedExpertDraftSectionContent,
+  syncExpertDraftSectionField,
+  onExpertDraftStageBodyChange,
   bumpActiveExpertChatEpoch,
   bumpActiveStageChatEpoch,
 }: Props) {
@@ -188,12 +205,15 @@ export function WorkspaceAiPanel({
                     activeStageContentId={activeContentStageForLayer}
                     stageBody={session.stages[activeContentStageForLayer] ?? ''}
                     getCurrentStageBody={(stageId) => {
-                      const sid = (stageId ?? s.id) as StageId
-                      if (isVisibleBook) {
-                        const rendered = getRenderedWorkspaceStageBody(sid)
-                        if (rendered !== undefined) return rendered
-                      }
-                      return workspaceSessionsRef.current[session.book.id]?.stages[sid]
+                      const sid = (stageId ?? activeContentStageForLayer) as StageId
+                      return resolveLiveWorkspaceStageBody({
+                        sessionBookId: session.book.id,
+                        activeBookId: book.id,
+                        stageId: sid,
+                        fallbackStages: session.stages,
+                        workspaceSessionsRef,
+                        getRenderedWorkspaceStageBody,
+                      })
                     }}
                     allStages={session.stages}
                     linkedMaterial={session.linkedMaterial}
@@ -203,6 +223,14 @@ export function WorkspaceAiPanel({
                     applyToStageEditor={(payload) =>
                       applyToStageEditorForBook(session.book.id, s.id, payload)
                     }
+                    selectPlotChildStage={(stageId) => {
+                      if (!isPlotChildStageId(stageId)) return
+                      const allowed = plotChildStagesForBook(session.book).some(
+                        (child) => child.id === stageId,
+                      )
+                      if (!allowed) return
+                      selectPlotChildForBook(session.book.id, stageId)
+                    }}
                     onRequestSave={async () => {
                       await saveBookSession(session.book.id)
                     }}
@@ -257,6 +285,32 @@ export function WorkspaceAiPanel({
                   isVisibleBook
                     ? getRenderedExpertDraftSectionContent
                     : undefined
+                }
+                syncExpertDraftSectionField={
+                  isVisibleBook ? syncExpertDraftSectionField : undefined
+                }
+                getCurrentWorkspaceStageBody={(stageId) =>
+                  resolveLiveWorkspaceStageBody({
+                    sessionBookId: session.book.id,
+                    activeBookId: book.id,
+                    stageId,
+                    fallbackStages: session.stages,
+                    workspaceSessionsRef,
+                    getRenderedWorkspaceStageBody,
+                  })
+                }
+                getExpertDraftStageBody={() =>
+                  resolveLiveWorkspaceStageBody({
+                    sessionBookId: session.book.id,
+                    activeBookId: book.id,
+                    stageId: 'draft',
+                    fallbackStages: session.stages,
+                    workspaceSessionsRef,
+                    getRenderedWorkspaceStageBody,
+                  })
+                }
+                applyExpertDraftStageBody={(body) =>
+                  onExpertDraftStageBodyChange(body)
                 }
               />
             </div>

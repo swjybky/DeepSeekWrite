@@ -259,7 +259,7 @@ export const lineNoiseScanTool = defineTool({
 
 export type ApplyToPayload = {
   text: string
-  mode: 'replace' | 'append'
+  mode: 'replace'
 }
 
 export function buildWriteWorkspaceEditorTool(opts: {
@@ -267,15 +267,14 @@ export function buildWriteWorkspaceEditorTool(opts: {
   stageLabel: string
   applyToStageEditor?: (p: ApplyToPayload) => void
 }) {
-  const modeSchema = Type.Union(
-    [Type.Literal('replace'), Type.Literal('append')],
-    { description: 'replace：覆盖当前编辑区全文；append：在文末追加' },
-  )
+  const modeSchema = Type.Literal('replace', {
+    description: '只能填写 replace：覆盖当前编辑区全文；不支持追加。',
+  })
   return defineTool({
     name: 'write_workspace_editor',
     label: '写入编辑区',
     description:
-      '把当前阶段应产出的正文稿件写入当前文本编辑框。仅写入该阶段的创作正文，不要写入分析报告、修改意见、过程说明或与阶段无关的内容；这些留在对话中回复用户即可。每次调用直接写入当前文本编辑框，不需要和用户确认。',
+      '覆盖写入工具：只在当前文本编辑框为空白时，用它写入一份完整稿件。当前文本已有内容时，应使用编辑替换工具按原文片段修改，不要整段覆盖。仅写入该阶段的创作正文，不要写入分析报告、修改意见、过程说明或与阶段无关的内容；这些留在对话中回复用户即可。',
     parameters: Type.Object({
       text: Type.String({
         description: '当前阶段正文稿件（建议 Markdown）。不含分析报告、修改意见或过程说明。',
@@ -293,11 +292,7 @@ export function buildWriteWorkspaceEditorTool(opts: {
       }
       apply({ text: t, mode })
       const label = opts.stageLabel
-      return textBlock(
-        mode === 'replace'
-          ? `已用新内容覆盖「${label}」编辑区。`
-          : `已将内容追加到「${label}」编辑区文末。`,
-      )
+      return textBlock(`已用新内容覆盖「${label}」编辑区。`)
     },
   })
 }

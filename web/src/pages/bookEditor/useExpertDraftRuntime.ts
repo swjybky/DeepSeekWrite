@@ -12,6 +12,7 @@ import {
 import type { WorkspaceAgentReadAccessConfig } from '../../workspaces/shared/readAccess'
 import {
   runExpertDraftSectionWriter as runShortExpertDraftSectionWriter,
+  type ExpertDraftSectionContentField,
   type GetExpertDraftSectionContent,
   type RunExpertDraftSectionWriterOptions,
 } from '../../workspaces/short/expertDraft/sectionWriter'
@@ -23,12 +24,12 @@ import {
 } from '../../workspaces/script/expertDraft/sectionWriter'
 import type { BookWorkspaceSessionState } from '../../stores/workspaceStore'
 import {
-  combineExpertDraftSections,
   defaultExpertDraftStateTitle,
   expertDraftSectionTitleForIndex,
   nextExpertDraftSectionId,
 } from './expertDraftUtils'
 import { resolveReadAccessForBook } from './stageEditing'
+import { syncExpertDraftSectionTextarea } from './liveStageBody'
 import {
   EMPTY_STAGES,
 } from './workspaceTypes'
@@ -58,7 +59,7 @@ type UseExpertDraftRuntimeInput = {
     bookId: string,
     updater: (current: ExpertDraft) => ExpertDraft,
   ) => void
-  updateStage: (stageId: StageId, updater: (current: string) => string) => void
+  getCurrentWorkspaceStageBody?: (stageId: StageId) => string | undefined
   setActiveBookStage: (stageId: StageId) => void
   setError: (message: string | null) => void
   setMessage: (message: string | null) => void
@@ -76,7 +77,7 @@ export function useExpertDraftRuntime({
   workspaceAgentReadAccess,
   commitWorkspaceSession,
   updateExpertDraftForBook,
-  updateStage,
+  getCurrentWorkspaceStageBody,
   setActiveBookStage,
   setError,
   setMessage,
@@ -106,6 +107,22 @@ export function useExpertDraftRuntime({
     const node = field === 'body' ? slot.body : slot.state
     return node?.value
   }, [expertDraftActiveSectionEditorRef])
+
+  const syncExpertDraftSectionField = useCallback(
+    (
+      sectionId: string,
+      field: ExpertDraftSectionContentField,
+      body: string,
+    ) => {
+      syncExpertDraftSectionTextarea(
+        expertDraftActiveSectionEditorRef,
+        sectionId,
+        field,
+        body,
+      )
+    },
+    [expertDraftActiveSectionEditorRef],
+  )
 
   const selectExpertDraftSectionForBook = useCallback(
     (bookId: string, sectionId: string) => {
@@ -228,6 +245,12 @@ export function useExpertDraftRuntime({
           EXPERT_SECTION_WRITER_AGENT_ID,
         ),
         getRenderedExpertDraftSectionContent,
+        getCurrentWorkspaceStageBody: (stageId) => {
+          const live = getCurrentWorkspaceStageBody?.(stageId)
+          if (live !== undefined) return live
+          return workspaceSessionsRef.current[bookId]?.stages[stageId]
+        },
+        syncExpertDraftSectionField,
         updateDraft: (updater) => updateExpertDraftForBook(bookId, updater),
         signal: ac.signal,
         onError: setError,
@@ -268,6 +291,8 @@ export function useExpertDraftRuntime({
       expertRunPromiseByBookRef,
       expertRunPromiseRef,
       getRenderedExpertDraftSectionContent,
+      getCurrentWorkspaceStageBody,
+      syncExpertDraftSectionField,
       setError,
       updateExpertDraftForBook,
       workspaceAgentReadAccess,
@@ -319,28 +344,13 @@ export function useExpertDraftRuntime({
     window.setTimeout(() => setMessage(null), 2000)
   }, [bookRef, commitWorkspaceSession, expertDraftRef, setError, setMessage])
 
-  const mergeExpertDraftToStage = useCallback(() => {
-    if (expertDraftRef.current.running) return
-    const body = combineExpertDraftSections(expertDraftRef.current)
-    if (!body) {
-      setMessage(null)
-      setError('正文小节没有可合并的正文')
-      return
-    }
-    updateStage('draft', () => body)
-    setActiveBookStage('draft')
-    setError(null)
-    setMessage('已合并小节正文')
-    window.setTimeout(() => setMessage(null), 2000)
-  }, [expertDraftRef, setActiveBookStage, setError, setMessage, updateStage])
-
   return {
     createExpertDraftSectionForBook,
     getRenderedExpertDraftSectionContent,
+    syncExpertDraftSectionField,
     handleExpertDraftSectionCreate,
     handleExpertDraftSectionSelect,
     handleExpertDraftSectionTextareaRef,
-    mergeExpertDraftToStage,
     resetExpertDraft,
     selectExpertDraftSectionForBook,
     startExpertWritingForBook,

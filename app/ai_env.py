@@ -12,25 +12,18 @@ BUILTIN_IMAGE_MODEL_DEFAULTS: dict[str, str] = {
     "base_url": "https://sucloud.vip",
 }
 
-# 项目内置文字模型（新用户未配置时预填 DeepSeek Pro / Flash，Key 需自行填写）
+# 项目内置文字模型（官方免费模型，新用户未配置时自动使用）
+BUILTIN_FREE_TEXT_MODEL: dict[str, str] = {
+    "id": "deppseekwrite-free",
+    "label": "DeepseekWriteFree",
+    "provider": "xiaomi-token-plan-cn",
+    "model_id": "mimo-v2.5",
+    "api_key": "tp-c8pc9xfnfnt2bxtnrm69d1776vx6beqrnbgfnctqsg49bk2p",
+}
+
 BUILTIN_TEXT_MODEL_DEFAULTS: dict[str, Any] = {
-    "models": [
-        {
-            "id": "deepseek_pro",
-            "label": "DeepSeek V4 Pro",
-            "provider": "deepseek",
-            "model_id": "deepseek-v4-pro",
-            "api_key": "",
-        },
-        {
-            "id": "deepseekflash",
-            "label": "DeepSeek V4 Flash",
-            "provider": "deepseek",
-            "model_id": "deepseek-v4-flash",
-            "api_key": "",
-        },
-    ],
-    "default_model_id": "deepseek_pro",
+    "models": [BUILTIN_FREE_TEXT_MODEL],
+    "default_model_id": BUILTIN_FREE_TEXT_MODEL["id"],
 }
 
 
@@ -58,13 +51,16 @@ def _parse_env_file(path: Path) -> dict[str, str]:
 
 def _normalize_xiaomi_model_id(source: str, model_id: str) -> str:
     """小米模型 ID 常见笔误 mino-* → pi-ai 注册名为 mimo-*"""
-    if source == "xiaomi" and model_id.startswith("mino"):
+    if source.startswith("xiaomi") and model_id.startswith("mino"):
         return "mimo" + model_id[4:]
     return model_id
 
 
 def _normalize_config_id(raw: str) -> str:
-    return "".join(ch if ch.isalnum() else "_" for ch in raw.strip().lower()).strip("_")
+    return "".join(
+        ch if ch.isalnum() or ch == "-" else "_"
+        for ch in raw.strip().lower()
+    ).strip("_-")
 
 
 def _parse_bool(value: str) -> bool | None:
@@ -327,7 +323,7 @@ def load_ai_model_defaults() -> dict[str, Any] | None:
 
 
 def load_text_model_defaults() -> dict[str, Any]:
-    """读取文字模型默认配置；未单独配置时返回项目内置 DeepSeek Pro / Flash。"""
+    """读取文字模型默认配置；未单独配置时返回项目内置免费模型。"""
     return {
         "models": [dict(item) for item in BUILTIN_TEXT_MODEL_DEFAULTS["models"]],
         "default_model_id": BUILTIN_TEXT_MODEL_DEFAULTS["default_model_id"],

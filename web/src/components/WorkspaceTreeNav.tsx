@@ -6,6 +6,7 @@ export type WorkspaceTreeStage = {
   children?: WorkspaceTreeStageChild[]
   createChildLabel?: string
   createChildDisabled?: boolean
+  branchClickBehavior?: 'select' | 'toggle'
 }
 
 export type WorkspaceTreeStageChild = {
@@ -184,6 +185,11 @@ export function WorkspaceTreeNav({
   ) => {
     const stageHasChildren = hasStageChildren(stage)
     const stageExpanded = isStageExpanded(stage.id, stage)
+    const branchClickBehavior = stage.branchClickBehavior ?? 'select'
+    const handleBranchClick =
+      branchClickBehavior === 'toggle'
+        ? () => toggleStage(stage.id)
+        : options.onSelectStage
 
     if (!stageHasChildren) {
       return (
@@ -212,7 +218,10 @@ export function WorkspaceTreeNav({
                 ? 'workspace-tree-stage workspace-tree-stage--active workspace-tree-stage--branch'
                 : 'workspace-tree-stage workspace-tree-stage--branch'
             }
-            onClick={options.onSelectStage}
+            aria-expanded={
+              branchClickBehavior === 'toggle' ? stageExpanded : undefined
+            }
+            onClick={handleBranchClick}
           >
             <span className="workspace-tree-stage-dot" aria-hidden />
             {stage.label}

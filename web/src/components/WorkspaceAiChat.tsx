@@ -24,6 +24,7 @@ import { getWorkspaceSystemPrompt, getMaterialSystemPrompt, getSkillSystemPrompt
 import { ensurePiAppStorage } from '../pi/setupPiWorkspace'
 import {
   openWorkspaceConfiguredModelSelector,
+  syncWorkspaceModelButtonLabel,
 } from '../pi/resolveWorkspaceChatModel'
 import { createPiSessionId } from '../pi/sessionId'
 import {
@@ -424,14 +425,40 @@ function resolveCurrentStageBody(
   return props.getCurrentStageBody?.(contentStageId) ?? props.stageBody
 }
 
-function mergeCurrentStageIntoAllStages(
-  props: Pick<Props, 'stageId' | 'activeStageContentId' | 'allStages' | 'stageBody' | 'getCurrentStageBody'>,
+function readLiveWorkspaceStageBodyFromProps(
+  props: Pick<
+    Props,
+    'stageId' | 'activeStageContentId' | 'stageBody' | 'getCurrentStageBody' | 'allStages'
+  >,
+  stageId?: StageId | MaterialStageId | SkillStageId,
+): string {
+  const contentStageId = stageId ?? props.activeStageContentId ?? props.stageId
+  return (
+    props.getCurrentStageBody?.(contentStageId) ??
+    (contentStageId === (props.activeStageContentId ?? props.stageId)
+      ? props.stageBody
+      : props.allStages[contentStageId] ?? '') ??
+    ''
+  )
+}
+
+function mergeLiveStagesFromProps(
+  props: Pick<
+    Props,
+    'stageId' | 'activeStageContentId' | 'stageBody' | 'getCurrentStageBody' | 'allStages'
+  >,
 ): Partial<Record<StageId | MaterialStageId | SkillStageId, string>> {
   const contentStageId = props.activeStageContentId ?? props.stageId
   return {
     ...props.allStages,
-    [contentStageId]: resolveCurrentStageBody(props),
+    [contentStageId]: readLiveWorkspaceStageBodyFromProps(props, contentStageId),
   }
+}
+
+function mergeCurrentStageIntoAllStages(
+  props: Pick<Props, 'stageId' | 'activeStageContentId' | 'allStages' | 'stageBody' | 'getCurrentStageBody'>,
+): Partial<Record<StageId | MaterialStageId | SkillStageId, string>> {
+  return mergeLiveStagesFromProps(props)
 }
 
 /** 若当前 tools 里仍有 Pi 注入的 artifacts，则固定放在最前；否则仅返回阶段附加工具。 */
@@ -489,6 +516,8 @@ type Props = {
   promptRevision?: number
   /** 供「写入当前文本编辑框」工具调用：写入当前阶段文本框 */
   applyToStageEditor?: (payload: ApplyToStageEditorPayload) => void
+  /** 剧情父阶段专用：切换左侧剧情子方向。 */
+  selectPlotChildStage?: (stageId: StageId) => void
   /** 供工具调用后请求上层保存（如阶段复制后自动落盘） */
   onRequestSave?: () => void | Promise<void>
   /**
@@ -525,13 +554,16 @@ function WorkspaceAiChatInner({
   /** 当前正在流式写入编辑器的 tool call 状态 */
   const streamingWriteRef = useRef<{
     toolCallId: string
+    toolName: string
     accumulatedText: string
     hasCleared: boolean
     targetStageId?: StageId | MaterialStageId | SkillStageId
   } | null>(null)
+  const pendingPlotChildStageRef = useRef<StageId | null>(null)
 
   useEffect(() => {
     propsLatestRef.current = props
+    pendingPlotChildStageRef.current = null
   }, [props])
 
   const debouncedBody = useDebounced(props.stageBody, 600)
@@ -581,6 +613,7 @@ function WorkspaceAiChatInner({
           'agent-interface',
         ) as (HTMLElement & { requestUpdate?: () => void }) | null
         iface?.requestUpdate?.()
+        syncWorkspaceModelButtonLabel(panel, agentRef.current?.state.model)
       }
 
       resizeObserver = new ResizeObserver(() => {
@@ -590,7 +623,17 @@ function WorkspaceAiChatInner({
       resizeObserver.observe(root)
 
       const ctxTools = (): AgentTool[] => {
-        const latest = propsLatestRef.current
+        const rawLatest = propsLatestRef.current
+        const pendingPlotChildStage =
+          workspaceType === 'book' && rawLatest.stageId === 'plot_design'
+            ? pendingPlotChildStageRef.current
+            : null
+        const latest = pendingPlotChildStage
+          ? {
+              ...rawLatest,
+              activeStageContentId: pendingPlotChildStage,
+            }
+          : rawLatest
         return getWorkspaceStageAdditionalTools({
           bookTitle: latest.bookTitle,
           bookType: latest.bookType,
@@ -600,14 +643,39 @@ function WorkspaceAiChatInner({
           promptKind: latest.promptKind,
           stageId: latest.stageId,
           activeStageContentId: latest.activeStageContentId,
-          stageBody: resolveCurrentStageBody(latest),
+          stageBody: readLiveWorkspaceStageBodyFromProps(latest),
           getCurrentStageBody: (stageId) =>
-            latest.getCurrentStageBody?.(stageId ?? latest.activeStageContentId ?? latest.stageId),
-          allStages: mergeCurrentStageIntoAllStages(latest),
+            readLiveWorkspaceStageBodyFromProps(
+              pendingPlotChildStage
+                ? {
+                    ...propsLatestRef.current,
+                    activeStageContentId: pendingPlotChildStage,
+                  }
+                : propsLatestRef.current,
+              stageId,
+            ),
+          getDefaultWriteStageId: () => {
+            const p = propsLatestRef.current
+            if (
+              workspaceType === 'book' &&
+              p.stageId === 'plot_design' &&
+              pendingPlotChildStageRef.current
+            ) {
+              return pendingPlotChildStageRef.current
+            }
+            return (p.activeStageContentId ?? p.stageId) as StageId
+          },
+          allStages: mergeLiveStagesFromProps(latest),
           linkedMaterial: latest.linkedMaterial,
           linkedSkill: latest.linkedSkill,
           workspaceAgentReadAccess: latest.workspaceAgentReadAccess,
           applyToStageEditor: latest.applyToStageEditor,
+          selectPlotChildStage: latest.selectPlotChildStage
+            ? (stageId) => {
+                pendingPlotChildStageRef.current = stageId
+                latest.selectPlotChildStage?.(stageId)
+              }
+            : undefined,
           onRequestSave: latest.onRequestSave,
           isToolCallStreamed: (id) => streamedToolCallIdsRef.current.has(id),
         })
@@ -722,6 +790,7 @@ function WorkspaceAiChatInner({
               if (isWriteTool) {
                 streamingWriteRef.current = {
                   toolCallId: block.id,
+                  toolName: block.name,
                   accumulatedText: '',
                   hasCleared: false,
                 }
@@ -739,6 +808,10 @@ function WorkspaceAiChatInner({
               const args = (block.arguments || {}) as Record<string, unknown>
               const text = String(args.text ?? '')
               const mode = args.mode as 'replace' | 'append' | undefined
+              const effectiveMode =
+                streamingWriteRef.current.toolName === 'write_workspace_editor' && !mode
+                  ? 'replace'
+                  : mode
               const targetStageId = String(args.target_stage_id ?? '').trim() as
                 | StageId
                 | MaterialStageId
@@ -750,7 +823,7 @@ function WorkspaceAiChatInner({
               const effectiveTargetStageId =
                 targetStageId || streamingWriteRef.current.targetStageId
 
-              if (mode === 'replace' && !streamingWriteRef.current.hasCleared) {
+              if (effectiveMode === 'replace' && !streamingWriteRef.current.hasCleared) {
                 streamingWriteRef.current.hasCleared = true
                 streamingWriteRef.current.accumulatedText = ''
                 apply({
@@ -787,10 +860,15 @@ function WorkspaceAiChatInner({
               streamingWriteRef.current &&
               tc.id === streamingWriteRef.current.toolCallId
             ) {
-              streamedToolCallIdsRef.current.add(tc.id)
+              const didStream =
+                streamingWriteRef.current.hasCleared ||
+                streamingWriteRef.current.accumulatedText.length > 0
+              if (didStream) streamedToolCallIdsRef.current.add(tc.id)
               const targetStageId = streamingWriteRef.current.targetStageId
               streamingWriteRef.current = null
-              apply({ text: '', mode: 'streaming_end', targetStageId })
+              if (didStream) {
+                apply({ text: '', mode: 'streaming_end', targetStageId })
+              }
             }
           }
         }
@@ -798,14 +876,21 @@ function WorkspaceAiChatInner({
         if (ev.type === 'message_end') {
           // 清理未完成的流式写入
           if (streamingWriteRef.current) {
-            streamedToolCallIdsRef.current.add(streamingWriteRef.current.toolCallId)
+            const didStream =
+              streamingWriteRef.current.hasCleared ||
+              streamingWriteRef.current.accumulatedText.length > 0
+            if (didStream) {
+              streamedToolCallIdsRef.current.add(streamingWriteRef.current.toolCallId)
+            }
             const targetStageId = streamingWriteRef.current.targetStageId
             streamingWriteRef.current = null
-            propsLatestRef.current.applyToStageEditor?.({
-              text: '',
-              mode: 'streaming_end',
-              targetStageId,
-            })
+            if (didStream) {
+              propsLatestRef.current.applyToStageEditor?.({
+                text: '',
+                mode: 'streaming_end',
+                targetStageId,
+              })
+            }
           }
           agent.state.messages = agent.state.messages.slice()
         }
@@ -929,12 +1014,8 @@ function WorkspaceAiChatInner({
     ;(async () => {
       const p = propsLatestRef.current
       const contentStageId = p.activeStageContentId ?? p.stageId
-      const latestStageBody =
-        p.getCurrentStageBody?.(contentStageId) ?? debouncedBody
-      const latestAllStages = {
-        ...p.allStages,
-        [contentStageId]: latestStageBody,
-      }
+      const latestStageBody = readLiveWorkspaceStageBodyFromProps(p, contentStageId)
+      const latestAllStages = mergeLiveStagesFromProps(p)
       const nextPrompt =
         workspaceType === 'skill'
           ? await getSkillSystemPrompt(
@@ -980,24 +1061,59 @@ function WorkspaceAiChatInner({
       if (!agentRef.current || seq !== promptPullSeqRef.current) return
       const agent = agentRef.current
       agent.state.systemPrompt = nextPrompt
+      const pendingPlotChildStage =
+        workspaceType === 'book' && p.stageId === 'plot_design'
+          ? pendingPlotChildStageRef.current
+          : null
+      const toolProps = pendingPlotChildStage
+        ? {
+            ...p,
+            activeStageContentId: pendingPlotChildStage,
+          }
+        : p
       const extras = getWorkspaceStageAdditionalTools({
-        bookTitle: p.bookTitle,
-        bookType: p.bookType,
-        materialTypeKey: p.materialTypeKey,
-        skillType: p.skillType,
+        bookTitle: toolProps.bookTitle,
+        bookType: toolProps.bookType,
+        materialTypeKey: toolProps.materialTypeKey,
+        skillType: toolProps.skillType,
         workspaceType,
-        promptKind: p.promptKind,
-        stageId: p.stageId,
-        activeStageContentId: p.activeStageContentId,
+        promptKind: toolProps.promptKind,
+        stageId: toolProps.stageId,
+        activeStageContentId: toolProps.activeStageContentId,
         stageBody: latestStageBody,
         getCurrentStageBody: (stageId) =>
-          p.getCurrentStageBody?.(stageId ?? p.activeStageContentId ?? p.stageId),
+          readLiveWorkspaceStageBodyFromProps(
+            pendingPlotChildStage
+              ? {
+                  ...propsLatestRef.current,
+                  activeStageContentId: pendingPlotChildStage,
+                }
+              : propsLatestRef.current,
+            stageId,
+          ),
+        getDefaultWriteStageId: () => {
+          const live = propsLatestRef.current
+          if (
+            workspaceType === 'book' &&
+            live.stageId === 'plot_design' &&
+            pendingPlotChildStageRef.current
+          ) {
+            return pendingPlotChildStageRef.current
+          }
+          return (live.activeStageContentId ?? live.stageId) as StageId
+        },
         allStages: latestAllStages,
-        linkedMaterial: p.linkedMaterial,
-        linkedSkill: p.linkedSkill,
-        workspaceAgentReadAccess: p.workspaceAgentReadAccess,
-        applyToStageEditor: p.applyToStageEditor,
-        onRequestSave: p.onRequestSave,
+        linkedMaterial: toolProps.linkedMaterial,
+        linkedSkill: toolProps.linkedSkill,
+        workspaceAgentReadAccess: toolProps.workspaceAgentReadAccess,
+        applyToStageEditor: toolProps.applyToStageEditor,
+        selectPlotChildStage: toolProps.selectPlotChildStage
+          ? (stageId) => {
+              pendingPlotChildStageRef.current = stageId
+              toolProps.selectPlotChildStage?.(stageId)
+            }
+          : undefined,
+        onRequestSave: toolProps.onRequestSave,
         isToolCallStreamed: (id) => streamedToolCallIdsRef.current.has(id),
       })
       agent.state.tools = includePiArtifacts
@@ -1022,6 +1138,7 @@ function WorkspaceAiChatInner({
     props.linkedSkill,
     props.workspaceAgentReadAccess,
     props.applyToStageEditor,
+    props.selectPlotChildStage,
     includePiArtifacts,
     promptRevision,
     isPaused,
@@ -1038,6 +1155,7 @@ function WorkspaceAiChatInner({
  * - isPaused 变化时更新
  * - promptRevision 变化时更新
  * - applyToStageEditor 函数引用不比较（总是使用最新）
+ * - selectPlotChildStage 函数引用不比较（总是使用最新）
  */
 export const WorkspaceAiChat = memo(WorkspaceAiChatInner, (prev, next) => {
   // 如果核心标识变化，必须更新
@@ -1089,7 +1207,7 @@ export const WorkspaceAiChat = memo(WorkspaceAiChatInner, (prev, next) => {
   if (prev.bookGenre !== next.bookGenre) return false
   if (prev.workspaceAgentReadAccess !== next.workspaceAgentReadAccess) return false
 
-  // applyToStageEditor 函数引用不比较（总是使用最新）
+  // applyToStageEditor/selectPlotChildStage 函数引用不比较（总是使用最新）
 
   // 默认不更新（返回 true 表示相同）
   return true

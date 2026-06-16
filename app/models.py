@@ -40,7 +40,7 @@ MATERIAL_STAGE_KEYS: tuple[str, ...] = (
 # 旧导语设计、剧情细化技能会在读取时合并进 plot_design；
 # 旧正文审阅、格式转换、专家总控技能会在读取时合并进 draft。
 SKILL_STAGE_KEYS: tuple[str, ...] = (
-    "character_design",          # 人物设计技能
+    "character_design",          # 人物技能
     "plot_design",               # 剧情技能
     "outline",                   # 大纲技能
     "draft",                     # 正文专家编写技能
@@ -59,7 +59,7 @@ LEGACY_SKILL_STAGES_TO_DRAFT: tuple[str, ...] = (
 )
 
 SKILL_STAGE_LABELS: dict[str, str] = {
-    "character_design": "人物设计技能",
+    "character_design": "人物技能",
     "plot_design": "剧情技能",
     "outline": "大纲技能",
     "draft": "正文专家编写技能",
@@ -69,7 +69,7 @@ SKILL_STAGE_LABELS: dict[str, str] = {
 # 统一的短篇工作台阶段键（所有短篇分类共用）
 # 对应 web/src/workspaces/short/stages.ts 中的 SHORT_WORKSPACE_STAGES
 SHORT_STAGE_KEYS: tuple[str, ...] = (
-    "character_design",   # 人物设计（统一命名，世情原character_design，情感原qinggan_character）
+    "character_design",   # 人物（统一命名，世情原character_design，情感原qinggan_character）
     "plot_design",          # 剧情设计（新增到情感）
     "intro_design",         # 导语设计
     "plot_refine",          # 剧情细化

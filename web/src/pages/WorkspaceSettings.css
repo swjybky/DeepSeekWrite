@@ -348,10 +348,20 @@
   cursor: pointer;
 }
 
+.workspace-settings-read-option--locked {
+  color: #64748b;
+  cursor: default;
+}
+
 .workspace-settings-read-card input {
   width: 16px;
   height: 16px;
   accent-color: #2563eb;
+}
+
+.workspace-settings-read-card input:disabled {
+  cursor: not-allowed;
+  opacity: 0.9;
 }
 
 @media (max-width: 1000px) {

@@ -16,6 +16,11 @@ import type {
   BookPersistedSnapshot,
   BookWorkspaceSessionState,
 } from '../../stores/workspaceStore'
+import { defaultPlotChildStageForBook } from './stageEditing'
+import {
+  hydrateExpertDraftFromDraftStage,
+  mapExpertDraftToDraftStage,
+} from './expertDraftUtils'
 import type { PlotChildStageId } from './workspaceTypes'
 
 function expertDraftPersistedFingerprint(draft: ExpertDraft): string {
@@ -38,13 +43,15 @@ export function createBookPersistedSnapshot(
   book: Book,
   expertDraft?: ExpertDraft,
 ): BookPersistedSnapshot {
+  const normalizedExpertDraft = normalizeExpertDraft(
+    expertDraft ?? book.expert_draft,
+    true,
+    book.book_type,
+  )
+  const normalizedStages = normalizeStagesForWorkspaceBook(book, book.stages)
   return {
-    stages: normalizeStagesForWorkspaceBook(book, book.stages),
-    expertDraft: normalizeExpertDraft(
-      expertDraft ?? book.expert_draft,
-      true,
-      book.book_type,
-    ),
+    stages: normalizedStages,
+    expertDraft: normalizedExpertDraft,
   }
 }
 
@@ -122,30 +129,62 @@ export function createBookWorkspaceSession(input: {
   resetExpertRuntime: boolean
   previous?: BookWorkspaceSessionState
 }): BookWorkspaceSessionState {
-  const stages = normalizeStagesForWorkspaceBook(input.book, input.book.stages)
-  const expertDraft = normalizeExpertDraft(
+  const normalizedStages = normalizeStagesForWorkspaceBook(
+    input.book,
+    input.book.stages,
+  )
+  const normalizedExpertDraft = normalizeExpertDraft(
     input.book.expert_draft,
     input.resetExpertRuntime,
     input.book.book_type,
   )
+  const expertDraft = hydrateExpertDraftFromDraftStage(
+    normalizedExpertDraft,
+    normalizedStages.draft ?? '',
+    input.book.book_type,
+  )
+  const stages = (normalizedStages.draft ?? '').trim()
+    ? normalizedStages
+    : mapExpertDraftToDraftStage(normalizedStages, expertDraft)
+  const book = {
+    ...input.book,
+    stages,
+    content: stages.draft,
+    expert_draft: expertDraft,
+  }
   const persistedSnapshot =
     input.previous?.persistedSnapshot ??
-    createBookPersistedSnapshot(input.book, expertDraft)
+    createBookPersistedSnapshot(book, expertDraft)
+  const activePlotChildStage =
+    input.activeStage === PLOT_STAGE_ID
+      ? input.activePlotChildStage ||
+        input.previous?.activePlotChildStage ||
+        defaultPlotChildStageForBook(input.book)
+      : ''
   return {
-    book: input.book,
+    book,
     stages,
     expertDraft,
     persistedSnapshot,
     activeStage: input.activeStage,
-    activePlotChildStage:
-      input.activeStage === PLOT_STAGE_ID
-        ? input.activePlotChildStage ?? input.previous?.activePlotChildStage ?? ''
-        : '',
+    activePlotChildStage,
     linkedMaterial: input.linkedMaterial,
     linkedSkill: input.linkedSkill,
     coverData: input.coverData,
     aiChatEpochByStage: input.previous?.aiChatEpochByStage ?? {},
     expertAiChatEpoch: input.previous?.expertAiChatEpoch ?? 0,
     streamingStages: input.previous?.streamingStages ?? {},
+  }
+}
+
+export function ensurePlotChildSelection(
+  session: BookWorkspaceSessionState,
+): BookWorkspaceSessionState {
+  if (session.activeStage !== PLOT_STAGE_ID || session.activePlotChildStage) {
+    return session
+  }
+  return {
+    ...session,
+    activePlotChildStage: defaultPlotChildStageForBook(session.book),
   }
 }

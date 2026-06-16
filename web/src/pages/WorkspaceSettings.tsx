@@ -32,10 +32,14 @@ import {
   WORKSPACE_AGENT_IDS,
   getDefaultWorkspaceAgentReadAccess,
   getDefaultWorkspaceAgentReadAccessEntry,
+  isRequiredWorkspaceStageForAgent,
+  normalizeWorkspaceAgentReadAccess,
 } from '../workspaces/short/stageReadAccess'
 import {
   getDefaultWorkspaceAgentReadAccess as getDefaultScriptWorkspaceAgentReadAccess,
   getDefaultWorkspaceAgentReadAccessEntry as getDefaultScriptWorkspaceAgentReadAccessEntry,
+  isRequiredWorkspaceStageForAgent as isRequiredScriptWorkspaceStageForAgent,
+  normalizeWorkspaceAgentReadAccess as normalizeScriptWorkspaceAgentReadAccess,
 } from '../workspaces/script/stageReadAccess'
 import './WorkspaceSettings.css'
 
@@ -45,7 +49,7 @@ type WorkspaceSettingsType = Extract<BookType, 'short' | 'script'>
 const WORKSPACE_SETTING_TYPES: WorkspaceSettingsType[] = ['short', 'script']
 
 const AGENT_LABELS: Record<WorkspaceAgentId, string> = {
-  character_design: '人物设计',
+  character_design: '人物',
   plot_design: '剧情',
   outline: '大纲',
   expert_draft_coordinator: '正文专家编写智能体',
@@ -79,6 +83,25 @@ function getWorkspaceContentStagesForType(workspaceType: WorkspaceSettingsType) 
   return workspaceType === 'script'
     ? SCRIPT_WORKSPACE_CONTENT_STAGES
     : SHORT_WORKSPACE_CONTENT_STAGES
+}
+
+function normalizeReadAccessForType(
+  workspaceType: WorkspaceSettingsType,
+  config: WorkspaceAgentReadAccessConfig,
+): WorkspaceAgentReadAccessConfig {
+  return workspaceType === 'script'
+    ? normalizeScriptWorkspaceAgentReadAccess(config)
+    : normalizeWorkspaceAgentReadAccess(config)
+}
+
+function isRequiredWorkspaceStageForType(
+  workspaceType: WorkspaceSettingsType,
+  agentId: WorkspaceAgentId,
+  stageId: StageId,
+): boolean {
+  return workspaceType === 'script'
+    ? isRequiredScriptWorkspaceStageForAgent(agentId, stageId)
+    : isRequiredWorkspaceStageForAgent(agentId, stageId)
 }
 
 function statusLabel(status: SaveStatus): string {
@@ -278,6 +301,17 @@ export function WorkspaceSettings() {
       id: StageId | MaterialStageId,
       checked: boolean,
     ) => {
+      if (
+        kind === 'workspace' &&
+        !checked &&
+        isRequiredWorkspaceStageForType(
+          workspaceType,
+          activeAgentRef.current,
+          id as StageId,
+        )
+      ) {
+        return
+      }
       const current = readAccessRef.current
       const entry = current[activeAgentRef.current]
       const nextEntry =
@@ -294,10 +328,10 @@ export function WorkspaceSettings() {
                 ? [...new Set([...entry.material, id as MaterialStageId])]
                 : entry.material.filter((stageId) => stageId !== id),
             }
-      const next: WorkspaceAgentReadAccessConfig = {
+      const next = normalizeReadAccessForType(workspaceType, {
         ...current,
         [activeAgentRef.current]: nextEntry,
-      }
+      })
       readAccessRef.current = next
       setReadAccess(next)
       void enqueueSave(async () => {
@@ -564,22 +598,38 @@ export function WorkspaceSettings() {
 
                   <fieldset>
                     <legend>创作空间阶段</legend>
-                    {getWorkspaceContentStagesForType(workspaceType).map((stage) => (
-                      <label key={stage.id}>
-                        <input
-                          type="checkbox"
-                          checked={activeEntry.workspace.includes(stage.id)}
-                          onChange={(event) =>
-                            patchReadAccess(
-                              'workspace',
-                              stage.id,
-                              event.target.checked,
-                            )
+                    {getWorkspaceContentStagesForType(workspaceType).map((stage) => {
+                      const locked = isRequiredWorkspaceStageForType(
+                        workspaceType,
+                        activeAgentId,
+                        stage.id,
+                      )
+                      return (
+                        <label
+                          key={stage.id}
+                          className={
+                            locked
+                              ? 'workspace-settings-read-option workspace-settings-read-option--locked'
+                              : 'workspace-settings-read-option'
                           }
-                        />
-                        <span>{stage.label}</span>
-                      </label>
-                    ))}
+                          title={locked ? '当前阶段内容固定可读' : undefined}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={locked || activeEntry.workspace.includes(stage.id)}
+                            disabled={locked}
+                            onChange={(event) =>
+                              patchReadAccess(
+                                'workspace',
+                                stage.id,
+                                event.target.checked,
+                              )
+                            }
+                          />
+                          <span>{stage.label}</span>
+                        </label>
+                      )
+                    })}
                   </fieldset>
 
                   <fieldset>

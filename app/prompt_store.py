@@ -655,7 +655,7 @@ SKILL_STAGES_ORDER: tuple[str, ...] = (
 )
 
 SKILL_STAGE_LABELS: dict[str, str] = {
-    "character_design": "人物设计技能",
+    "character_design": "人物技能",
     "plot_design": "剧情技能",
     "outline": "大纲技能",
     "draft": "正文专家编写技能",
