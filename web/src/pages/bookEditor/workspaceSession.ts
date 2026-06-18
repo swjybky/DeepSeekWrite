@@ -64,7 +64,7 @@ function resolvePersistedSnapshot(
   )
 }
 
-function bookSessionHasUnsavedChanges(
+export function bookSessionHasUnsavedChanges(
   session: BookWorkspaceSessionState,
   tokenBuffers: Partial<Record<StageId, string>> | undefined,
 ): boolean {
@@ -84,6 +84,18 @@ function bookSessionHasUnsavedChanges(
     expertDraftPersistedFingerprint(session.expertDraft) !==
     expertDraftPersistedFingerprint(snapshot.expertDraft)
   )
+}
+
+export function workspaceSessionContentFingerprint(
+  session: BookWorkspaceSessionState,
+): string {
+  return JSON.stringify({
+    stages: WORKSPACE_CONTENT_STAGES.map((stage) => [
+      stage.id,
+      session.stages[stage.id] ?? '',
+    ]),
+    expertDraft: expertDraftPersistedFingerprint(session.expertDraft),
+  })
 }
 
 export function hasAnyUnsavedWorkspaceChanges(

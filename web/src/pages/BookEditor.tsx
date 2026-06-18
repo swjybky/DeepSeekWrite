@@ -27,8 +27,14 @@ import {
 import { WorkspaceBookHeader } from './bookEditor/WorkspaceBookHeader'
 import {
   useWorkspaceStore,
+  type BookPersistedSnapshot,
   type BookWorkspaceSessionState,
 } from '../stores/workspaceStore'
+import {
+  bookSessionHasUnsavedChanges,
+  createBookPersistedSnapshot,
+  workspaceSessionContentFingerprint,
+} from './bookEditor/workspaceSession'
 import {
   EMPTY_STAGES,
   type PlotChildStageId,
@@ -56,6 +62,9 @@ import {
   combineExpertDraftSections,
   mapExpertDraftToDraftStage,
 } from './bookEditor/expertDraftUtils'
+import { useKeyedAutoSave } from '../hooks/useKeyedAutoSave'
+import { useTextHistory } from '../hooks/useTextHistory'
+import { TextHistoryControls } from '../components/TextHistoryControls'
 import './BookEditor.css'
 
 export function BookEditor() {
@@ -144,6 +153,8 @@ export function BookEditor() {
   /** 正在流式输出的阶段禁用用户输入（设为只读） */
   const [streamingStages, setStreamingStages] = useState<Partial<Record<StageId, boolean>>>({})
   const streamingStagesRef = useRef<Partial<Record<StageId, boolean>>>({})
+  const textHistory = useTextHistory()
+  const observedWorkspaceFingerprintsRef = useRef<Record<string, string>>({})
 
   const rememberLoadedBookId = useCallback((bookId: string) => {
     markWorkspaceBookLoaded(bookId)
@@ -298,6 +309,34 @@ export function BookEditor() {
           previousDraftBody === nextDraftBody
             ? session.stages
             : mapExpertDraftToDraftStage(session.stages, nextExpertDraft)
+        for (const section of nextExpertDraft.sections) {
+          const previous = session.expertDraft.sections.find(
+            (candidate) => candidate.id === section.id,
+          )
+          if (previous?.body !== section.body) {
+            textHistory.observe(
+              `workspace:${bookId}:expert:${section.id}:body`,
+              section.body,
+            )
+          }
+        }
+        for (const state of nextExpertDraft.character_states) {
+          const previous = session.expertDraft.character_states.find(
+            (candidate) => candidate.section_id === state.section_id,
+          )
+          if (previous?.body !== state.body) {
+            textHistory.observe(
+              `workspace:${bookId}:expert:${state.section_id}:character-state`,
+              state.body,
+            )
+          }
+        }
+        if ((session.stages.draft ?? '') !== (nextStages.draft ?? '')) {
+          textHistory.observe(
+            `workspace:${bookId}:stage:draft`,
+            nextStages.draft ?? '',
+          )
+        }
         return {
           ...session,
           stages: nextStages,
@@ -311,7 +350,7 @@ export function BookEditor() {
         }
       })
     },
-    [commitWorkspaceSession],
+    [commitWorkspaceSession, textHistory],
   )
 
   const updateExpertDraft = useCallback(
@@ -321,6 +360,24 @@ export function BookEditor() {
       updateExpertDraftForBook(currentBookId, updater)
     },
     [updateExpertDraftForBook],
+  )
+
+  const recordWorkspaceTextChange = useCallback(
+    (
+      bookId: string,
+      stageId: StageId,
+      previous: string,
+      next: string,
+      kind: 'atomic' | 'stream',
+    ) => {
+      textHistory.record(
+        `workspace:${bookId}:stage:${stageId}`,
+        previous,
+        next,
+        kind,
+      )
+    },
+    [textHistory],
   )
 
   const {
@@ -340,11 +397,13 @@ export function BookEditor() {
     tokenBufferRafByBookRef,
     streamingStagesRef,
     commitWorkspaceSession,
+    recordTextChange: recordWorkspaceTextChange,
+    endTextHistoryGroup: (bookId, stageId) =>
+      textHistory.endGroup(`workspace:${bookId}:stage:${stageId}`),
   })
 
   const {
     handleBackToShelf,
-    handleSave,
     refreshWorkspaceBooks,
     saveBookSession,
     saveCurrentBook,
@@ -375,6 +434,74 @@ export function BookEditor() {
     flushAllTokenBuffersForBook,
   })
 
+  const workspaceAutoSave = useKeyedAutoSave<BookPersistedSnapshot>({
+    getSnapshot: (bookId) => {
+      const session = workspaceSessionsRef.current[bookId]
+      if (!session) return null
+      return createBookPersistedSnapshot(
+        {
+          ...session.book,
+          stages: session.stages,
+          expert_draft: session.expertDraft,
+        },
+        session.expertDraft,
+      )
+    },
+    saveSnapshot: async (bookId, snapshot) => {
+      const next = await saveBookSession(bookId, {}, snapshot)
+      if (!next) throw new Error('保存创作空间失败')
+    },
+  })
+  const {
+    flush: flushWorkspaceBook,
+    flushAll: flushAllWorkspaceBooks,
+    markSaved: markWorkspaceBookSaved,
+    schedule: scheduleWorkspaceBookSave,
+    statusFor: workspaceBookSaveStatus,
+  } = workspaceAutoSave
+
+  useEffect(() => {
+    for (const [bookId, session] of Object.entries(workspaceSessions)) {
+      const fingerprint = workspaceSessionContentFingerprint(session)
+      const previous = observedWorkspaceFingerprintsRef.current[bookId]
+      observedWorkspaceFingerprintsRef.current[bookId] = fingerprint
+      const dirty = bookSessionHasUnsavedChanges(
+        session,
+        tokenBuffersByBookRef.current[bookId],
+      )
+      if (previous === undefined) {
+        for (const section of session.expertDraft.sections) {
+          textHistory.observe(
+            `workspace:${bookId}:expert:${section.id}:body`,
+            section.body,
+          )
+        }
+        for (const state of session.expertDraft.character_states) {
+          textHistory.observe(
+            `workspace:${bookId}:expert:${state.section_id}:character-state`,
+            state.body,
+          )
+        }
+        if (dirty) scheduleWorkspaceBookSave(bookId)
+        else markWorkspaceBookSaved(bookId)
+      } else if (previous !== fingerprint && dirty) {
+        scheduleWorkspaceBookSave(bookId)
+      }
+    }
+  }, [
+    markWorkspaceBookSaved,
+    scheduleWorkspaceBookSave,
+    textHistory,
+    workspaceSessions,
+  ])
+
+  const flushActiveWorkspaceBook = useCallback(async () => {
+    const currentBookId = bookRef.current?.id
+    if (!currentBookId) return true
+    flushAllTokenBuffersForBook(currentBookId)
+    return flushWorkspaceBook(currentBookId)
+  }, [flushAllTokenBuffersForBook, flushWorkspaceBook])
+
   const {
     editingTitle,
     titleDraft,
@@ -391,6 +518,23 @@ export function BookEditor() {
     storeWorkspaceSession,
     syncWorkspaceBookSummary,
   })
+
+  const titleHistoryKey = `workspace:${book?.id ?? id ?? 'unknown'}:title`
+  const handleHistoryTitleEditStart = useCallback(() => {
+    textHistory.clear(titleHistoryKey, bookRef.current?.title ?? '')
+    handleTitleEditStart()
+  }, [handleTitleEditStart, textHistory, titleHistoryKey])
+  const handleHistoryTitleDraftChange = useCallback(
+    (value: string) => {
+      textHistory.change(
+        titleHistoryKey,
+        titleDraft,
+        value,
+        setTitleDraft,
+      )
+    },
+    [setTitleDraft, textHistory, titleDraft, titleHistoryKey],
+  )
 
   const {
     materialSelectorOpen,
@@ -551,8 +695,21 @@ export function BookEditor() {
   useWorkspaceKeyboardShortcuts({
     id,
     book,
-    handleSave,
+    handleSave: flushActiveWorkspaceBook,
   })
+
+  const handleAutoSaveBack = useCallback(async () => {
+    await flushAllWorkspaceBooks()
+    handleBackToShelf()
+  }, [flushAllWorkspaceBooks, handleBackToShelf])
+
+  const applyToStageEditorWithAutoSave = useCallback(
+    (bookId: string, stageId: StageId, payload: Parameters<typeof applyToStageEditorForBook>[2]) => {
+      applyToStageEditorForBook(bookId, stageId, payload)
+      if (payload.mode === 'streaming_end') void flushWorkspaceBook(bookId)
+    },
+    [applyToStageEditorForBook, flushWorkspaceBook],
+  )
 
   const {
     ActiveExpertDraftEditor,
@@ -654,15 +811,15 @@ export function BookEditor() {
         linkedMaterial={linkedMaterial}
         linkedSkill={linkedSkill}
         saving={saving}
+        autoSaveStatus={workspaceBookSaveStatus(book.id)}
         error={error}
         message={message}
-        onBack={handleBackToShelf}
+        onBack={() => void handleAutoSaveBack()}
         onViewCover={() => setCoverViewerOpen(true)}
         onGenerateCover={openCoverGenerateDialog}
         onCoverError={clearCoverDataForActiveBook}
         onOpenMaterialSelector={() => void openMaterialSelector()}
         onOpenSkillSelector={() => void openSkillSelector()}
-        onSave={() => void handleSave()}
         onToggleStatus={() => void handleToggleBookStatus()}
       />
 
@@ -692,13 +849,39 @@ export function BookEditor() {
           activeExpertDraftSectionId={activeExpertDraftSectionId}
           editingTitle={editingTitle}
           titleDraft={titleDraft}
-          onTitleDraftChange={setTitleDraft}
-          onTitleEditStart={handleTitleEditStart}
+          onTitleDraftChange={handleHistoryTitleDraftChange}
+          onTitleEditStart={handleHistoryTitleEditStart}
           onTitleEditEnd={handleTitleEditEnd}
           onTitleEditCancel={handleTitleEditCancel}
-          onActiveStageSelect={setActiveBookStage}
-          onPlotChildSelect={(childId) => selectPlotChildForBook(book.id, childId)}
-          onExpertDraftSectionSelect={handleExpertDraftSectionSelect}
+          titleInputControls={
+            <TextHistoryControls
+              compact
+              history={textHistory}
+              historyKey={titleHistoryKey}
+              value={titleDraft}
+              onChange={setTitleDraft}
+            />
+          }
+          onTitleInputKeyDown={(event) =>
+            textHistory.handleKeyDown(
+              event,
+              titleHistoryKey,
+              titleDraft,
+              setTitleDraft,
+            )
+          }
+          onActiveStageSelect={(stageId) => {
+            void flushActiveWorkspaceBook()
+            setActiveBookStage(stageId)
+          }}
+          onPlotChildSelect={(childId) => {
+            void flushActiveWorkspaceBook()
+            selectPlotChildForBook(book.id, childId)
+          }}
+          onExpertDraftSectionSelect={(sectionId) => {
+            void flushActiveWorkspaceBook()
+            handleExpertDraftSectionSelect(sectionId)
+          }}
           onExpertDraftSectionCreate={handleExpertDraftSectionCreate}
           onTreeBookSelect={handleTreeBookSelect}
           onTreeBookStageSelect={(bookId, stageId) =>
@@ -724,7 +907,7 @@ export function BookEditor() {
           linkedSkillTitle={linkedSkill?.title}
           workspaceSessionsRef={workspaceSessionsRef}
           getRenderedWorkspaceStageBody={getRenderedWorkspaceStageBody}
-          applyToStageEditorForBook={applyToStageEditorForBook}
+          applyToStageEditorForBook={applyToStageEditorWithAutoSave}
           selectPlotChildForBook={selectPlotChildForBook}
           saveBookSession={saveBookSession}
           updateExpertDraftForBook={updateExpertDraftForBook}
@@ -765,6 +948,9 @@ export function BookEditor() {
           railStages={railStages}
           textareaRef={textareaRef}
           textareaRefsRef={textareaRefsRef}
+          bookId={book.id}
+          textHistory={textHistory}
+          onTextBlur={() => void flushActiveWorkspaceBook()}
         />
 
         {materialSelectorOpen ? (
@@ -803,6 +989,8 @@ export function BookEditor() {
           setCoverPromptDraft={setCoverPromptDraft}
           setCoverViewerOpen={setCoverViewerOpen}
           confirmCoverGeneration={confirmCoverGeneration}
+          textHistory={textHistory}
+          historyKey={`workspace:${book.id}:cover-prompt`}
         />
       </div>
     </div>

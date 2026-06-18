@@ -35,6 +35,14 @@ type UseWorkspaceStreamingInput = {
   >
   streamingStagesRef: MutableRefObject<Partial<Record<StageId, boolean>>>
   commitWorkspaceSession: CommitWorkspaceSession
+  recordTextChange?: (
+    bookId: string,
+    stageId: StageId,
+    previous: string,
+    next: string,
+    kind: 'atomic' | 'stream',
+  ) => void
+  endTextHistoryGroup?: (bookId: string, stageId: StageId) => void
 }
 
 export function useWorkspaceStreaming({
@@ -49,6 +57,8 @@ export function useWorkspaceStreaming({
   tokenBufferRafByBookRef,
   streamingStagesRef,
   commitWorkspaceSession,
+  recordTextChange,
+  endTextHistoryGroup,
 }: UseWorkspaceStreamingInput) {
   const setEditorStreamingForBook = useCallback(
     (bookId: string, stageId: StageId, next: boolean) => {
@@ -240,7 +250,20 @@ export function useWorkspaceStreaming({
           [targetStage]: undefined,
         }
         setEditorStreamingForBook(bookId, targetStage, false)
-        updateStageForBook(bookId, targetStage, () => payload.text.trim())
+        const current =
+          (workspaceSessionsRef.current[bookId]?.stages[targetStage] ?? '') +
+          (tokenBuffersByBookRef.current[bookId]?.[targetStage] ?? '')
+        const next = payload.text.trim()
+        // 流式覆盖会先用空文本清空编辑器，再逐 token 写入。
+        // 将清空动作并入同一个 stream 历史组，避免撤销时先回到空文本。
+        recordTextChange?.(
+          bookId,
+          targetStage,
+          current,
+          next,
+          next.length === 0 ? 'stream' : 'atomic',
+        )
+        updateStageForBook(bookId, targetStage, () => next)
         if (bookRef.current?.id === bookId) {
           requestAnimationFrame(() => autoScrollTextarea(targetStage))
         }
@@ -250,6 +273,16 @@ export function useWorkspaceStreaming({
       if (payload.mode === 'append_token') {
         if (!payload.text) return
         setEditorStreamingForBook(bookId, targetStage, true)
+        const current =
+          (workspaceSessionsRef.current[bookId]?.stages[targetStage] ?? '') +
+          (tokenBuffersByBookRef.current[bookId]?.[targetStage] ?? '')
+        recordTextChange?.(
+          bookId,
+          targetStage,
+          current,
+          current + payload.text,
+          'stream',
+        )
         const buffers = { ...(tokenBuffersByBookRef.current[bookId] ?? {}) }
         buffers[targetStage] = (buffers[targetStage] ?? '') + payload.text
         tokenBuffersByBookRef.current[bookId] = buffers
@@ -274,6 +307,7 @@ export function useWorkspaceStreaming({
         cancelTokenFlushForBook(bookId, targetStage)
         flushTokenBufferForBook(bookId, targetStage)
         setEditorStreamingForBook(bookId, targetStage, false)
+        endTextHistoryGroup?.(bookId, targetStage)
         return
       }
 
@@ -285,6 +319,10 @@ export function useWorkspaceStreaming({
       setEditorStreamingForBook(bookId, targetStage, false)
       const trimmed = payload.text.trim()
       if (!trimmed) return
+      const current = workspaceSessionsRef.current[bookId]?.stages[targetStage] ?? ''
+      const sep = current.length === 0 ? '' : current.endsWith('\n') ? '\n' : '\n\n'
+      const next = current + sep + trimmed
+      recordTextChange?.(bookId, targetStage, current, next, 'atomic')
       updateStageForBook(bookId, targetStage, (cur) => {
         const sep = cur.length === 0 ? '' : cur.endsWith('\n') ? '\n' : '\n\n'
         return cur + sep + trimmed
@@ -297,7 +335,9 @@ export function useWorkspaceStreaming({
       autoScrollTextarea,
       bookRef,
       cancelTokenFlushForBook,
+      endTextHistoryGroup,
       flushTokenBufferForBook,
+      recordTextChange,
       setEditorStreamingForBook,
       tokenBufferRafByBookRef,
       tokenBufferRafRefsRef,

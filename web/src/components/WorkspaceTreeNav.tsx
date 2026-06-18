@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import type { KeyboardEvent, ReactNode } from 'react'
 
 export type WorkspaceTreeStage = {
   id: string
@@ -47,6 +48,8 @@ type WorkspaceTreeNavProps = {
   onTitleEditStart?: () => void
   onTitleEditEnd?: () => void
   onTitleEditCancel?: () => void
+  titleInputControls?: ReactNode
+  onTitleInputKeyDown?: (event: KeyboardEvent<HTMLInputElement>) => void
 }
 
 export function WorkspaceTreeNav({
@@ -71,6 +74,8 @@ export function WorkspaceTreeNav({
   onTitleEditStart,
   onTitleEditEnd,
   onTitleEditCancel,
+  titleInputControls,
+  onTitleInputKeyDown,
 }: WorkspaceTreeNavProps) {
   const [expanded, setExpanded] = useState(defaultExpanded)
   const [expandedBookIds, setExpandedBookIds] = useState<Record<string, boolean>>({})
@@ -277,20 +282,25 @@ export function WorkspaceTreeNav({
                       </span>
                     </button>
                     {editingTitle && isActiveBook ? (
-                      <input
-                        className="workspace-tree-title-input"
-                        value={titleDraft}
-                        onChange={(e) => onTitleDraftChange?.(e.target.value)}
-                        onBlur={() => onTitleEditEnd?.()}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter') {
-                            e.currentTarget.blur()
-                          } else if (e.key === 'Escape') {
-                            onTitleEditCancel?.()
-                          }
-                        }}
-                        autoFocus
-                      />
+                      <div className="workspace-tree-title-editor">
+                        {titleInputControls}
+                        <input
+                          className="workspace-tree-title-input"
+                          value={titleDraft}
+                          onChange={(e) => onTitleDraftChange?.(e.target.value)}
+                          onBlur={() => onTitleEditEnd?.()}
+                          onKeyDown={(e) => {
+                            onTitleInputKeyDown?.(e)
+                            if (e.defaultPrevented) return
+                            if (e.key === 'Enter') {
+                              e.currentTarget.blur()
+                            } else if (e.key === 'Escape') {
+                              onTitleEditCancel?.()
+                            }
+                          }}
+                          autoFocus
+                        />
+                      </div>
                     ) : (
                       <button
                         type="button"
@@ -371,20 +381,25 @@ export function WorkspaceTreeNav({
           </span>
         </button>
         {editingTitle ? (
-          <input
-            className="workspace-tree-title-input"
-            value={titleDraft}
-            onChange={(e) => onTitleDraftChange?.(e.target.value)}
-            onBlur={() => onTitleEditEnd?.()}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') {
-                e.currentTarget.blur()
-              } else if (e.key === 'Escape') {
-                onTitleEditCancel?.()
-              }
-            }}
-            autoFocus
-          />
+          <div className="workspace-tree-title-editor">
+            {titleInputControls}
+            <input
+              className="workspace-tree-title-input"
+              value={titleDraft}
+              onChange={(e) => onTitleDraftChange?.(e.target.value)}
+              onBlur={() => onTitleEditEnd?.()}
+              onKeyDown={(e) => {
+                onTitleInputKeyDown?.(e)
+                if (e.defaultPrevented) return
+                if (e.key === 'Enter') {
+                  e.currentTarget.blur()
+                } else if (e.key === 'Escape') {
+                  onTitleEditCancel?.()
+                }
+              }}
+              autoFocus
+            />
+          </div>
         ) : (
           <button
             type="button"

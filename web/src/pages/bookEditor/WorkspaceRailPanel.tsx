@@ -3,6 +3,7 @@ import type { Book, StageId } from '../../domain/workspace'
 import { PLOT_STAGE_ID } from '../../workspaces/short/stages'
 import type { PlotChildStageId } from './workspaceTypes'
 import { isPlotChildStageId } from './stageEditing'
+import type { KeyboardEvent, ReactNode } from 'react'
 
 type TreeStage = {
   id: StageId
@@ -33,6 +34,8 @@ type Props = {
   onTitleEditStart: () => void
   onTitleEditEnd: () => void
   onTitleEditCancel: () => void
+  titleInputControls?: ReactNode
+  onTitleInputKeyDown?: (event: KeyboardEvent<HTMLInputElement>) => void
   onActiveStageSelect: (stageId: StageId) => void
   onPlotChildSelect: (childId: PlotChildStageId) => void
   onExpertDraftSectionSelect: (sectionId: string) => void
@@ -70,6 +73,8 @@ export function WorkspaceRailPanel({
   onTitleEditStart,
   onTitleEditEnd,
   onTitleEditCancel,
+  titleInputControls,
+  onTitleInputKeyDown,
   onActiveStageSelect,
   onPlotChildSelect,
   onExpertDraftSectionSelect,
@@ -110,6 +115,8 @@ export function WorkspaceRailPanel({
           onTitleEditStart={onTitleEditStart}
           onTitleEditEnd={onTitleEditEnd}
           onTitleEditCancel={onTitleEditCancel}
+          titleInputControls={titleInputControls}
+          onTitleInputKeyDown={onTitleInputKeyDown}
         />
       ) : (
         <WorkspaceTreeNav
@@ -141,6 +148,8 @@ export function WorkspaceRailPanel({
           onTitleEditStart={onTitleEditStart}
           onTitleEditEnd={onTitleEditEnd}
           onTitleEditCancel={onTitleEditCancel}
+          titleInputControls={titleInputControls}
+          onTitleInputKeyDown={onTitleInputKeyDown}
         />
       )}
     </aside>

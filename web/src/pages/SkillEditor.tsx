@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
-import { Link, useParams } from 'react-router-dom'
+import { Link, useNavigate, useParams } from 'react-router-dom'
 import {
   SKILL_STAGE_KEYS,
   SKILL_STAGE_LABELS,
@@ -15,6 +15,11 @@ import {
 import { WorkspaceAiChat } from '../components/WorkspaceAiChat'
 import { WorkspaceTreeNav } from '../components/WorkspaceTreeNav'
 import type { ApplyToStageEditorPayload } from '../pi/workspaceStageAgents'
+import {
+  autoSaveStatusLabel,
+  useKeyedAutoSave,
+} from '../hooks/useKeyedAutoSave'
+import { useTextHistory } from '../hooks/useTextHistory'
 import './BookEditor.css'
 
 const AI_PANEL_WIDTH_KEY = 'write-claw:skill-ai-width'
@@ -108,6 +113,7 @@ function stagesToPromptText(stages: SkillStages): Record<SkillStageId, string> {
 
 export function SkillEditor() {
   const { id } = useParams<{ id: string }>()
+  const navigate = useNavigate()
   const [skill, setSkill] = useState<Skill | null>(null)
   const [stages, setStages] = useState<SkillStages>(() => normalizeSkillStages({}))
   const [activeStage, setActiveStage] = useState<SkillStageId>('character_design')
@@ -115,21 +121,40 @@ export function SkillEditor() {
     Partial<Record<SkillStageId, string>>
   >({})
   const [loading, setLoading] = useState(true)
-  const [saving, setSaving] = useState(false)
-  const [message, setMessage] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [aiPanelWidth, setAiPanelWidth] = useState(readStoredAiWidth)
   const [aiChatEpoch, setAiChatEpoch] = useState(0)
   const [editorStreaming, setEditorStreaming] = useState(false)
 
   const splitDragRef = useRef<{ startX: number; startWidth: number } | null>(null)
-  const saveInFlightRef = useRef(false)
   const textareaRef = useRef<HTMLTextAreaElement | null>(null)
   const stagesRef = useRef<SkillStages>(stages)
   const activeStageRef = useRef<SkillStageId>(activeStage)
   const selectedEntryIdsRef = useRef<Partial<Record<SkillStageId, string>>>({})
   const tokenBufferRef = useRef('')
   const tokenBufferRafRef = useRef<number | undefined>(undefined)
+  const textHistory = useTextHistory()
+
+  const autoSave = useKeyedAutoSave<SkillStages>({
+    getSnapshot: (key) => (key === id ? { ...stagesRef.current } : null),
+    saveSnapshot: async (key, snapshot) => {
+      try {
+        const next = await saveSkill(key, { stages: snapshot })
+        if (!next) throw new Error('保存失败：技能不存在')
+        setSkill({ ...next, stages: stagesRef.current })
+        setError(null)
+      } catch (cause) {
+        setError(cause instanceof Error ? cause.message : '保存失败')
+        throw cause
+      }
+    },
+  })
+  const {
+    flush: flushSkill,
+    markSaved: markSkillSaved,
+    schedule: scheduleSkillSave,
+    statusFor: skillSaveStatus,
+  } = autoSave
 
   useEffect(() => {
     stagesRef.current = stages
@@ -152,12 +177,13 @@ export function SkillEditor() {
   }, [])
 
   const setStagesAndRef = useCallback((updater: (current: SkillStages) => SkillStages) => {
-    setStages((prev) => {
-      const next = updater(prev)
-      stagesRef.current = next
-      return next
-    })
-  }, [])
+    const current = stagesRef.current
+    const next = updater(current)
+    if (next === current) return
+    stagesRef.current = next
+    setStages(next)
+    if (id) scheduleSkillSave(id)
+  }, [id, scheduleSkillSave])
 
   const setSelectedIdsAndRef = useCallback(
     (updater: (current: Partial<Record<SkillStageId, string>>) => Partial<Record<SkillStageId, string>>) => {
@@ -219,7 +245,20 @@ export function SkillEditor() {
         cancelTokenFlush()
         tokenBufferRef.current = ''
         setEditorStreaming(false)
-        updateSelectedEntry((entry) => ({ ...entry, body: payload.text.trim() }))
+        const stageId = activeStageRef.current
+        const entryId = selectedEntryIdsRef.current[stageId]
+        const currentBody = (stagesRef.current[stageId] ?? []).find(
+          (entry) => entry.id === entryId,
+        )?.body ?? ''
+        const current = currentBody + tokenBufferRef.current
+        const next = payload.text.trim()
+        textHistory.record(
+          `skill:${id}:${stageId}:${entryId}:body`,
+          current,
+          next,
+          next.length === 0 ? 'stream' : 'atomic',
+        )
+        updateSelectedEntry((entry) => ({ ...entry, body: next }))
         requestAnimationFrame(autoScrollTextarea)
         return
       }
@@ -227,6 +266,18 @@ export function SkillEditor() {
       if (payload.mode === 'append_token') {
         if (!payload.text) return
         setEditorStreaming(true)
+        const stageId = activeStageRef.current
+        const entryId = selectedEntryIdsRef.current[stageId]
+        const currentBody = (stagesRef.current[stageId] ?? []).find(
+          (entry) => entry.id === entryId,
+        )?.body ?? ''
+        const current = currentBody + tokenBufferRef.current
+        textHistory.record(
+          `skill:${id}:${stageId}:${entryId}:body`,
+          current,
+          current + payload.text,
+          'stream',
+        )
         tokenBufferRef.current += payload.text
         if (tokenBufferRafRef.current === undefined) {
           tokenBufferRafRef.current = requestAnimationFrame(() => {
@@ -241,6 +292,10 @@ export function SkillEditor() {
         cancelTokenFlush()
         flushTokenBuffer()
         setEditorStreaming(false)
+        const stageId = activeStageRef.current
+        const entryId = selectedEntryIdsRef.current[stageId]
+        textHistory.endGroup(`skill:${id}:${stageId}:${entryId}:body`)
+        if (id) void flushSkill(id)
         return
       }
 
@@ -251,11 +306,28 @@ export function SkillEditor() {
       if (!trimmed) return
       updateSelectedEntry((entry) => {
         const sep = entry.body.length === 0 ? '' : entry.body.endsWith('\n') ? '\n' : '\n\n'
-        return { ...entry, body: entry.body + sep + trimmed }
+        const next = entry.body + sep + trimmed
+        const stageId = activeStageRef.current
+        const entryId = selectedEntryIdsRef.current[stageId]
+        textHistory.record(
+          `skill:${id}:${stageId}:${entryId}:body`,
+          entry.body,
+          next,
+          'atomic',
+        )
+        return { ...entry, body: next }
       })
       requestAnimationFrame(autoScrollTextarea)
     },
-    [autoScrollTextarea, cancelTokenFlush, flushTokenBuffer, updateSelectedEntry],
+    [
+      autoScrollTextarea,
+      cancelTokenFlush,
+      flushSkill,
+      flushTokenBuffer,
+      id,
+      textHistory,
+      updateSelectedEntry,
+    ],
   )
 
   useEffect(() => {
@@ -319,12 +391,13 @@ export function SkillEditor() {
         return
       }
       syncSkillState(s, { resetNavigation: true })
+      markSkillSaved(s.id)
     } catch (e) {
       setError(e instanceof Error ? e.message : '加载失败')
     } finally {
       setLoading(false)
     }
-  }, [id, syncSkillState])
+  }, [id, markSkillSaved, syncSkillState])
 
   const hasLoadedRef = useRef(false)
   useEffect(() => {
@@ -334,51 +407,37 @@ export function SkillEditor() {
     }
   }, [load])
 
-  const handleSave = useCallback(async () => {
-    if (!id || !skill || saveInFlightRef.current) return
-    saveInFlightRef.current = true
-    setSaving(true)
-    setMessage(null)
-    setError(null)
-    try {
-      flushAllTokenBuffers()
-      const next = await saveSkill(id, {
-        stages: stagesRef.current,
-      })
-      if (!next) {
-        setError('保存失败：技能不存在')
-        return
-      }
-      syncSkillState(next)
-      setMessage('已保存')
-      window.setTimeout(() => setMessage(null), 2000)
-    } catch (e) {
-      setError(e instanceof Error ? e.message : '保存失败')
-    } finally {
-      saveInFlightRef.current = false
-      setSaving(false)
-    }
-  }, [flushAllTokenBuffers, id, skill, syncSkillState])
+  const flushAutoSave = useCallback(async () => {
+    if (!id) return true
+    flushAllTokenBuffers()
+    return flushSkill(id)
+  }, [flushAllTokenBuffers, flushSkill, id])
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if (!(e.ctrlKey || e.metaKey) || e.key.toLowerCase() !== 's') return
       e.preventDefault()
-      void handleSave()
+      void flushAutoSave()
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [handleSave])
+  }, [flushAutoSave])
 
   const stagePromptBodies = useMemo(() => stagesToPromptText(stages), [stages])
 
   const handleStageSelect = (stageId: SkillStageId) => {
+    void flushAutoSave()
     setActiveStage(stageId)
     const entries = stagesRef.current[stageId] ?? []
     if (!selectedEntryIdsRef.current[stageId] && entries[0]) {
       setSelectedIdsAndRef((prev) => ({ ...prev, [stageId]: entries[0].id }))
     }
   }
+
+  const handleBack = useCallback(async () => {
+    await flushAutoSave()
+    navigate('/')
+  }, [flushAutoSave, navigate])
 
   const handleAddEntry = () => {
     const stageId = activeStageRef.current
@@ -443,13 +502,16 @@ export function SkillEditor() {
   const { total: stageCharTotal, nonSpace: stageCharNonSpace } = stageTextCounts(stageBody)
   const stageLabel = SKILL_STAGE_LABELS[activeStage]
   const skillTypeText = skillTypeLabel(skill.skill_type)
+  const entryBodyHistoryKey = `skill:${skill.id}:${activeStage}:${selectedEntryId}:body`
+  const applyEntryBody = (value: string) =>
+    updateSelectedEntry((entry) => ({ ...entry, body: value }))
 
   return (
     <div className="editor-page editor-page--workspace">
       <header className="editor-header editor-header--agent">
-        <Link className="back-link" to="/">
+        <button type="button" className="back-link" onClick={() => void handleBack()}>
           ← 返回
-        </Link>
+        </button>
         <div className="editor-header-meta muted">
           <span className="editor-header-meta-inner">
             <span className="editor-header-meta-text">
@@ -459,28 +521,22 @@ export function SkillEditor() {
               {' · '}
               {stageLabel}
             </span>
-            {error || message ? (
+            {error ? (
               <span
-                className={
-                  error
-                    ? 'editor-header-flash editor-header-flash--error'
-                    : 'editor-header-flash editor-header-flash--ok'
-                }
+                className="editor-header-flash editor-header-flash--error"
                 aria-live="polite"
               >
-                {error ?? message}
+                {error}
               </span>
             ) : null}
           </span>
         </div>
-        <button
-          type="button"
-          className="btn-save"
-          onClick={() => void handleSave()}
-          disabled={saving}
+        <span
+          className={`workspace-settings-save-state workspace-settings-save-state--${skillSaveStatus(id)}`}
+          aria-live="polite"
         >
-          {saving ? '保存中…' : '保存'}
-        </button>
+          {autoSaveStatusLabel(skillSaveStatus(id))}
+        </span>
       </header>
 
       <div
@@ -629,9 +685,10 @@ export function SkillEditor() {
                         ? 'skill-stage-item skill-stage-item--active'
                         : 'skill-stage-item'
                     }
-                    onClick={() =>
+                    onClick={() => {
+                      void flushAutoSave()
                       setSelectedIdsAndRef((prev) => ({ ...prev, [activeStage]: entry.id }))
-                    }
+                    }}
                   >
                     {entry.title || '未命名技能'}
                   </button>
@@ -654,6 +711,7 @@ export function SkillEditor() {
                         title: e.target.value,
                       }))
                     }
+                    onBlur={() => void flushAutoSave()}
                     placeholder="请输入技能名称"
                   />
                 </label>
@@ -671,11 +729,23 @@ export function SkillEditor() {
                 className="editor-body workspace-textarea"
                 value={activeEntry.body}
                 onChange={(e) =>
-                  updateSelectedEntry((entry) => ({
-                    ...entry,
-                    body: e.target.value,
-                  }))
+                  textHistory.change(
+                    entryBodyHistoryKey,
+                    activeEntry.body,
+                    e.target.value,
+                    applyEntryBody,
+                  )
                 }
+                onKeyDown={(event) =>
+                  textHistory.handleKeyDown(
+                    event,
+                    entryBodyHistoryKey,
+                    activeEntry.body,
+                    applyEntryBody,
+                    { redoKey: 'm', standardRedo: false },
+                  )
+                }
+                onBlur={() => void flushAutoSave()}
                 spellCheck={false}
                 readOnly={editorStreaming}
                 placeholder={`沉淀「${activeEntry.title || stageLabel}」的写作技能、规则、示例或注意事项…`}

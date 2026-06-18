@@ -59,20 +59,31 @@
 
 .workspace-settings-save-state {
   justify-self: end;
+  min-width: 4.5em;
   font-size: 0.8125rem;
   color: #64748b;
+  text-align: center;
+  visibility: hidden;
 }
 
 .workspace-settings-save-state--saving {
   color: #2563eb;
+  visibility: visible;
 }
 
 .workspace-settings-save-state--saved {
   color: #059669;
+  visibility: visible;
 }
 
 .workspace-settings-save-state--error {
   color: #dc2626;
+  visibility: visible;
+}
+
+.workspace-settings-save-state--retrying {
+  color: #dc2626;
+  visibility: visible;
 }
 
 .workspace-settings-error {

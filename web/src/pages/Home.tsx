@@ -82,6 +82,29 @@ function createDraftModel(index: number): AiModelConfig {
   }
 }
 
+type OfficialTextModelPreset = Omit<AiModelConfig, 'api_key'>
+
+const OFFICIAL_TEXT_MODEL_PRESETS: OfficialTextModelPreset[] = [
+  {
+    id: 'deepseekflash',
+    label: 'DeepSeek V4 Flash',
+    provider: 'deepseek',
+    model_id: 'deepseek-v4-flash',
+  },
+  {
+    id: 'deepseek_pro',
+    label: 'DeepSeek V4 Pro',
+    provider: 'deepseek',
+    model_id: 'deepseek-v4-pro',
+  },
+]
+
+function getOfficialTextModelPreset(
+  model: Pick<AiModelConfig, 'id'>,
+): OfficialTextModelPreset | undefined {
+  return OFFICIAL_TEXT_MODEL_PRESETS.find((preset) => preset.id === model.id.trim())
+}
+
 function cloneAiSettings(settings: AiModelSettings | null): AiModelSettings {
   const normalized = normalizeAiModelSettings(settings ?? emptyAiModelSettings())
   return {
@@ -114,17 +137,22 @@ function ModelConfigDialog({
     cloneAiSettings(initialSettings),
   )
   const [error, setError] = useState<string | null>(null)
+  const [modelPickerOpen, setModelPickerOpen] = useState(false)
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape' && !saving) {
         event.preventDefault()
-        onClose()
+        if (modelPickerOpen) {
+          setModelPickerOpen(false)
+        } else {
+          onClose()
+        }
       }
     }
     document.addEventListener('keydown', onKeyDown)
     return () => document.removeEventListener('keydown', onKeyDown)
-  }, [onClose, saving])
+  }, [modelPickerOpen, onClose, saving])
 
   const updateModel = useCallback(
     (index: number, patch: Partial<AiModelConfig>) => {
@@ -150,9 +178,14 @@ function ModelConfigDialog({
     [],
   )
 
-  const addModel = useCallback(() => {
+  const addModel = useCallback((preset?: OfficialTextModelPreset) => {
     setDraft((prev) => {
-      const next = createDraftModel(prev.text.models.length + 1)
+      if (preset && prev.text.models.some((model) => model.id === preset.id)) {
+        return prev
+      }
+      const next: AiModelConfig = preset
+        ? { ...preset, api_key: '' }
+        : createDraftModel(prev.text.models.length + 1)
       const models = [...prev.text.models, next]
       return {
         ...prev,
@@ -162,6 +195,8 @@ function ModelConfigDialog({
         },
       }
     })
+    setModelPickerOpen(false)
+    setError(null)
   }, [])
 
   const removeModel = useCallback((index: number) => {
@@ -200,21 +235,38 @@ function ModelConfigDialog({
     event.preventDefault()
     setError(null)
 
-    const models = draft.text.models.map((model) => ({
-      ...model,
-      id: model.id.trim(),
-      label: model.label.trim() || model.id.trim() || model.model_id.trim(),
-      provider: model.provider.trim(),
-      model_id: model.model_id.trim(),
-      api_key: model.api_key.trim(),
-      base_url: model.base_url?.trim() || undefined,
-      api: model.api?.trim() || undefined,
-    }))
+    const models = draft.text.models.map((model) => {
+      const officialPreset = getOfficialTextModelPreset(model)
+      if (officialPreset) {
+        return {
+          ...officialPreset,
+          model_id: model.model_id.trim(),
+          api_key: model.api_key.trim(),
+        }
+      }
+      return {
+        ...model,
+        id: model.id.trim(),
+        label: model.label.trim() || model.id.trim() || model.model_id.trim(),
+        provider: model.provider.trim(),
+        model_id: model.model_id.trim(),
+        api_key: model.api_key.trim(),
+        base_url: model.base_url?.trim() || undefined,
+        api: model.api?.trim() || undefined,
+      }
+    })
     const incomplete = models.find(
       (model) => !model.id || !model.provider || !model.model_id,
     )
     if (incomplete) {
       setError('请补齐文字模型的 ID、来源和模型名')
+      return
+    }
+    const officialWithoutKey = models.find(
+      (model) => getOfficialTextModelPreset(model) && !model.api_key,
+    )
+    if (officialWithoutKey) {
+      setError(`请填写 ${officialWithoutKey.label} 的 API Key`)
       return
     }
 
@@ -280,7 +332,11 @@ function ModelConfigDialog({
             <section className="model-config-section">
               <div className="model-config-section-head">
                 <h3>文字模型</h3>
-                <button type="button" className="btn-secondary btn-small" onClick={addModel}>
+                <button
+                  type="button"
+                  className="btn-secondary btn-small"
+                  onClick={() => setModelPickerOpen(true)}
+                >
                   添加模型
                 </button>
               </div>
@@ -291,6 +347,7 @@ function ModelConfigDialog({
                 <div className="model-config-list">
                   {draft.text.models.map((model, index) => {
                     const builtinFreeModel = isBuiltinFreeTextModel(model)
+                    const officialPreset = getOfficialTextModelPreset(model)
                     return (
                       <article
                         className={
@@ -333,6 +390,43 @@ function ModelConfigDialog({
                           <div className="model-config-locked-summary">
                             <strong>{model.label || 'DeepseekWriteFree'}</strong>
                             <span>{model.model_id}</span>
+                          </div>
+                        ) : officialPreset ? (
+                          <div className="model-config-official">
+                            <div className="model-config-official-title">
+                              <strong>{officialPreset.label}</strong>
+                              <span>官方预设</span>
+                            </div>
+                            <div className="model-config-official-summary">
+                              <span>
+                                <em>配置 ID</em>
+                                <strong>{officialPreset.id}</strong>
+                              </span>
+                              <span>
+                                <em>模型来源</em>
+                                <strong>{officialPreset.provider}</strong>
+                              </span>
+                            </div>
+                            <div className="model-config-official-fields">
+                              <label className="field">
+                                <span className="field-label">模型名称</span>
+                                <input
+                                  type="text"
+                                  value={model.model_id}
+                                  onChange={(e) => updateModel(index, { model_id: e.target.value })}
+                                  placeholder={officialPreset.model_id}
+                                />
+                              </label>
+                              <label className="field">
+                                <span className="field-label">API Key</span>
+                                <input
+                                  type="password"
+                                  value={model.api_key}
+                                  onChange={(e) => updateModel(index, { api_key: e.target.value })}
+                                  placeholder="请输入 DeepSeek 官方 API Key"
+                                />
+                              </label>
+                            </div>
                           </div>
                         ) : (
                           <div className="model-config-grid">
@@ -387,7 +481,7 @@ function ModelConfigDialog({
                                 type="text"
                                 value={model.base_url ?? ''}
                                 onChange={(e) => updateModel(index, { base_url: e.target.value })}
-                                placeholder="https://api.example.com/v1"
+                                placeholder="官方来源无需填写 Base URL"
                               />
                             </label>
                             <label className="field">
@@ -493,6 +587,65 @@ function ModelConfigDialog({
               {saving ? '保存中…' : '保存'}
             </button>
           </footer>
+
+          {modelPickerOpen && (
+            <div
+              className="model-picker-backdrop"
+              role="presentation"
+              onClick={(event) => {
+                if (event.target === event.currentTarget) setModelPickerOpen(false)
+              }}
+            >
+              <section
+                className="model-picker-dialog"
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="model-picker-title"
+              >
+                <header className="model-config-head">
+                  <h2 id="model-picker-title">选择模型类型</h2>
+                  <button
+                    type="button"
+                    className="model-config-close"
+                    aria-label="关闭模型选择"
+                    onClick={() => setModelPickerOpen(false)}
+                  >
+                    ×
+                  </button>
+                </header>
+                <div className="model-picker-options">
+                  {OFFICIAL_TEXT_MODEL_PRESETS.map((preset, index) => {
+                    const alreadyAdded = draft.text.models.some(
+                      (model) => model.id === preset.id,
+                    )
+                    return (
+                      <button
+                        key={preset.id}
+                        type="button"
+                        className="model-picker-option"
+                        disabled={alreadyAdded}
+                        autoFocus={index === 0}
+                        onClick={() => addModel(preset)}
+                      >
+                        <strong>官方 {preset.label.replace(' V4', '')}</strong>
+                        <span>
+                          {alreadyAdded ? '已添加' : '仅需填写 API Key，其余配置自动完成'}
+                        </span>
+                      </button>
+                    )
+                  })}
+                  <button
+                    type="button"
+                    className="model-picker-option"
+                    onClick={() => addModel()}
+                  >
+                    <strong>其他厂商模型</strong>
+                    <span>手动填写模型来源、名称、API 地址等完整配置</span>
+                  </button>
+                </div>
+              </section>
+            </div>
+          )}
         </form>
       </section>
     </div>

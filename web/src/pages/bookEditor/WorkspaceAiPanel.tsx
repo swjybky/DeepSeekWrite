@@ -49,6 +49,24 @@ type StartExpertWriting = (
   },
 ) => boolean
 
+function workspaceAgentTitle(
+  activeStage: StageId,
+  activeExpertDraftSectionId: string,
+): string {
+  if (activeExpertDraftSectionId) return '分节写手智能体'
+  if (activeStage === 'character_design') return '人物智能体'
+  if (
+    activeStage === 'plot_design' ||
+    activeStage === 'intro_design' ||
+    activeStage === 'plot_refine'
+  ) {
+    return '剧情智能体'
+  }
+  if (activeStage === 'outline') return '大纲智能体'
+  if (activeStage === 'draft') return '正文智能体'
+  return '智能体'
+}
+
 type Props = {
   book: Book
   railStages: readonly { id: StageId; label: string }[]
@@ -114,7 +132,12 @@ export function WorkspaceAiPanel({
   return (
     <aside className="workspace-ai workspace-ai--center" aria-label="AI 对话">
       <div className="workspace-ai-header workspace-ai-header-row">
-        <span className="workspace-ai-header-title">智能体</span>
+        <span className="workspace-ai-header-title">
+          {workspaceAgentTitle(
+            activeStage,
+            expertDraftActive ? activeExpertDraftSectionId : '',
+          )}
+        </span>
         <div className="workspace-ai-header-actions">
           <button
             type="button"

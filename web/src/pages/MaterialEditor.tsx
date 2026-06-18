@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
-import { Link, useParams } from 'react-router-dom'
+import { Link, useNavigate, useParams } from 'react-router-dom'
 import {
   MATERIAL_MANAGER_PROMPT_KIND,
   type Material,
@@ -14,6 +14,11 @@ import {
 import { WorkspaceAiChat } from '../components/WorkspaceAiChat'
 import type { ApplyToStageEditorPayload } from '../pi/workspaceStageAgents'
 import { WorkspaceTreeNav } from '../components/WorkspaceTreeNav'
+import {
+  autoSaveStatusLabel,
+  useKeyedAutoSave,
+} from '../hooks/useKeyedAutoSave'
+import { useTextHistory } from '../hooks/useTextHistory'
 import './BookEditor.css'
 
 const MATERIAL_STAGE_KEYS: MaterialStageId[] = [
@@ -83,19 +88,19 @@ function readStoredAiWidth(): number {
 
 export function MaterialEditor() {
   const { id } = useParams<{ id: string }>()
+  const navigate = useNavigate()
   const [material, setMaterial] = useState<Material | null>(null)
   const [stages, setStages] = useState<Record<MaterialStageId, string>>(() =>
     normalizeMaterialStages({}),
   )
   const [activeStage, setActiveStage] = useState<MaterialStageId>('character')
   const [loading, setLoading] = useState(true)
-  const [saving, setSaving] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [aiPanelWidth, setAiPanelWidth] = useState(readStoredAiWidth)
   const [aiChatEpoch, setAiChatEpoch] = useState(0)
   const splitDragRef = useRef<{ startX: number; startWidth: number } | null>(null)
-  const saveInFlightRef = useRef(false)
+  const materialRef = useRef<Material | null>(null)
   const activeStageRef = useRef<MaterialStageId>(activeStage)
   const textareaRef = useRef<HTMLTextAreaElement | null>(null)
   const tokenBuffersRef = useRef<Partial<Record<MaterialStageId, string>>>({})
@@ -119,6 +124,38 @@ export function MaterialEditor() {
   }, [])
   const [editingTitle, setEditingTitle] = useState(false)
   const [titleDraft, setTitleDraft] = useState('')
+  const textHistory = useTextHistory()
+
+  const autoSave = useKeyedAutoSave<Record<MaterialStageId, string>>({
+    getSnapshot: (key) =>
+      key === id ? { ...stagesRef.current } : null,
+    saveSnapshot: async (key, snapshot) => {
+      try {
+        const next = await saveMaterial(key, { stages: snapshot })
+        if (!next) throw new Error('保存失败：素材不存在')
+        const liveStages = stagesRef.current
+        setMaterial((current) => {
+          const merged = {
+            ...next,
+            title: current?.title ?? next.title,
+            stages: liveStages,
+          }
+          materialRef.current = merged
+          return merged
+        })
+        setError(null)
+      } catch (cause) {
+        setError(cause instanceof Error ? cause.message : '保存失败')
+        throw cause
+      }
+    },
+  })
+  const {
+    flush: flushMaterial,
+    markSaved: markMaterialSaved,
+    schedule: scheduleMaterialSave,
+    statusFor: materialSaveStatus,
+  } = autoSave
 
   useEffect(() => {
     activeStageRef.current = activeStage
@@ -138,16 +175,16 @@ export function MaterialEditor() {
 
   const updateStage = useCallback(
     (stageId: MaterialStageId, updater: (current: string) => string) => {
-      setStages((prev) => {
-        const current = prev[stageId] ?? ''
-        const next = updater(current)
-        if (next === current) return prev
-        const updated = { ...prev, [stageId]: next }
-        stagesRef.current = updated
-        return updated
-      })
+      const currentStages = stagesRef.current
+      const current = currentStages[stageId] ?? ''
+      const next = updater(current)
+      if (next === current) return
+      const updated = { ...currentStages, [stageId]: next }
+      stagesRef.current = updated
+      setStages(updated)
+      if (id) scheduleMaterialSave(id)
     },
-    [],
+    [id, scheduleMaterialSave],
   )
 
   const cancelTokenFlush = useCallback((stageId: MaterialStageId) => {
@@ -204,7 +241,16 @@ export function MaterialEditor() {
         cancelTokenFlush(stage)
         delete tokenBuffersRef.current[stage]
         setEditorStreaming(stage, false)
-        updateStage(stage, () => payload.text.trim())
+        const current =
+          (stagesRef.current[stage] ?? '') + (tokenBuffersRef.current[stage] ?? '')
+        const next = payload.text.trim()
+        textHistory.record(
+          `material:${id}:${stage}`,
+          current,
+          next,
+          next.length === 0 ? 'stream' : 'atomic',
+        )
+        updateStage(stage, () => next)
         requestAnimationFrame(() => autoScrollTextarea(stage))
         return
       }
@@ -212,6 +258,14 @@ export function MaterialEditor() {
       if (payload.mode === 'append_token') {
         if (!payload.text) return
         setEditorStreaming(stage, true)
+        const current =
+          (stagesRef.current[stage] ?? '') + (tokenBuffersRef.current[stage] ?? '')
+        textHistory.record(
+          `material:${id}:${stage}`,
+          current,
+          current + payload.text,
+          'stream',
+        )
         tokenBuffersRef.current[stage] =
           (tokenBuffersRef.current[stage] ?? '') + payload.text
         if (tokenBufferRafRefs.current[stage] === undefined) {
@@ -227,6 +281,8 @@ export function MaterialEditor() {
         cancelTokenFlush(stage)
         flushTokenBuffer(stage)
         setEditorStreaming(stage, false)
+        textHistory.endGroup(`material:${id}:${stage}`)
+        if (id) void flushMaterial(id)
         return
       }
 
@@ -235,10 +291,13 @@ export function MaterialEditor() {
       setEditorStreaming(stage, false)
       const trimmed = payload.text.trim()
       if (!trimmed) return
-      updateStage(stage, (cur) => {
-        const sep = cur.length === 0 ? '' : cur.endsWith('\n') ? '\n' : '\n\n'
-        return cur + sep + trimmed
-      })
+      const current = stagesRef.current[stage] ?? ''
+      const next = (() => {
+        const sep = current.length === 0 ? '' : current.endsWith('\n') ? '\n' : '\n\n'
+        return current + sep + trimmed
+      })()
+      textHistory.record(`material:${id}:${stage}`, current, next, 'atomic')
+      updateStage(stage, () => next)
       requestAnimationFrame(() => autoScrollTextarea(stage))
     },
     [
@@ -247,6 +306,9 @@ export function MaterialEditor() {
       flushTokenBuffer,
       autoScrollTextarea,
       setEditorStreaming,
+      textHistory,
+      id,
+      flushMaterial,
     ],
   )
 
@@ -278,16 +340,18 @@ export function MaterialEditor() {
         return
       }
       setMaterial(m)
+      materialRef.current = m
       const normalized = normalizeMaterialStages(m.stages)
       stagesRef.current = normalized
       setStages(normalized)
+      markMaterialSaved(m.id)
       setActiveStage('character')
     } catch (e) {
       setError(e instanceof Error ? e.message : '加载失败')
     } finally {
       setLoading(false)
     }
-  }, [id])
+  }, [id, markMaterialSaved])
 
   const hasLoadedRef = useRef(false)
   useEffect(() => {
@@ -298,46 +362,32 @@ export function MaterialEditor() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  const handleSave = useCallback(async () => {
-    if (!id || !material || saveInFlightRef.current) return
-    saveInFlightRef.current = true
-    setSaving(true)
-    setMessage(null)
-    setError(null)
-    try {
-      flushAllTokenBuffers()
-      const next = await saveMaterial(id, { stages: stagesRef.current })
-      if (!next) {
-        setError('保存失败：素材不存在')
-        return
-      }
-      setMaterial(next)
-      setStages(normalizeMaterialStages(next.stages))
-      setMessage('已保存')
-      window.setTimeout(() => setMessage(null), 2000)
-    } catch (e) {
-      setError(e instanceof Error ? e.message : '保存失败')
-    } finally {
-      saveInFlightRef.current = false
-      setSaving(false)
-    }
-  }, [id, material, flushAllTokenBuffers])
+  const flushAutoSave = useCallback(async () => {
+    if (!id) return true
+    flushAllTokenBuffers()
+    return flushMaterial(id)
+  }, [flushAllTokenBuffers, flushMaterial, id])
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if (!(e.ctrlKey || e.metaKey) || e.key.toLowerCase() !== 's') return
       e.preventDefault()
-      void handleSave()
+      void flushAutoSave()
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [handleSave])
+  }, [flushAutoSave])
 
   const handleStageBodyChange = (value: string) => {
     cancelTokenFlush(activeStage)
     delete tokenBuffersRef.current[activeStage]
     updateStage(activeStage, () => value)
   }
+
+  const handleBack = useCallback(async () => {
+    await flushAutoSave()
+    navigate('/')
+  }, [flushAutoSave, navigate])
 
   if (!id) {
     return (
@@ -387,9 +437,9 @@ export function MaterialEditor() {
   return (
     <div className="editor-page editor-page--workspace">
       <header className="editor-header editor-header--agent">
-        <Link className="back-link" to="/">
+        <button type="button" className="back-link" onClick={() => void handleBack()}>
           ← 返回
-        </Link>
+        </button>
         <div className="editor-header-meta muted">
           <span className="editor-header-meta-inner">
             <span className="editor-header-meta-text">
@@ -411,14 +461,12 @@ export function MaterialEditor() {
             ) : null}
           </span>
         </div>
-        <button
-          type="button"
-          className="btn-save"
-          onClick={() => void handleSave()}
-          disabled={saving}
+        <span
+          className={`workspace-settings-save-state workspace-settings-save-state--${materialSaveStatus(id)}`}
+          aria-live="polite"
         >
-          {saving ? '保存中…' : '保存'}
-        </button>
+          {autoSaveStatusLabel(materialSaveStatus(id))}
+        </span>
       </header>
 
       <div
@@ -434,11 +482,22 @@ export function MaterialEditor() {
             }))}
             defaultExpanded
             activeStageId={activeStage}
-            onStageSelect={(stageId) => setActiveStage(stageId as MaterialStageId)}
+            onStageSelect={(stageId) => {
+              void flushAutoSave()
+              setActiveStage(stageId as MaterialStageId)
+            }}
             editingTitle={editingTitle}
             titleDraft={titleDraft}
-            onTitleDraftChange={setTitleDraft}
+            onTitleDraftChange={(value) =>
+              textHistory.change(
+                `material:${material.id}:title`,
+                titleDraft,
+                value,
+                setTitleDraft,
+              )
+            }
             onTitleEditStart={() => {
+              textHistory.clear(`material:${material.id}:title`, material.title)
               setTitleDraft(material.title)
               setEditingTitle(true)
             }}
@@ -449,7 +508,9 @@ export function MaterialEditor() {
                   try {
                     const next = await saveMaterial(material.id, { title: trimmed })
                     if (next) {
-                      setMaterial(next)
+                      const merged = { ...next, stages: stagesRef.current }
+                      materialRef.current = merged
+                      setMaterial(merged)
                       setMessage('素材名已修改')
                       window.setTimeout(() => setMessage(null), 2000)
                     } else {
@@ -467,6 +528,15 @@ export function MaterialEditor() {
               setEditingTitle(false)
               setTitleDraft('')
             }}
+            onTitleInputKeyDown={(event) =>
+              textHistory.handleKeyDown(
+                event,
+                `material:${material.id}:title`,
+                titleDraft,
+                setTitleDraft,
+                { redoKey: 'm', standardRedo: false },
+              )
+            }
           />
         </aside>
 
@@ -586,7 +656,24 @@ export function MaterialEditor() {
             ref={textareaRef}
             className="editor-body workspace-textarea"
             value={stageBody}
-            onChange={(e) => handleStageBodyChange(e.target.value)}
+            onChange={(e) =>
+              textHistory.change(
+                `material:${material.id}:${activeStage}`,
+                stageBody,
+                e.target.value,
+                handleStageBodyChange,
+              )
+            }
+            onKeyDown={(event) =>
+              textHistory.handleKeyDown(
+                event,
+                `material:${material.id}:${activeStage}`,
+                stageBody,
+                handleStageBodyChange,
+                { redoKey: 'm', standardRedo: false },
+              )
+            }
+            onBlur={() => void flushAutoSave()}
             placeholder={`在此编辑${MATERIAL_STAGE_LABELS[activeStage]}内容…`}
             spellCheck={false}
             readOnly={Boolean(streamingStages[activeStage])}

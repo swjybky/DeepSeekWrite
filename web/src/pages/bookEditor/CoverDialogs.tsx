@@ -1,9 +1,14 @@
+import { TextHistoryControls } from '../../components/TextHistoryControls'
+import type { TextHistoryController } from '../../hooks/useTextHistory'
+
 type CoverGenerateDialogProps = {
   promptDraft: string
   generating: boolean
   onPromptChange: (value: string) => void
   onClose: () => void
   onConfirm: () => void
+  textHistory: TextHistoryController
+  historyKey: string
 }
 
 type CoverViewerDialogProps = {
@@ -17,6 +22,8 @@ export function CoverGenerateDialog({
   onPromptChange,
   onClose,
   onConfirm,
+  textHistory,
+  historyKey,
 }: CoverGenerateDialogProps) {
   return (
     <div
@@ -44,13 +51,35 @@ export function CoverGenerateDialog({
           <label className="workspace-cover-dialog-label" htmlFor="cover-prompt">
             提示词（可修改）
           </label>
+          <TextHistoryControls
+            history={textHistory}
+            historyKey={historyKey}
+            value={promptDraft}
+            onChange={onPromptChange}
+            disabled={generating}
+          />
           <textarea
             id="cover-prompt"
             className="workspace-cover-dialog-area"
             value={promptDraft}
             spellCheck={false}
             disabled={generating}
-            onChange={(e) => onPromptChange(e.target.value)}
+            onChange={(e) =>
+              textHistory.change(
+                historyKey,
+                promptDraft,
+                e.target.value,
+                onPromptChange,
+              )
+            }
+            onKeyDown={(event) =>
+              textHistory.handleKeyDown(
+                event,
+                historyKey,
+                promptDraft,
+                onPromptChange,
+              )
+            }
           />
         </div>
         <div className="workspace-cover-dialog-foot">

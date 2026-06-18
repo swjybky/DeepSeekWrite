@@ -1,5 +1,9 @@
 import type { Book, Material, Skill } from '../../domain/workspace'
 import { bookTypeLabel, isWorkspaceBook } from '../../domain/workspace'
+import {
+  autoSaveStatusLabel,
+  type AutoSaveStatus,
+} from '../../hooks/useKeyedAutoSave'
 
 type Props = {
   book: Book
@@ -10,13 +14,13 @@ type Props = {
   saving: boolean
   error: string | null
   message: string | null
+  autoSaveStatus: AutoSaveStatus
   onBack: () => void
   onViewCover: () => void
   onGenerateCover: () => void
   onCoverError: () => void
   onOpenMaterialSelector: () => void
   onOpenSkillSelector: () => void
-  onSave: () => void
   onToggleStatus: () => void
 }
 
@@ -29,13 +33,13 @@ export function WorkspaceBookHeader({
   saving,
   error,
   message,
+  autoSaveStatus,
   onBack,
   onViewCover,
   onGenerateCover,
   onCoverError,
   onOpenMaterialSelector,
   onOpenSkillSelector,
-  onSave,
   onToggleStatus,
 }: Props) {
   return (
@@ -130,14 +134,12 @@ export function WorkspaceBookHeader({
         >
           技能库选择
         </button>
-        <button
-          type="button"
-          className="btn-save"
-          onClick={onSave}
-          disabled={saving}
+        <span
+          className={`workspace-settings-save-state workspace-settings-save-state--${autoSaveStatus}`}
+          aria-live="polite"
         >
-          {saving ? '保存中…' : '保存'}
-        </button>
+          {autoSaveStatusLabel(autoSaveStatus)}
+        </span>
         <button
           type="button"
           className={
@@ -148,7 +150,7 @@ export function WorkspaceBookHeader({
           onClick={onToggleStatus}
           disabled={saving}
         >
-          {book.status === 'completed' ? '修改' : '完成'}
+          {book.status === 'completed' ? '修改' : '完本'}
         </button>
       </div>
     </header>

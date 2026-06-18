@@ -85,7 +85,7 @@ export function buildInitializeExpertDraftTool(
     name: 'initialize_expert_draft',
     label: '初始化正文',
     description:
-      '根据大纲一次性创建或重建专家正文小节列表，并同步生成与之一一对应的人物状态槽位。每个小节会映射到独立正文编辑框；修改会写回对应小节。仅用于初始化或用户明确要求重建正文结构；已有正文需局部修改时请用 edit_expert_draft_section。可把已知导语/首章正文填入 body，把已知人物状态填入 character_state_body。',
+      '根据大纲一次性创建或重建专家正文小节列表，并同步生成与之一一对应的人物状态槽位。每个小节会映射到独立正文编辑框；修改会写回对应小节。仅用于初始化、批量修改章节名或用户明确要求重建正文结构；已有正文需局部修改时请用 edit_expert_draft_section。可把已知导语/首章正文填入 body；body 不传或传空时保留该小节现有正文，不做修改，适合只批量修改章节名。可把已知人物状态填入 character_state_body。',
     parameters: Type.Object({
       sections: Type.Array(
         Type.Object({
@@ -102,7 +102,10 @@ export function buildInitializeExpertDraftTool(
             }),
           ),
           body: Type.Optional(
-            Type.String({ description: '可选：该小节正文；未知时留空' }),
+            Type.String({
+              description:
+                '可选：该小节正文。仅传入非空内容时修改正文；不传或传空字符串时保留现有正文不变，可用于只批量修改章节名。',
+            }),
           ),
           character_state_body: Type.Optional(
             Type.String({
@@ -132,7 +135,7 @@ export function buildInitializeExpertDraftTool(
               item.word_count_requirement ?? previous?.word_count_requirement,
             ),
             body:
-              typeof item.body === 'string'
+              typeof item.body === 'string' && item.body.trim()
                 ? item.body
                 : previous?.body ?? '',
           }

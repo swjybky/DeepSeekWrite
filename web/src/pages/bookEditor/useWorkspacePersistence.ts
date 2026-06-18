@@ -19,7 +19,10 @@ import {
   type StageId,
   type WorkspaceAgentReadAccessConfig,
 } from '../../bridge'
-import type { BookWorkspaceSessionState } from '../../stores/workspaceStore'
+import type {
+  BookPersistedSnapshot,
+  BookWorkspaceSessionState,
+} from '../../stores/workspaceStore'
 import { PLOT_STAGE_ID } from '../../workspaces/short/stages'
 import {
   createBookPersistedSnapshot,
@@ -303,6 +306,7 @@ export function useWorkspacePersistence({
     async (
       bookId: string,
       options: SaveCurrentBookOptions = {},
+      snapshotOverride?: BookPersistedSnapshot,
     ): Promise<Book | null> => {
       const session = workspaceSessionsRef.current[bookId]
       if (!session) return null
@@ -321,14 +325,24 @@ export function useWorkspacePersistence({
       try {
         flushAllTokenBuffersForBook(bookId)
         const beforeSave = workspaceSessionsRef.current[bookId] ?? session
-        const stagesForSave = beforeSave.stages
+        const snapshotForSave =
+          snapshotOverride ??
+          createBookPersistedSnapshot(
+            {
+              ...beforeSave.book,
+              stages: beforeSave.stages,
+              expert_draft: beforeSave.expertDraft,
+            },
+            beforeSave.expertDraft,
+          )
+        const stagesForSave = snapshotForSave.stages
         const merged = mergeStagePatchIntoAll(
           beforeSave.book.stages,
           stagesForSave,
         )
         const next = await saveBook(bookId, {
           stages: merged,
-          expert_draft: beforeSave.expertDraft,
+          expert_draft: snapshotForSave.expertDraft,
           status: options.status,
         })
         if (!next) {
@@ -348,15 +362,9 @@ export function useWorkspacePersistence({
           },
           stages: latestStages,
           expertDraft: latest.expertDraft,
-          persistedSnapshot: createBookPersistedSnapshot(
-            {
-              ...next,
-              stages: nextBookStages,
-              expert_draft: latest.expertDraft,
-              content: latestStages.draft,
-            },
-            latest.expertDraft,
-          ),
+          // 只把这次请求实际提交的快照标记为已保存。请求期间产生的
+          // 新输入继续保持 dirty，随后由自动保存队列再次提交。
+          persistedSnapshot: snapshotForSave,
         }
         storeWorkspaceSession(nextSession, isActiveBook)
         syncWorkspaceBookSummary(next)

@@ -2,6 +2,7 @@ import {
   CoverGenerateDialog,
   CoverViewerDialog,
 } from './CoverDialogs'
+import type { TextHistoryController } from '../../hooks/useTextHistory'
 
 type WorkspaceCoverDialogsProps = {
   coverData: string | null
@@ -13,6 +14,8 @@ type WorkspaceCoverDialogsProps = {
   setCoverPromptDraft: (prompt: string) => void
   setCoverViewerOpen: (open: boolean) => void
   confirmCoverGeneration: () => void
+  textHistory: TextHistoryController
+  historyKey: string
 }
 
 export function WorkspaceCoverDialogs({
@@ -25,6 +28,8 @@ export function WorkspaceCoverDialogs({
   setCoverPromptDraft,
   setCoverViewerOpen,
   confirmCoverGeneration,
+  textHistory,
+  historyKey,
 }: WorkspaceCoverDialogsProps) {
   return (
     <>
@@ -35,6 +40,8 @@ export function WorkspaceCoverDialogs({
           onPromptChange={setCoverPromptDraft}
           onClose={() => setCoverDialogOpen(false)}
           onConfirm={confirmCoverGeneration}
+          textHistory={textHistory}
+          historyKey={historyKey}
         />
       ) : null}
 

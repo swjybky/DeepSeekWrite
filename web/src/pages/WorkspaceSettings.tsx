@@ -41,6 +41,12 @@ import {
   isRequiredWorkspaceStageForAgent as isRequiredScriptWorkspaceStageForAgent,
   normalizeWorkspaceAgentReadAccess as normalizeScriptWorkspaceAgentReadAccess,
 } from '../workspaces/script/stageReadAccess'
+import { TextHistoryControls } from '../components/TextHistoryControls'
+import {
+  autoSaveStatusLabel,
+  useKeyedAutoSave,
+} from '../hooks/useKeyedAutoSave'
+import { useTextHistory } from '../hooks/useTextHistory'
 import './WorkspaceSettings.css'
 
 type SaveStatus = 'idle' | 'saving' | 'saved' | 'error'
@@ -104,13 +110,6 @@ function isRequiredWorkspaceStageForType(
     : isRequiredWorkspaceStageForAgent(agentId, stageId)
 }
 
-function statusLabel(status: SaveStatus): string {
-  if (status === 'saving') return '保存中…'
-  if (status === 'saved') return '已保存'
-  if (status === 'error') return '保存失败'
-  return '自动保存'
-}
-
 export function WorkspaceSettings() {
   const navigate = useNavigate()
   const [workspaceType, setWorkspaceType] =
@@ -128,12 +127,39 @@ export function WorkspaceSettings() {
   const activeAgentRef = useRef(activeAgentId)
   const promptDraftsRef = useRef(promptDrafts)
   const savedPromptsRef = useRef<PromptDrafts>(EMPTY_PROMPTS)
+  const promptValuesByKeyRef = useRef<Record<string, string>>({})
   const readAccessRef = useRef(readAccess)
-  const promptTimersRef = useRef<
-    Partial<Record<WorkspaceAgentId, number>>
-  >({})
   const saveQueueRef = useRef<Promise<void>>(Promise.resolve())
   const operationSeqRef = useRef(0)
+  const textHistory = useTextHistory()
+  const promptAutoSave = useKeyedAutoSave<string>({
+    getSnapshot: (key) => {
+      return promptValuesByKeyRef.current[key] ?? null
+    },
+    saveSnapshot: async (key, value) => {
+      const [targetType, agentId] = key.split(':') as [
+        WorkspaceSettingsType,
+        WorkspaceAgentId,
+      ]
+      try {
+        await saveWorkspaceAgentPromptOverride(agentId, value, targetType)
+        savedPromptsRef.current = {
+          ...savedPromptsRef.current,
+          [agentId]: value,
+        }
+        setError(null)
+      } catch (cause) {
+        setError(cause instanceof Error ? cause.message : '保存创作空间提示词失败')
+        throw cause
+      }
+    },
+  })
+  const {
+    flush: flushWorkspacePrompt,
+    markSaved: markWorkspacePromptSaved,
+    schedule: scheduleWorkspacePromptSave,
+    statusFor: workspacePromptStatus,
+  } = promptAutoSave
 
   useEffect(() => {
     activeAgentRef.current = activeAgentId
@@ -171,47 +197,22 @@ export function WorkspaceSettings() {
     [],
   )
 
-  const savePromptValue = useCallback(
-    async (agentId: WorkspaceAgentId, value: string): Promise<void> => {
-      if (savedPromptsRef.current[agentId] === value) return
-      await enqueueSave(async () => {
-        await saveWorkspaceAgentPromptOverride(agentId, value, workspaceType)
-        savedPromptsRef.current = {
-          ...savedPromptsRef.current,
-          [agentId]: value,
-        }
-      })
-    },
-    [enqueueSave, workspaceType],
-  )
-
   const flushPrompt = useCallback(
     (agentId: WorkspaceAgentId): Promise<void> => {
-      const timer = promptTimersRef.current[agentId]
-      if (timer !== undefined) {
-        window.clearTimeout(timer)
-        delete promptTimersRef.current[agentId]
-      }
-      return savePromptValue(agentId, promptDraftsRef.current[agentId])
+      return flushWorkspacePrompt(`${workspaceType}:${agentId}`).then(() => undefined)
     },
-    [savePromptValue],
+    [flushWorkspacePrompt, workspaceType],
   )
 
   const schedulePromptSave = useCallback(
-    (agentId: WorkspaceAgentId, value: string) => {
-      const previous = promptTimersRef.current[agentId]
-      if (previous !== undefined) window.clearTimeout(previous)
-      promptTimersRef.current[agentId] = window.setTimeout(() => {
-        delete promptTimersRef.current[agentId]
-        void savePromptValue(agentId, value).catch(() => undefined)
-      }, 500)
+    (agentId: WorkspaceAgentId) => {
+      scheduleWorkspacePromptSave(`${workspaceType}:${agentId}`)
     },
-    [savePromptValue],
+    [scheduleWorkspacePromptSave, workspaceType],
   )
 
   useEffect(() => {
     let cancelled = false
-    const promptTimers = promptTimersRef.current
     void (async () => {
       setLoading(true)
       setError(null)
@@ -232,6 +233,12 @@ export function WorkspaceSettings() {
         readAccessRef.current = config
         setPromptDrafts(nextPrompts)
         setReadAccess(config)
+        for (const agentId of WORKSPACE_AGENT_IDS) {
+          const key = `${workspaceType}:${agentId}`
+          promptValuesByKeyRef.current[key] = nextPrompts[agentId]
+          textHistory.clear(`workspace-settings:${key}`, nextPrompts[agentId])
+          markWorkspacePromptSaved(key)
+        }
       } catch (cause) {
         if (!cancelled) {
           setError(cause instanceof Error ? cause.message : '加载创作空间设置失败')
@@ -242,22 +249,21 @@ export function WorkspaceSettings() {
     })()
     return () => {
       cancelled = true
-      for (const timer of Object.values(promptTimers)) {
-        if (timer !== undefined) window.clearTimeout(timer)
-      }
       for (const agentId of WORKSPACE_AGENT_IDS) {
         if (
           promptDraftsRef.current[agentId] !==
           savedPromptsRef.current[agentId]
         ) {
-          void savePromptValue(
-            agentId,
-            promptDraftsRef.current[agentId],
-          ).catch(() => undefined)
+          void flushWorkspacePrompt(`${workspaceType}:${agentId}`)
         }
       }
     }
-  }, [savePromptValue, workspaceType])
+  }, [
+    flushWorkspacePrompt,
+    markWorkspacePromptSaved,
+    textHistory,
+    workspaceType,
+  ])
 
   const activeEntry = readAccess[activeAgentId]
   const activeLabel = AGENT_LABELS[activeAgentId]
@@ -346,19 +352,30 @@ export function WorkspaceSettings() {
     if (!window.confirm(`恢复「${AGENT_LABELS[agentId]}」的内置默认提示词？`)) {
       return
     }
-    const timer = promptTimersRef.current[agentId]
-    if (timer !== undefined) {
-      window.clearTimeout(timer)
-      delete promptTimersRef.current[agentId]
-    }
+    await flushPrompt(agentId).catch(() => undefined)
     await enqueueSave(async () => {
       await resetWorkspaceAgentPromptOverride(agentId, workspaceType)
       const value = await readWorkspaceAgentPromptTemplate(agentId, workspaceType)
+      const previous = promptDraftsRef.current[agentId]
       savedPromptsRef.current = { ...savedPromptsRef.current, [agentId]: value }
       promptDraftsRef.current = { ...promptDraftsRef.current, [agentId]: value }
+      promptValuesByKeyRef.current[`${workspaceType}:${agentId}`] = value
       setPromptDrafts((prev) => ({ ...prev, [agentId]: value }))
+      textHistory.record(
+        `workspace-settings:${workspaceType}:${agentId}`,
+        previous,
+        value,
+        'atomic',
+      )
+      markWorkspacePromptSaved(`${workspaceType}:${agentId}`)
     }).catch(() => undefined)
-  }, [enqueueSave, workspaceType])
+  }, [
+    enqueueSave,
+    flushPrompt,
+    markWorkspacePromptSaved,
+    textHistory,
+    workspaceType,
+  ])
 
   const resetReadAccess = useCallback(async () => {
     const agentId = activeAgentRef.current
@@ -386,14 +403,9 @@ export function WorkspaceSettings() {
       return
     }
 
-    // 取消所有未保存的提示词定时保存
-    for (const agentId of WORKSPACE_AGENT_IDS) {
-      const timer = promptTimersRef.current[agentId]
-      if (timer !== undefined) {
-        window.clearTimeout(timer)
-        delete promptTimersRef.current[agentId]
-      }
-    }
+    await Promise.all(
+      WORKSPACE_AGENT_IDS.map((agentId) => flushPrompt(agentId).catch(() => undefined)),
+    )
 
     setSaveStatus('saving')
     setError(null)
@@ -409,17 +421,29 @@ export function WorkspaceSettings() {
         getWorkspaceAgentReadAccess(workspaceType),
       ])
       const nextPrompts = Object.fromEntries(prompts) as PromptDrafts
+      const previousPrompts = promptDraftsRef.current
       promptDraftsRef.current = nextPrompts
       savedPromptsRef.current = nextPrompts
       readAccessRef.current = config
       setPromptDrafts(nextPrompts)
       setReadAccess(config)
+      for (const agentId of WORKSPACE_AGENT_IDS) {
+        const key = `${workspaceType}:${agentId}`
+        promptValuesByKeyRef.current[key] = nextPrompts[agentId]
+        textHistory.record(
+          `workspace-settings:${key}`,
+          previousPrompts[agentId],
+          nextPrompts[agentId],
+          'atomic',
+        )
+        markWorkspacePromptSaved(key)
+      }
       setSaveStatus('saved')
     } catch (cause) {
       setSaveStatus('error')
       setError(cause instanceof Error ? cause.message : '还原默认配置失败')
     }
-  }, [workspaceType])
+  }, [flushPrompt, markWorkspacePromptSaved, textHistory, workspaceType])
 
   const syncReadAccessDefaults = useCallback(async () => {
     if (
@@ -440,6 +464,20 @@ export function WorkspaceSettings() {
     }
   }, [workspaceType])
 
+  const activePromptKey = `${workspaceType}:${activeAgentId}`
+  const activePromptHistoryKey = `workspace-settings:${activePromptKey}`
+  const activePrompt = promptDrafts[activeAgentId]
+  const promptStatus = workspacePromptStatus(activePromptKey)
+  const headerStatus =
+    saveStatus === 'saving' || saveStatus === 'error' ? saveStatus : promptStatus
+  const applyActivePrompt = (value: string) => {
+    const next = { ...promptDraftsRef.current, [activeAgentId]: value }
+    promptDraftsRef.current = next
+    promptValuesByKeyRef.current[activePromptKey] = value
+    setPromptDrafts(next)
+    schedulePromptSave(activeAgentId)
+  }
+
   return (
     <div className="workspace-settings-page">
       <header className="workspace-settings-header">
@@ -455,10 +493,12 @@ export function WorkspaceSettings() {
           <p>短篇与剧本分别保存智能体提示词与读取范围。</p>
         </div>
         <span
-          className={`workspace-settings-save-state workspace-settings-save-state--${saveStatus}`}
+          className={`workspace-settings-save-state workspace-settings-save-state--${headerStatus}`}
           aria-live="polite"
         >
-          {statusLabel(saveStatus)}
+          {headerStatus === 'error'
+            ? '保存失败'
+            : autoSaveStatusLabel(headerStatus)}
         </span>
       </header>
 
@@ -565,28 +605,39 @@ export function WorkspaceSettings() {
                 <section className="workspace-settings-prompt-card">
                   <div className="workspace-settings-section-title">
                     <h3>系统提示词</h3>
-                    <p>停止输入 500ms 后自动保存，切换配置项或返回首页前会立即刷新。</p>
+                    <p>停止输入 1 秒后自动保存，持续输入最长 5 秒落盘一次。</p>
                   </div>
                   <p className="workspace-settings-placeholder-hint">
                     可用占位符：<code>{WORKSPACE_PLACEHOLDER_HINT}</code>
                   </p>
+                  <TextHistoryControls
+                    history={textHistory}
+                    historyKey={activePromptHistoryKey}
+                    value={activePrompt}
+                    onChange={applyActivePrompt}
+                  />
                   <textarea
-                    value={promptDrafts[activeAgentId]}
+                    value={activePrompt}
                     spellCheck={false}
                     onBlur={() =>
                       void flushPrompt(activeAgentId).catch(() => undefined)
                     }
                     onChange={(event) => {
-                      const value = event.target.value
-                      const agentId = activeAgentId
-                      const next = {
-                        ...promptDraftsRef.current,
-                        [agentId]: value,
-                      }
-                      promptDraftsRef.current = next
-                      setPromptDrafts(next)
-                      schedulePromptSave(agentId, value)
+                      textHistory.change(
+                        activePromptHistoryKey,
+                        activePrompt,
+                        event.target.value,
+                        applyActivePrompt,
+                      )
                     }}
+                    onKeyDown={(event) =>
+                      textHistory.handleKeyDown(
+                        event,
+                        activePromptHistoryKey,
+                        activePrompt,
+                        applyActivePrompt,
+                      )
+                    }
                   />
                 </section>
 

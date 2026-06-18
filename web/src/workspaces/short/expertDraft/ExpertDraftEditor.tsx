@@ -3,6 +3,8 @@ import type {
   ExpertDraftCharacterState,
   ExpertDraftSection,
 } from '../../../bridge'
+import { TextHistoryControls } from '../../../components/TextHistoryControls'
+import type { TextHistoryController } from '../../../hooks/useTextHistory'
 
 type Props = {
   draft: ExpertDraft
@@ -19,6 +21,9 @@ type Props = {
   stopWriting: () => void
   resetDraft: () => void
   exportDraft: () => void
+  textHistory: TextHistoryController
+  historyPrefix: string
+  onTextBlur: () => void
 }
 
 function textCounts(text: string): { total: number; nonSpace: number } {
@@ -74,6 +79,9 @@ export function ExpertDraftEditor({
   stopWriting,
   resetDraft,
   exportDraft,
+  textHistory,
+  historyPrefix,
+  onTextBlur,
 }: Props) {
   const selectedSection = draft.sections.find(
     (section) => section.id === draft.active_section_id,
@@ -88,6 +96,9 @@ export function ExpertDraftEditor({
     : null
   const isSectionMode = Boolean(selectedSection && selectedState)
   const counts = textCounts(isSectionMode ? (selectedSection?.body ?? '') : stageBody)
+  const bodyKey = `${historyPrefix}:expert:${selectedId}:body`
+  const stateKey = `${historyPrefix}:expert:${selectedId}:character-state`
+  const mainBodyKey = `${historyPrefix}:stage:draft`
   const sectionCounts = textCounts(selectedSection?.body ?? '')
 
   const deleteSelectedSection = () => {
@@ -117,6 +128,15 @@ export function ExpertDraftEditor({
       <div className="expert-draft-heading">
         <div className="expert-draft-heading-main">
           <label className="workspace-stage-label">正文编写</label>
+          {!isSectionMode ? (
+            <TextHistoryControls
+              history={textHistory}
+              historyKey={mainBodyKey}
+              value={stageBody}
+              onChange={onStageBodyChange}
+              disabled={draft.running || stageBodyReadOnly}
+            />
+          ) : null}
           <span className="expert-draft-status">
             {draft.running ? '分节写作中' : '待启动'}
           </span>
@@ -197,6 +217,7 @@ export function ExpertDraftEditor({
                       ),
                     }))
                   }}
+                  onBlur={onTextBlur}
                   disabled={draft.running}
                 />
               </label>
@@ -214,6 +235,7 @@ export function ExpertDraftEditor({
                       }),
                     }))
                   }}
+                  onBlur={onTextBlur}
                   placeholder="如 800-1000"
                   disabled={draft.running}
                 />
@@ -224,7 +246,21 @@ export function ExpertDraftEditor({
             </div>
 
             <label className="expert-draft-textarea-field">
-              <span>{selectedSection.title || '当前小节'}正文</span>
+              <span className="expert-draft-field-heading">
+                <span>{selectedSection.title || '当前小节'}正文</span>
+                <TextHistoryControls
+                  history={textHistory}
+                  historyKey={bodyKey}
+                  value={selectedSection.body}
+                  onChange={(body) =>
+                    updateDraft((current) => ({
+                      ...current,
+                      sections: updateSectionList(current.sections, selectedId, { body }),
+                    }))
+                  }
+                  disabled={draft.running}
+                />
+              </span>
               <textarea
                 className="editor-body workspace-textarea expert-draft-textarea"
                 value={selectedSection.body}
@@ -233,14 +269,22 @@ export function ExpertDraftEditor({
                   onSectionTextareaRef?.(selectedId, 'body', node)
                 }
                 onChange={(e) => {
-                  const body = e.target.value
-                  updateDraft((current) => ({
-                    ...current,
-                    sections: updateSectionList(current.sections, selectedId, {
-                      body,
-                    }),
-                  }))
+                  textHistory.change(bodyKey, selectedSection.body, e.target.value, (body) =>
+                    updateDraft((current) => ({
+                      ...current,
+                      sections: updateSectionList(current.sections, selectedId, { body }),
+                    })),
+                  )
                 }}
+                onKeyDown={(event) =>
+                  textHistory.handleKeyDown(event, bodyKey, selectedSection.body, (body) =>
+                    updateDraft((current) => ({
+                      ...current,
+                      sections: updateSectionList(current.sections, selectedId, { body }),
+                    })),
+                  )
+                }
+                onBlur={onTextBlur}
                 placeholder="正文内容..."
                 spellCheck={false}
                 readOnly={draft.running}
@@ -248,7 +292,26 @@ export function ExpertDraftEditor({
             </label>
 
             <label className="expert-draft-textarea-field">
-              <span>{selectedState.title || defaultStateTitle(selectedSection.title)}</span>
+              <span className="expert-draft-field-heading">
+                <span>{selectedState.title || defaultStateTitle(selectedSection.title)}</span>
+                <TextHistoryControls
+                  history={textHistory}
+                  historyKey={stateKey}
+                  value={selectedState.body}
+                  onChange={(body) =>
+                    updateDraft((current) => ({
+                      ...current,
+                      character_states: updateStateList(
+                        current.character_states,
+                        selectedId,
+                        { body },
+                        selectedSection.title,
+                      ),
+                    }))
+                  }
+                  disabled={draft.running}
+                />
+              </span>
               <textarea
                 className="editor-body workspace-textarea expert-draft-state-textarea"
                 value={selectedState.body}
@@ -257,17 +320,32 @@ export function ExpertDraftEditor({
                   onSectionTextareaRef?.(selectedId, 'character_state', node)
                 }
                 onChange={(e) => {
-                  const body = e.target.value
-                  updateDraft((current) => ({
-                    ...current,
-                    character_states: updateStateList(
-                      current.character_states,
-                      selectedId,
-                      { body },
-                      selectedSection.title,
-                    ),
-                  }))
+                  textHistory.change(stateKey, selectedState.body, e.target.value, (body) =>
+                    updateDraft((current) => ({
+                      ...current,
+                      character_states: updateStateList(
+                        current.character_states,
+                        selectedId,
+                        { body },
+                        selectedSection.title,
+                      ),
+                    })),
+                  )
                 }}
+                onKeyDown={(event) =>
+                  textHistory.handleKeyDown(event, stateKey, selectedState.body, (body) =>
+                    updateDraft((current) => ({
+                      ...current,
+                      character_states: updateStateList(
+                        current.character_states,
+                        selectedId,
+                        { body },
+                        selectedSection.title,
+                      ),
+                    })),
+                  )
+                }
+                onBlur={onTextBlur}
                 placeholder="人物状态..."
                 spellCheck={false}
                 readOnly={draft.running}
@@ -281,7 +359,23 @@ export function ExpertDraftEditor({
               value={stageBody}
               aria-label="正文编写正文"
               ref={(node) => onMainStageTextareaRef?.(node)}
-              onChange={(e) => onStageBodyChange(e.target.value)}
+              onChange={(e) =>
+                textHistory.change(
+                  mainBodyKey,
+                  stageBody,
+                  e.target.value,
+                  onStageBodyChange,
+                )
+              }
+              onKeyDown={(event) =>
+                textHistory.handleKeyDown(
+                  event,
+                  mainBodyKey,
+                  stageBody,
+                  onStageBodyChange,
+                )
+              }
+              onBlur={onTextBlur}
               placeholder="在此编辑正文..."
               spellCheck={false}
               readOnly={draft.running || stageBodyReadOnly}

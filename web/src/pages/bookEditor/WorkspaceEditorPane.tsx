@@ -3,6 +3,8 @@ import type { ExpertDraft, StageId } from '../../domain/workspace'
 import type { PlotChildStageDefinition, PlotChildStageId } from './workspaceTypes'
 import { PLOT_STAGE_ID } from '../../workspaces/short/stages'
 import { stageTextCounts } from './stageEditing'
+import { TextHistoryControls } from '../../components/TextHistoryControls'
+import type { TextHistoryController } from '../../hooks/useTextHistory'
 
 type ExpertDraftEditorProps = {
   draft: ExpertDraft
@@ -19,6 +21,9 @@ type ExpertDraftEditorProps = {
   stopWriting: () => void
   resetDraft: () => void
   exportDraft: () => void
+  textHistory: TextHistoryController
+  historyPrefix: string
+  onTextBlur: () => void
 }
 
 type Props = {
@@ -47,6 +52,9 @@ type Props = {
   textareaRefsRef: MutableRefObject<
     Partial<Record<StageId, HTMLTextAreaElement | null>>
   >
+  bookId: string
+  textHistory: TextHistoryController
+  onTextBlur: () => void
 }
 
 function StageCharCount({ text }: { text: string }) {
@@ -88,6 +96,9 @@ export function WorkspaceEditorPane({
   railStages,
   textareaRef,
   textareaRefsRef,
+  bookId,
+  textHistory,
+  onTextBlur,
 }: Props) {
   return (
     <div className="workspace-editor-pane workspace-editor-pane--primary">
@@ -108,6 +119,9 @@ export function WorkspaceEditorPane({
           stopWriting={stopExpertWriting}
           resetDraft={resetExpertDraft}
           exportDraft={exportExpertDraft}
+          textHistory={textHistory}
+          historyPrefix={`workspace:${bookId}`}
+          onTextBlur={onTextBlur}
         />
       ) : activeStage === PLOT_STAGE_ID ? (
         <div
@@ -136,6 +150,13 @@ export function WorkspaceEditorPane({
                   >
                     {plotStage.label}
                   </label>
+                  <TextHistoryControls
+                    history={textHistory}
+                    historyKey={`workspace:${bookId}:stage:${plotStage.id}`}
+                    value={body}
+                    onChange={(value) => onStageBodyChange(value, plotStage.id)}
+                    disabled={Boolean(streamingStages[plotStage.id])}
+                  />
                   <StageCharCount text={body} />
                 </div>
                 <textarea
@@ -149,8 +170,22 @@ export function WorkspaceEditorPane({
                   className="editor-body workspace-textarea"
                   value={body}
                   onChange={(e) =>
-                    onStageBodyChange(e.target.value, plotStage.id)
+                    textHistory.change(
+                      `workspace:${bookId}:stage:${plotStage.id}`,
+                      body,
+                      e.target.value,
+                      (value) => onStageBodyChange(value, plotStage.id),
+                    )
                   }
+                  onKeyDown={(event) =>
+                    textHistory.handleKeyDown(
+                      event,
+                      `workspace:${bookId}:stage:${plotStage.id}`,
+                      body,
+                      (value) => onStageBodyChange(value, plotStage.id),
+                    )
+                  }
+                  onBlur={onTextBlur}
                   placeholder="在此编辑当前剧情内容..."
                   spellCheck={false}
                   readOnly={Boolean(streamingStages[plotStage.id])}
@@ -165,6 +200,13 @@ export function WorkspaceEditorPane({
             <label className="workspace-stage-label" htmlFor="stage-body">
               {railStages.find((s) => s.id === activeStage)?.label}
             </label>
+            <TextHistoryControls
+              history={textHistory}
+              historyKey={`workspace:${bookId}:stage:${activeContentStage}`}
+              value={stageBody}
+              onChange={(value) => onStageBodyChange(value)}
+              disabled={Boolean(streamingStages[activeContentStage])}
+            />
             <StageCharCount text={stageBody} />
           </div>
           <textarea
@@ -175,7 +217,23 @@ export function WorkspaceEditorPane({
             }}
             className="editor-body workspace-textarea"
             value={stageBody}
-            onChange={(e) => onStageBodyChange(e.target.value)}
+            onChange={(e) =>
+              textHistory.change(
+                `workspace:${bookId}:stage:${activeContentStage}`,
+                stageBody,
+                e.target.value,
+                (value) => onStageBodyChange(value),
+              )
+            }
+            onKeyDown={(event) =>
+              textHistory.handleKeyDown(
+                event,
+                `workspace:${bookId}:stage:${activeContentStage}`,
+                stageBody,
+                (value) => onStageBodyChange(value),
+              )
+            }
+            onBlur={onTextBlur}
             placeholder="在此编辑当前阶段内容..."
             spellCheck={false}
             readOnly={Boolean(streamingStages[activeContentStage])}

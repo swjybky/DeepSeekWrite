@@ -339,6 +339,12 @@ button.back-link:hover {
   min-width: 0;
 }
 
+.workspace-textarea-history-row {
+  display: flex;
+  justify-content: flex-end;
+  flex: 0 0 auto;
+}
+
 .workspace-stage-label {
   flex: 1 1 auto;
   min-width: 0;
@@ -608,6 +614,19 @@ button.back-link:hover {
   letter-spacing: 0.06em;
   color: var(--ink);
   text-align: left;
+}
+
+.workspace-tree-title-editor {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.2rem;
+}
+
+.workspace-tree-title-editor .text-history-controls {
+  align-self: flex-end;
 }
 
 .workspace-tree-book {
@@ -1145,6 +1164,19 @@ button.back-link:hover {
   line-height: 1.1;
 }
 
+.field-label--history,
+.expert-draft-field-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.45rem;
+}
+
+.expert-draft-field-heading {
+  width: 100%;
+  justify-content: flex-start;
+}
+
 .expert-draft-section-title-field input,
 .expert-draft-section-word-field input {
   width: 100%;
@@ -1578,94 +1610,6 @@ button.back-link:hover {
   display: flex;
   flex-direction: column;
   align-self: stretch;
-}
-
-.expert-draft-agent-preview {
-  flex: 0 0 auto;
-  max-height: 38%;
-  margin: 0.5rem 0.75rem 0;
-  padding: 0.6rem 0.7rem;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: color-mix(in oklab, var(--surface) 88%, var(--bg));
-  overflow: hidden;
-}
-
-.expert-draft-agent-preview--active {
-  border-color: color-mix(in oklab, var(--accent) 45%, var(--border));
-  background: color-mix(in oklab, var(--accent) 7%, var(--surface));
-}
-
-.expert-draft-agent-preview-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.5rem;
-  margin-bottom: 0.25rem;
-}
-
-.expert-draft-agent-preview-kicker {
-  min-width: 0;
-  font-size: 0.75rem;
-  font-weight: 600;
-  color: var(--text-h);
-}
-
-.expert-draft-agent-preview-actions {
-  flex-shrink: 0;
-  display: inline-flex;
-  align-items: center;
-  gap: 0.4rem;
-}
-
-.expert-draft-agent-prompt-button {
-  flex-shrink: 0;
-  padding: 0.16rem 0.42rem;
-  border: 1px solid color-mix(in oklab, var(--accent) 45%, var(--border));
-  border-radius: 6px;
-  background: color-mix(in oklab, var(--accent) 8%, var(--surface));
-  color: var(--text-h);
-  font-size: 0.7rem;
-  font-weight: 600;
-  line-height: 1.2;
-  cursor: pointer;
-}
-
-.expert-draft-agent-prompt-button:hover {
-  background: color-mix(in oklab, var(--accent) 14%, var(--surface));
-}
-
-.expert-draft-agent-prompt-button:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
-}
-
-.expert-draft-agent-preview-status {
-  flex-shrink: 0;
-  font-size: 0.75rem;
-  color: var(--accent);
-  font-weight: 600;
-}
-
-.expert-draft-agent-preview-title {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 0.75rem;
-  color: var(--text);
-}
-
-.expert-draft-agent-preview-body {
-  margin: 0.45rem 0 0;
-  max-height: 10rem;
-  overflow: auto;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-  font: inherit;
-  font-size: 0.75rem;
-  line-height: 1.55;
-  color: var(--text-h);
 }
 
 .expert-draft-prompt-viewer-backdrop {

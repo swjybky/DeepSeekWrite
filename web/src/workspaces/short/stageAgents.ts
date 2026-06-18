@@ -120,13 +120,22 @@ function resolveWritableTargetStageId(
   return defaultWriteStageId(ctx)
 }
 
+const TARGET_STAGE_ID_NOTE =
+  'target_stage_id 仅供剧情智能体选择剧情子方向；人物、大纲等阶段请省略该参数，自动操作当前阶段。'
+
+const WRITE_TOOL_SCOPE_NOTE =
+  `本工具仅挂载于人物设计、剧情、大纲阶段；正文编写阶段不挂载。${TARGET_STAGE_ID_NOTE}`
+
+const REPLACE_TOOL_SCOPE_NOTE =
+  `本工具挂载于所有可编辑阶段（含正文编写、正文审阅、格式转换等）。${TARGET_STAGE_ID_NOTE}`
+
 function targetStageIdSchema() {
   return Type.Optional(
     Type.Union(
       PLOT_CHILD_STAGES.map((stage) => Type.Literal(stage.id)),
       {
         description:
-          '仅剧情智能体使用：指定写入目标。plot_design=剧情设计，intro_design=导语设计，plot_refine=剧情细化；省略时写入当前选中的剧情子方向。',
+          `${TARGET_STAGE_ID_NOTE}剧情子方向：plot_design=剧情设计，intro_design=导语设计，plot_refine=剧情细化。`,
       },
     ),
   )
@@ -655,7 +664,9 @@ export function buildReplaceCurrentStageTextTool(
     name: 'replace_current_stage_text',
     label: '替换当前阶段文本',
     description:
-      '编辑替换工具：目标阶段已有内容且只是局部修改时，必须优先使用本工具，不要调用 write_workspace_editor 整段覆盖。根据当前文本编辑框中的原文片段替换成新文本，不使用行号。'
+      `${REPLACE_TOOL_SCOPE_NOTE}\n`
+      + '编辑替换工具：目标阶段已有内容且只是局部修改时，必须优先使用本工具'
+      + '，不要调用 write_workspace_editor 整段覆盖（正文阶段无该工具）。根据当前文本编辑框中的原文片段替换成新文本，不使用行号。'
       + '\n【必做】先调用 read_workspace_content 读取当前阶段，从工具返回正文中原样复制待改片段到 original_text；不要从对话摘要、系统提示词或旧回复中抄写。'
       + '\noriginal_text 须在正文中唯一匹配；系统会自动容忍直引号"与弯引号“”、全角/半角逗号分号、破折号等常见差异，但语义内容必须一致。'
       + '\n匹配失败时会返回当前文本编辑框中最接近的片段与可能差异；请据此修正后重试。'
@@ -727,7 +738,8 @@ export function buildWriteWorkspaceEditorTool(
     name: 'write_workspace_editor',
     label: '写入当前文本编辑框',
     description:
-      '覆盖写入工具：只在目标文本编辑框为空白时，用它写入一份完整稿件。目标已有内容时，用户只是要求局部修改、润色、扩写某段或替换片段，必须使用 replace_current_stage_text，不能调用本工具整段覆盖。只有用户明确要求整体覆盖、重写、重新生成或替换全文时，才允许设置 allow_overwrite_existing=true 后覆盖写入。仅写入该阶段的创作正文（如人设、剧情、导语、大纲、审阅后正文等），不要写入分析报告、修改意见、过程说明或与阶段无关的内容；这些留在对话中回复用户即可。',
+      `${WRITE_TOOL_SCOPE_NOTE}\n`
+      + '覆盖写入工具：只在目标文本编辑框为空白时，用它写入一份完整稿件。目标已有内容时，用户只是要求局部修改、润色、扩写某段或替换片段，必须使用 replace_current_stage_text，不能调用本工具整段覆盖。只有用户明确要求整体覆盖、重写、重新生成或替换全文时，才允许设置 allow_overwrite_existing=true 后覆盖写入。仅写入该阶段的创作正文（如人设、剧情、导语、大纲等），不要写入分析报告、修改意见、过程说明或与阶段无关的内容；这些留在对话中回复用户即可。',
     parameters: Type.Object({
       target_stage_id: targetStageIdSchema(),
       text: Type.String({

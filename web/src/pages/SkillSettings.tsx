@@ -7,94 +7,56 @@ import {
   skillTypeLabel,
   type SkillType,
 } from '../bridge'
+import {
+  autoSaveStatusLabel,
+  useKeyedAutoSave,
+} from '../hooks/useKeyedAutoSave'
+import { useTextHistory } from '../hooks/useTextHistory'
 import './WorkspaceSettings.css'
 
-type SaveStatus = 'idle' | 'saving' | 'saved' | 'error'
 const SKILL_SETTING_TYPES: SkillType[] = ['short', 'long', 'script']
 
 const PLACEHOLDER_HINT =
   '{{SKILL_TITLE}}  {{SKILL_LINE}}  {{SKILL_TYPE}}  {{STAGE_ID}}  {{STAGE_LABEL}}  {{STAGE_BODY}}  {{OTHER_STAGES_EXCERPT}}'
-
-function statusLabel(status: SaveStatus): string {
-  if (status === 'saving') return '保存中…'
-  if (status === 'saved') return '已保存'
-  if (status === 'error') return '保存失败'
-  return '自动保存'
-}
 
 export function SkillSettings() {
   const navigate = useNavigate()
   const [skillType, setSkillType] = useState<SkillType>('short')
   const [promptDraft, setPromptDraft] = useState('')
   const [loading, setLoading] = useState(true)
-  const [saveStatus, setSaveStatus] = useState<SaveStatus>('idle')
   const [error, setError] = useState<string | null>(null)
 
   const promptDraftRef = useRef(promptDraft)
   const savedPromptRef = useRef('')
-  const promptTimerRef = useRef<number | undefined>(undefined)
-  const saveQueueRef = useRef<Promise<void>>(Promise.resolve())
-  const operationSeqRef = useRef(0)
+  const promptValuesByTypeRef = useRef<Partial<Record<SkillType, string>>>({})
+  const textHistory = useTextHistory()
+  const autoSave = useKeyedAutoSave<string>({
+    getSnapshot: (key) => promptValuesByTypeRef.current[key as SkillType] ?? null,
+    saveSnapshot: async (key, value) => {
+      try {
+        await saveSkillAgentPromptOverride(value, key as SkillType)
+        savedPromptRef.current = value
+        setError(null)
+      } catch (cause) {
+        setError(cause instanceof Error ? cause.message : '保存技能库智能体设置失败')
+        throw cause
+      }
+    },
+  })
+  const {
+    flush: flushSkillPrompt,
+    markSaved: markSkillPromptSaved,
+    schedule: scheduleSkillPromptSave,
+    statusFor: skillPromptStatus,
+  } = autoSave
 
   useEffect(() => {
     promptDraftRef.current = promptDraft
   }, [promptDraft])
 
-  const enqueueSave = useCallback(
-    (operation: () => Promise<void>): Promise<void> => {
-      const seq = ++operationSeqRef.current
-      setSaveStatus('saving')
-      setError(null)
-      const task = saveQueueRef.current
-        .catch(() => undefined)
-        .then(operation)
-      saveQueueRef.current = task.then(
-        () => {
-          if (seq === operationSeqRef.current) setSaveStatus('saved')
-        },
-        (cause: unknown) => {
-          if (seq === operationSeqRef.current) {
-            setSaveStatus('error')
-            setError(cause instanceof Error ? cause.message : '保存技能库智能体设置失败')
-          }
-        },
-      )
-      return task
-    },
-    [],
-  )
-
-  const savePromptValue = useCallback(
-    async (value: string): Promise<void> => {
-      if (savedPromptRef.current === value) return
-      await enqueueSave(async () => {
-        await saveSkillAgentPromptOverride(value, skillType)
-        savedPromptRef.current = value
-      })
-    },
-    [enqueueSave, skillType],
-  )
-
   const flushPrompt = useCallback((): Promise<void> => {
-    if (promptTimerRef.current !== undefined) {
-      window.clearTimeout(promptTimerRef.current)
-      promptTimerRef.current = undefined
-    }
-    return savePromptValue(promptDraftRef.current)
-  }, [savePromptValue])
-
-  const schedulePromptSave = useCallback(
-    (value: string) => {
-      if (promptTimerRef.current !== undefined) {
-        window.clearTimeout(promptTimerRef.current)
-      }
-      promptTimerRef.current = window.setTimeout(() => {
-        promptTimerRef.current = undefined
-        void savePromptValue(value).catch(() => undefined)
-      }, 500)
-    },
-    [savePromptValue],
-  )
+    return flushSkillPrompt(skillType).then(() => undefined)
+  }, [flushSkillPrompt, skillType])
 
   useEffect(() => {
     let cancelled = false
@@ -105,8 +67,11 @@ export function SkillSettings() {
         const prompt = await readSkillAgentPromptTemplateForType(skillType)
         if (cancelled) return
         promptDraftRef.current = prompt
+        promptValuesByTypeRef.current[skillType] = prompt
         savedPromptRef.current = prompt
         setPromptDraft(prompt)
+        textHistory.clear(`skill-settings:${skillType}`, prompt)
+        markSkillPromptSaved(skillType)
       } catch (cause) {
         if (!cancelled) {
           setError(cause instanceof Error ? cause.message : '加载技能库智能体设置失败')
@@ -117,14 +82,9 @@ export function SkillSettings() {
     })()
     return () => {
       cancelled = true
-      if (promptTimerRef.current !== undefined) {
-        window.clearTimeout(promptTimerRef.current)
-      }
-      if (promptDraftRef.current !== savedPromptRef.current) {
-        void savePromptValue(promptDraftRef.current).catch(() => undefined)
-      }
+      if (promptDraftRef.current !== savedPromptRef.current) void flushSkillPrompt(skillType)
     }
-  }, [savePromptValue, skillType])
+  }, [flushSkillPrompt, markSkillPromptSaved, skillType, textHistory])
 
   const switchSkillType = useCallback(
     async (next: SkillType) => {
@@ -139,10 +99,9 @@ export function SkillSettings() {
   const handleBack = useCallback(async () => {
     try {
       await flushPrompt()
-      await saveQueueRef.current
       navigate('/')
     } catch {
-      setSaveStatus('error')
+      setError('保存技能库智能体设置失败')
     }
   }, [flushPrompt, navigate])
 
@@ -150,18 +109,25 @@ export function SkillSettings() {
     if (!window.confirm('恢复技能库管理智能体的内置默认提示词？')) {
       return
     }
-    if (promptTimerRef.current !== undefined) {
-      window.clearTimeout(promptTimerRef.current)
-      promptTimerRef.current = undefined
-    }
-    await enqueueSave(async () => {
+    await flushPrompt().catch(() => undefined)
+    try {
       await resetSkillAgentPromptOverride(skillType)
       const value = await readSkillAgentPromptTemplateForType(skillType)
       savedPromptRef.current = value
       promptDraftRef.current = value
+      promptValuesByTypeRef.current[skillType] = value
       setPromptDraft(value)
-    }).catch(() => undefined)
-  }, [enqueueSave, skillType])
+      textHistory.record(
+        `skill-settings:${skillType}`,
+        promptDraft,
+        value,
+        'atomic',
+      )
+      markSkillPromptSaved(skillType)
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : '恢复默认提示词失败')
+    }
+  }, [flushPrompt, markSkillPromptSaved, promptDraft, skillType, textHistory])
 
   return (
     <div className="workspace-settings-page">
@@ -178,10 +144,10 @@ export function SkillSettings() {
           <p>短篇、长篇与剧本技能库分别保存管理智能体提示词。</p>
         </div>
         <span
-          className={`workspace-settings-save-state workspace-settings-save-state--${saveStatus}`}
+          className={`workspace-settings-save-state workspace-settings-save-state--${skillPromptStatus(skillType)}`}
           aria-live="polite"
         >
-          {statusLabel(saveStatus)}
+          {autoSaveStatusLabel(skillPromptStatus(skillType))}
         </span>
       </header>
 
@@ -227,7 +193,7 @@ export function SkillSettings() {
               <section className="workspace-settings-prompt-card">
                 <div className="workspace-settings-section-title">
                   <h3>系统提示词</h3>
-                  <p>停止输入 500ms 后自动保存，返回首页前会立即刷新。</p>
+                  <p>停止输入 1 秒后自动保存，持续输入最长 5 秒落盘一次。</p>
                 </div>
                 <p className="workspace-settings-placeholder-hint">
                   可用占位符：<code>{PLACEHOLDER_HINT}</code>
@@ -237,11 +203,32 @@ export function SkillSettings() {
                   spellCheck={false}
                   onBlur={() => void flushPrompt().catch(() => undefined)}
                   onChange={(event) => {
-                    const value = event.target.value
-                    promptDraftRef.current = value
-                    setPromptDraft(value)
-                    schedulePromptSave(value)
+                    textHistory.change(
+                      `skill-settings:${skillType}`,
+                      promptDraft,
+                      event.target.value,
+                      (value) => {
+                        promptDraftRef.current = value
+                        promptValuesByTypeRef.current[skillType] = value
+                        setPromptDraft(value)
+                        scheduleSkillPromptSave(skillType)
+                      },
+                    )
                   }}
+                  onKeyDown={(event) =>
+                    textHistory.handleKeyDown(
+                      event,
+                      `skill-settings:${skillType}`,
+                      promptDraft,
+                      (value) => {
+                        promptDraftRef.current = value
+                        promptValuesByTypeRef.current[skillType] = value
+                        setPromptDraft(value)
+                        scheduleSkillPromptSave(skillType)
+                      },
+                      { redoKey: 'm', standardRedo: false },
+                    )
+                  }
                 />
               </section>
             </div>

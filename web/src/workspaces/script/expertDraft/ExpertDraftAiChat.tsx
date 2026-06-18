@@ -1,5 +1,5 @@
 import { Agent } from '@earendil-works/pi-agent-core'
-import type { AgentMessage, AgentTool } from '@earendil-works/pi-agent-core'
+import type { AgentTool } from '@earendil-works/pi-agent-core'
 import { ApiKeyPromptDialog, ChatPanel, ModelSelector } from '@earendil-works/pi-web-ui'
 import { useCallback, useEffect, useRef, useState } from 'react'
 
@@ -46,12 +46,6 @@ const ARTIFACTS_TOOL_NAME = 'artifacts'
 type MessageEditorElement = HTMLElement & {
   attachments?: unknown[]
   requestUpdate?: () => void
-}
-
-type AgentKicker = {
-  label: string
-  detail: string
-  status: string
 }
 
 function disableExpertDraftAttachments(chatPanel: ChatPanel) {
@@ -203,67 +197,6 @@ function stripArtifacts(tools: AgentTool[]): AgentTool[] {
   return tools.filter((tool) => tool.name !== ARTIFACTS_TOOL_NAME)
 }
 
-function messageText(message: AgentMessage | undefined): string {
-  if (!message || message.role !== 'assistant') return ''
-  return message.content
-    .map((block) => {
-      if (block.type === 'text') return block.text
-      return ''
-    })
-    .filter(Boolean)
-    .join('\n\n')
-}
-
-function toolStatus(toolName: string, done = false): string {
-  if (toolName === 'edit_expert_draft_section') {
-    return done ? '正文已更新' : '正在编辑正文'
-  }
-  if (toolName === 'initialize_expert_draft') {
-    return done ? '正文已初始化' : '正在初始化正文'
-  }
-  if (toolName === 'replace_section_body_text') {
-    return done ? '正文片段已替换' : '正在替换正文片段'
-  }
-  if (toolName === 'write_section_body') {
-    return done ? '正文已写入' : '正在写入正文'
-  }
-  if (toolName === 'replace_character_state_text') {
-    return done ? '人物状态片段已替换' : '正在替换人物状态片段'
-  }
-  if (toolName === 'write_character_state') {
-    return done ? '人物状态已写入' : '正在写入人物状态'
-  }
-  if (toolName === 'read_workspace_content') {
-    return done ? '已读取创作阶段' : '正在读取创作阶段'
-  }
-  if (toolName === 'search_workspace_text') {
-    return done ? '已搜索创作文本' : '正在搜索创作文本'
-  }
-  if (toolName === 'read_linked_material_content') {
-    return done ? '已读取关联素材' : '正在读取关联素材'
-  }
-  if (toolName === 'load_skill') {
-    return done ? '已加载技能' : '正在加载技能'
-  }
-  return done ? '工具调用完成' : '正在调用工具'
-}
-
-function coordinatorKicker(): AgentKicker {
-  return {
-    label: '专家总控智能体',
-    detail: '当用户输入「初始化后进入正文编写」，进入章节自动编写模式',
-    status: '',
-  }
-}
-
-function sectionWriterKicker(sectionTitle: string): AgentKicker {
-  return {
-    label: '分节写手智能体',
-    detail: sectionTitle || '当前小节',
-    status: '',
-  }
-}
-
 export function ExpertDraftAiChat(props: Props) {
   const hostRef = useRef<HTMLDivElement>(null)
   const coordinatorAgentRef = useRef<Agent | null>(null)
@@ -284,9 +217,7 @@ export function ExpertDraftAiChat(props: Props) {
     'coordinator',
   )
   const unsubscribeMessagesRefreshRef = useRef<(() => void) | null>(null)
-  const unsubscribeBackgroundStatusRef = useRef<(() => void) | null>(null)
   const [chatReady, setChatReady] = useState(false)
-  const [agentKicker, setAgentKicker] = useState<AgentKicker>(coordinatorKicker)
   const debouncedDraft = useDebounced(props.expertDraft, 600)
 
   useEffect(() => {
@@ -337,47 +268,9 @@ export function ExpertDraftAiChat(props: Props) {
 
   const watchWriterAgent: RunExpertDraftSectionWriterOptions['onSectionAgentStart'] =
     useCallback(
-      async ({ agent, sectionTitle, sectionIndex, sectionCount }) => {
+      async ({ agent }) => {
         backgroundWriterLockRef.current = true
         activePanelKindRef.current = 'section-writer'
-        setAgentKicker({
-          label: '分节写手智能体',
-          detail: `${sectionIndex + 1}/${sectionCount} · ${sectionTitle}`,
-          status: '准备中',
-        })
-
-        unsubscribeBackgroundStatusRef.current?.()
-        unsubscribeBackgroundStatusRef.current = agent.subscribe((ev) => {
-          if (ev.type === 'message_start' && ev.message.role === 'assistant') {
-            setAgentKicker((prev) => ({ ...prev, status: '生成正文中' }))
-            return
-          }
-          if (ev.type === 'message_update') {
-            const text = messageText(ev.message)
-            setAgentKicker((prev) => ({
-              ...prev,
-              status: text ? '生成正文中' : '思考中',
-            }))
-            return
-          }
-          if (ev.type === 'tool_execution_start') {
-            setAgentKicker((prev) => ({
-              ...prev,
-              status: toolStatus(ev.toolName),
-            }))
-            return
-          }
-          if (ev.type === 'tool_execution_end') {
-            setAgentKicker((prev) => ({
-              ...prev,
-              status: toolStatus(ev.toolName, true),
-            }))
-            return
-          }
-          if (ev.type === 'agent_end') {
-            setAgentKicker((prev) => ({ ...prev, status: '本节完成' }))
-          }
-        })
 
         bindActiveAgentUi(agent)
         await setPanelAgentRef.current?.(agent, () =>
@@ -388,9 +281,7 @@ export function ExpertDraftAiChat(props: Props) {
     )
 
   const finishWriterPreview: RunExpertDraftSectionWriterOptions['onRunFinish'] =
-    useCallback(async ({ aborted }) => {
-      unsubscribeBackgroundStatusRef.current?.()
-      unsubscribeBackgroundStatusRef.current = null
+    useCallback(async () => {
       backgroundWriterLockRef.current = false
 
       const sectionId = propsLatestRef.current.expertDraft.active_section_id
@@ -398,13 +289,6 @@ export function ExpertDraftAiChat(props: Props) {
         await switchToSectionWriterRef.current?.(sectionId)
       } else {
         await switchToCoordinatorRef.current?.()
-      }
-
-      if (!sectionId) {
-        setAgentKicker({
-          ...coordinatorKicker(),
-          status: aborted ? '后台写作已停止' : '后台写作已完成',
-        })
       }
     }, [])
 
@@ -589,7 +473,6 @@ export function ExpertDraftAiChat(props: Props) {
         if (!agent) return
         refreshCoordinatorAgentState(propsLatestRef.current.expertDraft)
         activePanelKindRef.current = 'coordinator'
-        setAgentKicker(coordinatorKicker())
         bindActiveAgentUi(agent)
         await setPanelAgent(agent, currentCoordinatorTools)
       }
@@ -635,7 +518,6 @@ export function ExpertDraftAiChat(props: Props) {
           propsLatestRef.current.expertDraft,
         )
         activePanelKindRef.current = 'section-writer'
-        setAgentKicker(sectionWriterKicker(section.title))
         bindActiveAgentUi(agent)
         await setPanelAgent(agent, () =>
           stripArtifacts(buildSectionWriterToolsFor(sectionId)),
@@ -670,8 +552,6 @@ export function ExpertDraftAiChat(props: Props) {
       setChatReady(false)
       unsubscribeMessagesRefreshRef.current?.()
       unsubscribeMessagesRefreshRef.current = null
-      unsubscribeBackgroundStatusRef.current?.()
-      unsubscribeBackgroundStatusRef.current = null
       unsubscribePreferences?.()
       backgroundWriterLockRef.current = false
       setPanelAgentRef.current = null
@@ -743,9 +623,6 @@ export function ExpertDraftAiChat(props: Props) {
     sectionAgent.state.tools = stripArtifacts(
       buildSectionWriterToolsInput(() => propsLatestRef.current, sectionId),
     )
-    if (activePanelKindRef.current === 'section-writer') {
-      setAgentKicker(sectionWriterKicker(section.title))
-    }
   }, [
     chatReady,
     props.bookTitle,
@@ -762,26 +639,6 @@ export function ExpertDraftAiChat(props: Props) {
 
   return (
     <div className="expert-draft-ai-shell">
-      <div
-        className={
-          props.expertDraft.running
-            ? 'expert-draft-agent-preview expert-draft-agent-preview--active'
-            : 'expert-draft-agent-preview'
-        }
-        aria-live="polite"
-      >
-        <div className="expert-draft-agent-preview-head">
-          <span className="expert-draft-agent-preview-kicker">
-            {agentKicker.label}
-          </span>
-          {agentKicker.status ? (
-            <span className="expert-draft-agent-preview-status">
-              {agentKicker.status}
-            </span>
-          ) : null}
-        </div>
-        <div className="expert-draft-agent-preview-title">{agentKicker.detail}</div>
-      </div>
       <div ref={hostRef} className="workspace-ai-chat-host" />
     </div>
   )
