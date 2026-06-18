@@ -190,6 +190,7 @@ from app.storage import (
     read_ai_model_defaults,
     read_image_model_config,
     read_saved_workspace_root,
+    read_text_display_mode,
     read_workspace_agent_read_access,
     read_workspace_agent_read_access_defaults,
     read_workspace_agent_read_access_for_type,
@@ -197,6 +198,7 @@ from app.storage import (
     write_appearance_style,
     write_ai_model_config,
     write_saved_workspace_root,
+    write_text_display_mode,
     write_workspace_agent_read_access,
     write_workspace_agent_read_access_for_type,
 )
@@ -688,6 +690,12 @@ class Api:
 
     def set_appearance_style(self, style: str) -> str:
         return write_appearance_style(style)
+
+    def get_text_display_mode(self) -> str:
+        return read_text_display_mode()
+
+    def set_text_display_mode(self, mode: str) -> str:
+        return write_text_display_mode(mode)
 
     def get_workspace_agent_read_access(self, workspace_type: str | None = None) -> dict[str, object]:
         """全局创作空间智能体可读的 workspace/material 阶段列表。"""

@@ -14,6 +14,7 @@ import {
 import { WorkspaceAiChat } from '../components/WorkspaceAiChat'
 import type { ApplyToStageEditorPayload } from '../pi/workspaceStageAgents'
 import { WorkspaceTreeNav } from '../components/WorkspaceTreeNav'
+import { MarkdownTextEditor } from '../components/MarkdownTextEditor'
 import {
   autoSaveStatusLabel,
   useKeyedAutoSave,
@@ -651,16 +652,16 @@ export function MaterialEditor() {
               </span>
             </span>
           </div>
-          <textarea
+          <MarkdownTextEditor
             id="stage-body"
-            ref={textareaRef}
+            textareaRef={textareaRef}
             className="editor-body workspace-textarea"
             value={stageBody}
-            onChange={(e) =>
+            onValueChange={(value) =>
               textHistory.change(
                 `material:${material.id}:${activeStage}`,
                 stageBody,
-                e.target.value,
+                value,
                 handleStageBodyChange,
               )
             }

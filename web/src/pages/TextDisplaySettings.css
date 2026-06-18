@@ -1,0 +1,48 @@
+.text-display-settings-page {
+  width: 100%;
+  min-height: 100vh;
+  background: var(--app-bg, #f5f7fb);
+  color: var(--text-primary, #1e293b);
+}
+
+.text-display-settings-content {
+  display: flex;
+  justify-content: center;
+  padding: 3rem 1.5rem;
+}
+
+.text-display-settings-card {
+  width: min(720px, 100%);
+  padding: 1.75rem;
+  border: 1px solid var(--border-color, #e2e8f0);
+  border-radius: 14px;
+  background: var(--surface, #fff);
+  box-shadow: 0 12px 32px rgb(15 23 42 / 7%);
+}
+
+.text-display-settings-card-head h2,
+.text-display-settings-card-head p { margin: 0; }
+.text-display-settings-card-head h2 { font-size: 1.15rem; }
+.text-display-settings-card-head p { margin-top: .4rem; color: #64748b; font-size: .875rem; }
+.text-display-options { display: grid; gap: .85rem; margin-top: 1.5rem; }
+
+.text-display-option {
+  display: flex;
+  align-items: flex-start;
+  gap: .85rem;
+  width: 100%;
+  padding: 1rem 1.1rem;
+  border: 1px solid #dbe3ef;
+  border-radius: 10px;
+  background: #fff;
+  color: #334155;
+  text-align: left;
+  cursor: pointer;
+}
+.text-display-option:hover { border-color: #94a3b8; background: #f8fafc; }
+.text-display-option--active { border-color: #2563eb; background: #eff6ff; }
+.text-display-option-mark { width: 16px; height: 16px; margin-top: 2px; border: 2px solid #94a3b8; border-radius: 50%; box-shadow: inset 0 0 0 3px #fff; }
+.text-display-option--active .text-display-option-mark { border-color: #2563eb; background: #2563eb; }
+.text-display-option strong, .text-display-option em { display: block; }
+.text-display-option strong { font-size: .95rem; }
+.text-display-option em { margin-top: .3rem; color: #64748b; font-size: .82rem; font-style: normal; font-weight: 400; }

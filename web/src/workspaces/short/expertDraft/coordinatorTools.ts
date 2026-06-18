@@ -21,7 +21,7 @@ export type ExpertDraftCoordinatorToolContext = ExpertDraftCoordinatorCoreToolCo
   linkedSkill?: Skill | null
   readAccess: WorkspaceAgentReadAccessEntry
   getRenderedExpertDraftSectionContent?: GetExpertDraftSectionContent
-  /** 优先读取编辑框/会话最新内容，与 edit_expert_draft_section 同源 */
+  /** 优先读取编辑框/会话最新内容；draft 阶段与 edit_expert_draft_section 写入的目标同源 */
   getCurrentWorkspaceStageBody?: (stageId: StageId) => string | undefined
 }
 

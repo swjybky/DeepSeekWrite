@@ -44,6 +44,8 @@ _WIN_INVALID = '<>:"/\\|?*\n\r\t'
 AI_MODEL_CONFIG_PREF_KEY = "ai_model_config"
 APPEARANCE_STYLE_PREF_KEY = "appearance_style"
 APPEARANCE_STYLES = {"classic", "modern"}
+TEXT_DISPLAY_MODE_PREF_KEY = "text_display_mode"
+TEXT_DISPLAY_MODES = {"text", "markdown"}
 
 
 @contextmanager
@@ -277,6 +279,28 @@ def write_appearance_style(style: str) -> str:
     with _data_file_lock():
         prefs = _load_preferences_unlocked()
         prefs[APPEARANCE_STYLE_PREF_KEY] = normalized
+        _save_preferences_atomic_unlocked(prefs)
+    return normalized
+
+
+def normalize_text_display_mode(raw: Any) -> str:
+    if isinstance(raw, str) and raw.strip() in TEXT_DISPLAY_MODES:
+        return raw.strip()
+    return "text"
+
+
+def read_text_display_mode() -> str:
+    with _data_file_lock():
+        return normalize_text_display_mode(
+            _load_preferences_unlocked().get(TEXT_DISPLAY_MODE_PREF_KEY)
+        )
+
+
+def write_text_display_mode(mode: str) -> str:
+    normalized = normalize_text_display_mode(mode)
+    with _data_file_lock():
+        prefs = _load_preferences_unlocked()
+        prefs[TEXT_DISPLAY_MODE_PREF_KEY] = normalized
         _save_preferences_atomic_unlocked(prefs)
     return normalized
 

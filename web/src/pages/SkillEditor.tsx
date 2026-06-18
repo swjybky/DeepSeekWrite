@@ -14,6 +14,7 @@ import {
 } from '../bridge'
 import { WorkspaceAiChat } from '../components/WorkspaceAiChat'
 import { WorkspaceTreeNav } from '../components/WorkspaceTreeNav'
+import { MarkdownTextEditor } from '../components/MarkdownTextEditor'
 import type { ApplyToStageEditorPayload } from '../pi/workspaceStageAgents'
 import {
   autoSaveStatusLabel,
@@ -723,16 +724,16 @@ export function SkillEditor() {
                   删除技能
                 </button>
               </div>
-              <textarea
+              <MarkdownTextEditor
                 id="stage-body"
-                ref={textareaRef}
+                textareaRef={textareaRef}
                 className="editor-body workspace-textarea"
                 value={activeEntry.body}
-                onChange={(e) =>
+                onValueChange={(value) =>
                   textHistory.change(
                     entryBodyHistoryKey,
                     activeEntry.body,
-                    e.target.value,
+                    value,
                     applyEntryBody,
                   )
                 }

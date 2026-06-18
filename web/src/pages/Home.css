@@ -889,6 +889,130 @@
   box-shadow: 0 1px 2px rgb(15 23 42 / 4%);
 }
 
+/* —— 文字显示配置弹窗 —— */
+.text-display-config-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  display: grid;
+  place-items: center;
+  padding: 1.25rem;
+  background: rgb(42 36 28 / 32%);
+  backdrop-filter: blur(4px);
+}
+
+.text-display-config-dialog {
+  width: min(480px, 100%);
+  overflow: hidden;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-lg);
+  background: var(--paper-elevated);
+  box-shadow: var(--shadow-soft);
+}
+
+.text-display-config-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1rem 1.1rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.text-display-config-head h2 {
+  font-family: var(--font-display);
+  font-size: 1.02rem;
+  letter-spacing: 0.08em;
+}
+
+.text-display-config-body {
+  padding: 1rem;
+  background: var(--paper);
+}
+
+.text-display-config-hint {
+  margin: 0 0 0.75rem;
+  font-size: 0.8125rem;
+  color: var(--ink-faint);
+}
+
+.text-display-config-options {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.text-display-config-option {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+  padding: 0.85rem 0.9rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--paper-elevated);
+  color: var(--ink-soft);
+  text-align: left;
+  transition: border-color 0.2s ease, background 0.2s ease, color 0.2s ease;
+}
+
+.text-display-config-option:hover:not(:disabled) {
+  border-color: var(--border-strong);
+  background: color-mix(in oklab, var(--accent) 5%, var(--paper-elevated));
+  color: var(--ink);
+}
+
+.text-display-config-option--active {
+  border-color: color-mix(in oklab, var(--accent) 60%, var(--border));
+  background: var(--accent-soft);
+  color: var(--ink);
+}
+
+.text-display-config-option-mark {
+  width: 1rem;
+  height: 1rem;
+  border: 1px solid var(--border-strong);
+  border-radius: 50%;
+  background: var(--paper-elevated);
+  box-shadow: 0 0 0 3px var(--paper-elevated) inset;
+  flex-shrink: 0;
+}
+
+.text-display-config-option--active .text-display-config-option-mark {
+  border-color: var(--accent);
+  background: var(--accent);
+}
+
+.text-display-config-option strong,
+.text-display-config-option em {
+  display: block;
+  font-style: normal;
+}
+
+.text-display-config-option strong {
+  font-size: 0.95rem;
+  color: var(--text-h);
+}
+
+.text-display-config-option em {
+  margin-top: 0.12rem;
+  font-size: 0.78rem;
+  color: var(--ink-faint);
+}
+
+.text-display-config-status {
+  margin: 0.75rem 0 0;
+  color: var(--ink-faint);
+  font-size: 0.8125rem;
+}
+
+:root[data-appearance='modern'] .text-display-config-backdrop {
+  background: rgb(15 23 42 / 32%);
+}
+
+:root[data-appearance='modern'] .text-display-config-option {
+  box-shadow: 0 1px 2px rgb(15 23 42 / 4%);
+}
+
 /* 导出选择器 */
 .export-picker {
   padding: 0.75rem 1rem;

@@ -19,6 +19,8 @@ export const WORKSPACE_AGENT_READ_ACCESS_STORAGE_KEY =
   'write-claw:workspace_agent_read_access'
 const LEGACY_STAGE_READ_ACCESS_STORAGE_KEY = 'write-claw:stage_read_access'
 export const APPEARANCE_STYLE_STORAGE_KEY = 'write-claw:appearance_style'
+export const TEXT_DISPLAY_MODE_STORAGE_KEY = 'write-claw:text_display_mode'
+export type TextDisplayMode = 'text' | 'markdown'
 
 export function getStoredWorkspaceRoot(): string | null {
   try {
@@ -86,6 +88,52 @@ export async function saveAppearanceStyle(
     return saved
   }
   setStoredAppearanceStyle(normalized)
+  return normalized
+}
+
+export function normalizeTextDisplayMode(raw: unknown): TextDisplayMode {
+  return raw === 'markdown' ? 'markdown' : 'text'
+}
+
+export function getStoredTextDisplayMode(): TextDisplayMode {
+  try {
+    return normalizeTextDisplayMode(localStorage.getItem(TEXT_DISPLAY_MODE_STORAGE_KEY))
+  } catch {
+    return 'text'
+  }
+}
+
+export function setStoredTextDisplayMode(mode: TextDisplayMode): void {
+  try {
+    localStorage.setItem(TEXT_DISPLAY_MODE_STORAGE_KEY, normalizeTextDisplayMode(mode))
+  } catch {
+    /* ignore */
+  }
+}
+
+export async function getTextDisplayMode(): Promise<TextDisplayMode> {
+  const api = await getBridgeApi()
+  if (api?.get_text_display_mode) {
+    try {
+      const mode = normalizeTextDisplayMode(await api.get_text_display_mode())
+      setStoredTextDisplayMode(mode)
+      return mode
+    } catch {
+      /* fall through */
+    }
+  }
+  return getStoredTextDisplayMode()
+}
+
+export async function saveTextDisplayMode(mode: TextDisplayMode): Promise<TextDisplayMode> {
+  const normalized = normalizeTextDisplayMode(mode)
+  const api = await getBridgeApi()
+  if (api?.set_text_display_mode) {
+    const saved = normalizeTextDisplayMode(await api.set_text_display_mode(normalized))
+    setStoredTextDisplayMode(saved)
+    return saved
+  }
+  setStoredTextDisplayMode(normalized)
   return normalized
 }
 

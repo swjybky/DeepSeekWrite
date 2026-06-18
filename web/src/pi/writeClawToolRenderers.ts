@@ -197,12 +197,10 @@ function summarizeToolCall(
         : verb('正在初始化正文', '已初始化正文')
     }
     case 'edit_expert_draft_section': {
-      const hasReplacements =
-        Array.isArray(params?.replacements) && params.replacements.length > 0
       if (!done) {
         return '正在编辑正文'
       }
-      return hasReplacements ? '已编辑正文' : '已读取正文'
+      return '已编辑正文'
     }
     case 'start_expert_writing':
       return verb('正在启动专家分节写作', '已启动专家分节写作')

@@ -18,9 +18,9 @@ export type ExpertDraftCoordinatorCoreToolContext = {
   bookTitle: string
   getDraft: () => ExpertDraft
   updateDraft: ExpertDraftUpdater
-  /** 读取当前专家正文编辑区（合并视图）内容 */
+  /** 读取当前 draft 阶段正文（专家正文合并视图）内容 */
   getExpertDraftStageBody: () => string
-  /** 写回专家正文并自动同步到各小节 */
+  /** 写回当前 draft 阶段正文 */
   applyExpertDraftStageBody: (body: string) => void
   startWriting: (input: {
     sectionIds: string[]
@@ -168,40 +168,30 @@ export function buildEditExpertDraftSectionTool(
     name: 'edit_expert_draft_section',
     label: '编辑正文',
     description:
-      '专家正文统一编辑工具：直接读写当前专家正文编辑区（与小节映射，写回后会自动同步到各小节）。不传 replacements 时读取当前正文；传 replacements 时按原文片段局部替换。总控不负责修改人物状态。不要用它重建小节列表，初始化请用 initialize_expert_draft；不要为了局部修改重新调用 start_expert_writing，除非用户明确要求重写或重跑分节写作。',
+      '专家正文编辑工具：直接对当前专家正文编辑区（draft 阶段合并视图）做局部替换。修改前请先调用 read_workspace_content（stage_id=draft）读取当前正文，再从返回正文中原样复制待改片段到 original_text。总控不负责修改人物状态。不要用它重建小节列表，初始化请用 initialize_expert_draft；不要为了局部修改重新调用 start_expert_writing，除非用户明确要求重写或重跑分节写作。',
     parameters: Type.Object({
-      replacements: Type.Optional(
-        Type.Array(
-          Type.Object({
-            original_text: Type.String({
-              maxLength: MAX_EXPERT_DRAFT_TEXT_REPLACE_CHARS,
-              description:
-                '要被替换的正文原文片段。须来自本工具读取结果或 read_workspace_content（draft），并包含足够上下文以唯一定位。',
-            }),
-            new_text: Type.String({
-              maxLength: MAX_EXPERT_DRAFT_TEXT_REPLACE_CHARS,
-              description:
-                '替换后的新正文片段。只放这个片段的新内容，可包含换行；不要放整篇正文。',
-            }),
-          }),
-          {
-            minItems: 1,
-            maxItems: 20,
+      replacements: Type.Array(
+        Type.Object({
+          original_text: Type.String({
+            maxLength: MAX_EXPERT_DRAFT_TEXT_REPLACE_CHARS,
             description:
-              '需要替换的正文片段列表。省略时仅读取当前专家正文，不写入。',
-          },
-        ),
+              '要被替换的正文原文片段。须来自 read_workspace_content（stage_id=draft）的返回正文，并包含足够上下文以唯一定位。',
+          }),
+          new_text: Type.String({
+            maxLength: MAX_EXPERT_DRAFT_TEXT_REPLACE_CHARS,
+            description:
+              '替换后的新正文片段。只放这个片段的新内容，可包含换行；不要放整篇正文。',
+          }),
+        }),
+        {
+          minItems: 1,
+          maxItems: 20,
+          description: '需要替换的正文片段列表。',
+        },
       ),
     }),
     execute: async (_id, params) => {
       const currentBody = ctx.getExpertDraftStageBody()
-      const replacements = params.replacements ?? []
-      if (replacements.length === 0) {
-        const body = currentBody.trim()
-        const header = `书名：《${ctx.bookTitle}》\n【专家正文】（draft）\n正文来源：当前专家正文编辑区`
-        return textBlock(`${header}\n\n${body || '（空）'}`)
-      }
-
       if (!currentBody.trim()) {
         return textBlock(
           '当前正文为空。请使用 initialize_expert_draft 初始化，或调用 start_expert_writing 启动分节写作。',
@@ -209,7 +199,7 @@ export function buildEditExpertDraftSectionTool(
       }
       const result = applyExpertDraftSectionBodyReplacements(
         currentBody,
-        replacements,
+        params.replacements,
       )
       if ('error' in result) return textBlock(`未替换：${result.error}`)
 

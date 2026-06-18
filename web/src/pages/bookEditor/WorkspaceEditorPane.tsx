@@ -1,10 +1,12 @@
-import type { ComponentType, MutableRefObject } from 'react'
+import { useState, type ComponentType, type MutableRefObject } from 'react'
 import type { ExpertDraft, StageId } from '../../domain/workspace'
 import type { PlotChildStageDefinition, PlotChildStageId } from './workspaceTypes'
 import { PLOT_STAGE_ID } from '../../workspaces/short/stages'
 import { stageTextCounts } from './stageEditing'
 import { TextHistoryControls } from '../../components/TextHistoryControls'
 import type { TextHistoryController } from '../../hooks/useTextHistory'
+import { MarkdownModeToggle, MarkdownTextEditor } from '../../components/MarkdownTextEditor'
+import { useTextDisplay } from '../../textDisplay'
 
 type ExpertDraftEditorProps = {
   draft: ExpertDraft
@@ -100,6 +102,22 @@ export function WorkspaceEditorPane({
   textHistory,
   onTextBlur,
 }: Props) {
+  const { mode: textDisplayMode } = useTextDisplay()
+  const [mdEditingMap, setMdEditingMap] = useState<Record<string, boolean>>({})
+
+  const getMdKey = (stageId: StageId) => `stage:${stageId}`
+  const singleStageKey = getMdKey(activeContentStage)
+  const setMdEditing = (key: string, editing: boolean) => {
+    setMdEditingMap((prev) => ({ ...prev, [key]: editing }))
+  }
+  const renderMdToggle = (key: string) =>
+    textDisplayMode === 'markdown' ? (
+      <MarkdownModeToggle
+        editing={mdEditingMap[key] ?? false}
+        onChange={(editing) => setMdEditing(key, editing)}
+      />
+    ) : null
+
   return (
     <div className="workspace-editor-pane workspace-editor-pane--primary">
       {expertDraftActive ? (
@@ -157,11 +175,13 @@ export function WorkspaceEditorPane({
                     onChange={(value) => onStageBodyChange(value, plotStage.id)}
                     disabled={Boolean(streamingStages[plotStage.id])}
                   />
+                  {renderMdToggle(getMdKey(plotStage.id))}
                   <StageCharCount text={body} />
                 </div>
-                <textarea
+                <MarkdownTextEditor
+                  key={`md-${plotStage.id}`}
                   id={`stage-body-${plotStage.id}`}
-                  ref={(node) => {
+                  textareaRef={(node) => {
                     textareaRefsRef.current[plotStage.id] = node
                     if (plotStage.id === activeContentStage) {
                       textareaRef.current = node
@@ -169,11 +189,11 @@ export function WorkspaceEditorPane({
                   }}
                   className="editor-body workspace-textarea"
                   value={body}
-                  onChange={(e) =>
+                  onValueChange={(value) =>
                     textHistory.change(
                       `workspace:${bookId}:stage:${plotStage.id}`,
                       body,
-                      e.target.value,
+                      value,
                       (value) => onStageBodyChange(value, plotStage.id),
                     )
                   }
@@ -189,6 +209,11 @@ export function WorkspaceEditorPane({
                   placeholder="在此编辑当前剧情内容..."
                   spellCheck={false}
                   readOnly={Boolean(streamingStages[plotStage.id])}
+                  showToolbar={false}
+                  editingMarkdown={mdEditingMap[getMdKey(plotStage.id)] ?? false}
+                  onEditingMarkdownChange={(editing) =>
+                    setMdEditing(getMdKey(plotStage.id), editing)
+                  }
                 />
               </section>
             )
@@ -207,21 +232,23 @@ export function WorkspaceEditorPane({
               onChange={(value) => onStageBodyChange(value)}
               disabled={Boolean(streamingStages[activeContentStage])}
             />
+            {renderMdToggle(singleStageKey)}
             <StageCharCount text={stageBody} />
           </div>
-          <textarea
+          <MarkdownTextEditor
+            key={`md-${activeContentStage}`}
             id="stage-body"
-            ref={(node) => {
+            textareaRef={(node) => {
               textareaRef.current = node
               textareaRefsRef.current[activeContentStage] = node
             }}
             className="editor-body workspace-textarea"
             value={stageBody}
-            onChange={(e) =>
+            onValueChange={(value) =>
               textHistory.change(
                 `workspace:${bookId}:stage:${activeContentStage}`,
                 stageBody,
-                e.target.value,
+                value,
                 (value) => onStageBodyChange(value),
               )
             }
@@ -237,6 +264,11 @@ export function WorkspaceEditorPane({
             placeholder="在此编辑当前阶段内容..."
             spellCheck={false}
             readOnly={Boolean(streamingStages[activeContentStage])}
+            showToolbar={false}
+            editingMarkdown={mdEditingMap[singleStageKey] ?? false}
+            onEditingMarkdownChange={(editing) =>
+              setMdEditing(singleStageKey, editing)
+            }
           />
         </>
       )}

@@ -48,6 +48,9 @@ declare global {
         /** 全软件外观风格（持久化在用户数据 .data/preferences.json） */
         get_appearance_style(): Promise<AppearanceStyle | string>
         set_appearance_style(style: AppearanceStyle): Promise<AppearanceStyle | string>
+        /** 创作空间、素材库、技能库的文字显示方式 */
+        get_text_display_mode(): Promise<string>
+        set_text_display_mode(mode: string): Promise<string>
         /** 全局创作空间智能体可读配置 */
         get_workspace_agent_read_access(): Promise<Record<string, unknown>>
         get_workspace_agent_read_access(

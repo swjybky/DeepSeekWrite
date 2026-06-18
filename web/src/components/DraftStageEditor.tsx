@@ -6,6 +6,7 @@ import {
   useState,
   type Ref,
 } from 'react'
+import { MarkdownTextEditor } from './MarkdownTextEditor'
 
 const COMMIT_DEBOUNCE_MS = 400
 
@@ -113,12 +114,12 @@ export const DraftStageEditor = memo(function DraftStageEditor({
   }
 
   return (
-    <textarea
+    <MarkdownTextEditor
       id="stage-body"
-      ref={setTextareaNode}
+      textareaRef={setTextareaNode}
       className="editor-body workspace-textarea"
       value={localText}
-      onChange={(e) => handleChange(e.target.value)}
+      onValueChange={handleChange}
       onBlur={flushCommit}
       placeholder="在此编辑当前阶段内容…"
       spellCheck={false}

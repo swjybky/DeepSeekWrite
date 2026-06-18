@@ -10,6 +10,7 @@ import {
   type BookType,
   type MaterialType,
   type SkillType,
+  type TextDisplayMode,
   bookTypeLabel,
   createBook,
   createSkill,
@@ -41,6 +42,7 @@ import { APPEARANCE_STYLE_LABELS, useAppearance } from '../appearance'
 import { CardGrid, bookToCardItem, materialToCardItem, skillToCardItem } from '../components/CardGrid'
 import { refreshPreferredWorkspaceChatModel } from '../pi/workspaceChatPreferences'
 import { useHomeStore } from '../stores/homeStore'
+import { TEXT_DISPLAY_MODE_LABELS, useTextDisplay } from '../textDisplay'
 import './Home.css'
 
 function truncatePath(path: string, max = 42): string {
@@ -669,6 +671,97 @@ const APPEARANCE_OPTIONS: Array<{
   { id: 'modern', label: APPEARANCE_STYLE_LABELS.modern, tone: '白色清爽' },
 ]
 
+const TEXT_DISPLAY_OPTIONS: Array<{ id: TextDisplayMode; description: string }> = [
+  { id: 'text', description: '直接显示和编辑纯文本，不解析 Markdown 标记。' },
+  { id: 'markdown', description: '默认按 Markdown 排版预览，并可随时切换到源码编辑。' },
+]
+
+type TextDisplayDialogProps = {
+  currentMode: TextDisplayMode
+  saving: boolean
+  error: string | null
+  onClose: () => void
+  onSelect: (mode: TextDisplayMode) => Promise<void>
+}
+
+function TextDisplayDialog({
+  currentMode,
+  saving,
+  error,
+  onClose,
+  onSelect,
+}: TextDisplayDialogProps) {
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && !saving) {
+        event.preventDefault()
+        onClose()
+      }
+    }
+    document.addEventListener('keydown', onKeyDown)
+    return () => document.removeEventListener('keydown', onKeyDown)
+  }, [onClose, saving])
+
+  return (
+    <div
+      className="text-display-config-backdrop"
+      role="presentation"
+      onClick={(event) => {
+        if (event.target === event.currentTarget && !saving) onClose()
+      }}
+    >
+      <section
+        className="text-display-config-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="text-display-config-title"
+      >
+        <header className="text-display-config-head">
+          <h2 id="text-display-config-title">文字显示</h2>
+          <button
+            type="button"
+            className="model-config-close"
+            aria-label="关闭文字显示配置"
+            disabled={saving}
+            onClick={onClose}
+          >
+            ×
+          </button>
+        </header>
+
+        <div className="text-display-config-body">
+          <p className="text-display-config-hint">统一设置创作空间、素材库和技能库的内容显示方式。</p>
+          <div className="text-display-config-options" role="radiogroup" aria-label="文字显示模式">
+            {TEXT_DISPLAY_OPTIONS.map((option) => (
+              <button
+                key={option.id}
+                type="button"
+                className={
+                  currentMode === option.id
+                    ? 'text-display-config-option text-display-config-option--active'
+                    : 'text-display-config-option'
+                }
+                role="radio"
+                aria-checked={currentMode === option.id}
+                disabled={saving}
+                onClick={() => void onSelect(option.id)}
+              >
+                <span className="text-display-config-option-mark" aria-hidden="true" />
+                <span>
+                  <strong>{TEXT_DISPLAY_MODE_LABELS[option.id]}</strong>
+                  <em>{option.description}</em>
+                </span>
+              </button>
+            ))}
+          </div>
+          {saving ? <p className="text-display-config-status">保存中…</p> : null}
+          {error ? <p className="form-error">{error}</p> : null}
+        </div>
+      </section>
+    </div>
+  )
+}
+
 function AppearanceStyleDialog({
   currentStyle,
   saving,
@@ -817,10 +910,12 @@ export function Home() {
   )
   const [modelConfigOpen, setModelConfigOpen] = useState(false)
   const [styleConfigOpen, setStyleConfigOpen] = useState(false)
+  const [textDisplayOpen, setTextDisplayOpen] = useState(false)
   const [workspaceDrawerOpen, setWorkspaceDrawerOpen] = useState(false)
   const [savingAiSettings, setSavingAiSettings] = useState(false)
   const [modelConfigError, setModelConfigError] = useState<string | null>(null)
   const [styleConfigError, setStyleConfigError] = useState<string | null>(null)
+  const [textDisplayError, setTextDisplayError] = useState<string | null>(null)
 
   // ==================== 创作空间封面加载 ====================
   const loadBookCovers = useCallback(async (bookList: BookSummary[]) => {
@@ -993,6 +1088,18 @@ export function Home() {
       await setAppearanceStyle(style)
     } catch (e) {
       setStyleConfigError(e instanceof Error ? e.message : '保存风格配置失败')
+    }
+  }
+
+  // ==================== 文字显示状态 ====================
+  const { mode: textDisplayMode, saving: savingTextDisplay, error: textDisplayContextError, setMode: setTextDisplayMode } = useTextDisplay()
+
+  const handleSaveTextDisplayMode = async (mode: TextDisplayMode) => {
+    setTextDisplayError(null)
+    try {
+      await setTextDisplayMode(mode)
+    } catch (e) {
+      setTextDisplayError(e instanceof Error ? e.message : '保存文字显示设置失败')
     }
   }
 
@@ -1275,6 +1382,22 @@ export function Home() {
           >
             风格配置
           </button>
+          <button
+            type="button"
+            className={
+              textDisplayOpen
+                ? 'home-config-trigger home-config-trigger--active'
+                : 'home-config-trigger'
+            }
+            aria-expanded={textDisplayOpen}
+            disabled={savingTextDisplay}
+            onClick={() => {
+              setTextDisplayError(null)
+              setTextDisplayOpen(true)
+            }}
+          >
+            {savingTextDisplay ? '文字显示…' : '文字显示'}
+          </button>
         </nav>
       </header>
 
@@ -1287,6 +1410,12 @@ export function Home() {
       {(styleConfigError || appearanceError) && !styleConfigOpen ? (
         <p className="home-config-error" role="alert">
           {styleConfigError || appearanceError}
+        </p>
+      ) : null}
+
+      {textDisplayError && !textDisplayOpen ? (
+        <p className="home-config-error" role="alert">
+          {textDisplayError}
         </p>
       ) : null}
 
@@ -1843,6 +1972,16 @@ export function Home() {
           error={styleConfigError || appearanceError}
           onClose={() => setStyleConfigOpen(false)}
           onSelect={handleSaveAppearanceStyle}
+        />
+      )}
+
+      {textDisplayOpen && (
+        <TextDisplayDialog
+          currentMode={textDisplayMode}
+          saving={savingTextDisplay}
+          error={textDisplayError ?? textDisplayContextError}
+          onClose={() => setTextDisplayOpen(false)}
+          onSelect={handleSaveTextDisplayMode}
         />
       )}
     </div>

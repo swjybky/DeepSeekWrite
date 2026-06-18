@@ -66,6 +66,15 @@ function safariRegexCompatPlugin(): Plugin {
         )
       }
 
+      // remark-gfm email autolink uses lookbehind + unicode properties; findEmail()
+      // already validates the preceding character via previous().
+      if (id.includes('/node_modules/mdast-util-gfm-autolink-literal/')) {
+        next = next.replaceAll(
+          '[/(?<=^|\\s|\\p{P}|\\p{S})([-.\\w+]+)@([-\\w]+(?:\\.[-\\w]+)+)/gu, findEmail]',
+          String.raw`[/([-.\w+]+)@([-\w]+(?:\.[-\w]+)+)/g, findEmail]`,
+        )
+      }
+
       return next === code ? null : next
     },
   }

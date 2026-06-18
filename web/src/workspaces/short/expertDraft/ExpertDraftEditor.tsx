@@ -4,6 +4,7 @@ import type {
   ExpertDraftSection,
 } from '../../../bridge'
 import { TextHistoryControls } from '../../../components/TextHistoryControls'
+import { MarkdownTextEditor } from '../../../components/MarkdownTextEditor'
 import type { TextHistoryController } from '../../../hooks/useTextHistory'
 
 type Props = {
@@ -261,15 +262,15 @@ export function ExpertDraftEditor({
                   disabled={draft.running}
                 />
               </span>
-              <textarea
+              <MarkdownTextEditor
                 className="editor-body workspace-textarea expert-draft-textarea"
                 value={selectedSection.body}
                 aria-label={`${selectedSection.title}正文`}
-                ref={(node) =>
+                textareaRef={(node) =>
                   onSectionTextareaRef?.(selectedId, 'body', node)
                 }
-                onChange={(e) => {
-                  textHistory.change(bodyKey, selectedSection.body, e.target.value, (body) =>
+                onValueChange={(value) => {
+                  textHistory.change(bodyKey, selectedSection.body, value, (body) =>
                     updateDraft((current) => ({
                       ...current,
                       sections: updateSectionList(current.sections, selectedId, { body }),
@@ -312,15 +313,15 @@ export function ExpertDraftEditor({
                   disabled={draft.running}
                 />
               </span>
-              <textarea
+              <MarkdownTextEditor
                 className="editor-body workspace-textarea expert-draft-state-textarea"
                 value={selectedState.body}
                 aria-label={`${selectedSection.title}人物状态`}
-                ref={(node) =>
+                textareaRef={(node) =>
                   onSectionTextareaRef?.(selectedId, 'character_state', node)
                 }
-                onChange={(e) => {
-                  textHistory.change(stateKey, selectedState.body, e.target.value, (body) =>
+                onValueChange={(value) => {
+                  textHistory.change(stateKey, selectedState.body, value, (body) =>
                     updateDraft((current) => ({
                       ...current,
                       character_states: updateStateList(
@@ -354,16 +355,16 @@ export function ExpertDraftEditor({
           </section>
         ) : (
           <section className="expert-draft-main-editor">
-            <textarea
+            <MarkdownTextEditor
               className="editor-body workspace-textarea expert-draft-main-textarea"
               value={stageBody}
               aria-label="正文编写正文"
-              ref={(node) => onMainStageTextareaRef?.(node)}
-              onChange={(e) =>
+              textareaRef={(node) => onMainStageTextareaRef?.(node)}
+              onValueChange={(value) =>
                 textHistory.change(
                   mainBodyKey,
                   stageBody,
-                  e.target.value,
+                  value,
                   onStageBodyChange,
                 )
               }

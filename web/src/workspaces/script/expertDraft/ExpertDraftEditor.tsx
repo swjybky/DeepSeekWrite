@@ -4,6 +4,7 @@ import type {
   ExpertDraftSection,
 } from '../../../bridge'
 import { TextHistoryControls } from '../../../components/TextHistoryControls'
+import { MarkdownTextEditor } from '../../../components/MarkdownTextEditor'
 import type { TextHistoryController } from '../../../hooks/useTextHistory'
 
 type Props = {
@@ -247,15 +248,15 @@ export function ExpertDraftEditor({
 
             <label className="expert-draft-textarea-field">
               <span className="expert-draft-field-heading"><span>{selectedSection.title || '当前小节'}正文</span><TextHistoryControls history={textHistory} historyKey={bodyKey} value={selectedSection.body} onChange={(body) => updateDraft((current) => ({ ...current, sections: updateSectionList(current.sections, selectedId, { body }) }))} disabled={draft.running} /></span>
-              <textarea
+              <MarkdownTextEditor
                 className="editor-body workspace-textarea expert-draft-textarea"
                 value={selectedSection.body}
                 aria-label={`${selectedSection.title}正文`}
-                ref={(node) =>
+                textareaRef={(node) =>
                   onSectionTextareaRef?.(selectedId, 'body', node)
                 }
-                onChange={(e) => {
-                  textHistory.change(bodyKey, selectedSection.body, e.target.value, (body) => updateDraft((current) => ({ ...current, sections: updateSectionList(current.sections, selectedId, { body }) })))
+                onValueChange={(value) => {
+                  textHistory.change(bodyKey, selectedSection.body, value, (body) => updateDraft((current) => ({ ...current, sections: updateSectionList(current.sections, selectedId, { body }) })))
                 }}
                 onKeyDown={(event) => textHistory.handleKeyDown(event, bodyKey, selectedSection.body, (body) => updateDraft((current) => ({ ...current, sections: updateSectionList(current.sections, selectedId, { body }) })))}
                 onBlur={onTextBlur}
@@ -267,15 +268,15 @@ export function ExpertDraftEditor({
 
             <label className="expert-draft-textarea-field">
               <span className="expert-draft-field-heading"><span>{selectedState.title || defaultStateTitle(selectedSection.title)}</span><TextHistoryControls history={textHistory} historyKey={stateKey} value={selectedState.body} onChange={(body) => updateDraft((current) => ({ ...current, character_states: updateStateList(current.character_states, selectedId, { body }, selectedSection.title) }))} disabled={draft.running} /></span>
-              <textarea
+              <MarkdownTextEditor
                 className="editor-body workspace-textarea expert-draft-state-textarea"
                 value={selectedState.body}
                 aria-label={`${selectedSection.title}人物状态`}
-                ref={(node) =>
+                textareaRef={(node) =>
                   onSectionTextareaRef?.(selectedId, 'character_state', node)
                 }
-                onChange={(e) => {
-                  textHistory.change(stateKey, selectedState.body, e.target.value, (body) => updateDraft((current) => ({ ...current, character_states: updateStateList(current.character_states, selectedId, { body }, selectedSection.title) })))
+                onValueChange={(value) => {
+                  textHistory.change(stateKey, selectedState.body, value, (body) => updateDraft((current) => ({ ...current, character_states: updateStateList(current.character_states, selectedId, { body }, selectedSection.title) })))
                 }}
                 onKeyDown={(event) => textHistory.handleKeyDown(event, stateKey, selectedState.body, (body) => updateDraft((current) => ({ ...current, character_states: updateStateList(current.character_states, selectedId, { body }, selectedSection.title) })))}
                 onBlur={onTextBlur}
@@ -287,12 +288,12 @@ export function ExpertDraftEditor({
           </section>
         ) : (
           <section className="expert-draft-main-editor">
-            <textarea
+            <MarkdownTextEditor
               className="editor-body workspace-textarea expert-draft-main-textarea"
               value={stageBody}
               aria-label="正文编写正文"
-              ref={(node) => onMainStageTextareaRef?.(node)}
-              onChange={(e) => textHistory.change(mainBodyKey, stageBody, e.target.value, onStageBodyChange)}
+              textareaRef={(node) => onMainStageTextareaRef?.(node)}
+              onValueChange={(value) => textHistory.change(mainBodyKey, stageBody, value, onStageBodyChange)}
               onKeyDown={(event) => textHistory.handleKeyDown(event, mainBodyKey, stageBody, onStageBodyChange)}
               onBlur={onTextBlur}
               placeholder="在此编辑正文..."
