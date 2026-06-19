@@ -839,6 +839,81 @@ function AppearanceStyleDialog({
   )
 }
 
+type CreateDialogProps = {
+  title: string
+  titleId: string
+  submitting: boolean
+  onClose: () => void
+  onSubmit: (event: React.FormEvent<HTMLFormElement>) => void
+  children: React.ReactNode
+}
+
+function CreateDialog({
+  title,
+  titleId,
+  submitting,
+  onClose,
+  onSubmit,
+  children,
+}: CreateDialogProps) {
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && !submitting) {
+        event.preventDefault()
+        onClose()
+      }
+    }
+    document.addEventListener('keydown', onKeyDown)
+    return () => document.removeEventListener('keydown', onKeyDown)
+  }, [onClose, submitting])
+
+  return (
+    <div
+      className="create-dialog-backdrop"
+      role="presentation"
+      onClick={(event) => {
+        if (event.target === event.currentTarget && !submitting) onClose()
+      }}
+    >
+      <section
+        className="create-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+      >
+        <form className="create-dialog-form" onSubmit={onSubmit}>
+          <header className="create-dialog-head">
+            <h2 id={titleId}>{title}</h2>
+            <button
+              type="button"
+              className="create-dialog-close"
+              aria-label={`关闭${title}`}
+              disabled={submitting}
+              onClick={onClose}
+            >
+              ×
+            </button>
+          </header>
+          <div className="create-dialog-body">{children}</div>
+          <footer className="create-dialog-foot">
+            <button
+              type="button"
+              className="btn-secondary"
+              disabled={submitting}
+              onClick={onClose}
+            >
+              取消
+            </button>
+            <button type="submit" className="btn-primary" disabled={submitting}>
+              {submitting ? '创建中…' : '创建'}
+            </button>
+          </footer>
+        </form>
+      </section>
+    </div>
+  )
+}
+
 export function Home() {
   const {
     appearanceStyle,
@@ -893,6 +968,7 @@ export function Home() {
   const [showSkillForm, setShowSkillForm] = useState(false)
   const [skillTitle, setSkillTitle] = useState('')
   const [skillType, setSkillType] = useState<SkillType>('short')
+  const [loadCommonSkills, setLoadCommonSkills] = useState(false)
   const [submittingSkill, setSubmittingSkill] = useState(false)
   const [deletingSkillId, setDeletingSkillId] = useState<string | null>(null)
   const [skillError, setSkillError] = useState<string | null>(null)
@@ -1202,9 +1278,10 @@ export function Home() {
     setSubmittingSkill(true)
     setSkillError(null)
     try {
-      await createSkill(skillTitle, skillType, ws)
+      await createSkill(skillTitle, skillType, ws, loadCommonSkills)
       setSkillTitle('')
       setSkillType('short')
+      setLoadCommonSkills(false)
       setShowSkillForm(false)
       await refreshSkills()
     } catch (err) {
@@ -1461,108 +1538,16 @@ export function Home() {
               </Link>
               <button
                 type="button"
-                className={showBookForm ? 'btn-secondary btn-small' : 'btn-primary btn-small'}
-                onClick={() => setShowBookForm((v) => !v)}
+                className="btn-primary btn-small"
+                onClick={() => {
+                  setBookError(null)
+                  setShowBookForm(true)
+                }}
               >
-                {showBookForm ? '收起' : '+ 创建书籍'}
+                + 创建书籍
               </button>
             </div>
           </header>
-
-          {showBookForm && (
-            <form className="create-form" onSubmit={handleCreateBook}>
-              <label className="field">
-                <span className="field-label">书名</span>
-                <input
-                  type="text"
-                  value={bookTitle}
-                  onChange={(e) => setBookTitle(e.target.value)}
-                  placeholder="请输入书名"
-                  required
-                  autoFocus
-                />
-              </label>
-
-              <fieldset className="field">
-                <legend className="field-label">类型</legend>
-                <div className="radio-row">
-                  <label className="radio">
-                    <input
-                      type="radio"
-                      name="bookType"
-                      checked={bookType === 'short'}
-                      onChange={() => setBookType('short')}
-                    />
-                    短篇
-                  </label>
-                  <label className="radio">
-                    <input
-                      type="radio"
-                      name="bookType"
-                      checked={bookType === 'script'}
-                      onChange={() => setBookType('script')}
-                    />
-                    剧本
-                  </label>
-                  <label className="radio">
-                    <input
-                      type="radio"
-                      name="bookType"
-                      checked={bookType === 'long'}
-                      onChange={() => {
-                        setBookType('long')
-                        setBookLinkedSkillId('')
-                      }}
-                    />
-                    长篇
-                  </label>
-                </div>
-              </fieldset>
-
-              {(bookType === 'short' || bookType === 'script') && (
-                <>
-                  <fieldset className="field">
-                    <legend className="field-label">{bookTypeLabel(bookType)}分类</legend>
-                    <div className="genre-grid">
-                      {(bookType === 'script' ? SCRIPT_GENRE_OPTIONS : SHORT_GENRE_OPTIONS).map((g) => (
-                        <label key={g} className="radio">
-                          <input
-                            type="radio"
-                            name="shortGenre"
-                            checked={shortGenre === g}
-                            onChange={() => setShortGenre(g)}
-                          />
-                          {g}
-                        </label>
-                      ))}
-                    </div>
-                  </fieldset>
-
-                  <label className="field">
-                    <span className="field-label">绑定技能库</span>
-                    <select
-                      value={bookLinkedSkillId}
-                      onChange={(e) => setBookLinkedSkillId(e.target.value)}
-                      disabled={loadingSkills}
-                    >
-                      <option value="">不绑定</option>
-                      {skills.map((skill) => (
-                        <option key={skill.id} value={skill.id}>
-                          {skill.title}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                </>
-              )}
-
-              {bookError && <p className="form-error">{bookError}</p>}
-
-              <button type="submit" className="btn-primary" disabled={submittingBook}>
-                {submittingBook ? '创建中…' : '创建'}
-              </button>
-            </form>
-          )}
 
           <div className="card-content-area">
             {loadingBooks ? (
@@ -1605,10 +1590,7 @@ export function Home() {
           ) : null}
         </section>
 
-        <div
-          className={showMaterialForm ? 'library-stack library-stack--material-form-open' : 'library-stack'}
-          aria-label="素材库和技能库"
-        >
+        <div className="library-stack" aria-label="素材库和技能库">
         {/* 素材卡片 */}
         <section className="main-card materials-card library-card" aria-label="素材库">
           <header className="card-header">
@@ -1646,10 +1628,13 @@ export function Home() {
               </Link>
               <button
                 type="button"
-                className={showMaterialForm ? 'btn-secondary btn-small' : 'btn-primary btn-small'}
-                onClick={() => setShowMaterialForm((v) => !v)}
+                className="btn-primary btn-small"
+                onClick={() => {
+                  setMaterialError(null)
+                  setShowMaterialForm(true)
+                }}
               >
-                {showMaterialForm ? '收起' : '+ 创建素材'}
+                + 创建素材
               </button>
             </div>
           </header>
@@ -1687,82 +1672,6 @@ export function Home() {
                 ))}
               </ul>
             </div>
-          )}
-
-          {showMaterialForm && (
-            <form className="create-form" onSubmit={handleCreateMaterial}>
-              <label className="field">
-                <span className="field-label">素材标题</span>
-                <input
-                  type="text"
-                  value={materialTitle}
-                  onChange={(e) => setMaterialTitle(e.target.value)}
-                  placeholder="请输入素材标题"
-                  required
-                  autoFocus
-                />
-              </label>
-
-              <fieldset className="field">
-                <legend className="field-label">素材类型</legend>
-                <div className="radio-row">
-                  <label className="radio">
-                    <input
-                      type="radio"
-                      name="materialType"
-                      checked={materialType === 'long'}
-                      onChange={() => handleMaterialTypeChange('long')}
-                    />
-                    长篇
-                  </label>
-                  <label className="radio">
-                    <input
-                      type="radio"
-                      name="materialType"
-                      checked={materialType === 'short'}
-                      onChange={() => handleMaterialTypeChange('short')}
-                    />
-                    短篇
-                  </label>
-                  <label className="radio">
-                    <input
-                      type="radio"
-                      name="materialType"
-                      checked={materialType === 'script'}
-                      onChange={() => handleMaterialTypeChange('script')}
-                    />
-                    剧本
-                  </label>
-                </div>
-              </fieldset>
-
-              {(materialType === 'short' || materialType === 'script') && (
-                <>
-                  <fieldset className="field">
-                    <legend className="field-label">大分类</legend>
-                    <div className="genre-grid">
-                      {getMaterialParentGenres(materialType).map((g) => (
-                        <label key={g} className="radio">
-                          <input
-                            type="radio"
-                            name="materialParentGenre"
-                            checked={materialParentGenre === g}
-                            onChange={() => handleMaterialParentGenreChange(g)}
-                          />
-                          {g}
-                        </label>
-                      ))}
-                    </div>
-                  </fieldset>
-                </>
-              )}
-
-              {materialError && <p className="form-error">{materialError}</p>}
-
-              <button type="submit" className="btn-primary" disabled={submittingMaterial}>
-                {submittingMaterial ? '创建中…' : '创建'}
-              </button>
-            </form>
           )}
 
           <div className="card-content-area">
@@ -1837,10 +1746,13 @@ export function Home() {
               </Link>
               <button
                 type="button"
-                className={showSkillForm ? 'btn-secondary btn-small' : 'btn-primary btn-small'}
-                onClick={() => setShowSkillForm((v) => !v)}
+                className="btn-primary btn-small"
+                onClick={() => {
+                  setSkillError(null)
+                  setShowSkillForm(true)
+                }}
               >
-                {showSkillForm ? '收起' : '+ 创建技能'}
+                + 创建技能
               </button>
             </div>
           </header>
@@ -1876,45 +1788,6 @@ export function Home() {
                 ))}
               </ul>
             </div>
-          )}
-
-          {showSkillForm && (
-            <form className="create-form" onSubmit={handleCreateSkill}>
-              <label className="field">
-                <span className="field-label">技能标题</span>
-                <input
-                  type="text"
-                  value={skillTitle}
-                  onChange={(e) => setSkillTitle(e.target.value)}
-                  placeholder="请输入技能标题"
-                  required
-                  autoFocus
-                />
-              </label>
-
-              <fieldset className="field">
-                <legend className="field-label">技能类型</legend>
-                <div className="radio-row">
-                  {(['short', 'long', 'script'] as const).map((type) => (
-                    <label key={type} className="radio">
-                      <input
-                        type="radio"
-                        name="skillType"
-                        checked={skillType === type}
-                        onChange={() => setSkillType(type)}
-                      />
-                      {skillTypeLabel(type)}
-                    </label>
-                  ))}
-                </div>
-              </fieldset>
-
-              {skillError && <p className="form-error">{skillError}</p>}
-
-              <button type="submit" className="btn-primary" disabled={submittingSkill}>
-                {submittingSkill ? '创建中…' : '创建'}
-              </button>
-            </form>
           )}
 
           <div className="card-content-area">
@@ -1953,6 +1826,232 @@ export function Home() {
         </section>
         </div>
       </div>
+
+      {showBookForm && (
+        <CreateDialog
+          title="创建书籍"
+          titleId="create-book-title"
+          submitting={submittingBook}
+          onClose={() => setShowBookForm(false)}
+          onSubmit={handleCreateBook}
+        >
+          <label className="field">
+            <span className="field-label">书名</span>
+            <input
+              type="text"
+              value={bookTitle}
+              onChange={(e) => setBookTitle(e.target.value)}
+              placeholder="请输入书名"
+              required
+              autoFocus
+            />
+          </label>
+
+          <fieldset className="field">
+            <legend className="field-label">类型</legend>
+            <div className="radio-row">
+              <label className="radio">
+                <input
+                  type="radio"
+                  name="bookType"
+                  checked={bookType === 'short'}
+                  onChange={() => setBookType('short')}
+                />
+                短篇
+              </label>
+              <label className="radio">
+                <input
+                  type="radio"
+                  name="bookType"
+                  checked={bookType === 'script'}
+                  onChange={() => setBookType('script')}
+                />
+                剧本
+              </label>
+              <label className="radio">
+                <input
+                  type="radio"
+                  name="bookType"
+                  checked={bookType === 'long'}
+                  onChange={() => {
+                    setBookType('long')
+                    setBookLinkedSkillId('')
+                  }}
+                />
+                长篇
+              </label>
+            </div>
+          </fieldset>
+
+          {(bookType === 'short' || bookType === 'script') && (
+            <>
+              <fieldset className="field">
+                <legend className="field-label">{bookTypeLabel(bookType)}分类</legend>
+                <div className="genre-grid">
+                  {(bookType === 'script' ? SCRIPT_GENRE_OPTIONS : SHORT_GENRE_OPTIONS).map((g) => (
+                    <label key={g} className="radio">
+                      <input
+                        type="radio"
+                        name="shortGenre"
+                        checked={shortGenre === g}
+                        onChange={() => setShortGenre(g)}
+                      />
+                      {g}
+                    </label>
+                  ))}
+                </div>
+              </fieldset>
+
+              <label className="field">
+                <span className="field-label">绑定技能库</span>
+                <select
+                  value={bookLinkedSkillId}
+                  onChange={(e) => setBookLinkedSkillId(e.target.value)}
+                  disabled={loadingSkills}
+                >
+                  <option value="">不绑定</option>
+                  {skills.map((skill) => (
+                    <option key={skill.id} value={skill.id}>
+                      {skill.title}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </>
+          )}
+
+          {bookError && <p className="form-error">{bookError}</p>}
+        </CreateDialog>
+      )}
+
+      {showMaterialForm && (
+        <CreateDialog
+          title="创建素材"
+          titleId="create-material-title"
+          submitting={submittingMaterial}
+          onClose={() => setShowMaterialForm(false)}
+          onSubmit={handleCreateMaterial}
+        >
+          <label className="field">
+            <span className="field-label">素材标题</span>
+            <input
+              type="text"
+              value={materialTitle}
+              onChange={(e) => setMaterialTitle(e.target.value)}
+              placeholder="请输入素材标题"
+              required
+              autoFocus
+            />
+          </label>
+
+          <fieldset className="field">
+            <legend className="field-label">素材类型</legend>
+            <div className="radio-row">
+              <label className="radio">
+                <input
+                  type="radio"
+                  name="materialType"
+                  checked={materialType === 'long'}
+                  onChange={() => handleMaterialTypeChange('long')}
+                />
+                长篇
+              </label>
+              <label className="radio">
+                <input
+                  type="radio"
+                  name="materialType"
+                  checked={materialType === 'short'}
+                  onChange={() => handleMaterialTypeChange('short')}
+                />
+                短篇
+              </label>
+              <label className="radio">
+                <input
+                  type="radio"
+                  name="materialType"
+                  checked={materialType === 'script'}
+                  onChange={() => handleMaterialTypeChange('script')}
+                />
+                剧本
+              </label>
+            </div>
+          </fieldset>
+
+          {(materialType === 'short' || materialType === 'script') && (
+            <fieldset className="field">
+              <legend className="field-label">大分类</legend>
+              <div className="genre-grid">
+                {getMaterialParentGenres(materialType).map((g) => (
+                  <label key={g} className="radio">
+                    <input
+                      type="radio"
+                      name="materialParentGenre"
+                      checked={materialParentGenre === g}
+                      onChange={() => handleMaterialParentGenreChange(g)}
+                    />
+                    {g}
+                  </label>
+                ))}
+              </div>
+            </fieldset>
+          )}
+
+          {materialError && <p className="form-error">{materialError}</p>}
+        </CreateDialog>
+      )}
+
+      {showSkillForm && (
+        <CreateDialog
+          title="创建技能"
+          titleId="create-skill-title"
+          submitting={submittingSkill}
+          onClose={() => setShowSkillForm(false)}
+          onSubmit={handleCreateSkill}
+        >
+          <label className="field">
+            <span className="field-label">技能标题</span>
+            <input
+              type="text"
+              value={skillTitle}
+              onChange={(e) => setSkillTitle(e.target.value)}
+              placeholder="请输入技能标题"
+              required
+              autoFocus
+            />
+          </label>
+
+          <fieldset className="field">
+            <legend className="field-label">技能类型</legend>
+            <div className="radio-row">
+              {(['short', 'long', 'script'] as const).map((type) => (
+                <label key={type} className="radio">
+                  <input
+                    type="radio"
+                    name="skillType"
+                    checked={skillType === type}
+                    onChange={() => setSkillType(type)}
+                  />
+                  {skillTypeLabel(type)}
+                </label>
+              ))}
+            </div>
+          </fieldset>
+
+          <label className="radio create-form-checkbox">
+            <input
+              type="checkbox"
+              checked={loadCommonSkills}
+              onChange={(event) => setLoadCommonSkills(event.target.checked)}
+            />
+            <span>
+              加载通用技能库
+              <small>按通用技能设置中的生效阶段，复制到新技能库</small>
+            </span>
+          </label>
+
+          {skillError && <p className="form-error">{skillError}</p>}
+        </CreateDialog>
+      )}
 
       {modelConfigOpen && (
         <ModelConfigDialog

@@ -160,12 +160,6 @@
   min-height: 0;
 }
 
-.library-stack--material-form-open {
-  grid-template-rows: minmax(27rem, 1.45fr) minmax(12rem, 0.55fr);
-  overflow-y: auto;
-  scrollbar-gutter: stable;
-}
-
 .library-card {
   min-height: 0;
 }
@@ -320,34 +314,6 @@
   font-weight: 500;
 }
 
-.create-form {
-  margin: 0.65rem 0.85rem;
-  padding: 0.85rem;
-  border: 1px dashed var(--border);
-  border-radius: var(--radius-md);
-  background: color-mix(in oklab, var(--paper) 60%, var(--paper-elevated));
-  animation: slideDown 0.25s ease;
-}
-
-.materials-card .create-form {
-  flex: 0 1 auto;
-  min-height: 0;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  scrollbar-gutter: stable;
-}
-
-@keyframes slideDown {
-  from {
-    opacity: 0;
-    transform: translateY(-8px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
 .loading-state,
 .empty-state {
   display: flex;
@@ -457,6 +423,21 @@
   accent-color: var(--accent);
 }
 
+.create-form-checkbox {
+  align-items: flex-start;
+  margin: 0 0 0.85rem;
+}
+
+.create-form-checkbox span {
+  display: grid;
+  gap: 0.15rem;
+}
+
+.create-form-checkbox small {
+  color: var(--ink-faint);
+  font-size: 0.75rem;
+}
+
 .form-error {
   color: var(--danger);
   font-size: 0.8125rem;
@@ -464,6 +445,99 @@
   padding: 0.5rem 0.65rem;
   border-radius: var(--radius-sm);
   background: color-mix(in oklab, var(--danger) 8%, var(--paper));
+}
+
+/* —— 创建书籍 / 素材 / 技能弹窗 —— */
+.create-dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 10020;
+  display: grid;
+  place-items: center;
+  padding: 1.25rem;
+  background: rgb(42 36 28 / 38%);
+  backdrop-filter: blur(4px);
+}
+
+.create-dialog {
+  width: min(560px, 100%);
+  max-height: min(720px, calc(100vh - 2.5rem));
+  overflow: hidden;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-lg);
+  background: var(--paper-elevated);
+  box-shadow: var(--shadow-soft);
+  animation: createDialogIn 0.18s ease-out;
+}
+
+.create-dialog-form {
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.create-dialog-head,
+.create-dialog-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1rem 1.25rem;
+}
+
+.create-dialog-head {
+  border-bottom: 1px solid var(--border);
+}
+
+.create-dialog-head h2 {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 1.05rem;
+  letter-spacing: 0.1em;
+}
+
+.create-dialog-close {
+  width: 2rem;
+  height: 2rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--ink-faint);
+  font-size: 1.25rem;
+}
+
+.create-dialog-close:hover:not(:disabled) {
+  border-color: var(--border);
+  background: var(--accent-soft);
+  color: var(--ink);
+}
+
+.create-dialog-body {
+  min-height: 0;
+  overflow-y: auto;
+  padding: 1.15rem 1.25rem 0.3rem;
+  background: var(--paper);
+  overscroll-behavior: contain;
+}
+
+.create-dialog-foot {
+  justify-content: flex-end;
+  border-top: 1px solid var(--border);
+  background: var(--paper-elevated);
+}
+
+@keyframes createDialogIn {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
 }
 
 /* —— 模型配置弹窗 —— */
@@ -1109,9 +1183,6 @@
     grid-template-rows: auto auto;
   }
 
-  .library-stack--material-form-open {
-    overflow-y: visible;
-  }
 }
 
 @media (max-width: 640px) {

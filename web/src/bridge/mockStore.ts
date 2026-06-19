@@ -14,6 +14,7 @@ import type {
   StageId,
 } from '../domain/workspaceCore'
 import type { SaveSkillOptions } from './apiTypes'
+import { readCommonSkills } from './commonSkillsClient'
 import {
   SCRIPT_MATERIAL_GENRES,
   SHORT_MATERIAL_GENRES,
@@ -372,14 +373,29 @@ export async function mockGetSkill(skill_id: string): Promise<Skill | null> {
 export async function mockCreateSkill(
   title: string,
   skill_type = 'short',
+  load_common_skills = false,
 ): Promise<Skill> {
   const map = loadMockSkills()
   const now = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z')
+  const stages = normalizeSkillStages({})
+  if (load_common_skills) {
+    for (const commonSkill of await readCommonSkills()) {
+      for (const stageId of commonSkill.effective_stages) {
+        stages[stageId].push({
+          id: randomId(),
+          title: commonSkill.title,
+          body: commonSkill.body,
+          created_at: now,
+          updated_at: now,
+        })
+      }
+    }
+  }
   const skill: Skill = {
     id: randomId(),
     title: title.trim() || '未命名技能',
     skill_type: normalizeSkillType(skill_type),
-    stages: normalizeSkillStages({}),
+    stages,
     stage_counts: {},
     stage_skill_count: 0,
     created_at: now,

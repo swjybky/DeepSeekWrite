@@ -654,12 +654,30 @@ class Api:
         title: str,
         skill_type: str = "short",
         workspace_root: str | None = None,
+        load_common_skills: bool = False,
     ) -> dict:
         """创建新技能集合"""
         if workspace_root is None and str(skill_type or "").strip() not in {"short", "long", "script"}:
             workspace_root = skill_type
             skill_type = "short"
-        return self._store.create_skill(title, skill_type, workspace_root)
+        return self._store.create_skill(
+            title,
+            skill_type,
+            workspace_root,
+            bool(load_common_skills),
+        )
+
+    def read_common_skills(self) -> list[dict]:
+        """读取随应用发布、不会写入用户数据目录的通用技能配置。"""
+        from app.common_skill_store import read_common_skills
+
+        return read_common_skills()
+
+    def save_common_skills(self, skills: list | None = None) -> list[dict]:
+        """保存随应用发布的通用技能配置。"""
+        from app.common_skill_store import save_common_skills
+
+        return save_common_skills(skills or [])
 
     def save_skill(
         self,

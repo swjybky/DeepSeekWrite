@@ -182,6 +182,13 @@ export interface SkillStageEntry {
   updated_at?: string
 }
 
+export interface CommonSkill {
+  id: string
+  title: string
+  body: string
+  effective_stages: SkillStageId[]
+}
+
 function newLocalSkillStageEntryId(): string {
   return globalThis.crypto?.randomUUID?.() ?? Math.random().toString(36).slice(2)
 }

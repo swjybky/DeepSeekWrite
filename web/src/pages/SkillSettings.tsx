@@ -1,10 +1,16 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
+  SKILL_STAGE_KEYS,
+  SKILL_STAGE_LABELS,
   readSkillAgentPromptTemplateForType,
+  readCommonSkills,
   resetSkillAgentPromptOverride,
+  saveCommonSkills,
   saveSkillAgentPromptOverride,
   skillTypeLabel,
+  type CommonSkill,
+  type SkillStageId,
   type SkillType,
 } from '../bridge'
 import {
@@ -21,10 +27,15 @@ const PLACEHOLDER_HINT =
 
 export function SkillSettings() {
   const navigate = useNavigate()
+  const [settingsMode, setSettingsMode] = useState<'prompt' | 'common'>('prompt')
   const [skillType, setSkillType] = useState<SkillType>('short')
   const [promptDraft, setPromptDraft] = useState('')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [commonSkills, setCommonSkills] = useState<CommonSkill[]>([])
+  const [commonSkillsLoading, setCommonSkillsLoading] = useState(true)
+  const [commonSkillsSaving, setCommonSkillsSaving] = useState(false)
+  const [commonSkillsSaved, setCommonSkillsSaved] = useState(false)
 
   const promptDraftRef = useRef(promptDraft)
   const savedPromptRef = useRef('')
@@ -86,6 +97,25 @@ export function SkillSettings() {
     }
   }, [flushSkillPrompt, markSkillPromptSaved, skillType, textHistory])
 
+  useEffect(() => {
+    let cancelled = false
+    void readCommonSkills()
+      .then((skills) => {
+        if (!cancelled) setCommonSkills(skills)
+      })
+      .catch((cause) => {
+        if (!cancelled) {
+          setError(cause instanceof Error ? cause.message : '加载通用技能失败')
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setCommonSkillsLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
   const switchSkillType = useCallback(
     async (next: SkillType) => {
       if (next === skillType) return
@@ -129,6 +159,61 @@ export function SkillSettings() {
     }
   }, [flushPrompt, markSkillPromptSaved, promptDraft, skillType, textHistory])
 
+  const addCommonSkill = useCallback(() => {
+    setCommonSkillsSaved(false)
+    setCommonSkills((current) => [
+      ...current,
+      {
+        id: globalThis.crypto?.randomUUID?.() ?? Math.random().toString(36).slice(2),
+        title: '新通用技能',
+        body: '',
+        effective_stages: [],
+      },
+    ])
+  }, [])
+
+  const updateCommonSkill = useCallback(
+    (id: string, patch: Partial<CommonSkill>) => {
+      setCommonSkillsSaved(false)
+      setCommonSkills((current) =>
+        current.map((skill) => skill.id === id ? { ...skill, ...patch } : skill),
+      )
+    },
+    [],
+  )
+
+  const toggleEffectiveStage = useCallback(
+    (skill: CommonSkill, stageId: SkillStageId) => {
+      const selected = new Set(skill.effective_stages)
+      if (selected.has(stageId)) selected.delete(stageId)
+      else selected.add(stageId)
+      updateCommonSkill(skill.id, {
+        effective_stages: SKILL_STAGE_KEYS.filter((id) => selected.has(id)),
+      })
+    },
+    [updateCommonSkill],
+  )
+
+  const removeCommonSkill = useCallback((skill: CommonSkill) => {
+    if (!window.confirm(`删除通用技能「${skill.title}」？`)) return
+    setCommonSkillsSaved(false)
+    setCommonSkills((current) => current.filter((item) => item.id !== skill.id))
+  }, [])
+
+  const persistCommonSkills = useCallback(async () => {
+    setCommonSkillsSaving(true)
+    setError(null)
+    try {
+      const saved = await saveCommonSkills(commonSkills)
+      setCommonSkills(saved)
+      setCommonSkillsSaved(true)
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : '保存通用技能失败')
+    } finally {
+      setCommonSkillsSaving(false)
+    }
+  }, [commonSkills])
+
   return (
     <div className="workspace-settings-page">
       <header className="workspace-settings-header">
@@ -140,21 +225,37 @@ export function SkillSettings() {
           ← 返回首页
         </button>
         <div>
-          <h1>技能库智能体设置</h1>
-          <p>短篇、长篇与剧本技能库分别保存管理智能体提示词。</p>
+          <h1>技能库设置</h1>
+          <p>配置管理智能体提示词，以及随应用打包发布的通用技能。</p>
         </div>
         <span
-          className={`workspace-settings-save-state workspace-settings-save-state--${skillPromptStatus(skillType)}`}
+          className={`workspace-settings-save-state workspace-settings-save-state--${settingsMode === 'common' ? (commonSkillsSaving ? 'saving' : commonSkillsSaved ? 'saved' : 'idle') : skillPromptStatus(skillType)}`}
           aria-live="polite"
         >
-          {autoSaveStatusLabel(skillPromptStatus(skillType))}
+          {settingsMode === 'common'
+            ? commonSkillsSaving ? '保存中…' : commonSkillsSaved ? '已保存' : ''
+            : autoSaveStatusLabel(skillPromptStatus(skillType))}
         </span>
       </header>
 
       {error ? <p className="workspace-settings-error">{error}</p> : null}
 
-      <div className="workspace-settings-type-switch" role="tablist" aria-label="技能类型">
-        {SKILL_SETTING_TYPES.map((type) => (
+      <div className="workspace-settings-type-switch" role="tablist" aria-label="设置类型">
+        <button
+          type="button"
+          className={settingsMode === 'prompt' ? 'workspace-settings-type-btn workspace-settings-type-btn--active' : 'workspace-settings-type-btn'}
+          onClick={() => setSettingsMode('prompt')}
+        >
+          管理智能体
+        </button>
+        <button
+          type="button"
+          className={settingsMode === 'common' ? 'workspace-settings-type-btn workspace-settings-type-btn--active' : 'workspace-settings-type-btn'}
+          onClick={() => setSettingsMode('common')}
+        >
+          通用技能
+        </button>
+        {settingsMode === 'prompt' ? SKILL_SETTING_TYPES.map((type) => (
           <button
             key={type}
             type="button"
@@ -169,11 +270,76 @@ export function SkillSettings() {
           >
             {skillTypeLabel(type)}
           </button>
-        ))}
+        )) : null}
       </div>
 
       <main className="workspace-settings-content">
-        {loading ? (
+        {settingsMode === 'common' ? (
+          commonSkillsLoading ? (
+            <div className="workspace-settings-loading">加载通用技能中…</div>
+          ) : (
+            <section className="common-skills-panel">
+              <div className="workspace-settings-content-head">
+                <div>
+                  <span>项目本地配置</span>
+                  <h2>通用技能</h2>
+                  <p>配置保存在 app/prompt_defaults/skill/common_skills.json，打包时随应用发布，不进入用户数据目录。</p>
+                </div>
+                <div className="workspace-settings-head-actions">
+                  <button type="button" onClick={addCommonSkill}>+ 添加技能</button>
+                  <button type="button" disabled={commonSkillsSaving} onClick={() => void persistCommonSkills()}>
+                    {commonSkillsSaving ? '保存中…' : '保存配置'}
+                  </button>
+                </div>
+              </div>
+
+              {commonSkills.length === 0 ? (
+                <div className="common-skills-empty">暂无通用技能，点击“添加技能”开始配置。</div>
+              ) : (
+                <div className="common-skills-list">
+                  {commonSkills.map((skill, index) => (
+                    <article className="common-skill-card" key={skill.id}>
+                      <div className="common-skill-card-head">
+                        <strong>通用技能 {index + 1}</strong>
+                        <button type="button" onClick={() => removeCommonSkill(skill)}>删除</button>
+                      </div>
+                      <label>
+                        <span>技能名称</span>
+                        <input
+                          value={skill.title}
+                          onChange={(event) => updateCommonSkill(skill.id, { title: event.target.value })}
+                        />
+                      </label>
+                      <label>
+                        <span>技能内容</span>
+                        <textarea
+                          value={skill.body}
+                          spellCheck={false}
+                          onChange={(event) => updateCommonSkill(skill.id, { body: event.target.value })}
+                        />
+                      </label>
+                      <fieldset>
+                        <legend>生效阶段（可多选）</legend>
+                        <div className="common-skill-stages">
+                          {SKILL_STAGE_KEYS.map((stageId) => (
+                            <label key={stageId}>
+                              <input
+                                type="checkbox"
+                                checked={skill.effective_stages.includes(stageId)}
+                                onChange={() => toggleEffectiveStage(skill, stageId)}
+                              />
+                              {SKILL_STAGE_LABELS[stageId]}
+                            </label>
+                          ))}
+                        </div>
+                      </fieldset>
+                    </article>
+                  ))}
+                </div>
+              )}
+            </section>
+          )
+        ) : loading ? (
           <div className="workspace-settings-loading">加载设置中…</div>
         ) : (
           <>

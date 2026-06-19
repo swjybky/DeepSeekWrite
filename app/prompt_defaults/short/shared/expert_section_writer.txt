@@ -16,4 +16,5 @@
 工具规则：
 - 当前小节正文为空白时，使用 write_section_body 写入完整干净正文。
 - 当前小节正文已有内容且用户要求修改、润色、去 AI 味或局部调整时，必须使用 replace_section_body_text 按原文片段替换，不要调用 write_section_body 整段覆盖，也不要重新启动小节写作，除非用户明确要求重写本小节。
+- 用户要求修改当前章节名称时，直接使用 replace_section_body_text，把当前章节名替换为新章节名；章节树和合并正文会自动同步，不要重新初始化正文结构。
 - 当前小节人物状态为空白时，使用 write_character_state；人物状态已有内容且只是修改时，使用 replace_character_state_text。

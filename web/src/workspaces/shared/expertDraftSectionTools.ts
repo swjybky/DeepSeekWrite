@@ -143,6 +143,33 @@ function replaceSectionBody(
   }
 }
 
+function replaceSectionTitleAndBody(
+  draft: ExpertDraft,
+  sectionId: string,
+  title: string,
+  body: string,
+): ExpertDraft {
+  const previousSection = draft.sections.find(
+    (section) => section.id === sectionId,
+  )
+  const previousDefaultStateTitle = previousSection
+    ? `${previousSection.title.trim() || '小节'}人物状态`
+    : ''
+  const nextDefaultStateTitle = `${title.trim() || '小节'}人物状态`
+  return {
+    ...draft,
+    sections: draft.sections.map((section) =>
+      section.id === sectionId ? { ...section, title, body } : section,
+    ),
+    character_states: draft.character_states.map((state) =>
+      state.section_id === sectionId &&
+      state.title === previousDefaultStateTitle
+        ? { ...state, title: nextDefaultStateTitle }
+        : state,
+    ),
+  }
+}
+
 function replaceCharacterState(
   draft: ExpertDraft,
   sectionId: string,
@@ -316,9 +343,9 @@ export function buildExpertDraftSectionEditTools(
 
   const replaceSectionBodyTool = defineTool({
       name: 'replace_section_body_text',
-      label: '替换正文片段',
+      label: '替换章节信息',
       description:
-        `编辑替换工具：${sectionLabel}正文已有内容时，必须优先使用本工具修改正文，不要调用 write_section_body 整段覆盖，也不要重新启动 start_expert_writing，除非用户明确要求重写/重跑小节。先调用 read_expert_draft_section 读取目标小节正文，从返回正文中原样复制待改片段到 original_text；每项只替换一个小段，不要把整节正文作为 original_text 或 new_text。`,
+        `编辑替换工具：可直接替换${sectionLabel}的章节名称或正文片段。修改章节名时，把 read_expert_draft_section 返回的当前章节名称原样放入 original_text，把新章节名放入 new_text，章节树与合并正文会同步更新。正文已有内容时也必须优先使用本工具，不要调用 write_section_body 整段覆盖，也不要重新启动 start_expert_writing，除非用户明确要求重写/重跑小节。每项只替换章节名或一个正文小段，不要把整节正文作为 original_text 或 new_text。`,
       parameters: Type.Object({
         section_id: Type.String({
           description:
@@ -329,12 +356,12 @@ export function buildExpertDraftSectionEditTools(
             original_text: Type.String({
               maxLength: MAX_EXPERT_DRAFT_TEXT_REPLACE_CHARS,
               description:
-                '要被替换的小节正文原文片段。须来自 read_expert_draft_section 的返回正文，并包含足够上下文以唯一定位。',
+                '要被替换的当前章节名称或正文原文片段。须来自 read_expert_draft_section 的返回内容；替换章节名时直接填写当前章节名称。',
             }),
             new_text: Type.String({
               maxLength: MAX_EXPERT_DRAFT_TEXT_REPLACE_CHARS,
               description:
-                '替换后的新正文片段。只放这个片段的新内容，可包含换行；不要放整节正文。',
+                '替换后的新章节名称或正文片段。替换章节名时只填写新名称且不要换行；替换正文时只放对应片段的新内容。',
             }),
           }),
           {
@@ -355,28 +382,58 @@ export function buildExpertDraftSectionEditTools(
           getDraft,
           getRenderedSectionContent,
         ).text
-        if (!currentBody.trim()) {
+        let nextTitle = section.title
+        const bodyReplacements: ExpertDraftTextReplacement[] = []
+        let titleReplaceCount = 0
+        for (const replacement of params.replacements) {
+          const originalText = normalizeNewlines(
+            replacement.original_text,
+          ).trim()
+          const newText = normalizeNewlines(replacement.new_text).trim()
+          if (originalText === nextTitle.trim() && !originalText.includes('\n')) {
+            if (!newText) return textBlock('未替换：新章节名称不能为空。')
+            if (newText.includes('\n')) {
+              return textBlock('未替换：章节名称不能包含换行。')
+            }
+            nextTitle = newText
+            titleReplaceCount += 1
+          } else {
+            bodyReplacements.push(replacement)
+          }
+        }
+        if (!currentBody.trim() && bodyReplacements.length > 0) {
           return textBlock(
             scope === 'coordinator'
               ? `当前「${section.title}」正文为空。请使用 initialize_expert_draft 初始化或填入 body，或调用 start_expert_writing 启动分节写作。`
               : `当前「${section.title}」正文为空，请使用 write_section_body 写入完整正文。`,
           )
         }
-        const result = replaceExpertDraftText({
-          currentBody,
-          replacements: params.replacements,
-        })
+        const result =
+          bodyReplacements.length > 0
+            ? replaceExpertDraftText({
+                currentBody,
+                replacements: bodyReplacements,
+              })
+            : { next: currentBody, count: 0, flexibleCount: 0 }
         if ('error' in result) return textBlock(`未替换：${result.error}`)
 
-        onSectionBodyWritten?.(result.next)
-        syncExpertDraftSectionField?.(section.id, 'body', result.next)
-        updateDraft((draft) => replaceSectionBody(draft, section.id, result.next))
+        if (bodyReplacements.length > 0) {
+          onSectionBodyWritten?.(result.next)
+          syncExpertDraftSectionField?.(section.id, 'body', result.next)
+        }
+        updateDraft((draft) =>
+          replaceSectionTitleAndBody(draft, section.id, nextTitle, result.next),
+        )
         const flexibleNote =
           result.flexibleCount > 0
             ? `（其中 ${result.flexibleCount} 处经引号/标点归一化后定位）`
             : ''
+        const changedParts = [
+          titleReplaceCount > 0 ? `章节名 ${titleReplaceCount} 处` : '',
+          result.count > 0 ? `正文 ${result.count} 个片段` : '',
+        ].filter(Boolean)
         return textBlock(
-          `已替换「${section.title}」正文 ${result.count} 个片段${flexibleNote}。`,
+          `已替换「${section.title}」的${changedParts.join('、')}${flexibleNote}。`,
         )
       },
       executionMode: 'sequential',

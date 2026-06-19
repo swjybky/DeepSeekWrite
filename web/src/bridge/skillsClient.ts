@@ -37,14 +37,20 @@ export async function createSkill(
   title: string,
   skill_type: SkillType = 'short',
   workspace_root?: string | null,
+  load_common_skills = false,
 ): Promise<Skill> {
   const api = await getBridgeApi()
   if (api?.create_skill) {
     return normalizeSkill(
-      await api.create_skill(title, skill_type, workspace_root ?? null),
+      await api.create_skill(
+        title,
+        skill_type,
+        workspace_root ?? null,
+        load_common_skills,
+      ),
     )
   }
-  return mockCreateSkill(title, skill_type)
+  return mockCreateSkill(title, skill_type, load_common_skills)
 }
 
 

@@ -9,9 +9,9 @@ export function combineExpertDraftSections(draft: ExpertDraft): string {
   return draft.sections
     .map((section) => {
       const body = section.body.trim()
-      if (!body) return ''
       const title = section.title.trim()
-      return title ? `${title}\n${body}` : body
+      if (title && body) return `${title}\n${body}`
+      return title || body
     })
     .filter(Boolean)
     .join('\n\n')
@@ -35,6 +35,40 @@ function firstDraftBodySectionIndex(
   return bodyIndex >= 0 ? bodyIndex : 0
 }
 
+function findLineSequence(
+  lines: string[],
+  sequence: string[],
+  fromIndex: number,
+): number {
+  if (sequence.length === 0) return -1
+  for (
+    let lineIndex = fromIndex;
+    lineIndex <= lines.length - sequence.length;
+    lineIndex += 1
+  ) {
+    if (
+      sequence.every(
+        (line, offset) => lines[lineIndex + offset] === line,
+      )
+    ) {
+      return lineIndex
+    }
+  }
+  return -1
+}
+
+function previousNonBlankLineIndex(lines: string[], fromIndex: number): number {
+  for (let lineIndex = fromIndex; lineIndex >= 0; lineIndex -= 1) {
+    if (lines[lineIndex]!.trim()) return lineIndex
+  }
+  return -1
+}
+
+function isMappedTitleLine(lines: string[], lineIndex: number): boolean {
+  if (lineIndex < 0) return false
+  return lineIndex === 0 || !lines[lineIndex - 1]!.trim()
+}
+
 export function syncExpertDraftFromDraftStage(
   draft: ExpertDraft,
   draftStageBody: string,
@@ -49,6 +83,21 @@ export function syncExpertDraftFromDraftStage(
 
   draft.sections.forEach((section, sectionIndex) => {
     const title = section.title.trim()
+    const bodyLines = trimBlankBoundaryLines(
+      section.body.replace(/\r\n?/g, '\n').split('\n'),
+    )
+    const bodyStart = findLineSequence(lines, bodyLines, cursor)
+    if (bodyStart >= 0) {
+      const inferredTitleLine = previousNonBlankLineIndex(lines, bodyStart - 1)
+      if (
+        inferredTitleLine >= cursor &&
+        isMappedTitleLine(lines, inferredTitleLine)
+      ) {
+        markers.push({ sectionIndex, lineIndex: inferredTitleLine })
+        cursor = inferredTitleLine + 1
+        return
+      }
+    }
     if (!title) return
     for (let lineIndex = cursor; lineIndex < lines.length; lineIndex += 1) {
       if (lines[lineIndex]!.trim() !== title) continue
@@ -100,12 +149,37 @@ export function syncExpertDraftFromDraftStage(
     }
   }
 
+  const nextSections = draft.sections.map((section, sectionIndex) => {
+    const marker = markers.find((item) => item.sectionIndex === sectionIndex)
+    return {
+      ...section,
+      title: marker
+        ? lines[marker.lineIndex]!.trim() || section.title
+        : section.title,
+      body: bodiesBySectionId.get(section.id) ?? '',
+    }
+  })
+  const nextTitleById = new Map(
+    nextSections.map((section) => [section.id, section.title]),
+  )
+
   return {
     ...draft,
-    sections: draft.sections.map((section) => ({
-      ...section,
-      body: bodiesBySectionId.get(section.id) ?? '',
-    })),
+    sections: nextSections,
+    character_states: draft.character_states.map((state) => {
+      const previousSection = draft.sections.find(
+        (section) => section.id === state.section_id,
+      )
+      const nextTitle = nextTitleById.get(state.section_id)
+      if (
+        !previousSection ||
+        !nextTitle ||
+        state.title !== defaultExpertDraftStateTitle(previousSection.title)
+      ) {
+        return state
+      }
+      return { ...state, title: defaultExpertDraftStateTitle(nextTitle) }
+    }),
   }
 }
 
@@ -125,7 +199,8 @@ export function hydrateExpertDraftFromDraftStage(
   bookType: BookType = 'short',
 ): ExpertDraft {
   const legacyBody = draftStageBody.trim()
-  if (!legacyBody || combineExpertDraftSections(draft).trim()) return draft
+  const hasSectionBody = draft.sections.some((section) => section.body.trim())
+  if (!legacyBody || hasSectionBody) return draft
 
   const targetIndex = draft.sections.findIndex((section) =>
     bookType === 'script' ? true : section.id !== 'intro',

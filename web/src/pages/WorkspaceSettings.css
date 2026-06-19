@@ -223,6 +223,117 @@
   margin-bottom: 1rem;
 }
 
+.workspace-settings-content-head p {
+  max-width: 760px;
+  margin: 0.35rem 0 0;
+  color: #64748b;
+  font-size: 0.82rem;
+}
+
+.common-skills-panel {
+  max-width: 1120px;
+  margin: 0 auto;
+}
+
+.common-skills-list {
+  display: grid;
+  gap: 1rem;
+  margin-top: 1rem;
+}
+
+.common-skills-empty {
+  margin-top: 1rem;
+  padding: 3rem 1rem;
+  border: 1px dashed #cbd5e1;
+  border-radius: 12px;
+  color: #64748b;
+  text-align: center;
+}
+
+.common-skill-card {
+  display: grid;
+  gap: 1rem;
+  padding: 1rem;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  background: #fff;
+}
+
+.common-skill-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.common-skill-card-head button {
+  border: 0;
+  background: transparent;
+  color: #dc2626;
+  cursor: pointer;
+}
+
+.common-skill-card > label {
+  display: grid;
+  gap: 0.4rem;
+  color: #475569;
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.common-skill-card input[type='text'],
+.common-skill-card > label > input,
+.common-skill-card textarea {
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  padding: 0.65rem 0.75rem;
+  background: #fff;
+  color: #1e293b;
+  font: inherit;
+}
+
+.common-skill-card textarea {
+  min-height: 150px;
+  resize: vertical;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.82rem;
+  line-height: 1.6;
+}
+
+.common-skill-card fieldset {
+  margin: 0;
+  padding: 0.8rem;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+}
+
+.common-skill-card legend {
+  padding: 0 0.35rem;
+  color: #475569;
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.common-skill-stages {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem 1rem;
+}
+
+.common-skill-stages label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  color: #475569;
+  font-size: 0.82rem;
+  cursor: pointer;
+}
+
+.common-skill-stages input {
+  accent-color: #2563eb;
+}
+
 .workspace-settings-content-head span {
   color: #64748b;
   font-size: 0.8rem;

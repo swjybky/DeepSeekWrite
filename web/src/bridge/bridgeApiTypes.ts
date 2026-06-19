@@ -10,6 +10,7 @@ import type {
   AppearanceStyle,
 } from './aiModelConfig'
 import type {
+  CommonSkill,
   Material,
   MaterialSummary,
   Skill,
@@ -121,12 +122,15 @@ declare global {
           title: string,
           skill_type?: string | null,
           workspace_root?: string | null,
+          load_common_skills?: boolean,
         ): Promise<Skill>
         save_skill(
           skill_id: string,
           payload?: Record<string, unknown> | null,
         ): Promise<Skill | null>
         delete_skill(skill_id: string): Promise<boolean>
+        read_common_skills(): Promise<CommonSkill[]>
+        save_common_skills(skills: CommonSkill[]): Promise<CommonSkill[]>
 
         // ==================== 素材库提示词 API ====================
         get_material_system_prompt(

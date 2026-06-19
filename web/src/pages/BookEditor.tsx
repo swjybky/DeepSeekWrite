@@ -64,7 +64,6 @@ import {
 } from './bookEditor/expertDraftUtils'
 import { useKeyedAutoSave } from '../hooks/useKeyedAutoSave'
 import { useTextHistory } from '../hooks/useTextHistory'
-import { TextHistoryControls } from '../components/TextHistoryControls'
 import './BookEditor.css'
 
 export function BookEditor() {
@@ -853,15 +852,6 @@ export function BookEditor() {
           onTitleEditStart={handleHistoryTitleEditStart}
           onTitleEditEnd={handleTitleEditEnd}
           onTitleEditCancel={handleTitleEditCancel}
-          titleInputControls={
-            <TextHistoryControls
-              compact
-              history={textHistory}
-              historyKey={titleHistoryKey}
-              value={titleDraft}
-              onChange={setTitleDraft}
-            />
-          }
           onTitleInputKeyDown={(event) =>
             textHistory.handleKeyDown(
               event,

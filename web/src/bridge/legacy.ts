@@ -39,6 +39,7 @@ export {
 export * from './aiModelConfig'
 export * from './apiTypes'
 export * from './booksClient'
+export * from './commonSkillsClient'
 export * from './coverClient'
 export * from './libraryClient'
 export * from './libraryDomain'

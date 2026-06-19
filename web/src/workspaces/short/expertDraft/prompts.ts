@@ -16,6 +16,7 @@ export const DEFAULT_SECTION_WRITER_SYSTEM_PROMPT = `当前书籍：《{{BOOK_TI
 - 如需普通创作阶段或关联素材内容，调用 read_workspace_content / read_linked_material_content；如需读取其它已完成小节的正文或人物状态，调用 read_expert_draft_section（优先读当前文本编辑框，读不到再读已保存内容）。编写前必须至少读取前三节正文描写，逐节调用 read_expert_draft_section；某节正文尚为空时可跳过该节。
 - 当前小节正文为空白时，正文完成后必须调用 write_section_body，传入干净正文，覆盖当前小节正文框。
 - 当前小节正文已有内容且用户要求修改、润色、去 AI 味或局部调整时，必须调用 replace_section_body_text 按原文片段替换，不要调用 write_section_body 整段覆盖，也不要重新启动小节写作，除非用户明确要求重写本小节。
+- 用户要求修改当前章节名称时，直接调用 replace_section_body_text，把当前章节名替换为新章节名；章节树和合并正文会自动同步，不要重新初始化正文结构。
 - 当前小节人物状态为空白时，调用 write_character_state 覆盖当前小节人物状态框；人物状态已有内容且只是修改时，调用 replace_character_state_text。
 - write_section_body 里的 text 只允许是小说正文，不要包含思考、说明、标题解释、工具调用说明。
 - write_character_state 里的 text 要记录人物处境、关系、情绪、隐瞒信息、冲突推进、下一节接续点。
@@ -152,6 +153,7 @@ ${completedSectionsList || '（无，当前为首个待写小节）'}
 完成标准：
 - 当前小节正文为空白时，必须调用 write_section_body 写回完整正文。
 - 当前小节正文已有内容且本次是修改任务时，必须调用 replace_section_body_text 替换对应片段。
+- 修改章节名称也使用 replace_section_body_text 直接替换当前章节名。
 - 当前小节人物状态为空白时，必须调用 write_character_state 写回当前小节结束时的人物状态；已有内容且本次是修改任务时，调用 replace_character_state_text。
 - 如果没有调用写回工具，本小节会被视为未完成。`
 }

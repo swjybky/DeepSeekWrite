@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from app.runtime_paths import bundle_root, data_root, is_frozen
+from app.common_skill_store import read_common_skills
 
 from app.models import (
     Book,
@@ -1374,6 +1375,7 @@ class BookStore:
         title: str,
         skill_type: str = "short",
         workspace_root: str | None = None,
+        load_common_skills: bool = False,
     ) -> dict[str, Any]:
         """创建新技能集合"""
         if workspace_root is None and str(skill_type or "").strip() not in LIBRARY_TYPES:
@@ -1403,11 +1405,24 @@ class BookStore:
                         "无法在选定工作文件夹下创建技能目录，请检查路径是否有效、磁盘空间与写入权限。",
                     )
             sid = new_skill_id()
+            stages = normalize_skill_stages_from_storage(None)
+            if load_common_skills:
+                for common_skill in read_common_skills():
+                    for stage_id in common_skill["effective_stages"]:
+                        stages[stage_id].append(
+                            {
+                                "id": new_skill_stage_item_id(),
+                                "title": common_skill["title"],
+                                "body": common_skill["body"],
+                                "created_at": now,
+                                "updated_at": now,
+                            }
+                        )
             s = Skill(
                 id=sid,
                 title=title.strip() or "未命名技能",
                 skill_type=st,
-                stages=normalize_skill_stages_from_storage(None),
+                stages=stages,
                 output_dir=od,
                 created_at=now,
                 updated_at=now,
