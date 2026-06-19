@@ -72,7 +72,7 @@ const BUILTIN_TEXT_MODEL_DEFAULTS: AiModelSettings['text'] = {
 
 /** 文字模型 API Key 输入框占位提示 */
 export const TEXT_MODEL_API_KEY_PLACEHOLDER =
-  '内置免费模型已自动配置；自定义模型请填写对应 Key'
+  'deepseek官方key无需配置此项；内置免费模型已自动配置；自定义模型请填写对应 Key'
 const AI_MODEL_CONFIG_STORAGE_KEY = 'write-claw:ai_model_config'
 
 function mergeBuiltinTextDefaults(

@@ -260,7 +260,11 @@ export function syncWorkspaceModelButtonLabel(
       .forEach((span) => {
         const current = span.textContent?.trim() ?? ''
         if (candidates.has(current) && current !== label) {
-          span.textContent = label
+          // 不要直接修改 textContent：Pi MessageEditor 的 span 由 lit 管理文本节点，
+          // 直接替换会破坏 lit 的 TextPart 引用，导致后续重渲染时报
+          // "Cannot set properties of null (setting 'data')".
+          // 改用 data-label + CSS 伪元素安全覆盖显示文本。
+          span.dataset.label = label
         }
       })
   }

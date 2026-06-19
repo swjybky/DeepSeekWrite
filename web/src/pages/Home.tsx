@@ -52,6 +52,25 @@ function truncatePath(path: string, max = 42): string {
   return `${path.slice(0, head)}…${path.slice(-tail)}`
 }
 
+function RefreshIcon({ spinning }: { spinning?: boolean }) {
+  return (
+    <svg
+      className={spinning ? 'refresh-icon refresh-icon--spinning' : 'refresh-icon'}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M23 4v6h-6" />
+      <path d="M1 20v-6h6" />
+      <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
+    </svg>
+  )
+}
+
 function emptyAiModelSettings(): AiModelSettings {
   return {
     text: {
@@ -123,6 +142,7 @@ type ModelConfigDialogProps = {
   saving: boolean
   onClose: () => void
   onSave: (settings: AiModelSettings) => Promise<void>
+  onRefresh: () => Promise<AiModelSettings>
 }
 
 type RefreshOptions = {
@@ -134,12 +154,39 @@ function ModelConfigDialog({
   saving,
   onClose,
   onSave,
+  onRefresh,
 }: ModelConfigDialogProps) {
   const [draft, setDraft] = useState<AiModelSettings>(() =>
     cloneAiSettings(initialSettings),
   )
   const [error, setError] = useState<string | null>(null)
   const [modelPickerOpen, setModelPickerOpen] = useState(false)
+  const [refreshing, setRefreshing] = useState(false)
+
+  const handleRefresh = useCallback(async () => {
+    setRefreshing(true)
+    setError(null)
+    try {
+      const settings = await onRefresh()
+      setDraft(cloneAiSettings(settings))
+    } catch (e) {
+      setError(e instanceof Error ? e.message : '刷新模型配置失败')
+    } finally {
+      setRefreshing(false)
+    }
+  }, [onRefresh])
+
+  useEffect(() => {
+    let cancelled = false
+    const timer = window.setTimeout(() => {
+      if (cancelled) return
+      void handleRefresh()
+    }, 0)
+    return () => {
+      cancelled = true
+      window.clearTimeout(timer)
+    }
+  }, [handleRefresh])
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -334,13 +381,25 @@ function ModelConfigDialog({
             <section className="model-config-section">
               <div className="model-config-section-head">
                 <h3>文字模型</h3>
-                <button
-                  type="button"
-                  className="btn-secondary btn-small"
-                  onClick={() => setModelPickerOpen(true)}
-                >
-                  添加模型
-                </button>
+                <div className="model-config-section-actions">
+                  <button
+                    type="button"
+                    className="btn-secondary btn-small btn-icon"
+                    aria-label="刷新模型配置"
+                    title="刷新模型配置"
+                    disabled={saving || refreshing}
+                    onClick={() => void handleRefresh()}
+                  >
+                    <RefreshIcon spinning={refreshing} />
+                  </button>
+                  <button
+                    type="button"
+                    className="btn-secondary btn-small"
+                    onClick={() => setModelPickerOpen(true)}
+                  >
+                    添加模型
+                  </button>
+                </div>
               </div>
 
               {draft.text.models.length === 0 ? (
@@ -1123,6 +1182,33 @@ export function Home() {
     return () => window.clearTimeout(timer)
   }, [refreshMaterials, refreshSkills])
 
+  // 进入首页后自动在后台刷新一次，防止桥接未就绪导致首次加载为空。
+  useEffect(() => {
+    let cancelled = false
+    const timer = window.setTimeout(() => {
+      if (cancelled) return
+      void refreshBooks({ showLoading: false })
+      void refreshMaterials({ showLoading: false })
+      void refreshSkills({ showLoading: false })
+    }, 600)
+    return () => {
+      cancelled = true
+      window.clearTimeout(timer)
+    }
+  }, [refreshBooks, refreshMaterials, refreshSkills])
+
+  // 页面重新可见时自动刷新，从编辑器返回首页可立即看到最新数据。
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.visibilityState !== 'visible') return
+      void refreshBooks({ showLoading: false })
+      void refreshMaterials({ showLoading: false })
+      void refreshSkills({ showLoading: false })
+    }
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange)
+  }, [refreshBooks, refreshMaterials, refreshSkills])
+
   // ==================== 工作目录操作 ====================
   const handlePickWorkspace = async () => {
     setBookError(null)
@@ -1157,6 +1243,19 @@ export function Home() {
       setSavingAiSettings(false)
     }
   }
+
+  const refreshAiSettings = useCallback(async () => {
+    setModelConfigError(null)
+    try {
+      const settings = await getAiModelConfig()
+      setAiSettings(settings)
+      return settings
+    } catch (e) {
+      const message = e instanceof Error ? e.message : '加载模型配置失败'
+      setModelConfigError(message)
+      throw new Error(message, { cause: e })
+    }
+  }, [setAiSettings])
 
   const handleSaveAppearanceStyle = async (style: AppearanceStyle) => {
     setStyleConfigError(null)
@@ -1530,6 +1629,16 @@ export function Home() {
               <span className="card-header-count">{visibleBooks.length} 本书</span>
             </div>
             <div className="card-header-actions">
+              <button
+                type="button"
+                className="btn-secondary btn-small btn-icon"
+                aria-label="刷新创作空间"
+                title="刷新创作空间"
+                disabled={loadingBooks}
+                onClick={() => void refreshBooks()}
+              >
+                <RefreshIcon spinning={loadingBooks} />
+              </button>
               <Link
                 className="btn-secondary btn-small"
                 to="/workspace-settings"
@@ -1604,6 +1713,16 @@ export function Home() {
               <span className="card-header-count">{materials.length} 个素材</span>
             </div>
             <div className="card-header-actions">
+              <button
+                type="button"
+                className="btn-secondary btn-small btn-icon"
+                aria-label="刷新素材库"
+                title="刷新素材库"
+                disabled={loadingMaterials}
+                onClick={() => void refreshMaterials()}
+              >
+                <RefreshIcon spinning={loadingMaterials} />
+              </button>
               <button
                 type="button"
                 className="btn-secondary btn-small"
@@ -1722,6 +1841,16 @@ export function Home() {
               <span className="card-header-count">{skills.length} 个技能</span>
             </div>
             <div className="card-header-actions">
+              <button
+                type="button"
+                className="btn-secondary btn-small btn-icon"
+                aria-label="刷新技能库"
+                title="刷新技能库"
+                disabled={loadingSkills}
+                onClick={() => void refreshSkills()}
+              >
+                <RefreshIcon spinning={loadingSkills} />
+              </button>
               <button
                 type="button"
                 className="btn-secondary btn-small"
@@ -2061,6 +2190,7 @@ export function Home() {
             if (!savingAiSettings) setModelConfigOpen(false)
           }}
           onSave={handleSaveAiSettings}
+          onRefresh={refreshAiSettings}
         />
       )}
 

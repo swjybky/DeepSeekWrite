@@ -159,3 +159,23 @@
     transition: none;
   }
 }
+
+/*
+  Pi 的 MessageEditor 固定渲染 model.id 作为模型按钮文本。
+  syncWorkspaceModelButtonLabel 需要显示用户自定义 label 时，
+  不能直接改 textContent（会破坏 lit 的 TextPart 引用），
+  因此改用 data-label + ::after 伪元素安全覆盖。
+*/
+message-editor button span.ml-1[data-label] {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  font-size: 0;
+}
+
+message-editor button span.ml-1[data-label]::after {
+  content: attr(data-label);
+  font-size: var(--text-xs, 0.75rem);
+  line-height: 1;
+  white-space: nowrap;
+}

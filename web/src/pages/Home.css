@@ -266,6 +266,20 @@
   flex-shrink: 0;
 }
 
+.card-header-actions .btn-icon {
+  padding: 0.38rem;
+  color: var(--ink-soft);
+}
+
+.card-header-actions .btn-icon svg {
+  width: 1rem;
+  height: 1rem;
+}
+
+.refresh-icon--spinning {
+  animation: spin 0.8s linear infinite;
+}
+
 .card-header-actions .btn-primary,
 .card-header-actions .btn-secondary {
   text-decoration: none;
@@ -620,6 +634,22 @@
   justify-content: space-between;
   gap: 0.75rem;
   margin-bottom: 0.75rem;
+}
+
+.model-config-section-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.model-config-section-actions .btn-icon {
+  padding: 0.38rem;
+  color: var(--ink-soft);
+}
+
+.model-config-section-actions .btn-icon svg {
+  width: 1rem;
+  height: 1rem;
 }
 
 .model-config-list {
