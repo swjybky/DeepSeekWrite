@@ -8,7 +8,9 @@ import {
   type AiModelSettings,
   type BookSummary,
   type BookType,
+  type MaterialSummary,
   type MaterialType,
+  type SkillSummary,
   type SkillType,
   type TextDisplayMode,
   bookTypeLabel,
@@ -40,6 +42,8 @@ import {
 } from '../bridge'
 import { APPEARANCE_STYLE_LABELS, useAppearance } from '../appearance'
 import { CardGrid, bookToCardItem, materialToCardItem, skillToCardItem } from '../components/CardGrid'
+import { useAppDialog } from '../components/useAppDialog'
+import { LearningImitationDialog } from '../features/learningImitation/LearningImitationDialog'
 import { refreshPreferredWorkspaceChatModel } from '../pi/workspaceChatPreferences'
 import { useHomeStore } from '../stores/homeStore'
 import { TEXT_DISPLAY_MODE_LABELS, useTextDisplay } from '../textDisplay'
@@ -902,6 +906,9 @@ type CreateDialogProps = {
   title: string
   titleId: string
   submitting: boolean
+  submitLabel?: string
+  submittingLabel?: string
+  submitDisabled?: boolean
   onClose: () => void
   onSubmit: (event: React.FormEvent<HTMLFormElement>) => void
   children: React.ReactNode
@@ -911,6 +918,9 @@ function CreateDialog({
   title,
   titleId,
   submitting,
+  submitLabel = '创建',
+  submittingLabel = '创建中…',
+  submitDisabled = false,
   onClose,
   onSubmit,
   children,
@@ -963,8 +973,12 @@ function CreateDialog({
             >
               取消
             </button>
-            <button type="submit" className="btn-primary" disabled={submitting}>
-              {submitting ? '创建中…' : '创建'}
+            <button
+              type="submit"
+              className="btn-primary"
+              disabled={submitting || submitDisabled}
+            >
+              {submitting ? submittingLabel : submitLabel}
             </button>
           </footer>
         </form>
@@ -974,6 +988,7 @@ function CreateDialog({
 }
 
 export function Home() {
+  const { confirm, dialog } = useAppDialog()
   const {
     appearanceStyle,
     savingAppearance,
@@ -1035,6 +1050,8 @@ export function Home() {
   // ==================== 导入/导出状态 ====================
   const [exportMaterialOpen, setExportMaterialOpen] = useState(false)
   const [exportSkillOpen, setExportSkillOpen] = useState(false)
+  const [selectedExportMaterialId, setSelectedExportMaterialId] = useState('')
+  const [selectedExportSkillId, setSelectedExportSkillId] = useState('')
   const [exportingId, setExportingId] = useState<string | null>(null)
   const [importingMaterial, setImportingMaterial] = useState(false)
   const [importingSkill, setImportingSkill] = useState(false)
@@ -1046,6 +1063,7 @@ export function Home() {
   const [modelConfigOpen, setModelConfigOpen] = useState(false)
   const [styleConfigOpen, setStyleConfigOpen] = useState(false)
   const [textDisplayOpen, setTextDisplayOpen] = useState(false)
+  const [learningImitationOpen, setLearningImitationOpen] = useState(false)
   const [workspaceDrawerOpen, setWorkspaceDrawerOpen] = useState(false)
   const [savingAiSettings, setSavingAiSettings] = useState(false)
   const [modelConfigError, setModelConfigError] = useState<string | null>(null)
@@ -1308,7 +1326,13 @@ export function Home() {
   const handleDeleteBook = async (bookId: string) => {
     const b = books.find((book) => book.id === bookId)
     if (!b) return
-    const ok = window.confirm(`确定从创作空间移除「${b.title}」？\n书本文件夹仍会保留在工作目录中。`)
+    const ok = await confirm({
+      title: '移除创作空间',
+      message: `确定从创作空间移除「${b.title}」？`,
+      details: '书本文件夹仍会保留在工作目录中。',
+      confirmText: '移除',
+      variant: 'danger',
+    })
     if (!ok) return
     setDeletingBookId(bookId)
     try {
@@ -1353,7 +1377,13 @@ export function Home() {
   const handleDeleteMaterial = async (materialId: string) => {
     const m = materials.find((mat) => mat.id === materialId)
     if (!m) return
-    const ok = window.confirm(`确定删除素材「${m.title}」？\n本地素材文件夹也将一并删除，此操作不可恢复。`)
+    const ok = await confirm({
+      title: '删除素材',
+      message: `确定删除素材「${m.title}」？`,
+      details: '本地素材文件夹也将一并删除，此操作不可恢复。',
+      confirmText: '删除',
+      variant: 'danger',
+    })
     if (!ok) return
     setDeletingMaterialId(materialId)
     try {
@@ -1393,7 +1423,13 @@ export function Home() {
   const handleDeleteSkill = async (skillId: string) => {
     const s = skills.find((item) => item.id === skillId)
     if (!s) return
-    const ok = window.confirm(`确定删除技能「${s.title}」？\n本地技能文件夹也将一并删除，此操作不可恢复。`)
+    const ok = await confirm({
+      title: '删除技能',
+      message: `确定删除技能「${s.title}」？`,
+      details: '本地技能文件夹也将一并删除，此操作不可恢复。',
+      confirmText: '删除',
+      variant: 'danger',
+    })
     if (!ok) return
     setDeletingSkillId(skillId)
     try {
@@ -1407,36 +1443,72 @@ export function Home() {
   }
 
   // ==================== 导入/导出操作 ====================
+  const openExportMaterialDialog = () => {
+    if (materials.length === 0) return
+    setMaterialError(null)
+    setSelectedExportMaterialId((current) =>
+      materials.some((item) => item.id === current) ? current : materials[0]?.id ?? '',
+    )
+    setExportMaterialOpen(true)
+  }
+
+  const openExportSkillDialog = () => {
+    if (skills.length === 0) return
+    setSkillError(null)
+    setSelectedExportSkillId((current) =>
+      skills.some((item) => item.id === current) ? current : skills[0]?.id ?? '',
+    )
+    setExportSkillOpen(true)
+  }
+
   const handleExportMaterial = async (materialId: string) => {
     setExportingId(materialId)
     setMaterialError(null)
+    let shouldClose = false
     try {
       const result = await exportLibrary('material', materialId)
       if (result.error) {
         setMaterialError(result.error)
+      } else {
+        shouldClose = true
       }
     } catch (err) {
       setMaterialError(err instanceof Error ? err.message : '导出失败')
     } finally {
       setExportingId(null)
-      setExportMaterialOpen(false)
+      if (shouldClose) setExportMaterialOpen(false)
     }
   }
 
   const handleExportSkill = async (skillId: string) => {
     setExportingId(skillId)
     setSkillError(null)
+    let shouldClose = false
     try {
       const result = await exportLibrary('skill', skillId)
       if (result.error) {
         setSkillError(result.error)
+      } else {
+        shouldClose = true
       }
     } catch (err) {
       setSkillError(err instanceof Error ? err.message : '导出失败')
     } finally {
       setExportingId(null)
-      setExportSkillOpen(false)
+      if (shouldClose) setExportSkillOpen(false)
     }
+  }
+
+  const handleExportMaterialSubmit = async (event: React.FormEvent) => {
+    event.preventDefault()
+    if (!selectedExportMaterialId) return
+    await handleExportMaterial(selectedExportMaterialId)
+  }
+
+  const handleExportSkillSubmit = async (event: React.FormEvent) => {
+    event.preventDefault()
+    if (!selectedExportSkillId) return
+    await handleExportSkill(selectedExportSkillId)
   }
 
   const handleImportMaterial = async () => {
@@ -1504,6 +1576,14 @@ export function Home() {
   )
   const materialCardItems = useMemo(() => materials.map(materialToCardItem), [materials])
   const skillCardItems = useMemo(() => skills.map(skillToCardItem), [skills])
+  const materialExportItems = useMemo(
+    () => materials.map(materialToExportDialogItem),
+    [materials],
+  )
+  const skillExportItems = useMemo(
+    () => skills.map(skillToExportDialogItem),
+    [skills],
+  )
 
   return (
     <div className="home">
@@ -1574,8 +1654,22 @@ export function Home() {
           >
             {savingTextDisplay ? '文字显示…' : '文字显示'}
           </button>
+          <button
+            type="button"
+            className={
+              learningImitationOpen
+                ? 'home-config-trigger home-config-trigger--active'
+                : 'home-config-trigger'
+            }
+            aria-expanded={learningImitationOpen}
+            onClick={() => setLearningImitationOpen(true)}
+          >
+            学习仿写
+          </button>
         </nav>
       </header>
+
+      {dialog}
 
       {modelConfigError && !modelConfigOpen ? (
         <p className="home-config-error" role="alert">
@@ -1735,7 +1829,7 @@ export function Home() {
                 type="button"
                 className="btn-secondary btn-small"
                 disabled={materials.length === 0}
-                onClick={() => setExportMaterialOpen(true)}
+                onClick={openExportMaterialDialog}
               >
                 导出
               </button>
@@ -1757,42 +1851,6 @@ export function Home() {
               </button>
             </div>
           </header>
-
-          {exportMaterialOpen && (
-            <div className="export-picker">
-              <div className="export-picker-header">
-                <span className="export-picker-title">选择要导出的素材</span>
-                <button
-                  type="button"
-                  className="btn-secondary btn-small"
-                  onClick={() => setExportMaterialOpen(false)}
-                >
-                  取消
-                </button>
-              </div>
-              <ul className="export-picker-list">
-                {materials.map((m) => (
-                  <li key={m.id}>
-                    <button
-                      type="button"
-                      className="export-picker-item"
-                      disabled={exportingId === m.id}
-                      onClick={() => void handleExportMaterial(m.id)}
-                    >
-                      <span className="export-picker-item-title">{m.title}</span>
-                      <span className="export-picker-item-meta">
-                        {[materialTypeLabel(m.material_type), m.parent_genre]
-                          .filter(Boolean)
-                          .join(' · ')}
-                      </span>
-                      {exportingId === m.id && <span className="export-picker-item-loading">导出中…</span>}
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
-
           <div className="card-content-area">
             {loadingMaterials ? (
               <div className="loading-state">
@@ -1863,7 +1921,7 @@ export function Home() {
                 type="button"
                 className="btn-secondary btn-small"
                 disabled={skills.length === 0}
-                onClick={() => setExportSkillOpen(true)}
+                onClick={openExportSkillDialog}
               >
                 导出
               </button>
@@ -1885,40 +1943,6 @@ export function Home() {
               </button>
             </div>
           </header>
-
-          {exportSkillOpen && (
-            <div className="export-picker">
-              <div className="export-picker-header">
-                <span className="export-picker-title">选择要导出的技能</span>
-                <button
-                  type="button"
-                  className="btn-secondary btn-small"
-                  onClick={() => setExportSkillOpen(false)}
-                >
-                  取消
-                </button>
-              </div>
-              <ul className="export-picker-list">
-                {skills.map((s) => (
-                  <li key={s.id}>
-                    <button
-                      type="button"
-                      className="export-picker-item"
-                      disabled={exportingId === s.id}
-                      onClick={() => void handleExportSkill(s.id)}
-                    >
-                      <span className="export-picker-item-title">{s.title}</span>
-                      <span className="export-picker-item-meta">
-                        {skillTypeLabel(s.skill_type)} · {s.stage_skill_count ?? 0} 条技能
-                      </span>
-                      {exportingId === s.id && <span className="export-picker-item-loading">导出中…</span>}
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
-
           <div className="card-content-area">
             {loadingSkills ? (
               <div className="loading-state">
@@ -1955,6 +1979,36 @@ export function Home() {
         </section>
         </div>
       </div>
+
+      {exportMaterialOpen && (
+        <LibraryExportDialog
+          title="导出素材"
+          titleId="export-material-title"
+          itemLabel="素材"
+          items={materialExportItems}
+          selectedId={selectedExportMaterialId}
+          submitting={exportingId !== null}
+          error={materialError}
+          onSelect={setSelectedExportMaterialId}
+          onClose={() => setExportMaterialOpen(false)}
+          onSubmit={handleExportMaterialSubmit}
+        />
+      )}
+
+      {exportSkillOpen && (
+        <LibraryExportDialog
+          title="导出技能"
+          titleId="export-skill-title"
+          itemLabel="技能"
+          items={skillExportItems}
+          selectedId={selectedExportSkillId}
+          submitting={exportingId !== null}
+          error={skillError}
+          onSelect={setSelectedExportSkillId}
+          onClose={() => setExportSkillOpen(false)}
+          onSubmit={handleExportSkillSubmit}
+        />
+      )}
 
       {showBookForm && (
         <CreateDialog
@@ -2213,6 +2267,114 @@ export function Home() {
           onSelect={handleSaveTextDisplayMode}
         />
       )}
+
+      {learningImitationOpen && (
+        <LearningImitationDialog
+          workspaceRoot={workspaceRoot}
+          materials={materials}
+          skills={skills}
+          onClose={() => setLearningImitationOpen(false)}
+          onRefreshMaterials={() => refreshMaterials({ showLoading: false })}
+          onRefreshSkills={() => refreshSkills({ showLoading: false })}
+        />
+      )}
     </div>
   )
+}
+
+type ExportDialogItem = {
+  id: string
+  title: string
+  meta: string
+}
+
+type LibraryExportDialogProps = {
+  title: string
+  titleId: string
+  itemLabel: string
+  items: ExportDialogItem[]
+  selectedId: string
+  submitting: boolean
+  error: string | null
+  onSelect: (id: string) => void
+  onClose: () => void
+  onSubmit: (event: React.FormEvent<HTMLFormElement>) => void
+}
+
+function LibraryExportDialog({
+  title,
+  titleId,
+  itemLabel,
+  items,
+  selectedId,
+  submitting,
+  error,
+  onSelect,
+  onClose,
+  onSubmit,
+}: LibraryExportDialogProps) {
+  return (
+    <CreateDialog
+      title={title}
+      titleId={titleId}
+      submitting={submitting}
+      submitLabel="导出"
+      submittingLabel="导出中…"
+      submitDisabled={!selectedId || items.length === 0}
+      onClose={onClose}
+      onSubmit={onSubmit}
+    >
+      <fieldset className="field export-dialog-field">
+        <legend className="field-label">选择要导出的{itemLabel}</legend>
+        {items.length === 0 ? (
+          <p className="export-dialog-empty">暂无可导出的{itemLabel}</p>
+        ) : (
+          <div className="export-dialog-list" role="radiogroup" aria-label={`选择要导出的${itemLabel}`}>
+            {items.map((item, index) => (
+              <label
+                key={item.id}
+                className={
+                  selectedId === item.id
+                    ? 'export-dialog-item export-dialog-item--active'
+                    : 'export-dialog-item'
+                }
+              >
+                <input
+                  type="radio"
+                  name={titleId}
+                  checked={selectedId === item.id}
+                  disabled={submitting}
+                  autoFocus={index === 0}
+                  onChange={() => onSelect(item.id)}
+                />
+                <span className="export-dialog-item-copy">
+                  <strong>{item.title}</strong>
+                  <em>{item.meta}</em>
+                </span>
+              </label>
+            ))}
+          </div>
+        )}
+      </fieldset>
+      {error && <p className="form-error">{error}</p>}
+    </CreateDialog>
+  )
+}
+
+function materialToExportDialogItem(material: MaterialSummary): ExportDialogItem {
+  return {
+    id: material.id,
+    title: material.title || '未命名素材',
+    meta: [materialTypeLabel(material.material_type), material.parent_genre]
+      .filter(Boolean)
+      .join(' · '),
+  }
+}
+
+function skillToExportDialogItem(skill: SkillSummary): ExportDialogItem {
+  return {
+    id: skill.id,
+    title: skill.title || '未命名技能',
+    meta: `${skillTypeLabel(skill.skill_type)} · ${skill.stage_skill_count ?? 0} 条技能`,
+  }
 }

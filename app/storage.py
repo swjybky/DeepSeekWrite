@@ -1000,6 +1000,48 @@ def save_skills_atomic(path: Path, skills: dict[str, Skill]) -> None:
         raise
 
 
+def _same_loaded_common_skill(entry: dict[str, Any], common_skill: dict[str, Any]) -> bool:
+    source_id = str(common_skill.get("id") or "").strip()
+    entry_source_id = str(entry.get("source_common_skill_id") or "").strip()
+    if source_id and entry_source_id == source_id:
+        return True
+    return (
+        str(entry.get("title") or "").strip() == str(common_skill.get("title") or "").strip()
+        and str(entry.get("body") or "").strip() == str(common_skill.get("body") or "").strip()
+    )
+
+
+def _append_missing_common_skills(
+    stages: dict[str, list[dict[str, Any]]],
+    now: str,
+) -> tuple[int, int]:
+    added_count = 0
+    available_count = 0
+    for common_skill in read_common_skills():
+        source_id = str(common_skill.get("id") or "").strip()
+        title = str(common_skill.get("title") or "").strip() or "未命名通用技能"
+        body = str(common_skill.get("body") or "")
+        for stage_id in common_skill.get("effective_stages") or []:
+            if stage_id not in SKILL_STAGE_KEYS:
+                continue
+            available_count += 1
+            entries = stages.setdefault(stage_id, [])
+            if any(_same_loaded_common_skill(entry, common_skill) for entry in entries):
+                continue
+            entry = {
+                "id": new_skill_stage_item_id(),
+                "title": title,
+                "body": body,
+                "created_at": now,
+                "updated_at": now,
+            }
+            if source_id:
+                entry["source_common_skill_id"] = source_id
+            entries.append(entry)
+            added_count += 1
+    return added_count, available_count
+
+
 class BookStore:
     def __init__(self, path: Path | None = None) -> None:
         self._path = path or default_data_path()
@@ -1407,17 +1449,7 @@ class BookStore:
             sid = new_skill_id()
             stages = normalize_skill_stages_from_storage(None)
             if load_common_skills:
-                for common_skill in read_common_skills():
-                    for stage_id in common_skill["effective_stages"]:
-                        stages[stage_id].append(
-                            {
-                                "id": new_skill_stage_item_id(),
-                                "title": common_skill["title"],
-                                "body": common_skill["body"],
-                                "created_at": now,
-                                "updated_at": now,
-                            }
-                        )
+                _append_missing_common_skills(stages, now)
             s = Skill(
                 id=sid,
                 title=title.strip() or "未命名技能",
@@ -1432,6 +1464,28 @@ class BookStore:
             self._mark_skills_saved_unlocked()
             _write_skill_stages_to_disk(s)
             return s.to_dict()
+
+    def load_common_skills_to_skill(self, skill_id: str) -> dict[str, Any] | None:
+        """将内置通用技能合并到已有技能库，已存在的通用技能不会重复加载。"""
+        with _data_file_lock():
+            self._reload_skills_unlocked()
+            sid = (skill_id or "").strip()
+            s = self._skills.get(sid)
+            if s is None:
+                return None
+            now = _utc_now_iso()
+            added_count, available_count = _append_missing_common_skills(s.stages, now)
+            if added_count > 0:
+                s.updated_at = now
+                save_skills_atomic(self._skills_path, self._skills)
+                self._mark_skills_saved_unlocked()
+                _write_skill_stages_to_disk(s)
+            return {
+                "skill": s.to_dict(),
+                "added_count": added_count,
+                "available_count": available_count,
+                "already_loaded": available_count > 0 and added_count == 0,
+            }
 
     def save_skill(
         self,

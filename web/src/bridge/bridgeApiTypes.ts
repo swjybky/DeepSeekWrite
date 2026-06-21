@@ -11,6 +11,7 @@ import type {
 } from './aiModelConfig'
 import type {
   CommonSkill,
+  LoadCommonSkillsResult,
   Material,
   MaterialSummary,
   Skill,
@@ -131,6 +132,9 @@ declare global {
         delete_skill(skill_id: string): Promise<boolean>
         read_common_skills(): Promise<CommonSkill[]>
         save_common_skills(skills: CommonSkill[]): Promise<CommonSkill[]>
+        load_common_skills_to_skill(
+          skill_id: string,
+        ): Promise<LoadCommonSkillsResult | null>
 
         // ==================== 素材库提示词 API ====================
         get_material_system_prompt(
@@ -171,6 +175,18 @@ declare global {
           skill_type?: string | null,
         ): Promise<void>
         reset_skill_agent_prompt_override(skill_type?: string | null): Promise<boolean>
+
+        // ==================== 学习仿写提示词 API ====================
+        get_learning_imitation_system_prompt(
+          stage_id: string,
+          context_json: string,
+        ): Promise<string>
+        read_learning_imitation_prompt_template(stage_id: string): Promise<string>
+        save_learning_imitation_prompt_override(
+          stage_id: string,
+          body: string,
+        ): Promise<void>
+        reset_learning_imitation_prompt_override(stage_id: string): Promise<boolean>
 
         // ==================== 封面 API ====================
         get_book_cover(book_id: string): Promise<{ cover_data: string | null }>

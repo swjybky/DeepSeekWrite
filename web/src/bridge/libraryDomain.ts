@@ -180,6 +180,7 @@ export interface SkillStageEntry {
   body: string
   created_at?: string
   updated_at?: string
+  source_common_skill_id?: string
 }
 
 export interface CommonSkill {
@@ -187,6 +188,13 @@ export interface CommonSkill {
   title: string
   body: string
   effective_stages: SkillStageId[]
+}
+
+export interface LoadCommonSkillsResult {
+  skill: Skill
+  added_count: number
+  available_count: number
+  already_loaded: boolean
 }
 
 function newLocalSkillStageEntryId(): string {
@@ -272,6 +280,10 @@ function normalizeSkillStageEntry(
       body,
       created_at: typeof item.created_at === 'string' ? item.created_at : undefined,
       updated_at: typeof item.updated_at === 'string' ? item.updated_at : undefined,
+      source_common_skill_id:
+        typeof item.source_common_skill_id === 'string'
+          ? item.source_common_skill_id
+          : undefined,
     },
   ]
 }

@@ -47,6 +47,7 @@ import {
   useKeyedAutoSave,
 } from '../hooks/useKeyedAutoSave'
 import { useTextHistory } from '../hooks/useTextHistory'
+import { useAppDialog } from '../components/useAppDialog'
 import './WorkspaceSettings.css'
 
 type SaveStatus = 'idle' | 'saving' | 'saved' | 'error'
@@ -112,6 +113,7 @@ function isRequiredWorkspaceStageForType(
 
 export function WorkspaceSettings() {
   const navigate = useNavigate()
+  const { confirm, dialog } = useAppDialog()
   const [workspaceType, setWorkspaceType] =
     useState<WorkspaceSettingsType>('short')
   const [activeAgentId, setActiveAgentId] =
@@ -349,7 +351,13 @@ export function WorkspaceSettings() {
 
   const resetPrompt = useCallback(async () => {
     const agentId = activeAgentRef.current
-    if (!window.confirm(`恢复「${AGENT_LABELS[agentId]}」的内置默认提示词？`)) {
+    const ok = await confirm({
+      title: '恢复默认提示词',
+      message: `恢复「${AGENT_LABELS[agentId]}」的内置默认提示词？当前提示词覆盖会被清除。`,
+      confirmText: '恢复默认',
+      variant: 'warning',
+    })
+    if (!ok) {
       return
     }
     await flushPrompt(agentId).catch(() => undefined)
@@ -370,6 +378,7 @@ export function WorkspaceSettings() {
       markWorkspacePromptSaved(`${workspaceType}:${agentId}`)
     }).catch(() => undefined)
   }, [
+    confirm,
     enqueueSave,
     flushPrompt,
     markWorkspacePromptSaved,
@@ -379,7 +388,13 @@ export function WorkspaceSettings() {
 
   const resetReadAccess = useCallback(async () => {
     const agentId = activeAgentRef.current
-    if (!window.confirm(`恢复「${AGENT_LABELS[agentId]}」的默认读取范围？`)) {
+    const ok = await confirm({
+      title: '恢复默认读取范围',
+      message: `恢复「${AGENT_LABELS[agentId]}」的默认读取范围？`,
+      confirmText: '恢复默认',
+      variant: 'warning',
+    })
+    if (!ok) {
       return
     }
     const defaults = await getWorkspaceAgentReadAccessDefaults(workspaceType)
@@ -392,14 +407,16 @@ export function WorkspaceSettings() {
     await enqueueSave(async () => {
       await saveWorkspaceAgentReadAccess(next, workspaceType)
     }).catch(() => undefined)
-  }, [enqueueSave, workspaceType])
+  }, [confirm, enqueueSave, workspaceType])
 
   const resetAllSettings = useCallback(async () => {
-    if (
-      !window.confirm(
-        `确定将「${bookTypeLabel(workspaceType)}创作空间」的所有智能体提示词和读取范围恢复为默认配置？此操作不可撤销。`,
-      )
-    ) {
+    const ok = await confirm({
+      title: '一键还原默认配置',
+      message: `确定将「${bookTypeLabel(workspaceType)}创作空间」的所有智能体提示词和读取范围恢复为默认配置？此操作不可撤销。`,
+      confirmText: '还原默认',
+      variant: 'danger',
+    })
+    if (!ok) {
       return
     }
 
@@ -443,14 +460,16 @@ export function WorkspaceSettings() {
       setSaveStatus('error')
       setError(cause instanceof Error ? cause.message : '还原默认配置失败')
     }
-  }, [flushPrompt, markWorkspacePromptSaved, textHistory, workspaceType])
+  }, [confirm, flushPrompt, markWorkspacePromptSaved, textHistory, workspaceType])
 
   const syncReadAccessDefaults = useCallback(async () => {
-    if (
-      !window.confirm(
-        `将当前「${bookTypeLabel(workspaceType)}」的用户读取范围配置同步为内置默认配置？此操作会修改项目源码中的默认 JSON 文件，供后续版本使用。`,
-      )
-    ) {
+    const ok = await confirm({
+      title: '同步为内置默认',
+      message: `将当前「${bookTypeLabel(workspaceType)}」的用户读取范围配置同步为内置默认配置？此操作会修改项目源码中的默认 JSON 文件，供后续版本使用。`,
+      confirmText: '同步默认',
+      variant: 'warning',
+    })
+    if (!ok) {
       return
     }
     setSaveStatus('saving')
@@ -462,7 +481,7 @@ export function WorkspaceSettings() {
       setSaveStatus('error')
       setError(cause instanceof Error ? cause.message : '同步默认配置失败')
     }
-  }, [workspaceType])
+  }, [confirm, workspaceType])
 
   const activePromptKey = `${workspaceType}:${activeAgentId}`
   const activePromptHistoryKey = `workspace-settings:${activePromptKey}`
@@ -488,19 +507,21 @@ export function WorkspaceSettings() {
         >
           ← 返回首页
         </button>
-        <div>
+        <div className="workspace-settings-title-block">
           <h1>创作空间设置</h1>
           <p>短篇与剧本分别保存智能体提示词与读取范围。</p>
+          <span
+            className={`workspace-settings-save-state workspace-settings-save-state--${headerStatus}`}
+            aria-live="polite"
+          >
+            {headerStatus === 'error'
+              ? '保存失败'
+              : autoSaveStatusLabel(headerStatus)}
+          </span>
         </div>
-        <span
-          className={`workspace-settings-save-state workspace-settings-save-state--${headerStatus}`}
-          aria-live="polite"
-        >
-          {headerStatus === 'error'
-            ? '保存失败'
-            : autoSaveStatusLabel(headerStatus)}
-        </span>
       </header>
+
+      {dialog}
 
       {error ? <p className="workspace-settings-error">{error}</p> : null}
 

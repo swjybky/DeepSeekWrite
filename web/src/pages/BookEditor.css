@@ -512,6 +512,13 @@ button.back-link:hover {
   max-width: 100%;
 }
 
+.editor-header-meta-inner .workspace-settings-save-state {
+  flex: 0 0 auto;
+  justify-self: auto;
+  text-align: left;
+  letter-spacing: 0.02em;
+}
+
 .editor-header-meta-text {
   overflow: hidden;
   text-overflow: ellipsis;
@@ -2475,6 +2482,123 @@ button.back-link:hover {
   background: var(--surface);
   color: var(--text-h);
   font: inherit;
+}
+
+/* —— 工作台基础弹窗统一基线 —— */
+:is(
+  .workspace-prompt-editor-backdrop,
+  .workspace-material-selector-backdrop,
+  .workspace-cover-dialog-backdrop,
+  .expert-draft-prompt-viewer-backdrop
+) {
+  background: rgb(15 23 42 / 42%);
+  -webkit-backdrop-filter: blur(3px);
+  backdrop-filter: blur(3px);
+}
+
+:is(
+  .workspace-prompt-editor-panel,
+  .workspace-material-selector-panel,
+  .workspace-cover-dialog-panel,
+  .expert-draft-prompt-viewer-panel
+) {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text-h);
+  box-shadow: 0 18px 50px rgb(15 23 42 / 22%);
+}
+
+:is(
+  .workspace-prompt-editor-head,
+  .workspace-material-selector-head,
+  .workspace-cover-dialog-head,
+  .expert-draft-prompt-viewer-head
+) {
+  min-height: 3.25rem;
+  padding: 0.85rem 1rem;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+}
+
+:is(
+  .workspace-prompt-editor-title,
+  .workspace-material-selector-title,
+  .workspace-cover-dialog-title,
+  .expert-draft-prompt-viewer-title
+) {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 700;
+  letter-spacing: 0;
+}
+
+:is(
+  .workspace-prompt-editor-close,
+  .workspace-material-selector-close,
+  .workspace-cover-dialog-close,
+  .expert-draft-prompt-viewer-close
+) {
+  width: 2rem;
+  height: 2rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text-h);
+  line-height: 1;
+}
+
+:is(
+  .workspace-prompt-editor-close,
+  .workspace-material-selector-close,
+  .workspace-cover-dialog-close,
+  .expert-draft-prompt-viewer-close
+):hover:not(:disabled) {
+  border-color: color-mix(in oklab, var(--accent) 38%, var(--border));
+  background: color-mix(in oklab, var(--accent) 8%, var(--surface));
+  color: var(--text-h);
+}
+
+:is(.workspace-prompt-editor-foot, .workspace-material-selector-foot, .workspace-cover-dialog-foot) {
+  padding: 0.85rem 1rem;
+  border-top: 1px solid var(--border);
+  background: color-mix(in oklab, var(--surface) 84%, var(--bg));
+}
+
+:is(
+  .btn-prompt-cancel,
+  .btn-prompt-save,
+  .btn-material-clear,
+  .btn-material-close,
+  .btn-cover-dialog-cancel,
+  .btn-cover-dialog-confirm
+) {
+  min-height: 2rem;
+  border-radius: 8px;
+  font-weight: 600;
+}
+
+:is(.workspace-prompt-editor-area, .workspace-cover-dialog-area, .workspace-material-item) {
+  border-radius: 8px;
+}
+
+@media (max-width: 640px) {
+  :is(
+    .workspace-prompt-editor-backdrop,
+    .workspace-material-selector-backdrop,
+    .workspace-cover-dialog-backdrop
+  ) {
+    padding: 0.75rem;
+  }
+
+  :is(.workspace-prompt-editor-panel, .workspace-cover-dialog-panel) {
+    max-height: calc(100vh - 1.5rem);
+  }
+
+  :is(.workspace-prompt-editor-foot, .workspace-material-selector-foot, .workspace-cover-dialog-foot) {
+    flex-direction: column-reverse;
+    align-items: stretch;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

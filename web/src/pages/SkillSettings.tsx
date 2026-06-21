@@ -18,6 +18,7 @@ import {
   useKeyedAutoSave,
 } from '../hooks/useKeyedAutoSave'
 import { useTextHistory } from '../hooks/useTextHistory'
+import { useAppDialog } from '../components/useAppDialog'
 import './WorkspaceSettings.css'
 
 const SKILL_SETTING_TYPES: SkillType[] = ['short', 'long', 'script']
@@ -27,6 +28,7 @@ const PLACEHOLDER_HINT =
 
 export function SkillSettings() {
   const navigate = useNavigate()
+  const { confirm, dialog } = useAppDialog()
   const [settingsMode, setSettingsMode] = useState<'prompt' | 'common'>('prompt')
   const [skillType, setSkillType] = useState<SkillType>('short')
   const [promptDraft, setPromptDraft] = useState('')
@@ -136,7 +138,13 @@ export function SkillSettings() {
   }, [flushPrompt, navigate])
 
   const resetPrompt = useCallback(async () => {
-    if (!window.confirm('恢复技能库管理智能体的内置默认提示词？')) {
+    const ok = await confirm({
+      title: '恢复默认提示词',
+      message: '恢复技能库管理智能体的内置默认提示词？当前提示词覆盖会被清除。',
+      confirmText: '恢复默认',
+      variant: 'warning',
+    })
+    if (!ok) {
       return
     }
     await flushPrompt().catch(() => undefined)
@@ -157,7 +165,7 @@ export function SkillSettings() {
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : '恢复默认提示词失败')
     }
-  }, [flushPrompt, markSkillPromptSaved, promptDraft, skillType, textHistory])
+  }, [confirm, flushPrompt, markSkillPromptSaved, promptDraft, skillType, textHistory])
 
   const addCommonSkill = useCallback(() => {
     setCommonSkillsSaved(false)
@@ -194,11 +202,17 @@ export function SkillSettings() {
     [updateCommonSkill],
   )
 
-  const removeCommonSkill = useCallback((skill: CommonSkill) => {
-    if (!window.confirm(`删除通用技能「${skill.title}」？`)) return
+  const removeCommonSkill = useCallback(async (skill: CommonSkill) => {
+    const ok = await confirm({
+      title: '删除通用技能',
+      message: `删除通用技能「${skill.title}」？`,
+      confirmText: '删除',
+      variant: 'danger',
+    })
+    if (!ok) return
     setCommonSkillsSaved(false)
     setCommonSkills((current) => current.filter((item) => item.id !== skill.id))
-  }, [])
+  }, [confirm])
 
   const persistCommonSkills = useCallback(async () => {
     setCommonSkillsSaving(true)
@@ -224,19 +238,21 @@ export function SkillSettings() {
         >
           ← 返回首页
         </button>
-        <div>
+        <div className="workspace-settings-title-block">
           <h1>技能库设置</h1>
           <p>配置管理智能体提示词，以及随应用打包发布的通用技能。</p>
+          <span
+            className={`workspace-settings-save-state workspace-settings-save-state--${settingsMode === 'common' ? (commonSkillsSaving ? 'saving' : commonSkillsSaved ? 'saved' : 'idle') : skillPromptStatus(skillType)}`}
+            aria-live="polite"
+          >
+            {settingsMode === 'common'
+              ? commonSkillsSaving ? '保存中…' : commonSkillsSaved ? '已保存' : ''
+              : autoSaveStatusLabel(skillPromptStatus(skillType))}
+          </span>
         </div>
-        <span
-          className={`workspace-settings-save-state workspace-settings-save-state--${settingsMode === 'common' ? (commonSkillsSaving ? 'saving' : commonSkillsSaved ? 'saved' : 'idle') : skillPromptStatus(skillType)}`}
-          aria-live="polite"
-        >
-          {settingsMode === 'common'
-            ? commonSkillsSaving ? '保存中…' : commonSkillsSaved ? '已保存' : ''
-            : autoSaveStatusLabel(skillPromptStatus(skillType))}
-        </span>
       </header>
+
+      {dialog}
 
       {error ? <p className="workspace-settings-error">{error}</p> : null}
 
@@ -301,7 +317,7 @@ export function SkillSettings() {
                     <article className="common-skill-card" key={skill.id}>
                       <div className="common-skill-card-head">
                         <strong>通用技能 {index + 1}</strong>
-                        <button type="button" onClick={() => removeCommonSkill(skill)}>删除</button>
+                        <button type="button" onClick={() => void removeCommonSkill(skill)}>删除</button>
                       </div>
                       <label>
                         <span>技能名称</span>

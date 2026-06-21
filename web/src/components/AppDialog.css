@@ -1,0 +1,198 @@
+.app-dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 3000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+  background: rgb(15 23 42 / 0.42);
+  -webkit-backdrop-filter: blur(3px);
+  backdrop-filter: blur(3px);
+}
+
+.app-dialog {
+  width: min(420px, 100%);
+  overflow: hidden;
+  border: 1px solid var(--border, #dbe3ef);
+  border-radius: 8px;
+  background: var(--surface, #fff);
+  color: var(--text-h, #1e293b);
+  box-shadow: 0 18px 50px rgb(15 23 42 / 0.2);
+  animation: app-dialog-in 0.16s ease-out;
+}
+
+.app-dialog-head {
+  display: grid;
+  grid-template-columns: 2rem minmax(0, 1fr);
+  align-items: center;
+  gap: 0.75rem;
+  padding: 1rem 1rem 0.75rem;
+}
+
+.app-dialog-mark {
+  width: 2rem;
+  height: 2rem;
+  display: inline-grid;
+  place-items: center;
+  border: 1px solid color-mix(in oklab, var(--accent, #2563eb) 28%, var(--border, #dbe3ef));
+  border-radius: 50%;
+  background: color-mix(in oklab, var(--accent, #2563eb) 9%, var(--surface, #fff));
+  color: var(--accent, #2563eb);
+  font-size: 1rem;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.app-dialog--warning .app-dialog-mark {
+  border-color: #fde68a;
+  background: #fffbeb;
+  color: #b45309;
+}
+
+.app-dialog--danger .app-dialog-mark {
+  border-color: #fecaca;
+  background: #fef2f2;
+  color: #dc2626;
+}
+
+.app-dialog-head h2 {
+  min-width: 0;
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 700;
+  line-height: 1.35;
+}
+
+.app-dialog-body {
+  padding: 0 1rem 1rem 3.75rem;
+  color: var(--text, #475569);
+  font-size: 0.9rem;
+  line-height: 1.65;
+}
+
+.app-dialog-body p {
+  margin: 0;
+}
+
+.app-dialog-body p + p,
+.app-dialog-details {
+  margin-top: 0.6rem;
+}
+
+.app-dialog-details {
+  padding: 0.65rem 0.75rem;
+  border: 1px solid color-mix(in oklab, var(--border, #dbe3ef) 80%, transparent);
+  border-radius: 8px;
+  background: color-mix(in oklab, var(--paper, #f8fafc) 88%, var(--surface, #fff));
+  color: var(--text, #475569);
+  font-size: 0.82rem;
+}
+
+.app-dialog-foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  padding: 0.85rem 1rem 1rem;
+  border-top: 1px solid color-mix(in oklab, var(--border, #dbe3ef) 70%, transparent);
+  background: color-mix(in oklab, var(--paper, #f8fafc) 74%, var(--surface, #fff));
+}
+
+.app-dialog-btn {
+  min-width: 5rem;
+  padding: 0.5rem 0.85rem;
+  border: 1px solid var(--border, #dbe3ef);
+  border-radius: 8px;
+  font: inherit;
+  font-size: 0.875rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.app-dialog-btn--secondary {
+  background: var(--surface, #fff);
+  color: var(--text-h, #1e293b);
+}
+
+.app-dialog-btn--secondary:hover {
+  border-color: color-mix(in oklab, var(--accent, #2563eb) 38%, var(--border, #dbe3ef));
+  background: color-mix(in oklab, var(--accent, #2563eb) 7%, var(--surface, #fff));
+}
+
+.app-dialog-btn--primary {
+  border-color: var(--accent, #2563eb);
+  background: var(--accent, #2563eb);
+  color: #fff;
+}
+
+.app-dialog-btn--primary:hover {
+  border-color: var(--accent-hover, #1d4ed8);
+  background: var(--accent-hover, #1d4ed8);
+}
+
+.app-dialog-btn--warning {
+  border-color: #d97706;
+  background: #d97706;
+}
+
+.app-dialog-btn--warning:hover {
+  border-color: #b45309;
+  background: #b45309;
+}
+
+.app-dialog-btn--danger {
+  border-color: #dc2626;
+  background: #dc2626;
+}
+
+.app-dialog-btn--danger:hover {
+  border-color: #b91c1c;
+  background: #b91c1c;
+}
+
+.app-dialog-btn:focus-visible {
+  outline: 2px solid color-mix(in oklab, var(--accent, #2563eb) 65%, transparent);
+  outline-offset: 2px;
+}
+
+@keyframes app-dialog-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.985);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@media (max-width: 520px) {
+  .app-dialog-head {
+    grid-template-columns: 1.75rem minmax(0, 1fr);
+    gap: 0.65rem;
+  }
+
+  .app-dialog-mark {
+    width: 1.75rem;
+    height: 1.75rem;
+  }
+
+  .app-dialog-body {
+    padding-left: 3.4rem;
+  }
+
+  .app-dialog-foot {
+    flex-direction: column-reverse;
+  }
+
+  .app-dialog-btn {
+    width: 100%;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .app-dialog {
+    animation: none;
+  }
+}

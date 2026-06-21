@@ -219,10 +219,11 @@ export function buildReadWorkspaceContentTool(
 }
 
 const MAX_WORKSPACE_SEARCH_QUERY_CHARS = 600
+const MIN_WORKSPACE_SEARCH_CONTEXT_CHARS = 10
 const DEFAULT_WORKSPACE_SEARCH_CONTEXT_CHARS = 80
 const MAX_WORKSPACE_SEARCH_CONTEXT_CHARS = 500
 const DEFAULT_WORKSPACE_SEARCH_MATCHES = 10
-const MAX_WORKSPACE_SEARCH_MATCHES = 30
+const MAX_WORKSPACE_SEARCH_MATCHES = 200
 
 function clampInteger(
   value: number | undefined,
@@ -289,7 +290,8 @@ export function buildSearchWorkspaceTextTool(
     description:
       '在本书创作空间里按 grep 风格搜索文本，只返回命中的行列位置和前后少量上下文，不返回全文。'
       + `\n当前仅允许搜索：${allowedDescription || '（无）'}。不传 stage_id 时会搜索所有允许阶段。`
-      + '\n适用于 replace_current_stage_text 或全局替换失败后，先定位当前文本编辑框里真实存在的原文片段，再用搜索结果中的原样文本重试替换。',
+      + '\n适用于 replace_current_stage_text 或全局替换失败后，先定位当前文本编辑框里真实存在的原文片段，再用搜索结果中的原样文本重试替换。'
+      + '\n提醒：context_chars 最小为 10；需要更窄上下文时传 10，不要传小于 10 的值。',
     parameters: Type.Object({
       query: Type.String({
         maxLength: MAX_WORKSPACE_SEARCH_QUERY_CHARS,
@@ -301,14 +303,14 @@ export function buildSearchWorkspaceTextTool(
         Type.Integer({
           minimum: 1,
           maximum: MAX_WORKSPACE_SEARCH_MATCHES,
-          description: '最多返回多少处匹配，默认 10，最高 30。',
+          description: '最多返回多少处匹配，默认 10，最高 200。',
         }),
       ),
       context_chars: Type.Optional(
         Type.Integer({
-          minimum: 20,
+          minimum: MIN_WORKSPACE_SEARCH_CONTEXT_CHARS,
           maximum: MAX_WORKSPACE_SEARCH_CONTEXT_CHARS,
-          description: '每处匹配前后返回多少字符上下文，默认 80，最高 500。',
+          description: '每处匹配前后返回多少字符上下文，默认 80，最小 10，最高 500。',
         }),
       ),
     }),
@@ -341,7 +343,7 @@ export function buildSearchWorkspaceTextTool(
       const contextChars = clampInteger(
         params.context_chars,
         DEFAULT_WORKSPACE_SEARCH_CONTEXT_CHARS,
-        20,
+        MIN_WORKSPACE_SEARCH_CONTEXT_CHARS,
         MAX_WORKSPACE_SEARCH_CONTEXT_CHARS,
       )
 

@@ -167,17 +167,21 @@ import webview
 
 from app.runtime_paths import bundle_root, data_root, writable_root
 from app.prompt_store import (
+    read_raw_learning_imitation_prompt_for_editor,
     read_raw_material_prompt_for_editor,
     read_raw_material_agent_prompt_for_editor,
     read_raw_skill_agent_prompt_for_editor,
     read_raw_workspace_agent_prompt_for_editor,
     render_from_api_context,
+    render_learning_imitation_from_api_context,
     render_material_from_api_context,
     render_skill_from_api_context,
+    reset_learning_imitation_prompt_override as _reset_learning_imitation_prompt_override,
     reset_material_agent_prompt_override as _reset_material_agent_prompt_override,
     reset_material_prompt_override as _reset_material_prompt_override,
     reset_skill_agent_prompt_override as _reset_skill_agent_prompt_override,
     reset_workspace_agent_prompt_override as _reset_workspace_agent_prompt_override,
+    save_learning_imitation_prompt_override as _save_learning_imitation_prompt_override,
     save_material_agent_prompt_override as _save_material_agent_prompt_override,
     save_material_prompt_override as _save_material_prompt_override,
     save_skill_agent_prompt_override as _save_skill_agent_prompt_override,
@@ -679,6 +683,10 @@ class Api:
 
         return save_common_skills(skills or [])
 
+    def load_common_skills_to_skill(self, skill_id: str) -> dict | None:
+        """将通用技能合并到已有技能库，已加载的条目不会重复添加。"""
+        return self._store.load_common_skills_to_skill(skill_id)
+
     def save_skill(
         self,
         skill_id: str,
@@ -872,6 +880,28 @@ class Api:
 
     def reset_skill_agent_prompt_override(self, skill_type: str | None = None) -> bool:
         return _reset_skill_agent_prompt_override(skill_type)
+
+    # ==================== 学习仿写提示词 API ====================
+
+    def get_learning_imitation_system_prompt(
+        self,
+        stage_id: str,
+        context_json: str,
+    ) -> str:
+        return render_learning_imitation_from_api_context(stage_id, context_json)
+
+    def read_learning_imitation_prompt_template(self, stage_id: str) -> str:
+        return read_raw_learning_imitation_prompt_for_editor(stage_id)
+
+    def save_learning_imitation_prompt_override(
+        self,
+        stage_id: str,
+        body: str,
+    ) -> None:
+        _save_learning_imitation_prompt_override(stage_id, body)
+
+    def reset_learning_imitation_prompt_override(self, stage_id: str) -> bool:
+        return _reset_learning_imitation_prompt_override(stage_id)
 
     def get_book_cover(self, book_id: str) -> dict:
         """获取书籍封面图片（base64）。

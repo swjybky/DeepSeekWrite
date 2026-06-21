@@ -56,6 +56,9 @@ _MATERIAL_PLACEHOLDER_RE = re.compile(
 _SKILL_PLACEHOLDER_RE = re.compile(
     r"\{\{(BOOK_TITLE|BOOK_LINE|SKILL_TITLE|SKILL_LINE|SKILL_TYPE|STAGE_ID|STAGE_LABEL|STAGE_BODY|OTHER_STAGES_EXCERPT)\}\}"
 )
+_LEARNING_IMITATION_PLACEHOLDER_RE = re.compile(
+    r"\{\{(STAGE_ID|STAGE_LABEL|DOCUMENT_COUNT|DOCUMENTS_SUMMARY|CURRENT_RESULT)\}\}"
+)
 
 
 def excerpt(text: str, _max_len: int = STAGE_BODY_EXCERPT_CAP) -> str:
@@ -819,6 +822,135 @@ def render_skill_from_api_context(stage_id: str, context_raw: object) -> str:
 def read_raw_skill_agent_prompt_for_editor(skill_type: str | None = None) -> str:
     """技能库智能体设置页读取当前生效来源（优先覆盖）的原始模板正文。"""
     path = resolve_skill_agent_read_path(skill_type)
+    if not path.is_file():
+        return ""
+    text = path.read_text(encoding="utf-8")
+    if text.endswith("\n"):
+        return text[:-1]
+    return text
+
+
+# ==================== 学习仿写提示词管线 ====================
+
+LEARNING_IMITATION_PREFIX = Path("learning_imitation")
+LEARNING_IMITATION_SHARED_PROMPT_DIR = "shared"
+
+LEARNING_IMITATION_STAGE_LABELS: dict[str, str] = {
+    "material_split": "素材拆分",
+    "plot_learning": "剧情设计学习",
+    "style_learning": "文风学习",
+}
+
+LEARNING_IMITATION_STAGE_IDS: tuple[str, ...] = tuple(
+    LEARNING_IMITATION_STAGE_LABELS.keys()
+)
+
+
+def validate_learning_imitation_stage_id(stage_id: str) -> None:
+    if stage_id not in LEARNING_IMITATION_STAGE_IDS:
+        raise ValueError(f"未知的 learning imitation stage_id: {stage_id!r}")
+
+
+def learning_imitation_prompt_override_absolute_path(stage_id: str) -> Path:
+    validate_learning_imitation_stage_id(stage_id)
+    return (
+        data_root()
+        / "prompt_overrides"
+        / LEARNING_IMITATION_PREFIX
+        / LEARNING_IMITATION_SHARED_PROMPT_DIR
+        / f"{stage_id}.txt"
+    ).resolve()
+
+
+def learning_imitation_prompt_builtin_default_path(stage_id: str) -> Path:
+    validate_learning_imitation_stage_id(stage_id)
+    return (
+        bundle_root()
+        / "app"
+        / "prompt_defaults"
+        / LEARNING_IMITATION_PREFIX
+        / LEARNING_IMITATION_SHARED_PROMPT_DIR
+        / f"{stage_id}.txt"
+    )
+
+
+def resolve_learning_imitation_prompt_read_path(stage_id: str) -> Path:
+    over = learning_imitation_prompt_override_absolute_path(stage_id)
+    if over.is_file():
+        return over
+    return learning_imitation_prompt_builtin_default_path(stage_id)
+
+
+def read_learning_imitation_prompt_template(stage_id: str) -> str:
+    path = resolve_learning_imitation_prompt_read_path(stage_id)
+    if not path.is_file():
+        return (
+            f"[缺少学习仿写默认提示词模板文件]\n路径: {path}\n\n"
+            "请补齐 app/prompt_defaults/learning_imitation/shared 下的同名 .txt。\n"
+        )
+    text = path.read_text(encoding="utf-8")
+    if text.endswith("\n"):
+        return text[:-1]
+    return text
+
+
+def save_learning_imitation_prompt_override(stage_id: str, body: str) -> None:
+    path = learning_imitation_prompt_override_absolute_path(stage_id)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(body if body.endswith("\n") else body + "\n", encoding="utf-8")
+
+
+def reset_learning_imitation_prompt_override(stage_id: str) -> bool:
+    path = learning_imitation_prompt_override_absolute_path(stage_id)
+    if path.is_file():
+        path.unlink()
+        return True
+    return False
+
+
+def render_learning_imitation_system_prompt(
+    stage_id: str,
+    *,
+    document_count: int = 0,
+    documents_summary: str = "",
+    current_result: str = "",
+) -> str:
+    validate_learning_imitation_stage_id(stage_id)
+    raw = read_learning_imitation_prompt_template(stage_id)
+    replacements = {
+        "STAGE_ID": stage_id,
+        "STAGE_LABEL": LEARNING_IMITATION_STAGE_LABELS[stage_id],
+        "DOCUMENT_COUNT": str(document_count),
+        "DOCUMENTS_SUMMARY": documents_summary.strip() or "（尚未上传可分析文档）",
+        "CURRENT_RESULT": current_result.strip() or "（当前阶段暂未生成结果）",
+    }
+
+    def repl(m: re.Match[str]) -> str:
+        return replacements[m.group(1)]
+
+    return _LEARNING_IMITATION_PLACEHOLDER_RE.sub(repl, raw)
+
+
+def render_learning_imitation_from_api_context(
+    stage_id: str,
+    context_raw: object,
+) -> str:
+    ctx = parse_context_payload(context_raw)
+    raw_count = ctx.get("document_count")
+    try:
+        document_count = int(raw_count) if raw_count is not None else 0
+    except (TypeError, ValueError):
+        document_count = 0
+    return render_learning_imitation_system_prompt(
+        stage_id,
+        document_count=document_count,
+        documents_summary=str(ctx.get("documents_summary") or ""),
+        current_result=str(ctx.get("current_result") or ""),
+    )
+
+
+def read_raw_learning_imitation_prompt_for_editor(stage_id: str) -> str:
+    path = resolve_learning_imitation_prompt_read_path(stage_id)
     if not path.is_file():
         return ""
     text = path.read_text(encoding="utf-8")

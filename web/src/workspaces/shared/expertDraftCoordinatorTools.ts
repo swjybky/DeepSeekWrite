@@ -13,6 +13,8 @@ import {
 } from './expertDraftSectionTools'
 
 const MAX_EXPERT_DRAFT_TEXT_REPLACE_CHARS = 2400
+const REPLACEMENT_ARGUMENTS_EXAMPLE =
+  '参数格式必须严格为 {"replacements":[{"original_text":"原文片段","new_text":"新文本"}]}；删除片段时也必须传 "new_text": ""。字段名只能是 original_text 和 new_text，不要写 new_int、newText、text 或 replace。'
 
 export type ExpertDraftCoordinatorCoreToolContext = {
   bookTitle: string
@@ -168,7 +170,7 @@ export function buildEditExpertDraftSectionTool(
     name: 'edit_expert_draft_section',
     label: '编辑正文',
     description:
-      '专家正文编辑替换工具：直接对当前专家正文编辑区（draft 阶段合并视图）替换章节名称或正文片段。章节名称与分节结构已建立映射，直接把当前章节名替换为新章节名后，左侧章节树和对应分节会同步更新，不需要重新初始化。修改前请先调用 read_workspace_content（stage_id=draft）读取当前正文，再从返回正文中原样复制待改章节名或正文片段到 original_text。总控不负责修改人物状态。不要用它重建小节列表；不要为了局部修改重新调用 start_expert_writing，除非用户明确要求重写或重跑分节写作。',
+      `专家正文编辑替换工具：直接对当前专家正文编辑区（draft 阶段合并视图）替换章节名称或正文片段。${REPLACEMENT_ARGUMENTS_EXAMPLE}章节名称与分节结构已建立映射，直接把当前章节名替换为新章节名后，左侧章节树和对应分节会同步更新，不需要重新初始化。修改前请先调用 read_workspace_content（stage_id=draft）读取当前正文，再从返回正文中原样复制待改章节名或正文片段到 original_text。总控不负责修改人物状态。不要用它重建小节列表；不要为了局部修改重新调用 start_expert_writing，除非用户明确要求重写或重跑分节写作。`,
     parameters: Type.Object({
       replacements: Type.Array(
         Type.Object({
@@ -180,7 +182,7 @@ export function buildEditExpertDraftSectionTool(
           new_text: Type.String({
             maxLength: MAX_EXPERT_DRAFT_TEXT_REPLACE_CHARS,
             description:
-              '替换后的新章节名称或正文片段。修改章节名时只填写新名称；修改正文时只放对应片段的新内容，不要放整篇正文。',
+              '替换后的新章节名称或正文片段。字段名必须严格写 new_text；删除原文片段时填空字符串 ""，也不能省略本字段。修改章节名时只填写新名称；修改正文时只放对应片段的新内容，不要放整篇正文。',
           }),
         }),
         {

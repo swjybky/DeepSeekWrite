@@ -12,6 +12,7 @@ import {
   useKeyedAutoSave,
 } from '../hooks/useKeyedAutoSave'
 import { useTextHistory } from '../hooks/useTextHistory'
+import { useAppDialog } from '../components/useAppDialog'
 import './WorkspaceSettings.css'
 
 const MATERIAL_SETTING_TYPES: MaterialType[] = ['short', 'long', 'script']
@@ -21,6 +22,7 @@ const PLACEHOLDER_HINT =
 
 export function MaterialSettings() {
   const navigate = useNavigate()
+  const { confirm, dialog } = useAppDialog()
   const [materialType, setMaterialType] = useState<MaterialType>('short')
   const [promptDraft, setPromptDraft] = useState('')
   const [loading, setLoading] = useState(true)
@@ -106,7 +108,13 @@ export function MaterialSettings() {
   }, [flushPrompt, navigate])
 
   const resetPrompt = useCallback(async () => {
-    if (!window.confirm('恢复素材库管理智能体的内置默认提示词？')) {
+    const ok = await confirm({
+      title: '恢复默认提示词',
+      message: '恢复素材库管理智能体的内置默认提示词？当前提示词覆盖会被清除。',
+      confirmText: '恢复默认',
+      variant: 'warning',
+    })
+    if (!ok) {
       return
     }
     await flushPrompt().catch(() => undefined)
@@ -127,7 +135,14 @@ export function MaterialSettings() {
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : '恢复默认提示词失败')
     }
-  }, [flushPrompt, markMaterialPromptSaved, materialType, promptDraft, textHistory])
+  }, [
+    confirm,
+    flushPrompt,
+    markMaterialPromptSaved,
+    materialType,
+    promptDraft,
+    textHistory,
+  ])
 
   return (
     <div className="workspace-settings-page">
@@ -139,17 +154,19 @@ export function MaterialSettings() {
         >
           ← 返回首页
         </button>
-        <div>
+        <div className="workspace-settings-title-block">
           <h1>素材库智能体设置</h1>
           <p>短篇、长篇与剧本素材库分别保存管理智能体提示词。</p>
+          <span
+            className={`workspace-settings-save-state workspace-settings-save-state--${materialPromptStatus(materialType)}`}
+            aria-live="polite"
+          >
+            {autoSaveStatusLabel(materialPromptStatus(materialType))}
+          </span>
         </div>
-        <span
-          className={`workspace-settings-save-state workspace-settings-save-state--${materialPromptStatus(materialType)}`}
-          aria-live="polite"
-        >
-          {autoSaveStatusLabel(materialPromptStatus(materialType))}
-        </span>
       </header>
+
+      {dialog}
 
       {error ? <p className="workspace-settings-error">{error}</p> : null}
 

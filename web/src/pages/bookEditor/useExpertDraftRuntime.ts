@@ -63,6 +63,7 @@ type UseExpertDraftRuntimeInput = {
   setActiveBookStage: (stageId: StageId) => void
   setError: (message: string | null) => void
   setMessage: (message: string | null) => void
+  confirmResetExpertDraft: () => Promise<boolean>
 }
 
 export function useExpertDraftRuntime({
@@ -81,6 +82,7 @@ export function useExpertDraftRuntime({
   setActiveBookStage,
   setError,
   setMessage,
+  confirmResetExpertDraft,
 }: UseExpertDraftRuntimeInput) {
   const handleExpertDraftSectionTextareaRef = useCallback(
     (
@@ -313,9 +315,9 @@ export function useExpertDraftRuntime({
     }))
   }, [bookRef, expertRunAbortByBookRef, updateExpertDraftForBook])
 
-  const resetExpertDraft = useCallback(() => {
+  const resetExpertDraft = useCallback(async () => {
     if (expertDraftRef.current.running) return
-    const ok = window.confirm('清空正文编写内容，并恢复为第一节的初始状态？')
+    const ok = await confirmResetExpertDraft()
     if (!ok) return
     const currentBookId = bookRef.current?.id
     if (!currentBookId) return
@@ -342,7 +344,14 @@ export function useExpertDraftRuntime({
     setMessage('正文编写已清空')
     setError(null)
     window.setTimeout(() => setMessage(null), 2000)
-  }, [bookRef, commitWorkspaceSession, expertDraftRef, setError, setMessage])
+  }, [
+    bookRef,
+    commitWorkspaceSession,
+    confirmResetExpertDraft,
+    expertDraftRef,
+    setError,
+    setMessage,
+  ])
 
   return {
     createExpertDraftSectionForBook,

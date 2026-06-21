@@ -5,6 +5,7 @@ import type {
 } from '../../../bridge'
 import { TextHistoryControls } from '../../../components/TextHistoryControls'
 import { MarkdownTextEditor } from '../../../components/MarkdownTextEditor'
+import { useAppDialog } from '../../../components/useAppDialog'
 import type { TextHistoryController } from '../../../hooks/useTextHistory'
 
 type Props = {
@@ -84,6 +85,7 @@ export function ExpertDraftEditor({
   historyPrefix,
   onTextBlur,
 }: Props) {
+  const { confirm, dialog } = useAppDialog()
   const selectedSection = draft.sections.find(
     (section) => section.id === draft.active_section_id,
   )
@@ -102,10 +104,16 @@ export function ExpertDraftEditor({
   const mainBodyKey = `${historyPrefix}:stage:draft`
   const sectionCounts = textCounts(selectedSection?.body ?? '')
 
-  const deleteSelectedSection = () => {
+  const deleteSelectedSection = async () => {
     if (!selectedSection || draft.running) return
     const title = selectedSection.title.trim() || '当前小节'
-    const ok = window.confirm(`删除「${title}」？该操作会同时删除本节人物状态。`)
+    const ok = await confirm({
+      title: '删除小节',
+      message: `删除「${title}」？`,
+      details: '该操作会同时删除本节人物状态。',
+      confirmText: '删除',
+      variant: 'danger',
+    })
     if (!ok) return
     updateDraft((current) => {
       const index = current.sections.findIndex((section) => section.id === selectedId)
@@ -154,7 +162,7 @@ export function ExpertDraftEditor({
             <button
               type="button"
               className="expert-draft-action expert-draft-action--danger"
-              onClick={deleteSelectedSection}
+              onClick={() => void deleteSelectedSection()}
               disabled={draft.running}
             >
               删除本节
@@ -193,6 +201,7 @@ export function ExpertDraftEditor({
           </span>
         </span>
       </div>
+      {dialog}
 
       <div className="expert-draft-workbench">
         {isSectionMode && selectedSection && selectedState ? (

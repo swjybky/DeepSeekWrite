@@ -64,10 +64,12 @@ import {
 } from './bookEditor/expertDraftUtils'
 import { useKeyedAutoSave } from '../hooks/useKeyedAutoSave'
 import { useTextHistory } from '../hooks/useTextHistory'
+import { useAppDialog } from '../components/useAppDialog'
 import './BookEditor.css'
 
 export function BookEditor() {
   const { id } = useParams<{ id: string }>()
+  const { confirm, dialog } = useAppDialog()
   const [book, setBook] = useState<Book | null>(null)
   const [workspaceBooks, setWorkspaceBooks] = useState<BookSummary[]>([])
   const [stages, setStages] = useState<Record<StageId, string>>(() =>
@@ -612,6 +614,17 @@ export function BookEditor() {
     textareaRefsRef,
   })
 
+  const confirmResetExpertDraft = useCallback(
+    () =>
+      confirm({
+        title: '清空正文编写',
+        message: '清空正文编写内容，并恢复为第一节的初始状态？',
+        confirmText: '清空',
+        variant: 'danger',
+      }),
+    [confirm],
+  )
+
   const {
     createExpertDraftSectionForBook,
     getRenderedExpertDraftSectionContent,
@@ -639,6 +652,7 @@ export function BookEditor() {
     setActiveBookStage,
     setError,
     setMessage,
+    confirmResetExpertDraft,
   })
 
   const {
@@ -821,6 +835,7 @@ export function BookEditor() {
         onOpenSkillSelector={() => void openSkillSelector()}
         onToggleStatus={() => void handleToggleBookStatus()}
       />
+      {dialog}
 
       <div
         className={

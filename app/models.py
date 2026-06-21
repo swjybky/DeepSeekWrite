@@ -452,14 +452,19 @@ def _skill_stage_item(
     item_id: Any | None = None,
     created_at: Any | None = None,
     updated_at: Any | None = None,
+    source_common_skill_id: Any | None = None,
 ) -> dict[str, str]:
-    return {
+    item = {
         "id": str(item_id or new_skill_stage_item_id()),
         "title": str(title or "未命名技能").strip() or "未命名技能",
         "body": str(body or ""),
         "created_at": str(created_at or ""),
         "updated_at": str(updated_at or ""),
     }
+    source_id = str(source_common_skill_id or "").strip()
+    if source_id:
+        item["source_common_skill_id"] = source_id
+    return item
 
 
 def normalize_skill_stage_items(stage_id: str, raw: Any) -> list[dict[str, str]]:
@@ -482,6 +487,7 @@ def normalize_skill_stage_items(stage_id: str, raw: Any) -> list[dict[str, str]]
                         item_id=item.get("id"),
                         created_at=item.get("created_at"),
                         updated_at=item.get("updated_at"),
+                        source_common_skill_id=item.get("source_common_skill_id"),
                     ),
                 )
             elif isinstance(item, str) and item.strip():
@@ -497,6 +503,7 @@ def normalize_skill_stage_items(stage_id: str, raw: Any) -> list[dict[str, str]]
                     item_id=raw.get("id"),
                     created_at=raw.get("created_at"),
                     updated_at=raw.get("updated_at"),
+                    source_common_skill_id=raw.get("source_common_skill_id"),
                 ),
             ]
     return []

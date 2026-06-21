@@ -460,14 +460,14 @@ export function MaterialEditor() {
                 {error ?? message}
               </span>
             ) : null}
+            <span
+              className={`workspace-settings-save-state workspace-settings-save-state--${materialSaveStatus(id)}`}
+              aria-live="polite"
+            >
+              {autoSaveStatusLabel(materialSaveStatus(id))}
+            </span>
           </span>
         </div>
-        <span
-          className={`workspace-settings-save-state workspace-settings-save-state--${materialSaveStatus(id)}`}
-          aria-live="polite"
-        >
-          {autoSaveStatusLabel(materialSaveStatus(id))}
-        </span>
       </header>
 
       <div

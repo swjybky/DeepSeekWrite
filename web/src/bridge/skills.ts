@@ -7,6 +7,7 @@ export {
   deleteSkill,
   getSkill,
   listSkills,
+  loadCommonSkillsToSkill,
   normalizeSkillStageId,
   normalizeSkillStages,
   normalizeSkillType,
@@ -16,6 +17,7 @@ export {
 
 export type {
   SaveSkillOptions,
+  LoadCommonSkillsResult,
   Skill,
   SkillStageEntry,
   SkillStageId,

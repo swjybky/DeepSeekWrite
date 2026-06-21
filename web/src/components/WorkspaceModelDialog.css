@@ -154,6 +154,59 @@
   background: color-mix(in oklab, var(--accent) 8%, var(--paper-elevated));
 }
 
+/* —— 工作台模型弹窗基础基线 —— */
+.wc-model-dialog-backdrop {
+  background: rgb(15 23 42 / 42%);
+  -webkit-backdrop-filter: blur(3px);
+  backdrop-filter: blur(3px);
+}
+
+.wc-model-dialog {
+  border: 1px solid color-mix(in oklab, var(--border-strong) 72%, var(--border));
+  border-radius: 8px;
+  box-shadow: 0 18px 50px rgb(15 23 42 / 20%);
+}
+
+.wc-model-dialog-header {
+  min-height: 3.25rem;
+  padding: 0.85rem 1rem;
+  background: var(--paper-elevated);
+}
+
+.wc-model-dialog-header h2 {
+  font-family: inherit;
+  font-size: 1rem;
+  font-weight: 700;
+  letter-spacing: 0;
+}
+
+.wc-model-dialog-close {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--paper);
+  color: var(--ink-soft);
+}
+
+.wc-model-dialog-close:hover {
+  border-color: color-mix(in oklab, var(--accent) 38%, var(--border));
+  background: var(--accent-soft);
+  color: var(--ink);
+}
+
+.wc-model-dialog-item {
+  border-radius: 8px;
+}
+
+@media (max-width: 520px) {
+  .wc-model-dialog-backdrop {
+    padding: 0.75rem;
+  }
+
+  .wc-model-dialog {
+    max-height: calc(100vh - 1.5rem);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .wc-model-dialog-item {
     transition: none;

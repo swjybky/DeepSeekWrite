@@ -3,6 +3,7 @@ import type { SaveSkillOptions } from './apiTypes'
 import {
   normalizeSkill,
   normalizeSkillSummary,
+  type LoadCommonSkillsResult,
   type Skill,
   type SkillSummary,
   type SkillType,
@@ -12,6 +13,7 @@ import {
   mockDeleteSkill,
   mockGetSkill,
   mockListSkills,
+  mockLoadCommonSkillsToSkill,
   mockSaveSkill,
 } from './mockStore'
 
@@ -65,6 +67,24 @@ export async function saveSkill(
     return raw ? normalizeSkill(raw) : null
   }
   return mockSaveSkill(skill_id, opts)
+}
+
+export async function loadCommonSkillsToSkill(
+  skill_id: string,
+): Promise<LoadCommonSkillsResult | null> {
+  const api = await getBridgeApi()
+  if (api?.load_common_skills_to_skill) {
+    const raw = await api.load_common_skills_to_skill(skill_id)
+    return raw
+      ? {
+          skill: normalizeSkill(raw.skill),
+          added_count: Number(raw.added_count || 0),
+          available_count: Number(raw.available_count || 0),
+          already_loaded: Boolean(raw.already_loaded),
+        }
+      : null
+  }
+  return mockLoadCommonSkillsToSkill(skill_id)
 }
 
 export async function deleteSkill(skill_id: string): Promise<boolean> {

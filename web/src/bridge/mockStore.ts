@@ -28,10 +28,13 @@ import {
   normalizeSkill,
   normalizeSkillStages,
   normalizeSkillType,
+  type CommonSkill,
+  type LoadCommonSkillsResult,
   type Material,
   type MaterialStageId,
   type MaterialSummary,
   type Skill,
+  type SkillStageEntry,
   type SkillStageId,
   type SkillSummary,
 } from './libraryDomain'
@@ -347,6 +350,48 @@ function saveMockSkills(map: Map<string, Skill>) {
   localStorage.setItem(MOCK_SKILLS_KEY, JSON.stringify([...map.values()]))
 }
 
+function sameLoadedCommonSkill(entry: SkillStageEntry, commonSkill: CommonSkill): boolean {
+  if (
+    commonSkill.id &&
+    entry.source_common_skill_id &&
+    entry.source_common_skill_id === commonSkill.id
+  ) {
+    return true
+  }
+  return (
+    entry.title.trim() === commonSkill.title.trim() &&
+    entry.body.trim() === commonSkill.body.trim()
+  )
+}
+
+async function appendMissingCommonSkills(
+  stages: Skill['stages'],
+  now: string,
+): Promise<{ added_count: number; available_count: number }> {
+  let added_count = 0
+  let available_count = 0
+  for (const commonSkill of await readCommonSkills()) {
+    for (const stageId of commonSkill.effective_stages) {
+      available_count += 1
+      const entries = stages[stageId] ?? []
+      if (entries.some((entry) => sameLoadedCommonSkill(entry, commonSkill))) {
+        continue
+      }
+      entries.push({
+        id: randomId(),
+        title: commonSkill.title,
+        body: commonSkill.body,
+        created_at: now,
+        updated_at: now,
+        source_common_skill_id: commonSkill.id,
+      })
+      stages[stageId] = entries
+      added_count += 1
+    }
+  }
+  return { added_count, available_count }
+}
+
 export async function mockListSkills(): Promise<SkillSummary[]> {
   const map = loadMockSkills()
   return [...map.values()]
@@ -379,17 +424,7 @@ export async function mockCreateSkill(
   const now = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z')
   const stages = normalizeSkillStages({})
   if (load_common_skills) {
-    for (const commonSkill of await readCommonSkills()) {
-      for (const stageId of commonSkill.effective_stages) {
-        stages[stageId].push({
-          id: randomId(),
-          title: commonSkill.title,
-          body: commonSkill.body,
-          created_at: now,
-          updated_at: now,
-        })
-      }
-    }
+    await appendMissingCommonSkills(stages, now)
   }
   const skill: Skill = {
     id: randomId(),
@@ -440,6 +475,31 @@ export async function mockSaveSkill(
   map.set(skill_id, next)
   saveMockSkills(map)
   return next
+}
+
+export async function mockLoadCommonSkillsToSkill(
+  skill_id: string,
+): Promise<LoadCommonSkillsResult | null> {
+  const map = loadMockSkills()
+  const s = map.get(skill_id)
+  if (!s) return null
+  const now = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z')
+  const stages = normalizeSkillStages(s.stages)
+  const result = await appendMissingCommonSkills(stages, now)
+  const next: Skill = {
+    ...s,
+    stages,
+    updated_at: result.added_count > 0 ? now : s.updated_at,
+  }
+  if (result.added_count > 0) {
+    map.set(skill_id, next)
+    saveMockSkills(map)
+  }
+  return {
+    skill: next,
+    ...result,
+    already_loaded: result.available_count > 0 && result.added_count === 0,
+  }
 }
 
 export async function mockDeleteSkill(skill_id: string): Promise<boolean> {

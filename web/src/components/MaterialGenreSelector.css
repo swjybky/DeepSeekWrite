@@ -226,6 +226,73 @@
   background: #f5f5f5;
 }
 
+/* —— 基础弹出选择器统一基线 —— */
+.genre-selector-trigger,
+.filter-select {
+  border-color: var(--border, #dbe3ef);
+  border-radius: 8px;
+  background: var(--surface, #fff);
+  color: var(--text-h, #1e293b);
+}
+
+.genre-selector-trigger:hover:not(:disabled),
+.filter-select:hover {
+  border-color: color-mix(in oklab, var(--accent, #2563eb) 38%, var(--border, #dbe3ef));
+  background: color-mix(in oklab, var(--accent, #2563eb) 6%, var(--surface, #fff));
+}
+
+.genre-selector-panel {
+  border-color: var(--border, #dbe3ef);
+  border-radius: 8px;
+  background: var(--surface, #fff);
+  color: var(--text-h, #1e293b);
+  box-shadow: 0 18px 50px rgb(15 23 42 / 18%);
+}
+
+.genre-section-label {
+  color: var(--text, #475569);
+  letter-spacing: 0.04em;
+}
+
+:is(.genre-type-btn, .genre-parent-btn, .genre-sub-btn) {
+  border: 1px solid var(--border, #dbe3ef);
+  border-radius: 8px;
+  background: color-mix(in oklab, var(--surface, #fff) 88%, var(--bg, #f8fafc));
+  color: var(--text-h, #1e293b);
+}
+
+:is(.genre-type-btn, .genre-parent-btn, .genre-sub-btn):hover {
+  border-color: color-mix(in oklab, var(--accent, #2563eb) 38%, var(--border, #dbe3ef));
+  background: color-mix(in oklab, var(--accent, #2563eb) 8%, var(--surface, #fff));
+}
+
+:is(.genre-type-btn.active, .genre-parent-btn.active, .genre-sub-btn.active) {
+  border-color: color-mix(in oklab, var(--accent, #2563eb) 62%, var(--border, #dbe3ef));
+  background: color-mix(in oklab, var(--accent, #2563eb) 12%, var(--surface, #fff));
+  color: var(--accent, #2563eb);
+}
+
+.genre-selector-actions {
+  border-top-color: var(--border, #dbe3ef);
+}
+
+.genre-selector-close {
+  border: 1px solid var(--accent, #2563eb);
+  border-radius: 8px;
+  background: var(--accent, #2563eb);
+  color: #fff;
+  font-weight: 600;
+}
+
+.genre-selector-close:hover {
+  background: var(--accent-hover, #1d4ed8);
+}
+
+:is(.genre-selector-trigger, .filter-select, .genre-type-btn, .genre-parent-btn, .genre-selector-close):focus-visible {
+  outline: 2px solid color-mix(in oklab, var(--accent, #2563eb) 60%, transparent);
+  outline-offset: 2px;
+}
+
 /* 响应式 */
 @media (max-width: 480px) {
   .genre-selector-panel {

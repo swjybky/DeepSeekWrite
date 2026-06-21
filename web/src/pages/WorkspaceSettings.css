@@ -11,7 +11,7 @@
 
 .workspace-settings-header {
   display: grid;
-  grid-template-columns: 160px 1fr 120px;
+  grid-template-columns: 160px minmax(0, 1fr) auto;
   align-items: center;
   gap: 1rem;
   padding: 1.25rem 1.5rem;
@@ -32,6 +32,22 @@
   margin-top: 0.25rem;
   color: #64748b;
   font-size: 0.875rem;
+}
+
+.workspace-settings-title-block {
+  min-width: 0;
+}
+
+.workspace-settings-title-block p {
+  display: inline-block;
+}
+
+.workspace-settings-title-block .workspace-settings-save-state {
+  display: inline-block;
+  justify-self: auto;
+  margin-left: 0.55rem;
+  text-align: left;
+  vertical-align: baseline;
 }
 
 .workspace-settings-back,

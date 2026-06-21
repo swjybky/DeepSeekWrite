@@ -70,6 +70,12 @@ export function WorkspaceBookHeader({
               {error ?? message}
             </span>
           ) : null}
+          <span
+            className={`workspace-settings-save-state workspace-settings-save-state--${autoSaveStatus}`}
+            aria-live="polite"
+          >
+            {autoSaveStatusLabel(autoSaveStatus)}
+          </span>
         </span>
       </div>
       <div className="editor-header-actions">
@@ -134,12 +140,6 @@ export function WorkspaceBookHeader({
         >
           技能库选择
         </button>
-        <span
-          className={`workspace-settings-save-state workspace-settings-save-state--${autoSaveStatus}`}
-          aria-live="polite"
-        >
-          {autoSaveStatusLabel(autoSaveStatus)}
-        </span>
         <button
           type="button"
           className={

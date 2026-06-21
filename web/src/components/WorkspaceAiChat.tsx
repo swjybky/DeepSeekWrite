@@ -3,7 +3,6 @@ import { Agent } from '@earendil-works/pi-agent-core'
 import {
   ApiKeyPromptDialog,
   ChatPanel,
-  loadAttachment,
   ModelSelector,
   type Attachment,
 } from '@earendil-works/pi-web-ui'
@@ -46,32 +45,16 @@ import {
 import {
   resolveWorkspaceAgentReadAccess as resolveScriptWorkspaceAgentReadAccess,
 } from '../workspaces/script/stageReadAccess'
+import {
+  isWorkspaceSupportedAttachment,
+  loadWorkspaceAttachment,
+  WORKSPACE_ATTACHMENT_ACCEPTED_TYPES,
+  WORKSPACE_ATTACHMENT_SUPPORTED_LABEL,
+} from '../utils/documentText'
+import { useAppDialog } from './useAppDialog'
+import type { AppDialogOptions } from './AppDialog'
 
 const ARTIFACTS_TOOL_NAME = 'artifacts'
-const WORD_ATTACHMENT_EXTENSIONS = ['.docx']
-const LEGACY_WORD_ATTACHMENT_EXTENSIONS = ['.doc']
-const WORD_ATTACHMENT_MIME_TYPES = [
-  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-]
-const LEGACY_WORD_ATTACHMENT_MIME_TYPES = ['application/msword']
-const EXCEL_ATTACHMENT_EXTENSIONS = ['.xlsx', '.xls']
-const EXCEL_ATTACHMENT_MIME_TYPES = [
-  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-  'application/vnd.ms-excel',
-]
-const TEXT_ATTACHMENT_EXTENSIONS = ['.txt', '.md']
-const TEXT_ATTACHMENT_MIME_TYPES = ['text/plain', 'text/markdown', 'text/x-markdown']
-const WORKSPACE_ATTACHMENT_ACCEPTED_TYPES = [
-  'image/*',
-  ...WORD_ATTACHMENT_EXTENSIONS,
-  ...LEGACY_WORD_ATTACHMENT_EXTENSIONS,
-  ...WORD_ATTACHMENT_MIME_TYPES,
-  ...LEGACY_WORD_ATTACHMENT_MIME_TYPES,
-  ...EXCEL_ATTACHMENT_EXTENSIONS,
-  ...EXCEL_ATTACHMENT_MIME_TYPES,
-  ...TEXT_ATTACHMENT_EXTENSIONS,
-  ...TEXT_ATTACHMENT_MIME_TYPES,
-].join(',')
 const WORKSPACE_ATTACHMENT_MAX_FILES = 10
 
 function resolvePromptReadAccess(
@@ -84,9 +67,11 @@ function resolvePromptReadAccess(
     : resolveWorkspaceAgentReadAccess(config, agentId)
 }
 const WORKSPACE_ATTACHMENT_MAX_FILE_SIZE = 20 * 1024 * 1024
-const WORKSPACE_ATTACHMENT_SUPPORTED_LABEL =
-  'Word（.doc/.docx）、Excel（.xlsx/.xls）、TXT、Markdown、图片'
 const WORKSPACE_SEND_VALIDATION_ERROR_NAME = 'WriteClawSendValidationError'
+
+type ShowWorkspaceAlert = (
+  options: Omit<AppDialogOptions, 'cancelText' | 'hideCancel'>,
+) => Promise<boolean>
 
 type MessageEditorElement = HTMLElement & {
   attachments?: Attachment[]
@@ -121,132 +106,10 @@ function isWorkspaceSendValidationError(error: unknown): error is Error {
   )
 }
 
-function hasAttachmentExtension(fileName: string, extensions: string[]): boolean {
-  return extensions.some((ext) => fileName.endsWith(ext))
-}
-
-function isLegacyWordAttachmentName(fileName: string): boolean {
-  return hasAttachmentExtension(fileName.toLowerCase(), LEGACY_WORD_ATTACHMENT_EXTENSIONS)
-}
-
-function isLegacyWordFile(file: File): boolean {
-  return (
-    isLegacyWordAttachmentName(file.name) ||
-    LEGACY_WORD_ATTACHMENT_MIME_TYPES.includes(file.type)
-  )
-}
-
-function arrayBufferToBase64(arrayBuffer: ArrayBuffer): string {
-  const bytes = new Uint8Array(arrayBuffer)
-  const chunkSize = 0x8000
-  let binary = ''
-  for (let i = 0; i < bytes.length; i += chunkSize) {
-    binary += String.fromCharCode(...bytes.slice(i, i + chunkSize))
-  }
-  return btoa(binary)
-}
-
-function isReadableDocCodePoint(code: number): boolean {
-  return (
-    code === 9 ||
-    code === 10 ||
-    code === 13 ||
-    (code >= 0x20 && code <= 0x7e) ||
-    (code >= 0x3000 && code <= 0x303f) ||
-    (code >= 0x3400 && code <= 0x9fff) ||
-    (code >= 0xf900 && code <= 0xfaff) ||
-    (code >= 0xff00 && code <= 0xffef)
-  )
-}
-
-function collectReadableRuns(text: string, minLength: number): string[] {
-  const runs: string[] = []
-  let current = ''
-  for (const char of text) {
-    if (isReadableDocCodePoint(char.codePointAt(0) ?? 0)) {
-      current += char
-    } else {
-      if (current.trim().length >= minLength) runs.push(current)
-      current = ''
-    }
-  }
-  if (current.trim().length >= minLength) runs.push(current)
-  return runs
-}
-
-function collectUtf16ReadableRuns(bytes: Uint8Array, offset: number): string[] {
-  let text = ''
-  for (let i = offset; i + 1 < bytes.length; i += 2) {
-    text += String.fromCharCode(bytes[i] | (bytes[i + 1] << 8))
-  }
-  return collectReadableRuns(text, 4)
-}
-
-function normalizeLegacyDocText(runs: string[]): string {
-  const seen = new Set<string>()
-  const lines: string[] = []
-  for (const run of runs) {
-    const normalizedLines = run
-      .split('\u0000')
-      .join('')
-      .replace(/\u00a0/g, ' ')
-      .replace(/[ \t]+/g, ' ')
-      .split(/\r?\n+/)
-      .map((line) => line.trim())
-      .filter((line) => line.length >= 2)
-
-    for (const line of normalizedLines) {
-      if (seen.has(line)) continue
-      seen.add(line)
-      lines.push(line)
-    }
-  }
-  return lines.join('\n')
-}
-
-function extractLegacyWordText(arrayBuffer: ArrayBuffer): string {
-  const bytes = new Uint8Array(arrayBuffer)
-  const runs = [
-    ...collectUtf16ReadableRuns(bytes, 0),
-    ...collectUtf16ReadableRuns(bytes, 1),
-  ]
-
-  try {
-    runs.push(...collectReadableRuns(new TextDecoder('gb18030').decode(bytes), 6))
-  } catch {
-    runs.push(...collectReadableRuns(new TextDecoder().decode(bytes), 6))
-  }
-
-  return normalizeLegacyDocText(runs)
-}
-
-async function loadLegacyWordAttachment(file: File): Promise<Attachment> {
-  const arrayBuffer = await file.arrayBuffer()
-  const extractedBody = extractLegacyWordText(arrayBuffer)
-  if (!extractedBody.trim()) {
-    throw new Error('无法从 .doc 文件中提取可读文字，请另存为 .docx 后再上传。')
-  }
-  return {
-    id: `${file.name}_${Date.now()}_${Math.random()}`,
-    type: 'document',
-    fileName: file.name,
-    mimeType: 'application/msword',
-    size: file.size,
-    content: arrayBufferToBase64(arrayBuffer),
-    extractedText: `<doc filename="${file.name}">\n${extractedBody}\n</doc>`,
-  }
-}
-
-function loadWorkspaceAttachment(file: File): Promise<Attachment> {
-  if (isLegacyWordFile(file)) {
-    return loadLegacyWordAttachment(file)
-  }
-  return loadAttachment(file)
-}
-
 async function addWorkspaceAttachmentFiles(
   editor: MessageEditorElement,
   files: File[],
+  showAlert: ShowWorkspaceAlert,
 ) {
   if (files.length === 0) return
 
@@ -254,7 +117,10 @@ async function addWorkspaceAttachmentFiles(
   const maxFileSize = editor.maxFileSize ?? WORKSPACE_ATTACHMENT_MAX_FILE_SIZE
   const currentAttachments = editor.attachments ?? []
   if (files.length + currentAttachments.length > maxFiles) {
-    window.alert(`最多可上传 ${maxFiles} 个文件`)
+    await showAlert({
+      title: '文件数量超限',
+      message: `最多可上传 ${maxFiles} 个文件。`,
+    })
     return
   }
 
@@ -265,23 +131,30 @@ async function addWorkspaceAttachmentFiles(
   for (const file of files) {
     try {
       if (file.size > maxFileSize) {
-        window.alert(
-          `${file.name} 超过 ${Math.round(maxFileSize / 1024 / 1024)}MB 限制`,
-        )
+        await showAlert({
+          title: '文件过大',
+          message: `${file.name} 超过 ${Math.round(maxFileSize / 1024 / 1024)}MB 限制。`,
+        })
         continue
       }
 
       const attachment = await loadWorkspaceAttachment(file)
       if (!isWorkspaceSupportedAttachment(attachment)) {
-        window.alert(`当前仅支持上传${WORKSPACE_ATTACHMENT_SUPPORTED_LABEL}。\n不支持：${file.name}`)
+        await showAlert({
+          title: '不支持的附件格式',
+          message: `当前仅支持上传${WORKSPACE_ATTACHMENT_SUPPORTED_LABEL}。`,
+          details: `不支持：${file.name}`,
+        })
         continue
       }
       newAttachments.push(attachment)
     } catch (error) {
       console.error(`Error processing ${file.name}:`, error)
-      window.alert(
-        `处理 ${file.name} 失败：${error instanceof Error ? error.message : String(error)}`,
-      )
+      await showAlert({
+        title: '处理附件失败',
+        message: `处理 ${file.name} 失败。`,
+        details: error instanceof Error ? error.message : String(error),
+      })
     }
   }
 
@@ -293,13 +166,16 @@ async function addWorkspaceAttachmentFiles(
   editor.requestUpdate?.()
 }
 
-function installWorkspaceAttachmentLoader(editor: MessageEditorElement) {
+function installWorkspaceAttachmentLoader(
+  editor: MessageEditorElement,
+  showAlert: ShowWorkspaceAlert,
+) {
   if (editor.__writeClawWorkspaceAttachmentLoader) return
 
   editor.handleFilesSelected = async (event: Event) => {
     event.stopImmediatePropagation()
     const input = event.target as HTMLInputElement
-    await addWorkspaceAttachmentFiles(editor, Array.from(input.files ?? []))
+    await addWorkspaceAttachmentFiles(editor, Array.from(input.files ?? []), showAlert)
     input.value = ''
   }
   editor.handleDrop = async (event: DragEvent) => {
@@ -309,6 +185,7 @@ function installWorkspaceAttachmentLoader(editor: MessageEditorElement) {
     await addWorkspaceAttachmentFiles(
       editor,
       Array.from(event.dataTransfer?.files ?? []),
+      showAlert,
     )
   }
   editor.__writeClawWorkspaceAttachmentLoader = true
@@ -329,35 +206,13 @@ function getMessageEditor(chatPanel: ChatPanel | null): MessageEditorElement | n
   ) as MessageEditorElement | null
 }
 
-function isWorkspaceSupportedAttachment(attachment: Attachment): boolean {
-  const fileName = attachment.fileName.toLowerCase()
-  if (attachment.type === 'image' || attachment.mimeType.startsWith('image/')) {
-    return true
-  }
-  if (hasAttachmentExtension(fileName, WORD_ATTACHMENT_EXTENSIONS)) {
-    return true
-  }
-  if (hasAttachmentExtension(fileName, LEGACY_WORD_ATTACHMENT_EXTENSIONS)) {
-    return true
-  }
-  if (hasAttachmentExtension(fileName, EXCEL_ATTACHMENT_EXTENSIONS)) {
-    return true
-  }
-  if (hasAttachmentExtension(fileName, TEXT_ATTACHMENT_EXTENSIONS)) {
-    return true
-  }
-  return [
-    ...WORD_ATTACHMENT_MIME_TYPES,
-    ...LEGACY_WORD_ATTACHMENT_MIME_TYPES,
-    ...EXCEL_ATTACHMENT_MIME_TYPES,
-    ...TEXT_ATTACHMENT_MIME_TYPES,
-  ].includes(attachment.mimeType)
-}
-
-function applyWorkspaceAttachmentOptions(chatPanel: ChatPanel | null): boolean {
+function applyWorkspaceAttachmentOptions(
+  chatPanel: ChatPanel | null,
+  showAlert: ShowWorkspaceAlert,
+): boolean {
   const editor = getMessageEditor(chatPanel)
   if (!editor) return false
-  installWorkspaceAttachmentLoader(editor)
+  installWorkspaceAttachmentLoader(editor, showAlert)
   editor.acceptedTypes = WORKSPACE_ATTACHMENT_ACCEPTED_TYPES
   editor.maxFiles = WORKSPACE_ATTACHMENT_MAX_FILES
   editor.maxFileSize = WORKSPACE_ATTACHMENT_MAX_FILE_SIZE
@@ -365,11 +220,14 @@ function applyWorkspaceAttachmentOptions(chatPanel: ChatPanel | null): boolean {
   return true
 }
 
-function configureWorkspaceAttachmentOptions(chatPanel: ChatPanel | null) {
-  if (applyWorkspaceAttachmentOptions(chatPanel)) return
+function configureWorkspaceAttachmentOptions(
+  chatPanel: ChatPanel | null,
+  showAlert: ShowWorkspaceAlert,
+) {
+  if (applyWorkspaceAttachmentOptions(chatPanel, showAlert)) return
   requestAnimationFrame(() => {
-    if (applyWorkspaceAttachmentOptions(chatPanel)) return
-    requestAnimationFrame(() => applyWorkspaceAttachmentOptions(chatPanel))
+    if (applyWorkspaceAttachmentOptions(chatPanel, showAlert)) return
+    requestAnimationFrame(() => applyWorkspaceAttachmentOptions(chatPanel, showAlert))
   })
 }
 
@@ -542,6 +400,7 @@ function WorkspaceAiChatInner({
   workspaceType = 'book',
   ...props
 }: Props) {
+  const { alert: showAlert, dialog } = useAppDialog()
   const hostRef = useRef<HTMLDivElement>(null)
   const agentRef = useRef<Agent | null>(null)
   const chatPanelRef = useRef<ChatPanel | null>(null)
@@ -915,10 +774,11 @@ function WorkspaceAiChatInner({
             (attachment) => !isWorkspaceSupportedAttachment(attachment),
           )
           if (unsupported.length > 0) {
-            window.alert(
-              `当前仅支持上传${WORKSPACE_ATTACHMENT_SUPPORTED_LABEL}。` +
-                `\n不支持：${unsupported.map((a) => a.fileName).join('、')}`,
-            )
+            await showAlert({
+              title: '不支持的附件格式',
+              message: `当前仅支持上传${WORKSPACE_ATTACHMENT_SUPPORTED_LABEL}。`,
+              details: `不支持：${unsupported.map((a) => a.fileName).join('、')}`,
+            })
             throw new WorkspaceSendValidationError(
               'Unsupported workspace attachment type',
             )
@@ -931,9 +791,11 @@ function WorkspaceAiChatInner({
           )
           if (hasImage && !agent.state.model?.input?.includes('image')) {
             const modelName = agent.state.model?.id ?? '当前模型'
-            window.alert(
-              `${modelName} 不支持图片输入。请先切换到支持视觉/图片输入的模型，再发送图片附件。`,
-            )
+            await showAlert({
+              title: '当前模型不支持图片',
+              message: `${modelName} 不支持图片输入。`,
+              details: '请先切换到支持视觉/图片输入的模型，再发送图片附件。',
+            })
             throw new WorkspaceSendValidationError(
               'Current model does not support image attachments',
             )
@@ -958,7 +820,7 @@ function WorkspaceAiChatInner({
         toolsFactory: ctxTools,
       })
       installWorkspaceSendValidationGuard(chatPanel)
-      configureWorkspaceAttachmentOptions(chatPanel)
+      configureWorkspaceAttachmentOptions(chatPanel, showAlert)
 
       if (!includePiArtifacts) {
         agent.state.tools = (agent.state.tools ?? []).filter(
@@ -1145,7 +1007,12 @@ function WorkspaceAiChatInner({
     workspaceType,
   ])
 
-  return <div ref={hostRef} className="workspace-ai-chat-host" />
+  return (
+    <>
+      {dialog}
+      <div ref={hostRef} className="workspace-ai-chat-host" />
+    </>
+  )
 }
 
 /**

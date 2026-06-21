@@ -36,6 +36,15 @@ const RAW_SKILL_LEGACY = import.meta.glob('../../../app/prompt_defaults/skill/*/
   import: 'default',
 })
 
+const RAW_LEARNING_IMITATION = import.meta.glob(
+  '../../../app/prompt_defaults/learning_imitation/shared/*.txt',
+  {
+    eager: true,
+    query: '?raw',
+    import: 'default',
+  },
+)
+
 function normalizeGlobKey(importPath: string): string | null {
   const up = importPath.replace(/\\/g, '/')
   // short: prompt_defaults/short/shared/xxx.txt → shared/xxx
@@ -63,6 +72,10 @@ function normalizeGlobKey(importPath: string): string | null {
     /prompt_defaults\/skill\/shared\/skill_manager\.txt$/i,
   )
   if (skillManagerM) return 'skill_manager/skill_manager'
+  const learningImitationM = up.match(
+    /prompt_defaults\/learning_imitation\/shared\/(.+)\.txt$/i,
+  )
+  if (learningImitationM) return `learning_imitation/${learningImitationM[1]}`
   // material: prompt_defaults/material/short_shiqing/xxx.txt → material_short_shiqing/xxx
   const materialM = up.match(/prompt_defaults\/material\/(.+)\.txt$/i)
   if (materialM) return `material_${materialM[1]}`
@@ -77,6 +90,7 @@ for (const [k, v] of Object.entries({
   ...RAW_MATERIAL_TYPED,
   ...RAW_SKILL_LEGACY,
   ...RAW_SKILL_TYPED,
+  ...RAW_LEARNING_IMITATION,
 })) {
   const nk = normalizeGlobKey(k)
   if (!nk || typeof v !== 'string') continue

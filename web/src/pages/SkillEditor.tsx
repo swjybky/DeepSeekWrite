@@ -8,6 +8,7 @@ import {
   type SkillStageEntry,
   type SkillStageId,
   getSkill,
+  loadCommonSkillsToSkill,
   normalizeSkillStages,
   saveSkill,
   skillTypeLabel,
@@ -15,6 +16,7 @@ import {
 import { WorkspaceAiChat } from '../components/WorkspaceAiChat'
 import { WorkspaceTreeNav } from '../components/WorkspaceTreeNav'
 import { MarkdownTextEditor } from '../components/MarkdownTextEditor'
+import { useAppDialog } from '../components/useAppDialog'
 import type { ApplyToStageEditorPayload } from '../pi/workspaceStageAgents'
 import {
   autoSaveStatusLabel,
@@ -115,6 +117,7 @@ function stagesToPromptText(stages: SkillStages): Record<SkillStageId, string> {
 export function SkillEditor() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
+  const { alert: showAlert, confirm, dialog } = useAppDialog()
   const [skill, setSkill] = useState<Skill | null>(null)
   const [stages, setStages] = useState<SkillStages>(() => normalizeSkillStages({}))
   const [activeStage, setActiveStage] = useState<SkillStageId>('character_design')
@@ -122,7 +125,9 @@ export function SkillEditor() {
     Partial<Record<SkillStageId, string>>
   >({})
   const [loading, setLoading] = useState(true)
+  const [message, setMessage] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [loadingCommonSkills, setLoadingCommonSkills] = useState(false)
   const [aiPanelWidth, setAiPanelWidth] = useState(readStoredAiWidth)
   const [aiChatEpoch, setAiChatEpoch] = useState(0)
   const [editorStreaming, setEditorStreaming] = useState(false)
@@ -440,6 +445,63 @@ export function SkillEditor() {
     navigate('/')
   }, [flushAutoSave, navigate])
 
+  const handleLoadCommonSkills = useCallback(async () => {
+    if (!id || loadingCommonSkills) return
+    const ok = await confirm({
+      title: '加载通用技能',
+      message: '将项目通用技能加载到当前技能库。已加载过的通用技能不会重复添加。',
+      confirmText: '加载',
+    })
+    if (!ok) return
+    setLoadingCommonSkills(true)
+    setError(null)
+    setMessage(null)
+    try {
+      const saved = await flushAutoSave()
+      if (!saved) {
+        setError('当前技能库保存失败，请处理后再加载通用技能。')
+        return
+      }
+      const result = await loadCommonSkillsToSkill(id)
+      if (!result) {
+        setError('加载失败：技能库不存在')
+        return
+      }
+      syncSkillState(result.skill)
+      markSkillSaved(result.skill.id)
+      if (result.available_count === 0) {
+        await showAlert({
+          title: '暂无通用技能',
+          message: '请先在技能库设置中配置通用技能，再回到当前技能库加载。',
+        })
+        setMessage('暂无可加载的通用技能')
+        return
+      }
+      if (result.already_loaded || result.added_count === 0) {
+        await showAlert({
+          title: '无需重复加载',
+          message: '当前技能库已加载这些通用技能，不需要再次添加。',
+        })
+        setMessage('已加载，无需加载')
+        return
+      }
+      setMessage(`已加载 ${result.added_count} 条通用技能`)
+      window.setTimeout(() => setMessage(null), 2000)
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : '加载通用技能失败')
+    } finally {
+      setLoadingCommonSkills(false)
+    }
+  }, [
+    confirm,
+    flushAutoSave,
+    id,
+    loadingCommonSkills,
+    markSkillSaved,
+    showAlert,
+    syncSkillState,
+  ])
+
   const handleAddEntry = () => {
     const stageId = activeStageRef.current
     const entry = newStageSkillEntry(stageId)
@@ -522,23 +584,38 @@ export function SkillEditor() {
               {' · '}
               {stageLabel}
             </span>
-            {error ? (
+            {error || message ? (
               <span
-                className="editor-header-flash editor-header-flash--error"
+                className={
+                  error
+                    ? 'editor-header-flash editor-header-flash--error'
+                    : 'editor-header-flash editor-header-flash--ok'
+                }
                 aria-live="polite"
               >
-                {error}
+                {error ?? message}
               </span>
             ) : null}
+            <span
+              className={`workspace-settings-save-state workspace-settings-save-state--${skillSaveStatus(id)}`}
+              aria-live="polite"
+            >
+              {autoSaveStatusLabel(skillSaveStatus(id))}
+            </span>
           </span>
         </div>
-        <span
-          className={`workspace-settings-save-state workspace-settings-save-state--${skillSaveStatus(id)}`}
-          aria-live="polite"
-        >
-          {autoSaveStatusLabel(skillSaveStatus(id))}
-        </span>
+        <div className="editor-header-actions">
+          <button
+            type="button"
+            className="editor-header-material-select"
+            disabled={loadingCommonSkills}
+            onClick={() => void handleLoadCommonSkills()}
+          >
+            {loadingCommonSkills ? '加载中...' : '加载通用技能'}
+          </button>
+        </div>
       </header>
+      {dialog}
 
       <div
         className="workspace-grid"
