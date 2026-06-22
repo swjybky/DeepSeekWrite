@@ -43,6 +43,7 @@ const WRITE_CLAW_TOOL_NAMES = [
   'create_character_state_sections',
   'initialize_expert_draft',
   'edit_expert_draft_section',
+  'write_single_expert_section',
   'start_expert_writing',
   'read_expert_draft_section',
   'replace_section_body_text',
@@ -201,6 +202,12 @@ function summarizeToolCall(
         return '正在编辑正文'
       }
       return '已编辑正文'
+    }
+    case 'write_single_expert_section': {
+      const sectionId = pickString(params, 'section_id')
+      return sectionId
+        ? verb('正在启动单章写作', '已启动单章写作') + `「${sectionId}」`
+        : verb('正在启动单章写作', '已启动单章写作')
     }
     case 'start_expert_writing':
       return verb('正在启动专家分节写作', '已启动专家分节写作')

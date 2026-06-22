@@ -59,7 +59,7 @@ export const BUILTIN_FREE_TEXT_MODEL_ID = 'deppseekwrite-free'
 
 const BUILTIN_FREE_TEXT_MODEL: AiModelConfig = {
   id: BUILTIN_FREE_TEXT_MODEL_ID,
-  label: 'DeepSeek V4 Flash',
+  label: 'Deepseek V4 Flash Free',
   provider: 'deepseek',
   model_id: 'deepseek-v4-flash',
   api_key: 'sk-5852a9a14b0a47af9e23a1b86c561a84',

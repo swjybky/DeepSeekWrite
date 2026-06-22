@@ -222,6 +222,15 @@ export function workspaceModelIdentity(
   return `${requestModel.provider}:${requestModel.id}`
 }
 
+function workspaceModelConfigId(
+  model: Model<Api> | null | undefined,
+): string {
+  if (!model) return ''
+  return trimString(
+    (model as LegacyWorkspaceDisplayModel)[WORKSPACE_MODEL_CONFIG_ID_KEY],
+  )
+}
+
 export function workspaceModelDisplayName(
   model: Model<Api> | null | undefined,
 ): string {
@@ -469,10 +478,37 @@ export async function resolveWorkspaceProviderApiKey(
   }
 }
 
-/**
- * 桌面端：从 Python 读取本地固定模型配置，写入 Pi 的 provider API Key，
- * 并解析默认 Model。浏览器开发或未配置时回退 openai / gpt-4o-mini。
- */
+/** Resolve the API key for the selected configured model before provider fallback. */
+export async function resolveWorkspaceModelApiKey(
+  model: Model<Api> | null | undefined,
+  provider?: string,
+): Promise<string | undefined> {
+  const configId = workspaceModelConfigId(model)
+  if (configId) {
+    try {
+      const configured = await loadConfiguredModels()
+      const match = configured?.configs.find(
+        (config) => config.id.toLowerCase() === configId.toLowerCase(),
+      )
+      if (match?.api_key.trim()) return match.api_key.trim()
+    } catch {
+      // fall through to provider lookup
+    }
+  }
+
+  const fallbackProvider = trimString(provider) || trimString(model?.provider)
+  if (!fallbackProvider) return undefined
+  return resolveWorkspaceProviderApiKey(fallbackProvider)
+}
+
+export function createWorkspaceModelApiKeyResolver(
+  getCurrentModel: () => Model<Api> | null | undefined,
+): (provider: string) => Promise<string | undefined> {
+  return (provider: string) =>
+    resolveWorkspaceModelApiKey(getCurrentModel(), provider)
+}
+
+/** Resolve the configured default chat model. */
 export async function resolveWorkspaceChatModel(): Promise<Model<Api>> {
   const fallback = getModel('openai', 'gpt-4o-mini')
   try {

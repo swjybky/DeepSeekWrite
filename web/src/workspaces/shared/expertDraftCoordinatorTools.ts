@@ -58,6 +58,21 @@ function normalizeSectionId(
   return `${preferred}-${suffix}`
 }
 
+function formatAvailableSectionHint(draft: ExpertDraft): string {
+  const items = draft.sections.map((section) => `${section.title}（${section.id}）`)
+  return items.length > 0 ? `当前可用小节：${items.join('、')}。` : ''
+}
+
+function missingSectionMessage(
+  sectionIds: string[],
+  draft: ExpertDraft,
+): string {
+  const missing = sectionIds.filter(Boolean).join('、')
+  const target = missing ? `未找到正文小节：${missing}。` : '没有找到可写的小节。'
+  const available = formatAvailableSectionHint(draft)
+  return `未启动：${target}请先使用 initialize_expert_draft 初始化正文小节列表，或从已初始化的小节中选择有效 id。${available}`
+}
+
 function buildCharacterStatesForSections(
   sections: ExpertDraftSection[],
   items: Array<{ character_state_body?: string }>,
@@ -76,6 +91,50 @@ function buildCharacterStatesForSections(
       title: old?.title || defaultStateTitle(section.title),
       body,
     }
+  })
+}
+
+export function buildWriteSingleExpertSectionTool(
+  ctx: ExpertDraftCoordinatorCoreToolContext,
+): AgentTool {
+  return defineTool({
+    name: 'write_single_expert_section',
+    label: '单章写作',
+    description:
+      '单独启动一个分节写手智能体，只编写传入的一个小节。内部复用 start_expert_writing 的分节写手流程和用户写作提示组织方式，因此 user_writing_prompt 的填写规则与批量开始写书完全一致。启动前会检查该小节是否已经由 initialize_expert_draft 初始化；如果不存在，会提醒先初始化正文小节列表。',
+    parameters: Type.Object({
+      section_id: Type.String({
+        description:
+          '要单独编写的小节 id，必须来自已初始化的正文列表，如 section-1。不要传章节标题。',
+      }),
+      user_writing_prompt: Type.Optional(
+        Type.String({
+          description:
+            '用户写作提示：用户希望本章节继承的文风、情绪、爽点、节奏、人设表达或其它写作倾向；填写方式与 start_expert_writing 相同，没有明确要求可留空。',
+        }),
+      ),
+    }),
+    execute: async (_id, params) => {
+      const draft = ctx.getDraft()
+      const sectionId = String(params.section_id ?? '').trim()
+      if (!sectionId) {
+        return textBlock(missingSectionMessage([], draft))
+      }
+      const section = draft.sections.find((item) => item.id === sectionId)
+      if (!section) {
+        return textBlock(missingSectionMessage([sectionId], draft))
+      }
+      const started = ctx.startWriting({
+        sectionIds: [section.id],
+        userWritingPrompt: String(params.user_writing_prompt ?? '').trim(),
+      })
+      return textBlock(
+        started
+          ? `调用成功，正在单独编写「${section.title}」。后台小节智能体会写回该章节正文和人物状态。`
+          : '未启动：当前已经有后台分节写作任务在运行。',
+      )
+    },
+    executionMode: 'sequential',
   })
 }
 
@@ -170,7 +229,7 @@ export function buildEditExpertDraftSectionTool(
     name: 'edit_expert_draft_section',
     label: '编辑正文',
     description:
-      `专家正文编辑替换工具：直接对当前专家正文编辑区（draft 阶段合并视图）替换章节名称或正文片段。${REPLACEMENT_ARGUMENTS_EXAMPLE}章节名称与分节结构已建立映射，直接把当前章节名替换为新章节名后，左侧章节树和对应分节会同步更新，不需要重新初始化。修改前请先调用 read_workspace_content（stage_id=draft）读取当前正文，再从返回正文中原样复制待改章节名或正文片段到 original_text。总控不负责修改人物状态。不要用它重建小节列表；不要为了局部修改重新调用 start_expert_writing，除非用户明确要求重写或重跑分节写作。`,
+      `专家正文编辑替换工具：直接对当前专家正文编辑区（draft 阶段合并视图）替换章节名称或正文片段。${REPLACEMENT_ARGUMENTS_EXAMPLE}章节名称与分节结构已建立映射，直接把当前章节名替换为新章节名后，左侧章节树和对应分节会同步更新，不需要重新初始化。修改前请先调用 read_workspace_content（stage_id=draft）读取当前正文，再从返回正文中原样复制待改章节名或正文片段到 original_text。总控不负责修改人物状态。不要用它重建小节列表；不要为了局部修改重新调用 start_expert_writing 或 write_single_expert_section，除非用户明确要求重写或重跑分节写作。`,
     parameters: Type.Object({
       replacements: Type.Array(
         Type.Object({
@@ -225,7 +284,7 @@ export function buildStartExpertWritingTool(
     name: 'start_expert_writing',
     label: '开始写书',
     description:
-      '异步启动分节写手智能体。工具会立即返回，后台会按传入 section_ids 串行写入正文和人物状态。它不是已有正文的修改工具；当用户要求修改、润色、去 AI 味或局部替换已有正文时，使用 edit_expert_draft_section，不要重新启动分节写作，除非用户明确要求重写/重跑小节。',
+      '异步启动分节写手智能体。工具会立即返回，后台会按传入 section_ids 串行写入正文和人物状态。启动前会检查小节是否已初始化；如果传入的小节 id 不存在，会提醒先使用 initialize_expert_draft 初始化。它不是已有正文的修改工具；当用户要求修改、润色、去 AI 味或局部替换已有正文时，使用 edit_expert_draft_section，不要重新启动分节写作，除非用户明确要求重写/重跑小节。只写单个章节时优先使用 write_single_expert_section。',
     parameters: Type.Object({
       section_ids: Type.Optional(
         Type.Array(
@@ -246,12 +305,17 @@ export function buildStartExpertWritingTool(
       const defaultIds = ctx.skipIntroByDefault
         ? draft.sections.filter((s) => s.id !== 'intro').map((s) => s.id)
         : draft.sections.map((s) => s.id)
-      const ids = (params.section_ids?.length ? params.section_ids : defaultIds)
-        .map((id) => String(id).trim())
-        .filter(Boolean)
-      const valid = ids.filter((id) => draft.sections.some((s) => s.id === id))
+      const explicitIds =
+        params.section_ids?.map((id) => String(id).trim()).filter(Boolean) ?? []
+      const ids = explicitIds.length > 0 ? explicitIds : defaultIds
+      const available = new Set(draft.sections.map((s) => s.id))
+      const missing = explicitIds.filter((id) => !available.has(id))
+      if (missing.length > 0) {
+        return textBlock(missingSectionMessage(missing, draft))
+      }
+      const valid = ids.filter((id) => available.has(id))
       if (valid.length === 0) {
-        return textBlock('未启动：没有可写的小节。')
+        return textBlock(missingSectionMessage(ids, draft))
       }
       const started = ctx.startWriting({
         sectionIds: valid,
@@ -273,6 +337,7 @@ export function buildExpertDraftCoordinatorCoreTools(
   return [
     buildInitializeExpertDraftTool(ctx),
     buildEditExpertDraftSectionTool(ctx),
+    buildWriteSingleExpertSectionTool(ctx),
     buildStartExpertWritingTool(ctx),
   ]
 }

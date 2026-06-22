@@ -11,8 +11,8 @@ import {
   type StageId,
 } from '../../../bridge'
 import {
+  createWorkspaceModelApiKeyResolver,
   openWorkspaceConfiguredModelSelector,
-  resolveWorkspaceProviderApiKey,
   syncWorkspaceModelButtonLabel,
 } from '../../../pi/resolveWorkspaceChatModel'
 import { convertToLlmWithSkillAsUser } from '../../../pi/skillMessageTransform'
@@ -200,7 +200,7 @@ function stripArtifacts(tools: AgentTool[]): AgentTool[] {
 export function ExpertDraftAiChat(props: Props) {
   const hostRef = useRef<HTMLDivElement>(null)
   const coordinatorAgentRef = useRef<Agent | null>(null)
-  const sectionWriterAgentsRef = useRef<Map<string, Agent>>(new Map())
+  const sectionWriterAgentRef = useRef<Agent | null>(null)
   const chatPanelRef = useRef<ChatPanel | null>(null)
   const propsLatestRef = useRef(props)
   const coordinatorPromptTemplateRef = useRef('')
@@ -212,7 +212,7 @@ export function ExpertDraftAiChat(props: Props) {
   const switchToSectionWriterRef = useRef<
     ((sectionId: string) => Promise<void>) | null
   >(null)
-  const backgroundWriterLockRef = useRef(false)
+  const backgroundWriterActiveRef = useRef(false)
   const activePanelKindRef = useRef<'coordinator' | 'section-writer'>(
     'coordinator',
   )
@@ -266,39 +266,47 @@ export function ExpertDraftAiChat(props: Props) {
     })
   }, [])
 
+  const showSelectedPanel = useCallback(async () => {
+    const sectionId = propsLatestRef.current.expertDraft.active_section_id
+    if (sectionId) {
+      const runningAgent = sectionWriterAgentRef.current
+      if (backgroundWriterActiveRef.current && runningAgent) {
+        activePanelKindRef.current = 'section-writer'
+        bindActiveAgentUi(runningAgent)
+        await setPanelAgentRef.current?.(runningAgent, () =>
+          stripArtifacts(runningAgent.state.tools),
+        )
+        return
+      }
+      await switchToSectionWriterRef.current?.(sectionId)
+      return
+    }
+    await switchToCoordinatorRef.current?.()
+  }, [bindActiveAgentUi])
+
   const watchWriterAgent: RunExpertDraftSectionWriterOptions['onSectionAgentStart'] =
     useCallback(
       async ({ agent }) => {
-        backgroundWriterLockRef.current = true
-        activePanelKindRef.current = 'section-writer'
-
-        bindActiveAgentUi(agent)
-        await setPanelAgentRef.current?.(agent, () =>
-          stripArtifacts(agent.state.tools),
-        )
+        backgroundWriterActiveRef.current = true
+        sectionWriterAgentRef.current = agent
+        await showSelectedPanel()
       },
-      [bindActiveAgentUi],
+      [showSelectedPanel],
     )
 
   const finishWriterPreview: RunExpertDraftSectionWriterOptions['onRunFinish'] =
     useCallback(async () => {
-      backgroundWriterLockRef.current = false
-
-      const sectionId = propsLatestRef.current.expertDraft.active_section_id
-      if (sectionId) {
-        await switchToSectionWriterRef.current?.(sectionId)
-      } else {
-        await switchToCoordinatorRef.current?.()
-      }
-    }, [])
+      backgroundWriterActiveRef.current = false
+      await showSelectedPanel()
+    }, [showSelectedPanel])
 
   useEffect(() => {
     let cancelled = false
     let resizeObserver: ResizeObserver | undefined
     let unsubscribePreferences: (() => void) | undefined
     let activePanelAgent: Agent | null = null
-    const sectionWriterAgents = new Map<string, Agent>()
-    sectionWriterAgentsRef.current = sectionWriterAgents
+    let sectionWriterAgent: Agent | null = null
+    sectionWriterAgentRef.current = null
 
     const currentCoordinatorTools = () =>
       buildExpertDraftCoordinatorTools(
@@ -328,7 +336,7 @@ export function ExpertDraftAiChat(props: Props) {
     }
 
     const refreshSectionWriterAgentState = (sectionId: string, draft: ExpertDraft) => {
-      const agent = sectionWriterAgentsRef.current.get(sectionId)
+      const agent = sectionWriterAgentRef.current
       const section = draft.sections.find((item) => item.id === sectionId)
       if (!agent || !section) return
       const p = propsLatestRef.current
@@ -406,7 +414,9 @@ export function ExpertDraftAiChat(props: Props) {
             : undefined,
         ),
         convertToLlm: convertToLlmWithSkillAsUser,
-        getApiKey: resolveWorkspaceProviderApiKey,
+        getApiKey: createWorkspaceModelApiKeyResolver(
+          () => coordinatorAgentRef.current?.state.model ?? initialModel,
+        ),
         streamFn: createWorkspaceStreamFn(),
         toolExecution: 'sequential',
         initialState: {
@@ -477,19 +487,27 @@ export function ExpertDraftAiChat(props: Props) {
         await setPanelAgent(agent, currentCoordinatorTools)
       }
 
-      const ensureSectionWriterAgent = async (sectionId: string) => {
-        let agent = sectionWriterAgents.get(sectionId)
-        if (agent) return agent
+      const ensureSectionWriterAgent = async () => {
+        if (sectionWriterAgentRef.current) {
+          sectionWriterAgent = sectionWriterAgentRef.current
+          return sectionWriterAgent
+        }
+        if (sectionWriterAgent) return sectionWriterAgent
         const model = await resolvePreferredWorkspaceChatModel()
-        agent = new Agent({
+        const agent = new Agent({
           sessionId: createPiSessionId(
             'expert-draft-writer',
             propsLatestRef.current.bookId,
             'shared',
-            sectionId,
+            propsLatestRef.current.sessionEpoch &&
+              propsLatestRef.current.sessionEpoch > 0
+              ? propsLatestRef.current.sessionEpoch
+              : undefined,
           ),
           convertToLlm: convertToLlmWithSkillAsUser,
-          getApiKey: resolveWorkspaceProviderApiKey,
+          getApiKey: createWorkspaceModelApiKeyResolver(
+            () => sectionWriterAgent?.state.model ?? model,
+          ),
           streamFn: createWorkspaceStreamFn(),
           toolExecution: 'sequential',
           initialState: {
@@ -500,7 +518,8 @@ export function ExpertDraftAiChat(props: Props) {
             tools: [],
           },
         })
-        sectionWriterAgents.set(sectionId, agent)
+        sectionWriterAgent = agent
+        sectionWriterAgentRef.current = agent
         return agent
       }
 
@@ -512,7 +531,7 @@ export function ExpertDraftAiChat(props: Props) {
           await switchToCoordinator()
           return
         }
-        const agent = await ensureSectionWriterAgent(sectionId)
+        const agent = await ensureSectionWriterAgent()
         refreshSectionWriterAgentState(
           sectionId,
           propsLatestRef.current.expertDraft,
@@ -527,7 +546,8 @@ export function ExpertDraftAiChat(props: Props) {
       switchToCoordinatorRef.current = switchToCoordinator
       switchToSectionWriterRef.current = switchToSectionWriter
 
-      const initialSectionId = propsLatestRef.current.expertDraft.active_section_id
+      const initialDraft = propsLatestRef.current.expertDraft
+      const initialSectionId = initialDraft.active_section_id
       if (initialSectionId) {
         await switchToSectionWriter(initialSectionId)
       } else {
@@ -553,17 +573,15 @@ export function ExpertDraftAiChat(props: Props) {
       unsubscribeMessagesRefreshRef.current?.()
       unsubscribeMessagesRefreshRef.current = null
       unsubscribePreferences?.()
-      backgroundWriterLockRef.current = false
+      backgroundWriterActiveRef.current = false
       setPanelAgentRef.current = null
       switchToCoordinatorRef.current = null
       switchToSectionWriterRef.current = null
       coordinatorAgentRef.current?.abort()
       coordinatorAgentRef.current = null
-      for (const agent of sectionWriterAgents.values()) {
-        agent.abort()
-      }
-      sectionWriterAgents.clear()
-      sectionWriterAgentsRef.current = new Map()
+      ;(sectionWriterAgentRef.current ?? sectionWriterAgent)?.abort()
+      sectionWriterAgent = null
+      sectionWriterAgentRef.current = null
       chatPanelRef.current?.remove()
       chatPanelRef.current = null
     }
@@ -572,14 +590,9 @@ export function ExpertDraftAiChat(props: Props) {
   }, [])
 
   useEffect(() => {
-    if (!chatReady || backgroundWriterLockRef.current) return
-    const sectionId = props.expertDraft.active_section_id
-    if (sectionId) {
-      void switchToSectionWriterRef.current?.(sectionId)
-      return
-    }
-    void switchToCoordinatorRef.current?.()
-  }, [chatReady, props.expertDraft.active_section_id])
+    if (!chatReady) return
+    void showSelectedPanel()
+  }, [chatReady, props.expertDraft.active_section_id, showSelectedPanel])
 
   useEffect(() => {
     if (!chatReady || debouncedDraft.running) return
@@ -606,8 +619,8 @@ export function ExpertDraftAiChat(props: Props) {
     }
 
     const sectionId = debouncedDraft.active_section_id
-    if (!sectionId || backgroundWriterLockRef.current) return
-    const sectionAgent = sectionWriterAgentsRef.current.get(sectionId)
+    if (!sectionId) return
+    const sectionAgent = sectionWriterAgentRef.current
     const section = debouncedDraft.sections.find((item) => item.id === sectionId)
     if (!sectionAgent || !section) return
     const p = propsLatestRef.current

@@ -12,10 +12,10 @@ BUILTIN_IMAGE_MODEL_DEFAULTS: dict[str, str] = {
     "base_url": "https://sucloud.vip",
 }
 
-# 项目内置文字模型（DeepSeek V4 Flash，新用户未配置时自动使用）
+# 项目内置文字模型（Deepseek V4 Flash Free，新用户未配置时自动使用）
 BUILTIN_FREE_TEXT_MODEL: dict[str, str] = {
     "id": "deppseekwrite-free",
-    "label": "DeepSeek V4 Flash",
+    "label": "Deepseek V4 Flash Free",
     "provider": "deepseek",
     "model_id": "deepseek-v4-flash",
     "api_key": "sk-5852a9a14b0a47af9e23a1b86c561a84",

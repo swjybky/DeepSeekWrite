@@ -22,6 +22,7 @@ import type {
 import { getWorkspaceSystemPrompt, getMaterialSystemPrompt, getSkillSystemPrompt } from '../bridge'
 import { ensurePiAppStorage } from '../pi/setupPiWorkspace'
 import {
+  createWorkspaceModelApiKeyResolver,
   openWorkspaceConfiguredModelSelector,
   syncWorkspaceModelButtonLabel,
 } from '../pi/resolveWorkspaceChatModel'
@@ -603,6 +604,9 @@ function WorkspaceAiChatInner({
       const agent = new Agent({
         sessionId,
         convertToLlm: convertToLlmWithSkillAsUser,
+        getApiKey: createWorkspaceModelApiKeyResolver(
+          () => agentRef.current?.state.model ?? initialModel,
+        ),
         streamFn: createWorkspaceStreamFn(),
         initialState: {
           systemPrompt: systemPromptInitial,

@@ -221,7 +221,6 @@ export function useExpertDraftRuntime({
       updateExpertDraftForBook(bookId, (draft) => ({
         ...draft,
         running: true,
-        active_section_id: ids[0] ?? '',
       }))
 
       const runExpertDraftSectionWriter =
@@ -274,7 +273,6 @@ export function useExpertDraftRuntime({
             updateExpertDraftForBook(bookId, (draft) => ({
               ...draft,
               running: false,
-              active_section_id: '',
             }))
           }
         })
@@ -311,7 +309,6 @@ export function useExpertDraftRuntime({
     updateExpertDraftForBook(currentBookId, (draft) => ({
       ...draft,
       running: false,
-      active_section_id: '',
     }))
   }, [bookRef, expertRunAbortByBookRef, updateExpertDraftForBook])
 

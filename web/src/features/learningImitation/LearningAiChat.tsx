@@ -17,6 +17,7 @@ import {
   type LearningStageId,
 } from '../../bridge'
 import {
+  createWorkspaceModelApiKeyResolver,
   openWorkspaceConfiguredModelSelector,
   syncWorkspaceModelButtonLabel,
   workspaceModelDisplayName,
@@ -200,6 +201,9 @@ function LearningAiChat({
       const agent = new Agent({
         sessionId: createPiSessionId('learning-imitation', 'shared'),
         convertToLlm: convertToLlmWithSkillAsUser,
+        getApiKey: createWorkspaceModelApiKeyResolver(
+          () => agentRef.current?.state.model ?? initialModel,
+        ),
         streamFn: createWorkspaceStreamFn(),
         initialState: {
           systemPrompt: initialPrompt,

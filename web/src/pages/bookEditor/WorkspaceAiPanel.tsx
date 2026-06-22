@@ -186,14 +186,14 @@ export function WorkspaceAiPanel({
             className="workspace-ai-new-chat"
             aria-label={
               expertDraftActive
-                ? activeExpertDraftSectionId
+                ? activeExpertSectionForHeader
                   ? '清空当前小节分节写手对话并开始新会话'
                   : '清空专家总控智能体对话并开始新会话'
                 : '清空当前阶段 AI 对话并开始新会话'
             }
             title={
               expertDraftActive
-                ? activeExpertDraftSectionId
+                ? activeExpertSectionForHeader
                   ? '仅清空当前小节的分节写手会话，其它小节各自保留独立历史'
                   : '仅清空专家总控智能体上下文，不影响后台分节写作任务'
                 : '仅影响当前左侧阶段对应的助手会话，其他阶段各有一份独立历史'
@@ -215,7 +215,7 @@ export function WorkspaceAiPanel({
         {railStages.find((s) => s.id === activeStage)?.label}
         {activePlotChildLabel ? ` · ${activePlotChildLabel}` : ''}
         {expertDraftActive
-          ? activeExpertDraftSectionId
+          ? activeExpertSectionForHeader
             ? ' · 分节写手'
             : ' · 专家总控'
           : ''}

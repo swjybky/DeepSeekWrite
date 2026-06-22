@@ -1,5 +1,6 @@
 import { Agent } from '@earendil-works/pi-agent-core'
 import type { AgentMessage, AgentTool } from '@earendil-works/pi-agent-core'
+import type { Api, Model } from '@earendil-works/pi-ai'
 import { ApiKeyPromptDialog } from '@earendil-works/pi-web-ui'
 
 import {
@@ -22,7 +23,8 @@ import {
 } from '../stageReadAccess'
 import type { ShortStageId } from '../stages'
 import {
-  resolveWorkspaceProviderApiKey,
+  createWorkspaceModelApiKeyResolver,
+  resolveWorkspaceModelApiKey,
 } from '../../../pi/resolveWorkspaceChatModel'
 import { convertToLlmWithSkillAsUser } from '../../../pi/skillMessageTransform'
 import { createPiSessionId } from '../../../pi/sessionId'
@@ -242,12 +244,13 @@ export function buildSectionWriterTools(input: {
   ]
 }
 
-async function ensureModelApiKey(provider: string): Promise<boolean> {
-  const existing = await resolveWorkspaceProviderApiKey(provider)
+async function ensureModelApiKey(model: Model<Api>): Promise<boolean> {
+  const existing = await resolveWorkspaceModelApiKey(model)
   if (existing) return true
+  const provider = model.provider
   const ok = await ApiKeyPromptDialog.prompt(provider)
   if (!ok) return false
-  return Boolean(await resolveWorkspaceProviderApiKey(provider))
+  return Boolean(await resolveWorkspaceModelApiKey(model, provider))
 }
 
 export async function runExpertDraftSectionWriter(
@@ -256,7 +259,7 @@ export async function runExpertDraftSectionWriter(
   try {
     await ensurePiAppStorage()
     const model = await resolvePreferredWorkspaceChatModel()
-    const hasKey = await ensureModelApiKey(model.provider)
+    const hasKey = await ensureModelApiKey(model)
     if (!hasKey) {
       opts.onError?.('分节写作未启动：缺少当前模型 API Key。')
       return
@@ -265,6 +268,8 @@ export async function runExpertDraftSectionWriter(
     const ids = opts.sectionIds.filter((id) =>
       opts.getDraft().sections.some((section) => section.id === id),
     )
+    let currentAgent: Agent | null = null
+    const runStartedAt = Date.now()
 
     for (const [sectionIndex, sectionId] of ids.entries()) {
       if (opts.signal?.aborted) return
@@ -278,63 +283,72 @@ export async function runExpertDraftSectionWriter(
       opts.updateDraft((draft) => ({
         ...draft,
         running: true,
-        active_section_id: sectionId,
       }))
 
       let sectionBodyWritten = ''
       let characterStateWritten = ''
 
-      const agent = new Agent({
-        sessionId: createPiSessionId(
-          'expert-draft-writer',
-          opts.bookId,
-          'shared',
-          sectionId,
-          Date.now(),
-        ),
-        convertToLlm: convertToLlmWithSkillAsUser,
-        getApiKey: resolveWorkspaceProviderApiKey,
-        streamFn: createWorkspaceStreamFn(),
-        toolExecution: 'sequential',
-        initialState: {
-          systemPrompt: buildSectionWriterSystemPrompt({
-            bookTitle: opts.bookTitle,
-            bookGenre: opts.bookGenre,
-            stageBody: section.body,
-            workspaceStages: opts.getWorkspaceStages(),
-            allowedWorkspaceStages: opts.readAccess.workspace as readonly StageId[],
-            template: systemPromptTemplate,
-            linkedSkill: opts.linkedSkill,
-          }),
-          model,
-          thinkingLevel: getPreferredWorkspaceThinkingLevel(),
-          messages: [],
-          tools: buildSectionWriterTools({
-            bookTitle: opts.bookTitle,
-            sectionId,
-            sectionTitle: section.title,
-            allStages: opts.getWorkspaceStages(),
-            linkedMaterial: opts.linkedMaterial,
-            linkedSkill: opts.linkedSkill,
-            readAccess: opts.readAccess,
-            getDraft: opts.getDraft,
-            getRenderedSectionContent: opts.getRenderedExpertDraftSectionContent,
-            getCurrentWorkspaceStageBody: (stageId) => {
-              const live = opts.getCurrentWorkspaceStageBody?.(stageId)
-              if (live !== undefined) return live
-              return opts.getWorkspaceStages()[stageId]
-            },
-            syncExpertDraftSectionField: opts.syncExpertDraftSectionField,
-            updateDraft: opts.updateDraft,
-            onSectionBodyWritten: (text) => {
-              sectionBodyWritten = text
-            },
-            onCharacterStateWritten: (text) => {
-              characterStateWritten = text
-            },
-          }),
+      const systemPrompt = buildSectionWriterSystemPrompt({
+        bookTitle: opts.bookTitle,
+        bookGenre: opts.bookGenre,
+        stageBody: section.body,
+        workspaceStages: opts.getWorkspaceStages(),
+        allowedWorkspaceStages: opts.readAccess.workspace as readonly StageId[],
+        template: systemPromptTemplate,
+        linkedSkill: opts.linkedSkill,
+      })
+      const tools = buildSectionWriterTools({
+        bookTitle: opts.bookTitle,
+        sectionId,
+        sectionTitle: section.title,
+        allStages: opts.getWorkspaceStages(),
+        linkedMaterial: opts.linkedMaterial,
+        linkedSkill: opts.linkedSkill,
+        readAccess: opts.readAccess,
+        getDraft: opts.getDraft,
+        getRenderedSectionContent: opts.getRenderedExpertDraftSectionContent,
+        getCurrentWorkspaceStageBody: (stageId) => {
+          const live = opts.getCurrentWorkspaceStageBody?.(stageId)
+          if (live !== undefined) return live
+          return opts.getWorkspaceStages()[stageId]
+        },
+        syncExpertDraftSectionField: opts.syncExpertDraftSectionField,
+        updateDraft: opts.updateDraft,
+        onSectionBodyWritten: (text) => {
+          sectionBodyWritten = text
+        },
+        onCharacterStateWritten: (text) => {
+          characterStateWritten = text
         },
       })
+      let agent: Agent | null = currentAgent
+      if (!agent) {
+        agent = new Agent({
+          sessionId: createPiSessionId(
+            'expert-draft-writer',
+            opts.bookId,
+            'shared',
+            runStartedAt,
+          ),
+          convertToLlm: convertToLlmWithSkillAsUser,
+          getApiKey: createWorkspaceModelApiKeyResolver(
+            () => currentAgent?.state.model ?? model,
+          ),
+          streamFn: createWorkspaceStreamFn(),
+          toolExecution: 'sequential',
+          initialState: {
+            systemPrompt,
+            model,
+            thinkingLevel: getPreferredWorkspaceThinkingLevel(),
+            messages: [],
+            tools,
+          },
+        })
+        currentAgent = agent
+      } else {
+        agent.state.systemPrompt = systemPrompt
+        agent.state.tools = tools
+      }
 
       const abortCurrentAgent = () => agent.abort()
       opts.signal?.addEventListener('abort', abortCurrentAgent, { once: true })
@@ -407,7 +421,6 @@ export async function runExpertDraftSectionWriter(
         return
       } finally {
         opts.signal?.removeEventListener('abort', abortCurrentAgent)
-        agent.abort()
       }
     }
   } finally {
