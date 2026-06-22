@@ -1149,6 +1149,7 @@ class BookStore:
         categories: list[str] | None,
         workspace_root: str | None = None,
         linked_skill_id: str | None = None,
+        linked_material_id: str | None = None,
     ) -> dict[str, Any]:
         with _data_file_lock():
             self._reload_all_unlocked()
@@ -1157,6 +1158,8 @@ class BookStore:
             cats = list(categories or []) if bt in WORKSPACE_BOOK_TYPES else []
             sid = (linked_skill_id or "").strip()
             linked_sid = sid if bt in WORKSPACE_BOOK_TYPES and sid in self._skills else ""
+            mid = (linked_material_id or "").strip()
+            linked_mid = mid if bt in WORKSPACE_BOOK_TYPES and mid in self._materials else ""
             wr = (workspace_root or "").strip()
             od = ""
             if wr:
@@ -1182,7 +1185,7 @@ class BookStore:
                 categories=cats,
                 content="",
                 output_dir=od,
-                linked_material_id="",
+                linked_material_id=linked_mid,
                 linked_skill_id=linked_sid,
                 stages=default_stages(bt),
                 expert_draft=normalize_expert_draft_from_storage(None, bt),

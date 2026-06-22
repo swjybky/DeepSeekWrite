@@ -1019,6 +1019,7 @@ export function Home() {
   const [bookType, setBookType] = useState<BookType>('short')
   const [shortGenre, setShortGenre] = useState<string>(SHORT_GENRE_OPTIONS[0])
   const [bookLinkedSkillId, setBookLinkedSkillId] = useState('')
+  const [bookLinkedMaterialId, setBookLinkedMaterialId] = useState('')
   const [submittingBook, setSubmittingBook] = useState(false)
   const [deletingBookId, setDeletingBookId] = useState<string | null>(null)
   const [bookError, setBookError] = useState<string | null>(null)
@@ -1064,6 +1065,7 @@ export function Home() {
   const [styleConfigOpen, setStyleConfigOpen] = useState(false)
   const [textDisplayOpen, setTextDisplayOpen] = useState(false)
   const [learningImitationOpen, setLearningImitationOpen] = useState(false)
+  const [learningImitationBackground, setLearningImitationBackground] = useState(false)
   const [workspaceDrawerOpen, setWorkspaceDrawerOpen] = useState(false)
   const [savingAiSettings, setSavingAiSettings] = useState(false)
   const [modelConfigError, setModelConfigError] = useState<string | null>(null)
@@ -1309,11 +1311,13 @@ export function Home() {
     try {
       const cats = bookType === 'short' || bookType === 'script' ? [shortGenre] : []
       const linkedSkillId = bookType === 'short' || bookType === 'script' ? bookLinkedSkillId : ''
-      await createBook(bookTitle, bookType, cats, ws, linkedSkillId || null)
+      const linkedMaterialId = bookType === 'short' || bookType === 'script' ? bookLinkedMaterialId : ''
+      await createBook(bookTitle, bookType, cats, ws, linkedSkillId || null, linkedMaterialId || null)
       setBookTitle('')
       setBookType('short')
       setShortGenre(SHORT_GENRE_OPTIONS[0])
       setBookLinkedSkillId('')
+      setBookLinkedMaterialId('')
       setShowBookForm(false)
       await refreshBooks()
     } catch (err) {
@@ -1657,14 +1661,16 @@ export function Home() {
           <button
             type="button"
             className={
-              learningImitationOpen
+              learningImitationOpen || learningImitationBackground
                 ? 'home-config-trigger home-config-trigger--active'
                 : 'home-config-trigger'
             }
             aria-expanded={learningImitationOpen}
             onClick={() => setLearningImitationOpen(true)}
           >
-            学习仿写
+            {learningImitationBackground && !learningImitationOpen
+              ? '学习仿写后台中'
+              : '学习仿写'}
           </button>
         </nav>
       </header>
@@ -2059,6 +2065,7 @@ export function Home() {
                   onChange={() => {
                     setBookType('long')
                     setBookLinkedSkillId('')
+                    setBookLinkedMaterialId('')
                   }}
                 />
                 长篇
@@ -2096,6 +2103,22 @@ export function Home() {
                   {skills.map((skill) => (
                     <option key={skill.id} value={skill.id}>
                       {skill.title}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label className="field">
+                <span className="field-label">绑定素材库</span>
+                <select
+                  value={bookLinkedMaterialId}
+                  onChange={(e) => setBookLinkedMaterialId(e.target.value)}
+                  disabled={loadingMaterials}
+                >
+                  <option value="">不绑定</option>
+                  {materials.map((material) => (
+                    <option key={material.id} value={material.id}>
+                      {material.title}
                     </option>
                   ))}
                 </select>
@@ -2268,12 +2291,23 @@ export function Home() {
         />
       )}
 
-      {learningImitationOpen && (
+      {(learningImitationOpen || learningImitationBackground) && (
         <LearningImitationDialog
+          visible={learningImitationOpen}
           workspaceRoot={workspaceRoot}
           materials={materials}
           skills={skills}
-          onClose={() => setLearningImitationOpen(false)}
+          onClose={() => {
+            setLearningImitationOpen(false)
+            setLearningImitationBackground(false)
+          }}
+          onRunInBackground={() => {
+            setLearningImitationOpen(false)
+            setLearningImitationBackground(true)
+          }}
+          onBackgroundFinished={() => {
+            setLearningImitationBackground(false)
+          }}
           onRefreshMaterials={() => refreshMaterials({ showLoading: false })}
           onRefreshSkills={() => refreshSkills({ showLoading: false })}
         />

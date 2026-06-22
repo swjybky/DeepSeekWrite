@@ -25,20 +25,20 @@ export const LIBRARY_TYPE_LABELS: Record<MaterialType, string> = {
 }
 
 export type MaterialStageId =
-  | 'character'
-  | 'intro'
   | 'gimmick'
-  | 'plot_refine'
+  | 'character'
   | 'pacing'
+  | 'intro'
+  | 'plot_refine'
   | 'draft_excerpt'
 
 export const MATERIAL_STAGE_LABELS: Record<MaterialStageId, string> = {
-  character: '人设素材',
-  intro: '导语素材',
-  gimmick: '梗素材',
-  plot_refine: '剧情细化素材',
-  pacing: '剧情设计素材',
-  draft_excerpt: '正文片段',
+  gimmick: '梗',
+  character: '人设',
+  pacing: '剧情设计',
+  intro: '导语设计',
+  plot_refine: '剧情细化',
+  draft_excerpt: '优秀正文片段',
 }
 
 export const SHORT_MATERIAL_GENRES: Record<string, string[]> = {
@@ -110,11 +110,11 @@ export function normalizeMaterialStages(
   raw?: Partial<Record<MaterialStageId, string>> | null,
 ): Record<MaterialStageId, string> {
   const out: Record<MaterialStageId, string> = {
-    character: '',
-    intro: '',
     gimmick: '',
-    plot_refine: '',
+    character: '',
     pacing: '',
+    intro: '',
+    plot_refine: '',
     draft_excerpt: '',
   }
   if (!raw) return out

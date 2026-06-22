@@ -53,7 +53,7 @@ function workspaceAgentTitle(
   activeStage: StageId,
   activeExpertDraftSectionId: string,
 ): string {
-  if (activeExpertDraftSectionId) return '分节写手智能体'
+  if (activeExpertDraftSectionId) return '小节智能体'
   if (activeStage === 'character_design') return '人物智能体'
   if (
     activeStage === 'plot_design' ||
@@ -65,6 +65,33 @@ function workspaceAgentTitle(
   if (activeStage === 'outline') return '大纲智能体'
   if (activeStage === 'draft') return '正文智能体'
   return '智能体'
+}
+
+function workspaceAgentTip(
+  activeStage: StageId,
+  activeExpertDraftSectionId: string,
+  activePlotChildLabel: string,
+): string {
+  if (activeExpertDraftSectionId) {
+    return '输入“帮我开始xx小节编写，要求如下：xxxx”'
+  }
+  if (activeStage === 'character_design') {
+    return '输入“帮我设计xxx的人物设计”开始'
+  }
+  if (
+    activeStage === 'plot_design' ||
+    activeStage === 'intro_design' ||
+    activeStage === 'plot_refine'
+  ) {
+    return `输入“帮我设计xxx的${activePlotChildLabel || '剧情设计'}”开始`
+  }
+  if (activeStage === 'outline') {
+    return '剧情设计完成请说“帮我整理大纲”；直接从大纲开始：“帮我设计xx大纲”'
+  }
+  if (activeStage === 'draft') {
+    return '输入“帮我直接开始编写正文”开始自动小节内容编写'
+  }
+  return ''
 }
 
 type Props = {
@@ -129,15 +156,30 @@ export function WorkspaceAiPanel({
   bumpActiveExpertChatEpoch,
   bumpActiveStageChatEpoch,
 }: Props) {
+  const activeExpertSectionForHeader = expertDraftActive
+    ? activeExpertDraftSectionId
+    : ''
+  const activeAgentTitle = workspaceAgentTitle(
+    activeStage,
+    activeExpertSectionForHeader,
+  )
+  const activeAgentTip = workspaceAgentTip(
+    activeStage,
+    activeExpertSectionForHeader,
+    activePlotChildLabel,
+  )
+
   return (
     <aside className="workspace-ai workspace-ai--center" aria-label="AI 对话">
       <div className="workspace-ai-header workspace-ai-header-row">
-        <span className="workspace-ai-header-title">
-          {workspaceAgentTitle(
-            activeStage,
-            expertDraftActive ? activeExpertDraftSectionId : '',
-          )}
-        </span>
+        <div className="workspace-ai-header-title-line">
+          <span className="workspace-ai-header-title">{activeAgentTitle}</span>
+          {activeAgentTip ? (
+            <span className="workspace-ai-title-tip" title={activeAgentTip}>
+              {activeAgentTip}
+            </span>
+          ) : null}
+        </div>
         <div className="workspace-ai-header-actions">
           <button
             type="button"

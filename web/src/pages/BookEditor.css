@@ -842,8 +842,29 @@ button.back-link:hover {
   gap: 0.5rem;
 }
 
-.workspace-ai-header-title {
+.workspace-ai-header-title-line {
+  flex: 1 1 auto;
   min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  column-gap: 0.5rem;
+  row-gap: 0.12rem;
+}
+
+.workspace-ai-header-title {
+  flex: 0 0 auto;
+  min-width: 0;
+}
+
+.workspace-ai-title-tip {
+  flex: 1 1 12rem;
+  min-width: min(100%, 12rem);
+  font-size: 0.72rem;
+  line-height: 1.45;
+  font-weight: 400;
+  color: var(--text);
+  opacity: 0.82;
 }
 
 .workspace-ai-new-chat {

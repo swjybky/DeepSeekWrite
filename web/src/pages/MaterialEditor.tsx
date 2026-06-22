@@ -23,11 +23,11 @@ import { useTextHistory } from '../hooks/useTextHistory'
 import './BookEditor.css'
 
 const MATERIAL_STAGE_KEYS: MaterialStageId[] = [
-  'character',
-  'intro',
   'gimmick',
-  'plot_refine',
+  'character',
   'pacing',
+  'intro',
+  'plot_refine',
   'draft_excerpt',
 ]
 

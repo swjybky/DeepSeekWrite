@@ -548,6 +548,7 @@ class Api:
         categories: list[str],
         workspace_root: str | None = None,
         linked_skill_id: str | None = None,
+        linked_material_id: str | None = None,
     ) -> dict:
         return self._store.create_book(
             title,
@@ -555,6 +556,7 @@ class Api:
             categories,
             workspace_root,
             linked_skill_id,
+            linked_material_id,
         )
 
     def get_book(self, book_id: str) -> dict | None:

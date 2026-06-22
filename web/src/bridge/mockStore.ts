@@ -88,6 +88,7 @@ export async function mockCreateBook(
   categories: string[],
   workspace_root?: string | null,
   linked_skill_id?: string | null,
+  linked_material_id?: string | null,
 ): Promise<Book> {
   const map = loadMock()
   const now = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z')
@@ -98,6 +99,7 @@ export async function mockCreateBook(
     ws.length > 0
       ? `${ws.replace(/[/\\]+$/, '')}${typeof window !== 'undefined' && window.navigator.userAgent.includes('Win') ? '\\' : '/'}${safeName}`
       : undefined
+  const isWsBook = isWorkspaceBook({ book_type: bt, categories: [] })
   const book: Book = {
     id: randomId(),
     title: title.trim() || '未命名',
@@ -106,11 +108,12 @@ export async function mockCreateBook(
     status: 'editing',
     content: '',
     output_dir,
-    linked_material_id: '',
+    linked_material_id:
+      isWsBook && linked_material_id && loadMockMaterials().has(linked_material_id)
+        ? linked_material_id
+        : '',
     linked_skill_id:
-      isWorkspaceBook({ book_type: bt, categories: [] }) &&
-        linked_skill_id &&
-        loadMockSkills().has(linked_skill_id)
+      isWsBook && linked_skill_id && loadMockSkills().has(linked_skill_id)
         ? linked_skill_id
         : '',
     stages: normalizeAllBookStages({}),

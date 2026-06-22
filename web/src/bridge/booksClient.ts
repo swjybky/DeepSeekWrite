@@ -41,6 +41,7 @@ export async function createBook(
   categories: string[],
   workspace_root?: string | null,
   linked_skill_id?: string | null,
+  linked_material_id?: string | null,
 ): Promise<Book> {
   const api = await getBridgeApi()
   if (api) {
@@ -51,10 +52,11 @@ export async function createBook(
         categories,
         workspace_root ?? null,
         linked_skill_id ?? null,
+        linked_material_id ?? null,
       ),
     )
   }
-  return mockCreateBook(title, book_type, categories, workspace_root, linked_skill_id)
+  return mockCreateBook(title, book_type, categories, workspace_root, linked_skill_id, linked_material_id)
 }
 
 export async function getBook(book_id: string): Promise<Book | null> {

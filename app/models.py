@@ -26,14 +26,14 @@ SCRIPT_MATERIAL_GENRES: dict[str, list[str]] = {
     key: list(values) for key, values in SHORT_MATERIAL_GENRES.items()
 }
 
-# 素材阶段键（人设、导语、梗、剧情细化、剧情设计、正文片段）
+# 素材阶段键（梗、人设、剧情设计、导语设计、剧情细化、优秀正文片段）
 MATERIAL_STAGE_KEYS: tuple[str, ...] = (
-    "character",     # 人设素材
-    "intro",         # 导语素材
-    "gimmick",       # 梗素材
-    "plot_refine",   # 剧情细化素材
-    "pacing",        # 剧情设计素材
-    "draft_excerpt", # 正文片段
+    "gimmick",       # 梗
+    "character",     # 人设
+    "pacing",        # 剧情设计
+    "intro",         # 导语设计
+    "plot_refine",   # 剧情细化
+    "draft_excerpt", # 优秀正文片段
 )
 
 # 技能库阶段键：可见短篇技能栏目 + 分节写手技能。

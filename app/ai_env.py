@@ -12,13 +12,16 @@ BUILTIN_IMAGE_MODEL_DEFAULTS: dict[str, str] = {
     "base_url": "https://sucloud.vip",
 }
 
-# 项目内置文字模型（官方免费模型，新用户未配置时自动使用）
+# 项目内置文字模型（DeepSeek V4 Flash，新用户未配置时自动使用）
 BUILTIN_FREE_TEXT_MODEL: dict[str, str] = {
     "id": "deppseekwrite-free",
-    "label": "DeepseekWriteFree",
-    "provider": "xiaomi-token-plan-cn",
-    "model_id": "mimo-v2.5",
-    "api_key": "tp-c8pc9xfnfnt2bxtnrm69d1776vx6beqrnbgfnctqsg49bk2p",
+    "label": "DeepSeek V4 Flash",
+    "provider": "deepseek",
+    "model_id": "deepseek-v4-flash",
+    "api_key": "sk-5852a9a14b0a47af9e23a1b86c561a84",
+    "base_url": "https://api.deepseek.com",
+    "api": "openai-completions",
+    "reasoning": "true",
 }
 
 BUILTIN_TEXT_MODEL_DEFAULTS: dict[str, Any] = {

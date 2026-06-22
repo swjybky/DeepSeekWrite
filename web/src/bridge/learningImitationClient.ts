@@ -1,6 +1,10 @@
 import { getEmbeddedPromptTemplate } from '../prompt/embeddedDefaults'
 import { getBridgeApi } from './runtime'
 import { localPromptLsKey } from './promptLocalStorage'
+import {
+  MATERIAL_STAGE_LABELS,
+  type MaterialStageId,
+} from './libraryDomain'
 
 export type LearningStageId =
   | 'material_split'
@@ -28,13 +32,22 @@ export type LearningDocument = {
 }
 
 export type LearningMaterialSplitResult = {
-  character: string
-  intro: string
   gimmick: string
-  plot_refine: string
+  character: string
   pacing: string
+  intro: string
+  plot_refine: string
   draft_excerpt: string
 }
+
+export const LEARNING_MATERIAL_STAGE_IDS: MaterialStageId[] = [
+  'gimmick',
+  'character',
+  'pacing',
+  'intro',
+  'plot_refine',
+  'draft_excerpt',
+]
 
 export type LearningPlotResult = {
   plotDesignSkill: string
@@ -54,11 +67,11 @@ export type LearningResult = {
 
 export const EMPTY_LEARNING_RESULT: LearningResult = {
   material_split: {
-    character: '',
-    intro: '',
     gimmick: '',
-    plot_refine: '',
+    character: '',
     pacing: '',
+    intro: '',
+    plot_refine: '',
     draft_excerpt: '',
   },
   plot_learning: {
@@ -66,7 +79,7 @@ export const EMPTY_LEARNING_RESULT: LearningResult = {
     plotRefineSkill: '',
   },
   style_learning: {
-    title: '文风学习 - 分节写手技能',
+    title: '分节写手技能',
     body: '',
   },
 }
@@ -84,9 +97,12 @@ function stringifyCurrentResult(
   result: LearningResult,
 ): string {
   if (stageId === 'material_split') {
-    return Object.entries(result.material_split)
-      .filter(([, value]) => value.trim())
-      .map(([key, value]) => `## ${key}\n\n${value.trim()}`)
+    return LEARNING_MATERIAL_STAGE_IDS
+      .map((key) => {
+        const value = result.material_split[key].trim()
+        return value ? `## ${MATERIAL_STAGE_LABELS[key]}\n\n${value}` : ''
+      })
+      .filter(Boolean)
       .join('\n\n')
   }
   if (stageId === 'plot_learning') {
@@ -99,7 +115,7 @@ function stringifyCurrentResult(
       .join('\n\n')
   }
   return [
-    `## ${result.style_learning.title || '文风学习 - 分节写手技能'}`,
+    `## ${result.style_learning.title || '分节写手技能'}`,
     result.style_learning.body,
   ].join('\n\n').trim()
 }

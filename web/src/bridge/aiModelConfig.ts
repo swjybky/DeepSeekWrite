@@ -59,10 +59,13 @@ export const BUILTIN_FREE_TEXT_MODEL_ID = 'deppseekwrite-free'
 
 const BUILTIN_FREE_TEXT_MODEL: AiModelConfig = {
   id: BUILTIN_FREE_TEXT_MODEL_ID,
-  label: 'DeepseekWriteFree',
-  provider: 'xiaomi-token-plan-cn',
-  model_id: 'mimo-v2.5',
-  api_key: 'tp-c8pc9xfnfnt2bxtnrm69d1776vx6beqrnbgfnctqsg49bk2p',
+  label: 'DeepSeek V4 Flash',
+  provider: 'deepseek',
+  model_id: 'deepseek-v4-flash',
+  api_key: 'sk-5852a9a14b0a47af9e23a1b86c561a84',
+  base_url: 'https://api.deepseek.com',
+  api: 'openai-completions',
+  reasoning: true,
 }
 
 const BUILTIN_TEXT_MODEL_DEFAULTS: AiModelSettings['text'] = {

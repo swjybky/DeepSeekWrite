@@ -336,23 +336,23 @@ MATERIAL_MANAGER_PROMPT_KIND = "material_manager"
 SHARED_MATERIAL_PROMPT_DIR = "shared"
 LIBRARY_PROMPT_TYPES: frozenset[str] = frozenset({"short", "long", "script"})
 
-# 素材阶段顺序（人设/导语/梗/剧情细化/剧情设计/正文片段），对齐 app/models.py MATERIAL_STAGE_KEYS
+# 素材阶段顺序（梗/人设/剧情设计/导语设计/剧情细化/优秀正文片段），对齐 app/models.py MATERIAL_STAGE_KEYS
 MATERIAL_STAGES_ORDER: tuple[str, ...] = (
-    "character",
-    "intro",
     "gimmick",
-    "plot_refine",
+    "character",
     "pacing",
+    "intro",
+    "plot_refine",
     "draft_excerpt",
 )
 
 MATERIAL_STAGE_LABELS: dict[str, str] = {
-    "character": "人设素材",
-    "intro": "导语素材",
-    "gimmick": "梗素材",
-    "plot_refine": "剧情细化素材",
-    "pacing": "剧情设计素材",
-    "draft_excerpt": "正文片段",
+    "gimmick": "梗",
+    "character": "人设",
+    "pacing": "剧情设计",
+    "intro": "导语设计",
+    "plot_refine": "剧情细化",
+    "draft_excerpt": "优秀正文片段",
 }
 
 # 新版素材库只保留一个「素材库管理智能体」；旧 kind 仅作为桥接兼容入口。

@@ -45,11 +45,11 @@ export const ALL_WORKSPACE_CONTENT_STAGE_IDS = SCRIPT_WORKSPACE_CONTENT_STAGES.m
 
 /** 与 bridge.MATERIAL_STAGE_LABELS 键一致；勿从 bridge 取值以免循环依赖。 */
 export const ALL_MATERIAL_STAGE_IDS: MaterialStageId[] = [
-  'character',
-  'intro',
   'gimmick',
-  'plot_refine',
+  'character',
   'pacing',
+  'intro',
+  'plot_refine',
   'draft_excerpt',
 ]
 
@@ -65,7 +65,7 @@ const FALLBACK_DEFAULTS: WorkspaceAgentReadAccessConfig = {
   },
   plot_design: {
     workspace: ['character_design', 'plot_design', 'plot_refine'],
-    material: ['character', 'intro', 'gimmick', 'pacing', 'plot_refine'],
+    material: ['gimmick', 'character', 'pacing', 'intro', 'plot_refine'],
   },
   outline: {
     workspace: ['outline', 'character_design', 'plot_design', 'plot_refine'],

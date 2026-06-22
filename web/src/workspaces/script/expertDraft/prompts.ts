@@ -151,6 +151,7 @@ ${userWritingPrompt || '（无）'}
 ${completedSectionsList || '（无，当前为首个待写小节）'}
 
 完成标准：
+- write_section_body 的 text 只能写入当前小节的正文内容，不要写入章节名、小节标题或任何标题行。
 - 当前小节正文为空白时，必须调用 write_section_body 写回完整正文。
 - 当前小节正文已有内容且本次是修改任务时，必须调用 replace_section_body_text 替换对应片段。
 - 修改章节名称也使用 replace_section_body_text 直接替换当前章节名。

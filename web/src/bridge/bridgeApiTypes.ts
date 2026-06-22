@@ -31,6 +31,7 @@ declare global {
           categories: string[],
           workspace_root?: string | null,
           linked_skill_id?: string | null,
+          linked_material_id?: string | null,
         ): Promise<Book>
         get_book(book_id: string): Promise<Book | null>
         save_book(

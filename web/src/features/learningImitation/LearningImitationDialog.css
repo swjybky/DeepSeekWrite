@@ -9,6 +9,10 @@
   backdrop-filter: blur(4px);
 }
 
+.learning-dialog-backdrop--hidden {
+  display: none;
+}
+
 .learning-dialog {
   position: relative;
   width: min(1320px, 100%);
@@ -232,10 +236,30 @@
 }
 
 .learning-ai-pane {
+  --background: var(--paper);
+  --foreground: var(--ink);
+  --card: var(--paper-elevated);
+  --card-foreground: var(--ink);
+  --popover: var(--paper-elevated);
+  --popover-foreground: var(--ink);
+  --primary: var(--accent);
+  --primary-foreground: #faf6ee;
+  --secondary: var(--paper-deep);
+  --secondary-foreground: var(--ink);
+  --muted: var(--paper-deep);
+  --muted-foreground: var(--ink-faint);
+  --destructive: var(--danger);
+  --destructive-foreground: #faf6ee;
+  --input: color-mix(in oklab, var(--border) 78%, var(--paper-deep));
+  --ring: color-mix(in oklab, var(--accent) 56%, transparent);
+  --radius: var(--radius-md);
   display: grid;
-  grid-template-rows: auto 1fr;
+  grid-template-rows: auto auto 1fr;
   border-left: 0;
   border-radius: 0 var(--radius-md) var(--radius-md) 0;
+  overflow: hidden;
+  background: color-mix(in oklab, var(--paper) 92%, var(--paper-elevated));
+  box-shadow: inset 1px 0 0 rgb(255 255 255 / 35%);
 }
 
 .learning-result-head,
@@ -247,6 +271,139 @@
   min-height: 3.9rem;
   padding: 0.75rem 0.85rem;
   border-bottom: 1px solid var(--border);
+}
+
+.learning-ai-head {
+  background: color-mix(in oklab, var(--paper-elevated) 70%, var(--paper));
+}
+
+.learning-ai-head > div:first-child {
+  min-width: 0;
+}
+
+.learning-ai-head-actions {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.45rem;
+  flex-shrink: 0;
+}
+
+.learning-model-select,
+.learning-input-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+  min-width: 5.7rem;
+  height: 2rem;
+  padding: 0 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--paper-elevated);
+  color: var(--ink-soft);
+  font-size: 0.78rem;
+  white-space: nowrap;
+}
+
+.learning-model-select {
+  max-width: 12rem;
+  min-width: 0;
+}
+
+.learning-input-toggle:hover:not(:disabled),
+.learning-model-select:hover:not(:disabled),
+.learning-input-toggle--active {
+  border-color: color-mix(in oklab, var(--accent) 42%, var(--border-strong));
+  background: var(--accent-soft);
+  color: var(--ink);
+}
+
+.learning-input-toggle:disabled,
+.learning-model-select:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.learning-quick-actions {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.55rem;
+  padding: 0.65rem 0.75rem;
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in oklab, var(--paper-elevated) 54%, var(--paper));
+}
+
+.learning-action {
+  min-width: 0;
+  min-height: 4.2rem;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 0.55rem;
+  padding: 0.55rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--paper-elevated);
+  color: var(--ink-soft);
+  text-align: left;
+  box-shadow: 0 1px 0 rgb(255 255 255 / 38%) inset;
+}
+
+.learning-action:hover:not(:disabled) {
+  border-color: var(--border-strong);
+  background: color-mix(in oklab, var(--accent-soft) 55%, var(--paper-elevated));
+  color: var(--ink);
+}
+
+.learning-action--active {
+  border-color: color-mix(in oklab, var(--accent) 46%, var(--border-strong));
+  background: var(--accent-soft);
+  color: var(--ink);
+}
+
+.learning-action:disabled {
+  opacity: 0.58;
+  cursor: not-allowed;
+}
+
+.learning-action span {
+  min-width: 0;
+  display: grid;
+  gap: 0.1rem;
+}
+
+.learning-action strong,
+.learning-action em {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.learning-action strong {
+  font-size: 0.83rem;
+  font-weight: 700;
+  color: inherit;
+}
+
+.learning-action em {
+  color: var(--ink-faint);
+  font-size: 0.72rem;
+  font-style: normal;
+}
+
+.learning-action-icon {
+  width: 1.05rem;
+  height: 1.05rem;
+  flex: 0 0 auto;
+}
+
+.learning-action > .learning-action-icon {
+  width: 1.35rem;
+  height: 1.35rem;
+  color: color-mix(in oklab, var(--accent) 72%, var(--ink-soft));
 }
 
 .learning-result-actions {
@@ -271,6 +428,10 @@
   gap: 0.75rem;
   padding: 0.85rem;
   overflow: auto;
+}
+
+.learning-result-stack--style {
+  grid-template-rows: auto 1fr;
 }
 
 .learning-result-field {
@@ -320,19 +481,309 @@
   display: block;
 }
 
+.learning-ai-head strong {
+  color: var(--ink);
+  font-size: 0.9375rem;
+  font-weight: 600;
+}
+
 .learning-ai-head span {
   color: var(--ink-faint);
   font-size: 0.78rem;
 }
 
+.learning-model-select span,
+.learning-model-select strong {
+  min-width: 0;
+}
+
+.learning-model-select strong {
+  overflow: hidden;
+  color: inherit;
+  font-size: 0.78rem;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .learning-ai-chat-host {
+  flex: 1 1 0%;
   min-height: 0;
-  display: block;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-self: stretch;
+  height: 100%;
+  contain: layout paint style;
 }
 
 .learning-ai-chat-host > * {
   width: 100%;
   height: 100%;
+}
+
+.learning-ai-chat-host--preset agent-interface > .flex > .shrink-0 {
+  display: none;
+}
+
+.learning-ai-pane message-list {
+  contain: layout paint style;
+}
+
+.learning-ai-pane message-list > div > * {
+  content-visibility: auto;
+  contain: layout paint style;
+  contain-intrinsic-size: auto 12rem;
+}
+
+.learning-ai-pane streaming-message-container {
+  contain: layout paint style;
+}
+
+.learning-ai-pane chat-panel,
+.learning-ai-pane agent-interface {
+  min-width: 0;
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-body);
+}
+
+.learning-ai-pane agent-interface > .bg-background {
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in oklab, var(--paper-elevated) 42%, transparent),
+      transparent 32%
+    ),
+    var(--background);
+}
+
+.learning-ai-pane agent-interface .overflow-y-auto {
+  scrollbar-color: color-mix(in oklab, var(--border-strong) 72%, transparent)
+    transparent;
+}
+
+.learning-ai-pane agent-interface .max-w-3xl {
+  max-width: 100%;
+}
+
+.learning-ai-pane message-list,
+.learning-ai-pane streaming-message-container,
+.learning-ai-pane assistant-message,
+.learning-ai-pane user-message,
+.learning-ai-pane markdown-block,
+.learning-ai-pane thinking-block,
+.learning-ai-pane tool-message {
+  color: var(--foreground);
+  font-family: var(--font-body);
+}
+
+.learning-ai-pane assistant-message markdown-block,
+.learning-ai-pane streaming-message-container markdown-block {
+  display: block;
+  padding: 0.05rem 0.2rem;
+  color: var(--text-h);
+  line-height: 1.68;
+}
+
+.learning-ai-pane assistant-message markdown-block p,
+.learning-ai-pane user-message markdown-block p {
+  margin-block: 0.35rem;
+}
+
+.learning-ai-pane user-message > .flex {
+  justify-content: flex-end;
+}
+
+.learning-ai-pane user-message .user-message-container {
+  max-width: min(100%, 34rem);
+  border: 1px solid color-mix(in oklab, var(--accent) 34%, var(--border));
+  border-radius: 8px;
+  background:
+    linear-gradient(
+      135deg,
+      color-mix(in oklab, var(--accent) 16%, var(--paper-elevated)),
+      color-mix(in oklab, var(--gold) 12%, var(--paper-elevated))
+    );
+  box-shadow: 0 1px 0 rgb(255 255 255 / 38%) inset;
+  color: var(--ink);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+
+.learning-ai-pane user-message .user-message-container markdown-block {
+  color: var(--ink);
+}
+
+.learning-ai-pane thinking-block .thinking-block {
+  margin: 0.1rem 0.2rem;
+  padding: 0.35rem 0.5rem;
+  border-left: 2px solid color-mix(in oklab, var(--accent) 38%, var(--border));
+  background: color-mix(in oklab, var(--paper-deep) 48%, transparent);
+}
+
+.learning-ai-pane thinking-block .thinking-header {
+  color: var(--ink-faint);
+}
+
+.learning-ai-pane thinking-block .thinking-header:hover {
+  color: var(--ink);
+}
+
+.learning-ai-pane message-editor {
+  display: block;
+  padding-bottom: 0.15rem;
+}
+
+.learning-ai-pane message-editor > .bg-card {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in oklab, var(--paper-elevated) 88%, white),
+      var(--paper-elevated)
+    );
+  box-shadow: 0 1px 0 rgb(255 255 255 / 46%) inset,
+    0 8px 18px rgb(42 36 28 / 6%);
+}
+
+.learning-ai-pane message-editor textarea {
+  color: var(--ink);
+  caret-color: var(--accent);
+  line-height: 1.6;
+}
+
+.learning-ai-pane message-editor textarea::placeholder {
+  color: var(--ink-faint);
+}
+
+.learning-ai-pane message-editor button,
+.learning-ai-pane message-editor [role='button'] {
+  border-radius: 6px;
+  color: var(--ink-soft);
+}
+
+.learning-ai-pane message-editor button:hover:not(:disabled),
+.learning-ai-pane message-editor [role='button']:hover {
+  background: color-mix(in oklab, var(--accent) 10%, var(--paper-deep));
+  color: var(--ink);
+}
+
+.learning-ai-pane message-editor button:disabled {
+  opacity: 0.42;
+}
+
+.learning-ai-pane tool-message > .bg-card {
+  border-color: color-mix(in oklab, var(--border-strong) 66%, var(--border));
+  border-radius: 8px;
+  background: color-mix(in oklab, var(--paper-elevated) 82%, var(--paper));
+  box-shadow: 0 1px 0 rgb(255 255 255 / 36%) inset;
+}
+
+.learning-ai-pane .write-claw-tool-glyph--modern {
+  display: none;
+}
+
+.learning-ai-pane .write-claw-tool-glyph--classic {
+  display: inline-block;
+}
+
+:root[data-appearance='modern'] .learning-ai-pane .write-claw-tool-glyph--classic {
+  display: none;
+}
+
+:root[data-appearance='modern'] .learning-ai-pane .write-claw-tool-glyph--modern {
+  display: inline-block;
+}
+
+.learning-ai-pane .write-claw-tool-header,
+.learning-ai-pane .write-claw-tool-header-btn {
+  color: var(--ink-faint);
+}
+
+.learning-ai-pane .write-claw-tool-header-btn:hover {
+  color: var(--ink);
+}
+
+.learning-ai-pane .write-claw-tool-summary {
+  color: var(--ink-faint);
+}
+
+.learning-ai-pane .write-claw-tool-header-btn:hover .write-claw-tool-summary {
+  color: var(--ink);
+}
+
+.learning-ai-pane .write-claw-tool-icon--complete,
+.learning-ai-pane .write-claw-tool-icon--progress {
+  color: var(--gold);
+}
+
+:root[data-appearance='modern'] .learning-ai-pane .write-claw-tool-icon--complete,
+:root[data-appearance='modern'] .learning-ai-pane .write-claw-tool-icon--progress {
+  color: var(--accent);
+}
+
+.learning-ai-pane .write-claw-tool-icon--error {
+  color: var(--danger);
+}
+
+.learning-ai-pane .write-claw-tool-spinner,
+.learning-ai-pane .write-claw-tool-chevron {
+  color: var(--ink-faint);
+}
+
+.learning-ai-pane .write-claw-tool-header-btn:hover .write-claw-tool-chevron {
+  color: var(--ink-soft);
+}
+
+.learning-ai-pane console-block > div,
+.learning-ai-pane code-block {
+  border-color: color-mix(in oklab, var(--border-strong) 58%, var(--border));
+  border-radius: 8px;
+  background: color-mix(in oklab, var(--paper-deep) 70%, var(--paper));
+  color: var(--ink);
+}
+
+.learning-ai-pane console-block .bg-muted {
+  background: color-mix(in oklab, var(--paper-deep) 76%, var(--paper-elevated));
+}
+
+.learning-ai-pane console-block pre,
+.learning-ai-pane code-block pre {
+  background: transparent !important;
+  color: var(--ink) !important;
+}
+
+.learning-ai-pane expandable-section button,
+.learning-ai-pane tool-message button,
+.learning-ai-pane .text-muted-foreground {
+  color: var(--ink-faint);
+}
+
+.learning-ai-pane expandable-section button:hover,
+.learning-ai-pane tool-message button:hover,
+.learning-ai-pane .hover\:text-foreground:hover {
+  color: var(--ink);
+}
+
+.learning-ai-pane .bg-muted,
+.learning-ai-pane .hover\:bg-muted:hover {
+  background-color: var(--muted);
+}
+
+.learning-ai-pane .border-border {
+  border-color: var(--border);
+}
+
+.learning-ai-pane .text-foreground {
+  color: var(--foreground);
+}
+
+.learning-ai-pane .learning-ai-chat-host,
+.learning-ai-pane .learning-ai-chat-host * {
+  -webkit-user-select: text;
+  user-select: text;
 }
 
 .learning-ai-disabled {
@@ -363,6 +814,52 @@
   place-items: center;
   padding: 1rem;
   background: rgb(42 36 28 / 34%);
+}
+
+.learning-close-backdrop {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  display: grid;
+  place-items: center;
+  padding: 1rem;
+  background: rgb(42 36 28 / 38%);
+  -webkit-backdrop-filter: blur(3px);
+  backdrop-filter: blur(3px);
+}
+
+.learning-close-dialog {
+  width: min(460px, 100%);
+  display: grid;
+  gap: 0.85rem;
+  padding: 1rem;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  background: var(--paper-elevated);
+  color: var(--ink);
+  box-shadow: var(--shadow-soft);
+}
+
+.learning-close-dialog h3,
+.learning-close-dialog p {
+  margin: 0;
+}
+
+.learning-close-dialog h3 {
+  font-size: 1rem;
+  font-weight: 700;
+}
+
+.learning-close-dialog p {
+  color: var(--ink-faint);
+  font-size: 0.86rem;
+  line-height: 1.7;
+}
+
+.learning-close-dialog footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.65rem;
 }
 
 .learning-prompt-dialog {
@@ -397,6 +894,25 @@
   border: 0;
   border-radius: 0;
   padding: 0.85rem;
+}
+
+.learning-save-dialog {
+  width: min(480px, 100%);
+  height: auto;
+  grid-template-rows: auto auto auto;
+}
+
+.learning-save-body {
+  display: grid;
+  gap: 0.55rem;
+  padding: 0.95rem 1rem;
+  color: var(--ink-soft);
+  font-size: 0.9rem;
+  line-height: 1.7;
+}
+
+.learning-save-body p {
+  margin: 0;
 }
 
 /* —— 学习仿写弹窗基础基线 —— */
@@ -465,5 +981,16 @@
 
   .learning-result-pane {
     border-radius: var(--radius-md);
+  }
+}
+
+@media (max-width: 640px) {
+  .learning-quick-actions {
+    grid-template-columns: 1fr;
+  }
+
+  .learning-action strong,
+  .learning-action em {
+    white-space: normal;
   }
 }

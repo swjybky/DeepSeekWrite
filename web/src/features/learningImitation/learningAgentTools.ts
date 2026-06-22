@@ -3,6 +3,7 @@ import { Type } from 'typebox'
 
 import {
   LEARNING_STAGE_LABELS,
+  LEARNING_MATERIAL_STAGE_IDS,
   MATERIAL_STAGE_LABELS,
   type LearningDocument,
   type LearningResult,
@@ -11,22 +12,15 @@ import {
 } from '../../bridge'
 import { defineTool, textBlock } from '../../workspaces/shared/piToolkit'
 
-export const MATERIAL_STAGE_KEYS: MaterialStageId[] = [
-  'character',
-  'intro',
-  'gimmick',
-  'plot_refine',
-  'pacing',
-  'draft_excerpt',
-]
+export const MATERIAL_STAGE_KEYS: MaterialStageId[] = LEARNING_MATERIAL_STAGE_IDS
 
 export type LearningWritePayload = {
   mode?: 'replace' | 'append'
-  character?: string
-  intro?: string
   gimmick?: string
-  plot_refine?: string
+  character?: string
   pacing?: string
+  intro?: string
+  plot_refine?: string
   draft_excerpt?: string
   plot_design_skill?: string
   plot_refine_skill?: string
@@ -72,7 +66,7 @@ function formatCurrentResult(stageId: LearningStageId, result: LearningResult): 
       .join('\n\n')
   }
   return [
-    `## ${result.style_learning.title || '文风学习 - 分节写手技能'}`,
+    `## ${result.style_learning.title || '分节写手技能'}`,
     result.style_learning.body,
   ].join('\n\n').trim()
 }
@@ -206,12 +200,12 @@ export function buildLearningTools(input: {
         mode: Type.Optional(Type.Union([Type.Literal('replace'), Type.Literal('append')], {
           description: 'replace 覆盖对应预览字段；append 追加到字段末尾。默认 replace。',
         })),
-        character: Type.Optional(Type.String({ description: '素材拆分：人设素材' })),
-        intro: Type.Optional(Type.String({ description: '素材拆分：导语素材' })),
-        gimmick: Type.Optional(Type.String({ description: '素材拆分：梗素材' })),
-        plot_refine: Type.Optional(Type.String({ description: '素材拆分：剧情细化素材' })),
-        pacing: Type.Optional(Type.String({ description: '素材拆分：剧情设计素材' })),
-        draft_excerpt: Type.Optional(Type.String({ description: '素材拆分：正文片段' })),
+        gimmick: Type.Optional(Type.String({ description: '素材拆分：梗' })),
+        character: Type.Optional(Type.String({ description: '素材拆分：人设' })),
+        pacing: Type.Optional(Type.String({ description: '素材拆分：剧情设计' })),
+        intro: Type.Optional(Type.String({ description: '素材拆分：导语设计' })),
+        plot_refine: Type.Optional(Type.String({ description: '素材拆分：剧情细化' })),
+        draft_excerpt: Type.Optional(Type.String({ description: '素材拆分：优秀正文片段' })),
         plot_design_skill: Type.Optional(Type.String({ description: '剧情设计学习：剧情设计技能' })),
         plot_refine_skill: Type.Optional(Type.String({ description: '剧情设计学习：剧情细化技能' })),
         style_skill_title: Type.Optional(Type.String({ description: '文风学习：分节写手技能标题' })),

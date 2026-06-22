@@ -16,10 +16,10 @@
       "plot_refine"
     ],
     "material": [
-      "character",
-      "intro",
       "gimmick",
+      "character",
       "pacing",
+      "intro",
       "plot_refine"
     ]
   },
