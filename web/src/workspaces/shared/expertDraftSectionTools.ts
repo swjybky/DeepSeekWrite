@@ -2,7 +2,7 @@ import type { AgentTool } from '@earendil-works/pi-agent-core'
 import { Type } from 'typebox'
 
 import type { ExpertDraft, ExpertDraftSection } from '../../bridge'
-import { defineTool, textBlock } from './piToolkit'
+import { currentWordCountLine, defineTool, textBlock } from './piToolkit'
 import {
   applyTextSpanReplacement,
   normalizeNewlines,
@@ -290,12 +290,13 @@ export function buildReadExpertDraftSectionTool(input: {
       const bodySource =
         bodyResult.source === 'editor' ? '当前文本编辑框' : '已保存内容'
       const header = `书名：《${bookTitle}》\n【${section.title}】（${section.id}）\n正文来源：${bodySource}`
+      const wordCount = currentWordCountLine(body)
 
       if (!includeState) {
         if (!body) {
-          return textBlock(`${header}\n\n该小节正文当前为空。`)
+          return textBlock(`${header}\n${wordCount}\n\n该小节正文当前为空。`)
         }
-        return textBlock(`${header}\n\n${body}`)
+        return textBlock(`${header}\n${wordCount}\n\n${body}`)
       }
 
       const stateResult = readExpertDraftSectionField(
@@ -313,7 +314,7 @@ export function buildReadExpertDraftSectionTool(input: {
         stateResult.source === 'editor' ? '当前文本编辑框' : '已保存内容'
 
       const parts = [header]
-      parts.push(`\n## 正文\n${body || '（空）'}`)
+      parts.push(`\n## 正文\n${wordCount}\n${body || '（空）'}`)
       parts.push(
         `\n## ${stateTitle}\n人物状态来源：${stateSource}\n${stateBody || '（空）'}`,
       )

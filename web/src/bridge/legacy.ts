@@ -37,6 +37,7 @@ export {
   resolveWorkspaceStagesForBook,
 } from '../domain/workspaceCore'
 export * from './aiModelConfig'
+export * from './aiChatHistoryClient'
 export * from './apiTypes'
 export * from './booksClient'
 export * from './commonSkillsClient'

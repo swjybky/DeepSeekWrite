@@ -224,6 +224,13 @@ from app.storage import (
     write_workspace_agent_read_access,
     write_workspace_agent_read_access_for_type,
 )
+from app.ai_chat_history import (
+    delete_ai_chat_session,
+    delete_ai_chat_sessions_for_owner,
+    get_ai_chat_session,
+    list_ai_chat_sessions,
+    save_ai_chat_session,
+)
 
 
 _WEBVIEW2_INSTALLER_NAME = "MicrosoftEdgeWebView2RuntimeInstallerX64.exe"
@@ -647,9 +654,27 @@ class Api:
         )
 
     def delete_book(self, book_id: str) -> bool:
-        return self._store.delete_book(book_id)
+        ok = self._store.delete_book(book_id)
+        if ok:
+            delete_ai_chat_sessions_for_owner("book", book_id)
+        return ok
 
     # ==================== 素材库 API ====================
+
+    def list_ai_chat_sessions(self, scope: dict | None = None) -> list[dict]:
+        return list_ai_chat_sessions(scope or {})
+
+    def get_ai_chat_session(self, session_id: str) -> dict | None:
+        return get_ai_chat_session(session_id)
+
+    def save_ai_chat_session(self, session: dict | None = None) -> dict | None:
+        return save_ai_chat_session(session or {})
+
+    def delete_ai_chat_session(self, session_id: str) -> bool:
+        return delete_ai_chat_session(session_id)
+
+    def delete_ai_chat_sessions_for_owner(self, owner_type: str, owner_id: str) -> int:
+        return delete_ai_chat_sessions_for_owner(owner_type, owner_id)
 
     def list_materials(self) -> list[dict]:
         """列出所有素材"""
@@ -697,7 +722,10 @@ class Api:
 
     def delete_material(self, material_id: str) -> bool:
         """删除素材"""
-        return self._store.delete_material(material_id)
+        ok = self._store.delete_material(material_id)
+        if ok:
+            delete_ai_chat_sessions_for_owner("material", material_id)
+        return ok
 
     def get_material_genres(self) -> dict[str, list[str]]:
         """获取素材分类结构"""
@@ -767,7 +795,10 @@ class Api:
 
     def delete_skill(self, skill_id: str) -> bool:
         """删除技能"""
-        return self._store.delete_skill(skill_id)
+        ok = self._store.delete_skill(skill_id)
+        if ok:
+            delete_ai_chat_sessions_for_owner("skill", skill_id)
+        return ok
 
     def get_workspace_root(self) -> str | None:
         return read_saved_workspace_root()

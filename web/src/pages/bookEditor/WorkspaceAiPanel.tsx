@@ -1,4 +1,4 @@
-import type { MutableRefObject } from 'react'
+import { useId, type MutableRefObject } from 'react'
 import type {
   Book,
   ExpertDraft,
@@ -86,7 +86,7 @@ function workspaceAgentTip(
     return `输入“帮我设计xxx的${activePlotChildLabel || '剧情设计'}”开始`
   }
   if (activeStage === 'outline') {
-    return '剧情设计完成请说“帮我整理大纲”；直接从大纲开始：“帮我设计xx大纲”'
+    return '输入“帮我整理大纲”开始'
   }
   if (activeStage === 'draft') {
     return '输入“帮我直接开始编写正文”开始自动小节内容编写'
@@ -156,6 +156,7 @@ export function WorkspaceAiPanel({
   bumpActiveExpertChatEpoch,
   bumpActiveStageChatEpoch,
 }: Props) {
+  const historyPortalTargetId = useId()
   const activeExpertSectionForHeader = expertDraftActive
     ? activeExpertDraftSectionId
     : ''
@@ -181,6 +182,10 @@ export function WorkspaceAiPanel({
           ) : null}
         </div>
         <div className="workspace-ai-header-actions">
+          <div
+            id={historyPortalTargetId}
+            className="workspace-ai-header-history-slot"
+          />
           <button
             type="button"
             className="workspace-ai-new-chat"
@@ -267,6 +272,12 @@ export function WorkspaceAiPanel({
                     bookTitle={session.book.title}
                     bookGenre={sessionBookGenre}
                     stageId={s.id}
+                    chatHistoryScope={{
+                      owner_type: 'book',
+                      owner_id: session.book.id,
+                      category_id: s.id,
+                    }}
+                    historyPortalTargetId={historyPortalTargetId}
                     activeStageContentId={activeContentStageForLayer}
                     stageBody={session.stages[activeContentStageForLayer] ?? ''}
                     getCurrentStageBody={(stageId) => {
@@ -377,6 +388,8 @@ export function WorkspaceAiPanel({
                 applyExpertDraftStageBody={(body) =>
                   onExpertDraftStageBodyChange(body)
                 }
+                historyPortalTargetId={historyPortalTargetId}
+                isHistoryPortalActive={expertLayerActive}
               />
             </div>
           )

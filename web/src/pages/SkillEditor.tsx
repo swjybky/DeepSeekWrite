@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import {
@@ -115,6 +115,7 @@ function stagesToPromptText(stages: SkillStages): Record<SkillStageId, string> {
 }
 
 export function SkillEditor() {
+  const historyPortalTargetId = useId()
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
   const { alert: showAlert, confirm, dialog } = useAppDialog()
@@ -638,6 +639,10 @@ export function SkillEditor() {
           <div className="workspace-ai-header workspace-ai-header-row">
             <span className="workspace-ai-header-title">技能管理智能体</span>
             <div className="workspace-ai-header-actions">
+              <div
+                id={historyPortalTargetId}
+                className="workspace-ai-header-history-slot"
+              />
               <button
                 type="button"
                 className="workspace-ai-new-chat"
@@ -659,7 +664,13 @@ export function SkillEditor() {
                 key={`${skill.id}-skill-manager-${aiChatEpoch}`}
                 sessionBookId={skill.id}
                 sessionEpoch={aiChatEpoch}
+                chatHistoryScope={{
+                  owner_type: 'skill',
+                  owner_id: skill.id,
+                  category_id: 'skill_manager',
+                }}
                 bookTitle={skill.title}
+                historyPortalTargetId={historyPortalTargetId}
                 skillType={skill.skill_type}
                 stageId={activeStage}
                 stageBody={stageBody}

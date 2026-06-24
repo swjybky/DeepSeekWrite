@@ -17,6 +17,7 @@ import {
   type WorkspaceAgentReadAccessConfig,
 } from './stageReadAccess'
 import {
+  currentWordCountLine,
   defineTool,
   excerptFn as excerpt,
   textBlock,
@@ -210,10 +211,11 @@ export function buildReadWorkspaceContentTool(
       const label = SHORT_STAGE_LABELS[sid]
       const raw = readWorkspaceStageBody(ctx, sid).trim()
       const header = `书名：《${ctx.bookTitle}》\n【${label}】（${sid}）`
+      const wordCount = currentWordCountLine(raw)
       if (!raw) {
-        return textBlock(`${header}\n\n该阶段当前文本为空。`)
+        return textBlock(`${header}\n${wordCount}\n\n该阶段当前文本为空。`)
       }
-      return textBlock(`${header}\n\n${excerpt(raw)}`)
+      return textBlock(`${header}\n${wordCount}\n\n${excerpt(raw)}`)
     },
   })
 }

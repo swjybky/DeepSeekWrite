@@ -18,6 +18,14 @@ export const excerptFn = (body: string, max = 12000) => {
   return body
 }
 
+export function countNonWhitespaceChars(text: string): number {
+  return text.replace(/\p{White_Space}/gu, '').length
+}
+
+export function currentWordCountLine(text: string): string {
+  return `当前字数：${countNonWhitespaceChars(text).toLocaleString('zh-CN')} 字`
+}
+
 type AgentToolResultShape = {
   content: { type: 'text'; text: string }[]
   details: undefined

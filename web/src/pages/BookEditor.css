@@ -895,12 +895,27 @@ button.back-link:hover {
   outline-offset: 2px;
 }
 
+.workspace-ai-chat-history-row {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  min-height: 2rem;
+  padding: 0.35rem 0.45rem 0.25rem;
+  border-bottom: 1px solid color-mix(in oklab, var(--border) 70%, transparent);
+}
+
 .workspace-ai-header-actions {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   justify-content: flex-end;
   gap: 0.4rem;
+}
+
+.workspace-ai-header-history-slot {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
 }
 
 .workspace-ai-material-name {

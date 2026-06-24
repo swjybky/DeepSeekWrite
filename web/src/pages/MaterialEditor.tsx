@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useId, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import {
@@ -88,6 +88,7 @@ function readStoredAiWidth(): number {
 }
 
 export function MaterialEditor() {
+  const historyPortalTargetId = useId()
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
   const [material, setMaterial] = useState<Material | null>(null)
@@ -545,6 +546,10 @@ export function MaterialEditor() {
           <div className="workspace-ai-header workspace-ai-header-row">
             <span className="workspace-ai-header-title">素材管理智能体</span>
             <div className="workspace-ai-header-actions">
+              <div
+                id={historyPortalTargetId}
+                className="workspace-ai-header-history-slot"
+              />
               <button
                 type="button"
                 className="workspace-ai-new-chat"
@@ -565,7 +570,13 @@ export function MaterialEditor() {
                 key={`${material.id}-material-manager-${aiChatEpoch}`}
                 sessionBookId={material.id}
                 sessionEpoch={aiChatEpoch}
+                chatHistoryScope={{
+                  owner_type: 'material',
+                  owner_id: material.id,
+                  category_id: 'material_manager',
+                }}
                 promptKind={MATERIAL_MANAGER_PROMPT_KIND}
+                historyPortalTargetId={historyPortalTargetId}
                 bookTitle={material.title}
                 materialTypeKey={material.material_type}
                 materialType={materialTypeLabel(material.material_type)}

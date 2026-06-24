@@ -8,6 +8,7 @@ import type {
   BookType,
 } from '../domain/workspaceCore'
 import type { SaveBookOptions } from './apiTypes'
+import { deleteAiChatSessionsForOwner } from './aiChatHistoryClient'
 import { getBridgeApi } from './runtime'
 import {
   mockCreateBook,
@@ -100,6 +101,11 @@ export async function saveBook(
 
 export async function deleteBook(book_id: string): Promise<boolean> {
   const api = await getBridgeApi()
-  if (api?.delete_book) return api.delete_book(book_id)
-  return mockDeleteBook(book_id)
+  const ok = api?.delete_book
+    ? await api.delete_book(book_id)
+    : await mockDeleteBook(book_id)
+  if (ok && !api?.delete_book) {
+    await deleteAiChatSessionsForOwner('book', book_id)
+  }
+  return ok
 }

@@ -45,6 +45,20 @@ declare global {
           linked_skill_id?: string | null,
         ): Promise<Book | null>
         delete_book(book_id: string): Promise<boolean>
+        list_ai_chat_sessions(
+          scope: Record<string, string>,
+        ): Promise<Record<string, unknown>[]>
+        get_ai_chat_session(
+          session_id: string,
+        ): Promise<Record<string, unknown> | null>
+        save_ai_chat_session(
+          session: Record<string, unknown>,
+        ): Promise<Record<string, unknown> | null>
+        delete_ai_chat_session(session_id: string): Promise<boolean>
+        delete_ai_chat_sessions_for_owner(
+          owner_type: string,
+          owner_id: string,
+        ): Promise<number>
         /** 上次选定的工作文件夹（持久化在用户数据 .data/preferences.json） */
         get_workspace_root(): Promise<string | null>
         set_workspace_root(path: string | null): Promise<void>

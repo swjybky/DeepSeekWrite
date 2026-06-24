@@ -1,5 +1,6 @@
 import { getBridgeApi } from './runtime'
 import type { SaveMaterialOptions } from './apiTypes'
+import { deleteAiChatSessionsForOwner } from './aiChatHistoryClient'
 import {
   normalizeMaterial,
   normalizeMaterialSummary,
@@ -72,8 +73,13 @@ export async function saveMaterial(
 
 export async function deleteMaterial(material_id: string): Promise<boolean> {
   const api = await getBridgeApi()
-  if (api?.delete_material) return api.delete_material(material_id)
-  return mockDeleteMaterial(material_id)
+  const ok = api?.delete_material
+    ? await api.delete_material(material_id)
+    : await mockDeleteMaterial(material_id)
+  if (ok && !api?.delete_material) {
+    await deleteAiChatSessionsForOwner('material', material_id)
+  }
+  return ok
 }
 
 export async function getMaterialGenres(): Promise<Record<string, string[]>> {

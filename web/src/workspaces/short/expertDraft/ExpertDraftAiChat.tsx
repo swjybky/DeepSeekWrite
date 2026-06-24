@@ -1,10 +1,16 @@
 import { Agent } from '@earendil-works/pi-agent-core'
-import type { AgentTool } from '@earendil-works/pi-agent-core'
+import type { AgentMessage, AgentTool } from '@earendil-works/pi-agent-core'
 import { ApiKeyPromptDialog, ChatPanel, ModelSelector } from '@earendil-works/pi-web-ui'
 import { useCallback, useEffect, useRef, useState } from 'react'
 
 import {
+  deleteAiChatSession,
+  getAiChatSession,
+  listAiChatSessions,
   readWorkspaceAgentPromptTemplate,
+  saveAiChatSession,
+  type AiChatHistoryMetadata,
+  type AiChatHistoryScope,
   type ExpertDraft,
   type Material,
   type Skill,
@@ -18,6 +24,7 @@ import {
 import { convertToLlmWithSkillAsUser } from '../../../pi/skillMessageTransform'
 import { createPiSessionId } from '../../../pi/sessionId'
 import { ensurePiAppStorage } from '../../../pi/setupPiWorkspace'
+import { refreshChatPanelTranscript } from '../../../pi/chatPanelTranscript'
 import {
   bindWorkspaceChatPreferences,
   getPreferredWorkspaceThinkingLevel,
@@ -40,6 +47,7 @@ import {
   EXPERT_SECTION_WRITER_AGENT_ID,
   type WorkspaceAgentReadAccessEntry,
 } from '../stageReadAccess'
+import { AiChatHistoryMenu } from '../../../components/AiChatHistoryMenu'
 
 const ARTIFACTS_TOOL_NAME = 'artifacts'
 
@@ -103,6 +111,8 @@ type Props = {
   ) => void
   getExpertDraftStageBody?: () => string
   applyExpertDraftStageBody?: (body: string) => void
+  historyPortalTargetId?: string
+  isHistoryPortalActive?: boolean
 }
 
 function resolveCoordinatorDraftBody(props: Props): string {
@@ -197,6 +207,15 @@ function stripArtifacts(tools: AgentTool[]): AgentTool[] {
   return tools.filter((tool) => tool.name !== ARTIFACTS_TOOL_NAME)
 }
 
+function hasUserMessage(messages: AgentMessage[]): boolean {
+  return messages.some(
+    (message) =>
+      message &&
+      typeof message === 'object' &&
+      (message as { role?: unknown }).role === 'user',
+  )
+}
+
 export function ExpertDraftAiChat(props: Props) {
   const hostRef = useRef<HTMLDivElement>(null)
   const coordinatorAgentRef = useRef<Agent | null>(null)
@@ -218,11 +237,167 @@ export function ExpertDraftAiChat(props: Props) {
   )
   const unsubscribeMessagesRefreshRef = useRef<(() => void) | null>(null)
   const [chatReady, setChatReady] = useState(false)
+  const [activePanelKind, setActivePanelKind] = useState<
+    'coordinator' | 'section-writer'
+  >('coordinator')
+  const [coordinatorHistorySessions, setCoordinatorHistorySessions] = useState<
+    AiChatHistoryMetadata[]
+  >([])
+  const [writerHistorySessions, setWriterHistorySessions] = useState<
+    AiChatHistoryMetadata[]
+  >([])
+  const [activeCoordinatorHistoryId, setActiveCoordinatorHistoryId] = useState('')
+  const [activeWriterHistoryId, setActiveWriterHistoryId] = useState('')
+  const [historyLoading, setHistoryLoading] = useState(false)
+  const [historyDisabled, setHistoryDisabled] = useState(false)
   const debouncedDraft = useDebounced(props.expertDraft, 600)
+  const activeCoordinatorHistoryIdRef = useRef('')
+  const activeWriterHistoryIdRef = useRef('')
+  const coordinatorBlankNonceRef = useRef(0)
+  const writerBlankNonceRef = useRef(0)
+  const persistHistoryFromAgentRef = useRef<
+    ((
+      kind: 'coordinator' | 'section-writer',
+      agent: Agent,
+    ) => Promise<void>) | null
+  >(null)
 
   useEffect(() => {
     propsLatestRef.current = props
   }, [props])
+
+  const historyScopeFor = (
+    kind: 'coordinator' | 'section-writer',
+  ): AiChatHistoryScope => ({
+    owner_type: 'book',
+    owner_id: propsLatestRef.current.bookId,
+    category_id:
+      kind === 'coordinator'
+        ? EXPERT_DRAFT_COORDINATOR_AGENT_ID
+        : EXPERT_SECTION_WRITER_AGENT_ID,
+  })
+
+  const resolveCoordinatorPiSessionId = (historyKey?: string) =>
+    createPiSessionId(
+      'expert-draft-coordinator',
+      propsLatestRef.current.bookId,
+      'shared',
+      historyKey ||
+        `blank_${propsLatestRef.current.sessionEpoch ?? 0}_${coordinatorBlankNonceRef.current}`,
+    )
+
+  const resolveWriterPiSessionId = (historyKey?: string) =>
+    createPiSessionId(
+      'expert-draft-writer',
+      propsLatestRef.current.bookId,
+      'shared',
+      historyKey ||
+        `blank_${propsLatestRef.current.sessionEpoch ?? 0}_${writerBlankNonceRef.current}`,
+    )
+
+  const refreshHistorySessions = async (
+    kind: 'coordinator' | 'section-writer',
+  ) => {
+    const sessions = await listAiChatSessions(historyScopeFor(kind))
+    if (kind === 'coordinator') setCoordinatorHistorySessions(sessions)
+    else setWriterHistorySessions(sessions)
+    return sessions
+  }
+
+  const persistHistoryFromAgent = async (
+    kind: 'coordinator' | 'section-writer',
+    agent: Agent,
+  ) => {
+    if (!hasUserMessage(agent.state.messages)) return
+    const currentId =
+      kind === 'coordinator'
+        ? activeCoordinatorHistoryIdRef.current
+        : activeWriterHistoryIdRef.current
+    const saved = await saveAiChatSession({
+      id: currentId,
+      scope: historyScopeFor(kind),
+      messages: agent.state.messages,
+      model: agent.state.model,
+      thinking_level: agent.state.thinkingLevel,
+    })
+    if (!saved) return
+    if (kind === 'coordinator') {
+      activeCoordinatorHistoryIdRef.current = saved.id
+      setActiveCoordinatorHistoryId(saved.id)
+      agent.sessionId = resolveCoordinatorPiSessionId(saved.id)
+    } else {
+      activeWriterHistoryIdRef.current = saved.id
+      setActiveWriterHistoryId(saved.id)
+      agent.sessionId = resolveWriterPiSessionId(saved.id)
+    }
+    await refreshHistorySessions(kind)
+  }
+  useEffect(() => {
+    persistHistoryFromAgentRef.current = persistHistoryFromAgent
+  })
+
+  const activeHistoryAgent = () =>
+    activePanelKind === 'section-writer'
+      ? sectionWriterAgentRef.current
+      : coordinatorAgentRef.current
+
+  const applyHistorySession = async (sessionId: string) => {
+    const kind = activePanelKind
+    const agent = activeHistoryAgent()
+    if (!agent) return
+    if (agent.state.isStreaming) {
+      window.alert('请等本轮回复结束后再切换历史对话。')
+      return
+    }
+    setHistoryLoading(true)
+    try {
+      const session = await getAiChatSession(sessionId)
+      if (!session) return
+      agent.state.messages = session.messages
+      if (session.model) agent.state.model = session.model
+      if (session.thinking_level) {
+        agent.state.thinkingLevel = session.thinking_level as typeof agent.state.thinkingLevel
+      }
+      if (kind === 'coordinator') {
+        activeCoordinatorHistoryIdRef.current = session.id
+        setActiveCoordinatorHistoryId(session.id)
+        agent.sessionId = resolveCoordinatorPiSessionId(session.id)
+      } else {
+        activeWriterHistoryIdRef.current = session.id
+        setActiveWriterHistoryId(session.id)
+        agent.sessionId = resolveWriterPiSessionId(session.id)
+      }
+      refreshChatPanelTranscript(chatPanelRef.current, agent)
+      await refreshHistorySessions(kind)
+    } finally {
+      setHistoryLoading(false)
+    }
+  }
+
+  const deleteHistorySession = async (sessionId: string) => {
+    if (!window.confirm('删除后无法恢复，确定要删除这条历史对话吗？')) return
+    const kind = activePanelKind
+    await deleteAiChatSession(sessionId)
+    const agent = activeHistoryAgent()
+    if (kind === 'coordinator' && activeCoordinatorHistoryIdRef.current === sessionId) {
+      activeCoordinatorHistoryIdRef.current = ''
+      setActiveCoordinatorHistoryId('')
+      if (agent) {
+        agent.state.messages = []
+        agent.sessionId = resolveCoordinatorPiSessionId()
+      }
+    }
+    if (kind === 'section-writer' && activeWriterHistoryIdRef.current === sessionId) {
+      activeWriterHistoryIdRef.current = ''
+      setActiveWriterHistoryId('')
+      if (agent) {
+        agent.state.messages = []
+        agent.sessionId = resolveWriterPiSessionId()
+      }
+    }
+    if (agent) refreshChatPanelTranscript(chatPanelRef.current, agent)
+    await refreshHistorySessions(kind)
+  }
 
   const bindActiveAgentUi = useCallback((agent: Agent) => {
     unsubscribeMessagesRefreshRef.current?.()
@@ -249,11 +424,21 @@ export function ExpertDraftAiChat(props: Props) {
       }
     }
 
-    unsubscribeMessagesRefreshRef.current = agent.subscribe((ev) => {
+    unsubscribeMessagesRefreshRef.current = agent.subscribe(async (ev) => {
+      const historyKind =
+        agent === coordinatorAgentRef.current ? 'coordinator' : 'section-writer'
+      if (ev.type === 'agent_start') {
+        setHistoryDisabled(true)
+      }
       if (ev.type === 'message_end') {
         agent.state.messages = agent.state.messages.slice()
       }
       if (ev.type === 'agent_end') {
+        try {
+          await persistHistoryFromAgentRef.current?.(historyKind, agent)
+        } finally {
+          setHistoryDisabled(false)
+        }
         cancelAnimationFrame(postAgentEndRaf)
         postAgentEndRaf = requestAnimationFrame(() => {
           refreshIdleUi()
@@ -404,18 +589,23 @@ export function ExpertDraftAiChat(props: Props) {
       })
       resizeObserver.observe(root)
 
+      const coordinatorModel = initialModel
+      const coordinatorThinkingLevel = getPreferredWorkspaceThinkingLevel()
+      setHistoryLoading(true)
+      try {
+        await refreshHistorySessions('coordinator')
+        if (cancelled) return
+      } finally {
+        if (!cancelled) setHistoryLoading(false)
+      }
+      activeCoordinatorHistoryIdRef.current = ''
+      setActiveCoordinatorHistoryId('')
+
       const coordinatorAgent = new Agent({
-        sessionId: createPiSessionId(
-          'expert-draft-coordinator',
-          props.bookId,
-          'shared',
-          props.sessionEpoch && props.sessionEpoch > 0
-            ? props.sessionEpoch
-            : undefined,
-        ),
+        sessionId: resolveCoordinatorPiSessionId(),
         convertToLlm: convertToLlmWithSkillAsUser,
         getApiKey: createWorkspaceModelApiKeyResolver(
-          () => coordinatorAgentRef.current?.state.model ?? initialModel,
+          () => coordinatorAgentRef.current?.state.model ?? coordinatorModel,
         ),
         streamFn: createWorkspaceStreamFn(),
         toolExecution: 'sequential',
@@ -429,8 +619,8 @@ export function ExpertDraftAiChat(props: Props) {
             template: coordinatorTemplate,
             linkedSkill: props.linkedSkill,
           }),
-          model: initialModel,
-          thinkingLevel: getPreferredWorkspaceThinkingLevel(),
+          model: coordinatorModel,
+          thinkingLevel: coordinatorThinkingLevel,
           messages: [],
           tools: [],
         },
@@ -483,6 +673,7 @@ export function ExpertDraftAiChat(props: Props) {
         if (!agent) return
         refreshCoordinatorAgentState(propsLatestRef.current.expertDraft)
         activePanelKindRef.current = 'coordinator'
+        setActivePanelKind('coordinator')
         bindActiveAgentUi(agent)
         await setPanelAgent(agent, currentCoordinatorTools)
       }
@@ -494,16 +685,17 @@ export function ExpertDraftAiChat(props: Props) {
         }
         if (sectionWriterAgent) return sectionWriterAgent
         const model = await resolvePreferredWorkspaceChatModel()
+        const thinkingLevel = getPreferredWorkspaceThinkingLevel()
+        setHistoryLoading(true)
+        try {
+          await refreshHistorySessions('section-writer')
+        } finally {
+          if (!cancelled) setHistoryLoading(false)
+        }
+        activeWriterHistoryIdRef.current = ''
+        setActiveWriterHistoryId('')
         const agent = new Agent({
-          sessionId: createPiSessionId(
-            'expert-draft-writer',
-            propsLatestRef.current.bookId,
-            'shared',
-            propsLatestRef.current.sessionEpoch &&
-              propsLatestRef.current.sessionEpoch > 0
-              ? propsLatestRef.current.sessionEpoch
-              : undefined,
-          ),
+          sessionId: resolveWriterPiSessionId(),
           convertToLlm: convertToLlmWithSkillAsUser,
           getApiKey: createWorkspaceModelApiKeyResolver(
             () => sectionWriterAgent?.state.model ?? model,
@@ -513,7 +705,7 @@ export function ExpertDraftAiChat(props: Props) {
           initialState: {
             systemPrompt: '',
             model,
-            thinkingLevel: getPreferredWorkspaceThinkingLevel(),
+            thinkingLevel,
             messages: [],
             tools: [],
           },
@@ -537,6 +729,7 @@ export function ExpertDraftAiChat(props: Props) {
           propsLatestRef.current.expertDraft,
         )
         activePanelKindRef.current = 'section-writer'
+        setActivePanelKind('section-writer')
         bindActiveAgentUi(agent)
         await setPanelAgent(agent, () =>
           stripArtifacts(buildSectionWriterToolsFor(sectionId)),
@@ -570,6 +763,7 @@ export function ExpertDraftAiChat(props: Props) {
       resizeObserver?.disconnect()
       resizeObserver = undefined
       setChatReady(false)
+      setHistoryDisabled(false)
       unsubscribeMessagesRefreshRef.current?.()
       unsubscribeMessagesRefreshRef.current = null
       unsubscribePreferences?.()
@@ -650,8 +844,33 @@ export function ExpertDraftAiChat(props: Props) {
     finishWriterPreview,
   ])
 
+  const historyMenu = (
+    <AiChatHistoryMenu
+      sessions={
+        activePanelKind === 'section-writer'
+          ? writerHistorySessions
+          : coordinatorHistorySessions
+      }
+      activeSessionId={
+        activePanelKind === 'section-writer'
+          ? activeWriterHistoryId
+          : activeCoordinatorHistoryId
+      }
+      loading={historyLoading}
+      disabled={historyDisabled}
+      portalTargetId={props.historyPortalTargetId}
+      onSelect={(sessionId) => applyHistorySession(sessionId)}
+      onDelete={(sessionId) => void deleteHistorySession(sessionId)}
+    />
+  )
+
   return (
     <div className="expert-draft-ai-shell">
+      {props.historyPortalTargetId ? (
+        props.isHistoryPortalActive ? historyMenu : null
+      ) : (
+        <div className="workspace-ai-chat-history-row">{historyMenu}</div>
+      )}
       <div ref={hostRef} className="workspace-ai-chat-host" />
     </div>
   )

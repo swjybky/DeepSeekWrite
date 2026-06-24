@@ -1,5 +1,6 @@
 import { getBridgeApi } from './runtime'
 import type { SaveSkillOptions } from './apiTypes'
+import { deleteAiChatSessionsForOwner } from './aiChatHistoryClient'
 import {
   normalizeSkill,
   normalizeSkillSummary,
@@ -89,6 +90,11 @@ export async function loadCommonSkillsToSkill(
 
 export async function deleteSkill(skill_id: string): Promise<boolean> {
   const api = await getBridgeApi()
-  if (api?.delete_skill) return api.delete_skill(skill_id)
-  return mockDeleteSkill(skill_id)
+  const ok = api?.delete_skill
+    ? await api.delete_skill(skill_id)
+    : await mockDeleteSkill(skill_id)
+  if (ok && !api?.delete_skill) {
+    await deleteAiChatSessionsForOwner('skill', skill_id)
+  }
+  return ok
 }

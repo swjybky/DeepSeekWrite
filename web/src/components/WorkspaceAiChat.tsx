@@ -1,5 +1,6 @@
 import type { AgentTool } from '@earendil-works/pi-agent-core'
 import { Agent } from '@earendil-works/pi-agent-core'
+import type { AgentMessage } from '@earendil-works/pi-agent-core'
 import {
   ApiKeyPromptDialog,
   ChatPanel,
@@ -18,8 +19,18 @@ import type {
   SkillType,
   SkillStageId,
   WorkspaceAgentReadAccessConfig,
+  AiChatHistoryMetadata,
+  AiChatHistoryScope,
 } from '../bridge'
-import { getWorkspaceSystemPrompt, getMaterialSystemPrompt, getSkillSystemPrompt } from '../bridge'
+import {
+  deleteAiChatSession,
+  getAiChatSession,
+  getWorkspaceSystemPrompt,
+  getMaterialSystemPrompt,
+  getSkillSystemPrompt,
+  listAiChatSessions,
+  saveAiChatSession,
+} from '../bridge'
 import { ensurePiAppStorage } from '../pi/setupPiWorkspace'
 import {
   createWorkspaceModelApiKeyResolver,
@@ -38,6 +49,7 @@ import {
 } from '../pi/workspaceChatPreferences'
 import { createWorkspaceStreamFn } from '../pi/workspaceStreamFn'
 import { convertToLlmWithSkillAsUser } from '../pi/skillMessageTransform'
+import { refreshChatPanelTranscript } from '../pi/chatPanelTranscript'
 import {
   EXPERT_DRAFT_COORDINATOR_AGENT_ID,
   resolveWorkspaceAgentReadAccess,
@@ -54,6 +66,7 @@ import {
 } from '../utils/documentText'
 import { useAppDialog } from './useAppDialog'
 import type { AppDialogOptions } from './AppDialog'
+import { AiChatHistoryMenu } from './AiChatHistoryMenu'
 
 const ARTIFACTS_TOOL_NAME = 'artifacts'
 const WORKSPACE_ATTACHMENT_MAX_FILES = 10
@@ -104,6 +117,15 @@ class WorkspaceSendValidationError extends Error {
 function isWorkspaceSendValidationError(error: unknown): error is Error {
   return (
     error instanceof Error && error.name === WORKSPACE_SEND_VALIDATION_ERROR_NAME
+  )
+}
+
+function hasUserMessage(messages: AgentMessage[]): boolean {
+  return messages.some(
+    (message) =>
+      message &&
+      typeof message === 'object' &&
+      (message as { role?: unknown }).role === 'user',
   )
 }
 
@@ -391,6 +413,8 @@ type Props = {
    * @default 'book'
    */
   workspaceType?: 'book' | 'material' | 'skill'
+  chatHistoryScope?: AiChatHistoryScope
+  historyPortalTargetId?: string
 }
 
 function WorkspaceAiChatInner({
@@ -401,13 +425,20 @@ function WorkspaceAiChatInner({
   workspaceType = 'book',
   ...props
 }: Props) {
-  const { alert: showAlert, dialog } = useAppDialog()
+  const { alert: showAlert, confirm, dialog } = useAppDialog()
   const hostRef = useRef<HTMLDivElement>(null)
   const agentRef = useRef<Agent | null>(null)
   const chatPanelRef = useRef<ChatPanel | null>(null)
   const [chatReady, setChatReady] = useState(false)
+  const [historySessions, setHistorySessions] = useState<AiChatHistoryMetadata[]>([])
+  const [activeHistorySessionId, setActiveHistorySessionId] = useState('')
+  const [historyLoading, setHistoryLoading] = useState(false)
+  const [historyDisabled, setHistoryDisabled] = useState(false)
   const propsLatestRef = useRef(props)
   const promptPullSeqRef = useRef(0)
+  const activeHistorySessionIdRef = useRef('')
+  const blankHistoryNonceRef = useRef(0)
+  const historySaveSeqRef = useRef(0)
 
   /** 已流式同步到编辑器的 tool call id 集合 */
   const streamedToolCallIdsRef = useRef<Set<string>>(new Set())
@@ -427,6 +458,110 @@ function WorkspaceAiChatInner({
   }, [props])
 
   const debouncedBody = useDebounced(props.stageBody, 600)
+
+  const resolvePiSessionId = (historyKey?: string) => {
+    const p = propsLatestRef.current
+    return createPiSessionId(
+      'workspace',
+      p.sessionBookId,
+      workspaceType === 'skill'
+        ? `skill_${p.skillType ?? 'short'}_manager`
+        : workspaceType === 'material'
+          ? `material_${p.materialTypeKey ?? 'short'}_manager`
+          : p.bookType === 'script'
+            ? 'script_shared'
+            : 'shared',
+      workspaceType === 'material' || workspaceType === 'skill'
+        ? undefined
+        : p.stageId,
+      p.chatHistoryScope
+        ? historyKey || `blank_${sessionEpoch}_${blankHistoryNonceRef.current}`
+        : sessionEpoch > 0
+          ? sessionEpoch
+          : undefined,
+    )
+  }
+
+  const refreshHistorySessions = async () => {
+    const scope = propsLatestRef.current.chatHistoryScope
+    if (!scope) {
+      setHistorySessions([])
+      return []
+    }
+    const sessions = await listAiChatSessions(scope)
+    setHistorySessions(sessions)
+    return sessions
+  }
+
+  const persistHistoryFromAgent = async (agent: Agent) => {
+    const scope = propsLatestRef.current.chatHistoryScope
+    if (!scope || !hasUserMessage(agent.state.messages)) return
+    const seq = ++historySaveSeqRef.current
+    const saved = await saveAiChatSession({
+      id: activeHistorySessionIdRef.current,
+      scope,
+      messages: agent.state.messages,
+      model: agent.state.model,
+      thinking_level: agent.state.thinkingLevel,
+    })
+    if (!saved || seq !== historySaveSeqRef.current) return
+    activeHistorySessionIdRef.current = saved.id
+    setActiveHistorySessionId(saved.id)
+    agent.sessionId = resolvePiSessionId(saved.id)
+    await refreshHistorySessions()
+  }
+
+  const applyHistorySession = async (sessionId: string) => {
+    const agent = agentRef.current
+    if (!agent) return
+    if (agent.state.isStreaming) {
+      await showAlert({
+        title: '当前对话正在运行',
+        message: '请等本轮回复结束后再切换历史对话。',
+      })
+      return
+    }
+    setHistoryLoading(true)
+    try {
+      const session = await getAiChatSession(sessionId)
+      if (!session) return
+      agent.state.messages = session.messages
+      if (session.model) agent.state.model = session.model
+      if (session.thinking_level) {
+        agent.state.thinkingLevel = session.thinking_level as typeof agent.state.thinkingLevel
+      }
+      activeHistorySessionIdRef.current = session.id
+      setActiveHistorySessionId(session.id)
+      agent.sessionId = resolvePiSessionId(session.id)
+      refreshChatPanelTranscript(chatPanelRef.current, agent)
+      await refreshHistorySessions()
+    } finally {
+      setHistoryLoading(false)
+    }
+  }
+
+  const deleteHistorySession = async (sessionId: string) => {
+    const ok = await confirm({
+      title: '删除历史对话',
+      message: '删除后无法恢复，确定要删除这条历史对话吗？',
+      confirmText: '删除',
+      cancelText: '取消',
+      variant: 'danger',
+    })
+    if (!ok) return
+    await deleteAiChatSession(sessionId)
+    if (activeHistorySessionIdRef.current === sessionId) {
+      const agent = agentRef.current
+      activeHistorySessionIdRef.current = ''
+      setActiveHistorySessionId('')
+      if (agent) {
+        agent.state.messages = []
+        agent.sessionId = resolvePiSessionId()
+        refreshChatPanelTranscript(chatPanelRef.current, agent)
+      }
+    }
+    await refreshHistorySessions()
+  }
 
   useEffect(() => {
     let cancelled = false
@@ -585,33 +720,35 @@ function WorkspaceAiChatInner({
             )
       if (cancelled || !hostRef.current) return
 
-      const sessionId = createPiSessionId(
-        'workspace',
-        props.sessionBookId,
-        workspaceType === 'skill'
-          ? `skill_${props.skillType ?? 'short'}_manager`
-          : workspaceType === 'material'
-            ? `material_${props.materialTypeKey ?? 'short'}_manager`
-            : props.bookType === 'script'
-              ? 'script_shared'
-              : 'shared',
-        workspaceType === 'material' || workspaceType === 'skill'
-          ? undefined
-          : props.stageId,
-        sessionEpoch > 0 ? sessionEpoch : undefined,
-      )
+      const effectiveModel = initialModel
+      const effectiveThinkingLevel = getPreferredWorkspaceThinkingLevel()
+      const historyScope = props.chatHistoryScope
+      if (historyScope) {
+        setHistoryLoading(true)
+        try {
+          const sessions = await listAiChatSessions(historyScope)
+          if (cancelled) return
+          setHistorySessions(sessions)
+        } finally {
+          if (!cancelled) setHistoryLoading(false)
+        }
+      }
+      activeHistorySessionIdRef.current = ''
+      setActiveHistorySessionId('')
+
+      const sessionId = resolvePiSessionId()
 
       const agent = new Agent({
         sessionId,
         convertToLlm: convertToLlmWithSkillAsUser,
         getApiKey: createWorkspaceModelApiKeyResolver(
-          () => agentRef.current?.state.model ?? initialModel,
+          () => agentRef.current?.state.model ?? effectiveModel,
         ),
         streamFn: createWorkspaceStreamFn(),
         initialState: {
           systemPrompt: systemPromptInitial,
-          model: initialModel,
-          thinkingLevel: getPreferredWorkspaceThinkingLevel(),
+          model: effectiveModel,
+          thinkingLevel: effectiveThinkingLevel,
           messages: [],
           tools: [],
         },
@@ -631,6 +768,9 @@ function WorkspaceAiChatInner({
       // AgentInterface may render once with isStreaming still true and never refresh,
       // so the stop button stays visible — reflow after the next frame when idle.
       unsubscribeMessagesRefresh = agent.subscribe(async (ev) => {
+        if (ev.type === 'agent_start') {
+          setHistoryDisabled(true)
+        }
         if (ev.type === 'message_start') {
           if (ev.message.role === 'assistant') {
             streamedToolCallIdsRef.current.clear()
@@ -758,6 +898,11 @@ function WorkspaceAiChatInner({
           agent.state.messages = agent.state.messages.slice()
         }
         if (ev.type === 'agent_end') {
+          try {
+            await persistHistoryFromAgent(agent)
+          } finally {
+            setHistoryDisabled(false)
+          }
           cancelAnimationFrame(postAgentEndRaf)
           postAgentEndRaf = requestAnimationFrame(() => {
             postAgentEndRaf = 0
@@ -852,6 +997,7 @@ function WorkspaceAiChatInner({
       resizeObserver?.disconnect()
       resizeObserver = undefined
       setChatReady(false)
+      setHistoryDisabled(false)
       unsubscribeMessagesRefresh?.()
       unsubscribePreferences?.()
       agentRef.current = null
@@ -1011,9 +1157,30 @@ function WorkspaceAiChatInner({
     workspaceType,
   ])
 
+  const historyMenu = props.chatHistoryScope && (!props.historyPortalTargetId || !isPaused) ? (
+    <AiChatHistoryMenu
+      sessions={historySessions}
+      activeSessionId={activeHistorySessionId}
+      loading={historyLoading}
+      disabled={historyDisabled}
+      portalTargetId={props.historyPortalTargetId}
+      onSelect={(sessionId) => applyHistorySession(sessionId)}
+      onDelete={(sessionId) => void deleteHistorySession(sessionId)}
+    />
+  ) : null
+
   return (
     <>
       {dialog}
+      {historyMenu ? (
+        props.historyPortalTargetId ? (
+          historyMenu
+        ) : (
+          <div className="workspace-ai-chat-history-row">
+            {historyMenu}
+          </div>
+        )
+      ) : null}
       <div ref={hostRef} className="workspace-ai-chat-host" />
     </>
   )
@@ -1035,6 +1202,10 @@ export const WorkspaceAiChat = memo(WorkspaceAiChatInner, (prev, next) => {
   if (prev.promptKind !== next.promptKind) return false
   if (prev.stageId !== next.stageId) return false
   if (prev.activeStageContentId !== next.activeStageContentId) return false
+  if (prev.chatHistoryScope?.owner_type !== next.chatHistoryScope?.owner_type) return false
+  if (prev.chatHistoryScope?.owner_id !== next.chatHistoryScope?.owner_id) return false
+  if (prev.chatHistoryScope?.category_id !== next.chatHistoryScope?.category_id) return false
+  if (prev.historyPortalTargetId !== next.historyPortalTargetId) return false
 
   // 暂停状态变化需要更新
   if (prev.isPaused !== next.isPaused) return false
