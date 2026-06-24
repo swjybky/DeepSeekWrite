@@ -38,16 +38,39 @@
       }
     </style>
     <script>
+      function isBenignResizeObserverError(message) {
+        return (
+          message &&
+          (message.indexOf('ResizeObserver loop completed with undelivered notifications') !== -1 ||
+            message.indexOf('ResizeObserver loop limit exceeded') !== -1)
+        )
+      }
+      function escapeBootMessage(message) {
+        return String(message)
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;')
+      }
       window.addEventListener(
         'error',
         function (event) {
-          var root = document.getElementById('root')
-          if (!root || event.filename === location.href) return
           var msg = event.message || '脚本加载失败'
+          if (isBenignResizeObserverError(msg)) {
+            event.preventDefault()
+            return
+          }
+          var root = document.getElementById('root')
+          if (
+            !root ||
+            document.documentElement.dataset.writeClawMounted === '1' ||
+            event.filename === location.href
+          ) {
+            return
+          }
           root.innerHTML =
             '<div class="boot-splash" role="alert"><p class="boot-splash-title">DeepseekWrite</p>' +
             '<p class="boot-splash-hint" style="max-width:28rem;text-align:center;">' +
-            msg +
+            escapeBootMessage(msg) +
             '</p></div>'
         },
         true,

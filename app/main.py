@@ -12,6 +12,7 @@ import tempfile
 import threading
 import socket
 import ssl
+import time
 import uuid
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -162,6 +163,23 @@ def _ensure_linux_qt_input_method() -> None:
 
 _configure_linux_pywebview_env()
 _configure_macos_pywebview_env()
+
+
+def _configure_windows_webview2_proxy_env() -> None:
+    if not sys.platform.startswith("win"):
+        return
+    disable_proxy = os.environ.get("WRITECLAW_WEBVIEW2_DISABLE_PROXY", "")
+    if disable_proxy.strip().lower() not in ("1", "true", "yes", "on"):
+        return
+    key = "WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS"
+    current = os.environ.get(key, "").strip()
+    current_lower = current.lower()
+    if "--proxy-server" in current_lower or "--no-proxy-server" in current_lower:
+        return
+    os.environ[key] = f"{current} --no-proxy-server".strip()
+
+
+_configure_windows_webview2_proxy_env()
 
 import webview
 
@@ -484,6 +502,11 @@ class DistHTTPRequestHandler(SimpleHTTPRequestHandler):
         self.send_header("Cache-Control", "no-store, must-revalidate")
         super().end_headers()
 
+    def log_message(self, format: str, *args: object) -> None:
+        if self.headers.get("X-WriteClaw-Probe") == "1":
+            return
+        super().log_message(format, *args)
+
 
 def _start_local_dist_server(dist_dir: Path) -> tuple[ThreadingHTTPServer, str]:
     """本机回环 HTTP 提供 dist，与 `npm run dev` 同为 http 源，避免 file:// 下 fetch 异常。"""
@@ -494,7 +517,46 @@ def _start_local_dist_server(dist_dir: Path) -> tuple[ThreadingHTTPServer, str]:
     httpd = ThreadingHTTPServer(("127.0.0.1", 0), handler)
     port = httpd.server_address[1]
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
-    return httpd, f"http://127.0.0.1:{port}/?pywebview=1"
+    probe_url = f"http://127.0.0.1:{port}/?pywebview=1"
+    if not _wait_for_local_dist_server(probe_url):
+        print(
+            f"警告：本机页面服务未能及时响应：{probe_url}，将尝试继续启动窗口。",
+            file=sys.stderr,
+        )
+    host = os.environ.get("WRITECLAW_DESKTOP_HOST", "").strip() or "127.0.0.1"
+    return httpd, f"http://{host}:{port}/?pywebview=1"
+
+
+def _wait_for_local_dist_server(url: str, timeout_seconds: float = 3.0) -> bool:
+    deadline = time.monotonic() + timeout_seconds
+    last_error: BaseException | None = None
+    while time.monotonic() < deadline:
+        try:
+            request = Request(
+                url,
+                headers={"Cache-Control": "no-cache", "X-WriteClaw-Probe": "1"},
+            )
+            with urlopen(request, timeout=0.5) as response:
+                return 200 <= response.status < 500
+        except HTTPError as exc:
+            return 200 <= exc.code < 500
+        except (OSError, URLError) as exc:
+            last_error = exc
+            time.sleep(0.05)
+    if last_error is not None:
+        print(f"本机页面服务探活失败：{last_error}", file=sys.stderr)
+    return False
+
+
+def _dist_file_url(dist_dir: Path) -> str:
+    return f"{(dist_dir / 'index.html').resolve().as_uri()}?pywebview=1"
+
+
+def _resolve_desktop_url(dist_dir: Path) -> tuple[ThreadingHTTPServer | None, str]:
+    force_file = os.environ.get("WRITECLAW_FORCE_FILE_URL", "")
+    if force_file.strip().lower() in ("1", "true", "yes", "on"):
+        return None, _dist_file_url(dist_dir)
+    return _start_local_dist_server(dist_dir)
 
 
 def _app_icon_path() -> str | None:
@@ -1333,7 +1395,7 @@ def main() -> None:
     _ensure_windows_webview2()
     store = BookStore()
     api = Api(store)
-    _httpd, url = _start_local_dist_server(_dist_dir())
+    _httpd, url = _resolve_desktop_url(_dist_dir())
     webview.create_window(
         "DeepseekWrite",
         url,

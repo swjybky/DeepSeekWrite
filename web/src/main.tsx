@@ -7,10 +7,24 @@ import App from './App.tsx'
 import './bridge'
 import { registerWriteClawToolRenderers } from './pi/writeClawToolRenderers'
 
-registerWriteClawToolRenderers()
-
 const rootEl = document.getElementById('root')
 let appMounted = false
+
+const BENIGN_RESIZE_OBSERVER_MESSAGES = [
+  'ResizeObserver loop completed with undelivered notifications',
+  'ResizeObserver loop limit exceeded',
+] as const
+
+function isBenignResizeObserverError(message: string): boolean {
+  return BENIGN_RESIZE_OBSERVER_MESSAGES.some((item) => message.includes(item))
+}
+
+function escapeHtml(text: string): string {
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+}
 
 function showBootFatalError(message: string) {
   if (!rootEl) return
@@ -18,7 +32,7 @@ function showBootFatalError(message: string) {
     <div class="boot-splash" role="alert">
       <p class="boot-splash-title">DeepseekWrite</p>
       <p class="boot-splash-hint" style="max-width: 28rem; text-align: center; white-space: pre-wrap;">
-        ${message.replace(/</g, '&lt;')}
+        ${escapeHtml(message)}
       </p>
       <p class="boot-splash-hint">可在终端设置 WRITECLAW_DEBUG=1 后重启，用开发者工具查看详细错误。</p>
     </div>
@@ -33,6 +47,7 @@ function mount() {
     </StrictMode>,
   )
   appMounted = true
+  document.documentElement.dataset.writeClawMounted = '1'
 }
 
 /**
@@ -42,10 +57,21 @@ function mount() {
  */
 function boot() {
   window.addEventListener('error', (event) => {
+    const message = String(event.message || '')
+    if (isBenignResizeObserverError(message)) {
+      event.preventDefault()
+      console.warn('[DeepseekWrite] 已忽略 ResizeObserver 布局通知:', message)
+      return
+    }
+    if (appMounted) {
+      event.preventDefault()
+      console.error('[DeepseekWrite] 未处理脚本错误:', event.error ?? message)
+      return
+    }
     const detail =
       event.error instanceof Error
         ? `${event.error.message}\n${event.error.stack ?? ''}`
-        : String(event.message || '未知脚本错误')
+        : String(message || '未知脚本错误')
     showBootFatalError(`界面脚本加载失败：\n${detail}`)
   })
   window.addEventListener('unhandledrejection', (event) => {
@@ -80,6 +106,7 @@ function boot() {
   })
 
   // 立即挂载；桌面端 API 由 bridge.getBridgeApi() 单例等待，勿在此阻塞。
+  registerWriteClawToolRenderers()
   mount()
 }
 
