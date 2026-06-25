@@ -417,6 +417,15 @@ type Props = {
   historyPortalTargetId?: string
 }
 
+type WritableStageId = StageId | MaterialStageId | SkillStageId
+
+function targetStageIdFromArgs(args: unknown): WritableStageId | undefined {
+  if (!args || typeof args !== 'object') return undefined
+  const raw = (args as Record<string, unknown>).target_stage_id
+  const stageId = String(raw ?? '').trim()
+  return stageId ? (stageId as WritableStageId) : undefined
+}
+
 function WorkspaceAiChatInner({
   includePiArtifacts = true,
   sessionEpoch = 0,
@@ -448,9 +457,22 @@ function WorkspaceAiChatInner({
     toolName: string
     accumulatedText: string
     hasCleared: boolean
-    targetStageId?: StageId | MaterialStageId | SkillStageId
+    targetStageId?: WritableStageId
+    targetStageIdExplicit: boolean
   } | null>(null)
   const pendingPlotChildStageRef = useRef<StageId | null>(null)
+
+  const resolveDefaultStreamingWriteTargetStageId = (): WritableStageId => {
+    const p = propsLatestRef.current
+    if (workspaceType === 'book' && p.stageId === 'plot_design') {
+      return (
+        pendingPlotChildStageRef.current ??
+        p.activeStageContentId ??
+        p.stageId
+      ) as WritableStageId
+    }
+    return (p.activeStageContentId ?? p.stageId) as WritableStageId
+  }
 
   useEffect(() => {
     propsLatestRef.current = props
@@ -791,11 +813,16 @@ function WorkspaceAiChatInner({
                 block.name === 'write_material_editor' ||
                 block.name === 'write_skill_editor'
               if (isWriteTool) {
+                const args = block.arguments as Record<string, unknown> | undefined
+                const targetStageId = targetStageIdFromArgs(args)
                 streamingWriteRef.current = {
                   toolCallId: block.id,
                   toolName: block.name,
                   accumulatedText: '',
                   hasCleared: false,
+                  targetStageId:
+                    targetStageId ?? resolveDefaultStreamingWriteTargetStageId(),
+                  targetStageIdExplicit: Boolean(targetStageId),
                 }
               }
             }
@@ -815,16 +842,17 @@ function WorkspaceAiChatInner({
                 streamingWriteRef.current.toolName === 'write_workspace_editor' && !mode
                   ? 'replace'
                   : mode
-              const targetStageId = String(args.target_stage_id ?? '').trim() as
-                | StageId
-                | MaterialStageId
-                | SkillStageId
-                | ''
-              if (targetStageId) {
+              const targetStageId = targetStageIdFromArgs(args)
+              const canAcceptExplicitTarget =
+                !streamingWriteRef.current.targetStageIdExplicit &&
+                !streamingWriteRef.current.hasCleared &&
+                streamingWriteRef.current.accumulatedText.length === 0
+              if (targetStageId && canAcceptExplicitTarget) {
                 streamingWriteRef.current.targetStageId = targetStageId
+                streamingWriteRef.current.targetStageIdExplicit = true
               }
               const effectiveTargetStageId =
-                targetStageId || streamingWriteRef.current.targetStageId
+                streamingWriteRef.current.targetStageId
 
               if (effectiveMode === 'replace' && !streamingWriteRef.current.hasCleared) {
                 streamingWriteRef.current.hasCleared = true
