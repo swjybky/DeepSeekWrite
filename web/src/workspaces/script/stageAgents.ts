@@ -275,7 +275,7 @@ function snippetAroundMatch(
   const end = Math.min(text.length, span.end + contextChars)
   const prefix = start > 0 ? '...' : ''
   const suffix = end < text.length ? '...' : ''
-  return `${prefix}${text.slice(start, span.start)}<<${span.matched}>>${text.slice(span.end, end)}${suffix}`
+  return `${prefix}${text.slice(start, span.start)}${span.matched}${text.slice(span.end, end)}${suffix}`
 }
 
 export function buildSearchWorkspaceTextTool(
@@ -397,7 +397,7 @@ export function buildSearchWorkspaceTextTool(
       }
 
       if (total > 0) {
-        output.push('', `已返回 ${total} 处匹配；如需替换，请从 << >> 中或其上下文里原样复制真实片段。`)
+        output.push('', `已返回 ${total} 处匹配。`)
         return textBlock(output.join('\n'))
       }
 
