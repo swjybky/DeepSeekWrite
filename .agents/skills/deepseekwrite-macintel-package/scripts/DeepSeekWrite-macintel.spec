@@ -8,6 +8,7 @@ This file is invoked by build_macintel_dmg.sh with:
 
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
 
@@ -23,6 +24,10 @@ entry_script = project_root / "packaging" / "pyi_entry.py"
 dist_web = project_root / "web" / "dist"
 assets_dir = project_root / "app" / "assets"
 prompt_defaults = project_root / "app" / "prompt_defaults"
+version_config = project_root / "app" / "version.json"
+app_version = str(
+    json.loads(version_config.read_text(encoding="utf-8")).get("version") or "1.0.0"
+)
 icon_env = os.environ.get("WRITECLAW_MAC_ICON")
 icns_path = Path(icon_env).resolve() if icon_env else assets_dir / "app-icon.icns"
 
@@ -37,6 +42,7 @@ if not dist_web.is_dir() or not (dist_web / "index.html").is_file():
 datas = [
     (str(dist_web), "web/dist"),
     (str(prompt_defaults), "app/prompt_defaults"),
+    (str(version_config), "app"),
 ]
 if assets_dir.is_dir():
     datas.append((str(assets_dir), "app/assets"))
@@ -120,8 +126,8 @@ app = BUNDLE(
     info_plist={
         "CFBundleName": "DeepSeekWrite",
         "CFBundleDisplayName": "DeepSeekWrite",
-        "CFBundleShortVersionString": "1.0.0",
-        "CFBundleVersion": "1.0.0",
+        "CFBundleShortVersionString": app_version,
+        "CFBundleVersion": app_version,
         "LSMinimumSystemVersion": "10.13",
         "NSHighResolutionCapable": True,
         "NSAppTransportSecurity": {

@@ -68,6 +68,29 @@ declare global {
         /** 创作空间、素材库、技能库的文字显示方式 */
         get_text_display_mode(): Promise<string>
         set_text_display_mode(mode: string): Promise<string>
+        /** 检查远程版本配置并返回当前平台的可用更新。 */
+        check_for_update(): Promise<{
+          success: boolean
+          error: string | null
+          current_version: string
+          latest_version: string | null
+          update_available: boolean
+          platform_key: string | null
+          file_name: string | null
+          release_notes: string[]
+        }>
+        /** 下载最新安装包到当前用户的 Downloads 目录。 */
+        download_latest_update(): Promise<{
+          success: boolean
+          error: string | null
+          up_to_date: boolean
+          current_version: string
+          latest_version: string | null
+          path: string | null
+          browser_opened: boolean
+          file_name: string | null
+          release_notes: string[]
+        }>
         /** 全局创作空间智能体可读配置 */
         get_workspace_agent_read_access(): Promise<Record<string, unknown>>
         get_workspace_agent_read_access(

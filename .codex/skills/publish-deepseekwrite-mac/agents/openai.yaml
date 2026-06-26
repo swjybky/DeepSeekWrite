@@ -1,0 +1,4 @@
+interface:
+  display_name: "发布 DeepSeekWrite mac 安装包"
+  short_description: "校验双架构 DMG 并更新 Gitee Release 下载地址"
+  default_prompt: "Use $publish-deepseekwrite-mac to publish the current macOS DMG installers."

@@ -13,3 +13,79 @@
   display: flex;
   flex-direction: column;
 }
+
+.app-shell > .app-update-notice {
+  flex: none;
+  min-height: auto;
+  flex-direction: row;
+}
+
+.app-update-notice {
+  position: fixed;
+  right: 1rem;
+  bottom: 1rem;
+  z-index: 10100;
+  width: min(26rem, calc(100vw - 2rem));
+  box-sizing: border-box;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.9rem 1rem;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  background: var(--paper-elevated);
+  box-shadow: var(--shadow-soft);
+  animation: appUpdateNoticeIn 0.2s ease-out;
+}
+
+.app-update-notice > div {
+  min-width: 0;
+  display: grid;
+  gap: 0.28rem;
+}
+
+.app-update-notice strong {
+  color: var(--ink);
+  font-size: 0.88rem;
+}
+
+.app-update-notice span {
+  overflow-wrap: anywhere;
+  color: var(--ink-soft);
+  font-size: 0.8rem;
+  line-height: 1.5;
+}
+
+.app-update-notice button {
+  flex: 0 0 auto;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--ink-faint);
+  font-size: 1.25rem;
+  line-height: 1;
+}
+
+.app-update-notice--success {
+  border-color: color-mix(in oklab, var(--accent) 32%, var(--border));
+}
+
+.app-update-notice--error {
+  border-color: color-mix(in oklab, var(--danger) 35%, var(--border));
+}
+
+.app-update-notice--error strong {
+  color: var(--danger);
+}
+
+@keyframes appUpdateNoticeIn {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}

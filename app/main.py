@@ -231,6 +231,10 @@ from app.ai_chat_history import (
     list_ai_chat_sessions,
     save_ai_chat_session,
 )
+from app.update_service import (
+    check_for_update as _check_for_update,
+    download_latest_update as _download_latest_update,
+)
 
 
 _WEBVIEW2_INSTALLER_NAME = "MicrosoftEdgeWebView2RuntimeInstallerX64.exe"
@@ -817,6 +821,14 @@ class Api:
 
     def set_text_display_mode(self, mode: str) -> str:
         return write_text_display_mode(mode)
+
+    # ==================== 软件更新 API ====================
+
+    def check_for_update(self) -> dict[str, object]:
+        return _check_for_update()
+
+    def download_latest_update(self) -> dict[str, object]:
+        return _download_latest_update()
 
     def get_workspace_agent_read_access(self, workspace_type: str | None = None) -> dict[str, object]:
         """全局创作空间智能体可读的 workspace/material 阶段列表。"""

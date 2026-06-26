@@ -35,6 +35,7 @@ entry_script = project_root / "packaging" / "pyi_entry.py"
 dist_web = project_root / "web" / "dist"
 assets_dir = project_root / "app" / "assets"
 prompt_defaults = project_root / "app" / "prompt_defaults"
+version_config = project_root / "app" / "version.json"
 ico_path = assets_dir / "app-icon.ico"
 webview2_runtime = project_root / "packaging" / "webview2_runtime"
 
@@ -46,6 +47,7 @@ if not dist_web.is_dir() or not (dist_web / "index.html").is_file():
 datas = [
     (str(dist_web), "web/dist"),
     (str(prompt_defaults), "app/prompt_defaults"),
+    (str(version_config), "app"),
 ]
 if assets_dir.is_dir():
     datas.append((str(assets_dir), "app/assets"))

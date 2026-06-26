@@ -13,6 +13,7 @@ import {
   type SkillSummary,
   type SkillType,
   type TextDisplayMode,
+  type UpdateCheckResult,
   bookTypeLabel,
   createBook,
   createSkill,
@@ -33,6 +34,7 @@ import {
   deleteMaterial,
   normalizeAiModelSettings,
   saveAiModelConfig,
+  checkForUpdate,
   getMaterialParentGenres,
   materialTypeLabel,
   skillTypeLabel,
@@ -44,6 +46,10 @@ import { APPEARANCE_STYLE_LABELS, useAppearance } from '../appearance'
 import { CardGrid, bookToCardItem, materialToCardItem, skillToCardItem } from '../components/CardGrid'
 import { useAppDialog } from '../components/useAppDialog'
 import { LearningImitationDialog } from '../features/learningImitation/LearningImitationDialog'
+import {
+  startBackgroundUpdate,
+  useBackgroundUpdate,
+} from '../features/update/backgroundUpdate'
 import { refreshPreferredWorkspaceChatModel } from '../pi/workspaceChatPreferences'
 import { useHomeStore } from '../stores/homeStore'
 import { TEXT_DISPLAY_MODE_LABELS, useTextDisplay } from '../textDisplay'
@@ -1280,6 +1286,158 @@ function CreateDialog({
   )
 }
 
+type UpdateDialogProps = {
+  checking: boolean
+  result: UpdateCheckResult | null
+  error: string | null
+  onClose: () => void
+  onRetry: () => void
+  onDownload: () => void
+}
+
+function UpdateDialog({
+  checking,
+  result,
+  error,
+  onClose,
+  onRetry,
+  onDownload,
+}: UpdateDialogProps) {
+  const updateAvailable = Boolean(result?.success && result.update_available)
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        onClose()
+      }
+    }
+    document.addEventListener('keydown', onKeyDown)
+    return () => document.removeEventListener('keydown', onKeyDown)
+  }, [onClose])
+
+  return (
+    <div
+      className="update-dialog-backdrop"
+      role="presentation"
+      onClick={(event) => {
+        if (event.target === event.currentTarget) onClose()
+      }}
+    >
+      <section
+        className="update-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="update-dialog-title"
+      >
+        <header className="update-dialog-head">
+          <div>
+            <span className="update-dialog-kicker">VERSION UPDATE</span>
+            <h2 id="update-dialog-title">软件更新</h2>
+          </div>
+          <button
+            type="button"
+            className="model-config-close"
+            aria-label="关闭软件更新"
+            onClick={onClose}
+          >
+            ×
+          </button>
+        </header>
+
+        <div className="update-dialog-body">
+          {checking ? (
+            <div className="update-dialog-loading" role="status">
+              <span className="update-dialog-spinner" aria-hidden="true" />
+              <strong>正在获取版本更新信息</strong>
+              <span>请稍候，马上就好…</span>
+            </div>
+          ) : error ? (
+            <div className="update-dialog-state update-dialog-state--error" role="alert">
+              <strong>暂时无法获取更新信息</strong>
+              <span>{error}</span>
+            </div>
+          ) : result ? (
+            <>
+              <div className="update-dialog-version-card">
+                <div className="update-dialog-version-copy">
+                  <span>{updateAvailable ? '发现新版本' : '当前已是最新版本'}</span>
+                  <strong>
+                    v{result.latest_version || result.current_version}
+                  </strong>
+                </div>
+                <span
+                  className={
+                    updateAvailable
+                      ? 'update-dialog-badge'
+                      : 'update-dialog-badge update-dialog-badge--current'
+                  }
+                >
+                  {updateAvailable ? '可更新' : '已是最新'}
+                </span>
+              </div>
+
+              <div className="update-dialog-meta">
+                <span>当前版本：v{result.current_version}</span>
+                {result.file_name ? <span>安装包：{result.file_name}</span> : null}
+              </div>
+
+              <section className="update-dialog-release" aria-labelledby="update-release-title">
+                <h3 id="update-release-title">版本更新信息</h3>
+                {result.release_notes.length > 0 ? (
+                  <ul>
+                    {result.release_notes.map((note, index) => (
+                      <li key={`${note}-${index}`}>{note}</li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p>本次版本包含功能优化与已知问题修复。</p>
+                )}
+              </section>
+
+              {updateAvailable ? (
+                <div className="update-dialog-notice">
+                  <strong>安装提示</strong>
+                  <p>
+                    点击“下载新版本”后，请到系统下载处查看安装包，重新安装软件即可。
+                  </p>
+                </div>
+              ) : null}
+
+            </>
+          ) : null}
+        </div>
+
+        <footer className="update-dialog-foot">
+          {error ? (
+            <button type="button" className="btn-primary" onClick={onRetry}>
+              重新检查
+            </button>
+          ) : updateAvailable ? (
+            <button
+              type="button"
+              className="btn-primary update-dialog-download"
+              disabled={checking}
+              onClick={onDownload}
+            >
+              下载新版本
+            </button>
+          ) : (
+            <button
+              type="button"
+              className="btn-primary"
+              disabled={checking}
+              onClick={onClose}
+            >
+              关闭
+            </button>
+          )}
+        </footer>
+      </section>
+    </div>
+  )
+}
+
 export function Home() {
   const { confirm, dialog } = useAppDialog()
   const {
@@ -1364,6 +1522,13 @@ export function Home() {
   const [modelConfigError, setModelConfigError] = useState<string | null>(null)
   const [styleConfigError, setStyleConfigError] = useState<string | null>(null)
   const [textDisplayError, setTextDisplayError] = useState<string | null>(null)
+  const backgroundUpdate = useBackgroundUpdate()
+  const [updateDialogOpen, setUpdateDialogOpen] = useState(false)
+  const [checkingUpdate, setCheckingUpdate] = useState(false)
+  const [currentAppVersion, setCurrentAppVersion] = useState<string | null>(null)
+  const [updateCheckResult, setUpdateCheckResult] = useState<UpdateCheckResult | null>(null)
+  const [updateError, setUpdateError] = useState<string | null>(null)
+  const downloadingUpdate = backgroundUpdate.status === 'downloading'
 
   // ==================== 创作空间封面加载 ====================
   const loadBookCovers = useCallback(async (bookList: BookSummary[]) => {
@@ -1589,6 +1754,30 @@ export function Home() {
     } catch (e) {
       setTextDisplayError(e instanceof Error ? e.message : '保存文字显示设置失败')
     }
+  }
+
+  const handleCheckUpdate = async () => {
+    setUpdateDialogOpen(true)
+    setCheckingUpdate(true)
+    setUpdateCheckResult(null)
+    setUpdateError(null)
+    try {
+      const check = await checkForUpdate()
+      setCurrentAppVersion(check.current_version)
+      if (!check.success) {
+        throw new Error(check.error || '检查更新失败')
+      }
+      setUpdateCheckResult(check)
+    } catch (e) {
+      setUpdateError(e instanceof Error ? e.message : '软件更新失败')
+    } finally {
+      setCheckingUpdate(false)
+    }
+  }
+
+  const handleDownloadUpdate = () => {
+    if (!startBackgroundUpdate()) return
+    setUpdateDialogOpen(false)
   }
 
   // ==================== 书籍操作 ====================
@@ -1965,10 +2154,38 @@ export function Home() {
               ? '学习仿写后台中'
               : '学习仿写'}
           </button>
+          <button
+            type="button"
+            className={
+              downloadingUpdate
+                ? 'home-config-trigger home-config-trigger--active'
+                : 'home-config-trigger'
+            }
+            title={currentAppVersion ? `当前版本：v${currentAppVersion}` : '查看版本更新信息'}
+            disabled={checkingUpdate || downloadingUpdate}
+            onClick={() => void handleCheckUpdate()}
+          >
+            {downloadingUpdate
+              ? '后台下载中'
+              : checkingUpdate
+                ? '检查中…'
+                : '软件更新'}
+          </button>
         </nav>
       </header>
 
       {dialog}
+
+      {updateDialogOpen ? (
+        <UpdateDialog
+          checking={checkingUpdate}
+          result={updateCheckResult}
+          error={updateError}
+          onClose={() => setUpdateDialogOpen(false)}
+          onRetry={() => void handleCheckUpdate()}
+          onDownload={() => void handleDownloadUpdate()}
+        />
+      ) : null}
 
       {modelConfigError && !modelConfigOpen ? (
         <p className="home-config-error" role="alert">
