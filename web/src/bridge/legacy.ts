@@ -15,11 +15,14 @@ export type {
   ExpertDraft,
   ExpertDraftCharacterState,
   ExpertDraftSection,
+  MemoryEntry,
+  MemoryTag,
   ScriptStageId,
   ShortStageId,
   StageId,
 } from '../domain/workspaceCore'
 export {
+  MEMORY_TAGS,
   SCRIPT_GENRE_OPTIONS,
   SHORT_GENRE_OPTIONS,
   WORKSPACE_CONTENT_STAGES,
@@ -31,6 +34,8 @@ export {
   mergeStagePatchIntoAll,
   normalizeAllBookStages,
   normalizeExpertDraft,
+  normalizeMemoryEntries,
+  normalizeMemoryTag,
   normalizeStages,
   normalizeStagesForWorkspaceBook,
   resolveWorkspaceBookGenre,
@@ -46,6 +51,7 @@ export * from './libraryClient'
 export * from './libraryDomain'
 export * from './learningImitationClient'
 export * from './materialsClient'
+export * from './memoryClient'
 export * from './preferencesClient'
 export * from './skillPromptClient'
 export * from './skillsClient'

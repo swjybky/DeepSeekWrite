@@ -4,6 +4,7 @@ import type {
   BookSummary,
   BookType,
 } from '../domain/workspaceCore'
+import { normalizeMemoryEntries } from '../domain/workspaceCore'
 
 // ==================== 素材提示词类型 ====================
 export const MATERIAL_MANAGER_AGENT_ID = 'material_manager' as const
@@ -330,6 +331,7 @@ export function normalizeBook(raw: Partial<Book> & { id: string }): Book {
     content: typeof raw.content === 'string' ? raw.content : '',
     stages: raw.stages,
     expert_draft: raw.expert_draft,
+    memories: normalizeMemoryEntries(raw.memories),
     created_at: typeof raw.created_at === 'string' ? raw.created_at : undefined,
     updated_at: typeof raw.updated_at === 'string' ? raw.updated_at : undefined,
   }

@@ -15,6 +15,61 @@ import { isWorkspaceTypeEnabled } from '../workspaces/registry'
 
 export type BookType = 'short' | 'long' | 'script'
 export type BookStatus = 'editing' | 'completed'
+export const MEMORY_TAGS = [
+  'general',
+  'character',
+  'plot',
+  'outline',
+  'draft',
+  'style',
+] as const
+export type MemoryTag = (typeof MEMORY_TAGS)[number]
+
+export interface MemoryEntry {
+  id: string
+  tag: MemoryTag
+  content: string
+  created_at?: string
+  updated_at?: string
+}
+
+function randomLocalId(): string {
+  return globalThis.crypto?.randomUUID?.() ?? Math.random().toString(36).slice(2)
+}
+
+export function normalizeMemoryTag(raw: unknown): MemoryTag {
+  return MEMORY_TAGS.includes(raw as MemoryTag) ? (raw as MemoryTag) : 'general'
+}
+
+export function normalizeMemoryEntries(raw: unknown): MemoryEntry[] {
+  const source = Array.isArray(raw) ? raw : raw == null ? [] : [raw]
+  const out: MemoryEntry[] = []
+  const seenIds = new Set<string>()
+  for (const item of source) {
+    const entry =
+      typeof item === 'string'
+        ? { content: item }
+        : item && typeof item === 'object'
+          ? (item as Partial<MemoryEntry>)
+          : null
+    if (!entry) continue
+    const content = String(entry.content ?? '').trim()
+    if (!content) continue
+    let id = String(entry.id ?? '').trim() || randomLocalId()
+    if (seenIds.has(id)) id = randomLocalId()
+    seenIds.add(id)
+    out.push({
+      id,
+      tag: normalizeMemoryTag(entry.tag),
+      content,
+      created_at:
+        typeof entry.created_at === 'string' ? entry.created_at : undefined,
+      updated_at:
+        typeof entry.updated_at === 'string' ? entry.updated_at : undefined,
+    })
+  }
+  return out
+}
 
 export type { ShortStageId, ScriptStageId }
 
@@ -269,6 +324,7 @@ export interface Book extends BookSummary {
   content: string
   stages?: Partial<Record<StageId, string>>
   expert_draft?: ExpertDraft
+  memories: MemoryEntry[]
   created_at?: string
   updated_at?: string
 }

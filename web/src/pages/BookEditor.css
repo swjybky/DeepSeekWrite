@@ -155,6 +155,32 @@ button.back-link:hover {
   cursor: not-allowed;
 }
 
+.btn-book-memory {
+  position: relative;
+  padding: 0.45rem 0.8rem;
+  border: 1px solid color-mix(in oklab, var(--ink-faint) 28%, var(--border));
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.btn-book-memory:hover:not(:disabled) {
+  border-color: color-mix(in oklab, var(--accent) 42%, var(--border));
+  color: var(--accent);
+}
+
+.btn-book-memory--unread::after {
+  content: '';
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: #dc2626;
+}
+
 .editor-toast {
   font-size: 0.875rem;
   margin: 0 1rem 0.5rem;

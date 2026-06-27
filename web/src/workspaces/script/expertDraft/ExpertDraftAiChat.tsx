@@ -12,6 +12,7 @@ import {
   type AiChatHistoryMetadata,
   type AiChatHistoryScope,
   type ExpertDraft,
+  type MemoryEntry,
   type Material,
   type Skill,
   type StageId,
@@ -22,9 +23,11 @@ import {
   syncWorkspaceModelButtonLabel,
 } from '../../../pi/resolveWorkspaceChatModel'
 import { convertToLlmWithSkillAsUser } from '../../../pi/skillMessageTransform'
+import { createMemoryAwareConvertToLlm } from '../../../pi/memoryMessageTransform'
 import { createPiSessionId } from '../../../pi/sessionId'
 import { ensurePiAppStorage } from '../../../pi/setupPiWorkspace'
 import { refreshChatPanelTranscript } from '../../../pi/chatPanelTranscript'
+import { captureBookMemoryFromMessages } from '../../../pi/memoryCapture'
 import {
   bindWorkspaceChatPreferences,
   getPreferredWorkspaceThinkingLevel,
@@ -86,6 +89,8 @@ type Props = {
   bookGenre: string
   sessionEpoch?: number
   stages: Partial<Record<StageId, string>>
+  bookMemories?: MemoryEntry[]
+  userMemories?: MemoryEntry[]
   linkedMaterial?: Material | null
   linkedSkill?: Skill | null
   readAccess: WorkspaceAgentReadAccessEntry
@@ -113,6 +118,10 @@ type Props = {
   applyExpertDraftStageBody?: (body: string) => void
   historyPortalTargetId?: string
   isHistoryPortalActive?: boolean
+  onBookMemoriesCaptured?: (
+    bookId: string,
+    memories: MemoryEntry[],
+  ) => void | Promise<void>
 }
 
 function resolveCoordinatorDraftBody(props: Props): string {
@@ -332,6 +341,33 @@ export function ExpertDraftAiChat(props: Props) {
     }
     await refreshHistorySessions(kind)
   }
+
+  const captureMemoryFromAgent = (
+    kind: 'coordinator' | 'section-writer',
+    agent: Agent,
+  ) => {
+    if (kind === 'section-writer' && backgroundWriterActiveRef.current) return
+    const p = propsLatestRef.current
+    if (!p.onBookMemoriesCaptured) return
+    const messages = agent.state.messages.slice()
+    const bookMemories = [...(p.bookMemories ?? [])]
+    const userMemories = [...(p.userMemories ?? [])]
+    void (async () => {
+      try {
+        const next = await captureBookMemoryFromMessages({
+          bookId: p.bookId,
+          bookTitle: p.bookTitle,
+          bookType: 'script',
+          messages,
+          bookMemories,
+          userMemories,
+        })
+        if (next) await p.onBookMemoriesCaptured?.(p.bookId, next)
+      } catch (error) {
+        console.warn('[WriteClaw memory] expert capture skipped:', error)
+      }
+    })()
+  }
   useEffect(() => {
     persistHistoryFromAgentRef.current = persistHistoryFromAgent
   })
@@ -439,6 +475,7 @@ export function ExpertDraftAiChat(props: Props) {
         } finally {
           setHistoryDisabled(false)
         }
+        captureMemoryFromAgent(historyKind, agent)
         cancelAnimationFrame(postAgentEndRaf)
         postAgentEndRaf = requestAnimationFrame(() => {
           refreshIdleUi()
@@ -603,7 +640,15 @@ export function ExpertDraftAiChat(props: Props) {
 
       const coordinatorAgent = new Agent({
         sessionId: resolveCoordinatorPiSessionId(),
-        convertToLlm: convertToLlmWithSkillAsUser,
+        convertToLlm: createMemoryAwareConvertToLlm(
+          convertToLlmWithSkillAsUser,
+          () => ({
+            bookTitle: propsLatestRef.current.bookTitle,
+            bookType: 'script',
+            bookMemories: propsLatestRef.current.bookMemories,
+            userMemories: propsLatestRef.current.userMemories,
+          }),
+        ),
         getApiKey: createWorkspaceModelApiKeyResolver(
           () => coordinatorAgentRef.current?.state.model ?? coordinatorModel,
         ),
@@ -696,7 +741,15 @@ export function ExpertDraftAiChat(props: Props) {
         setActiveWriterHistoryId('')
         const agent = new Agent({
           sessionId: resolveWriterPiSessionId(),
-          convertToLlm: convertToLlmWithSkillAsUser,
+          convertToLlm: createMemoryAwareConvertToLlm(
+            convertToLlmWithSkillAsUser,
+            () => ({
+              bookTitle: propsLatestRef.current.bookTitle,
+              bookType: 'script',
+              bookMemories: propsLatestRef.current.bookMemories,
+              userMemories: propsLatestRef.current.userMemories,
+            }),
+          ),
           getApiKey: createWorkspaceModelApiKeyResolver(
             () => sectionWriterAgent?.state.model ?? model,
           ),

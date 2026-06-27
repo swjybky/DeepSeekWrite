@@ -6,12 +6,15 @@ export type {
   ExpertDraft,
   ExpertDraftCharacterState,
   ExpertDraftSection,
+  MemoryEntry,
+  MemoryTag,
   ScriptStageId,
   ShortStageId,
   StageId,
 } from './workspaceCore'
 
 export {
+  MEMORY_TAGS,
   SCRIPT_GENRE_OPTIONS,
   SHORT_GENRE_OPTIONS,
   WORKSPACE_CONTENT_STAGES,
@@ -23,6 +26,8 @@ export {
   mergeStagePatchIntoAll,
   normalizeAllBookStages,
   normalizeExpertDraft,
+  normalizeMemoryEntries,
+  normalizeMemoryTag,
   normalizeStages,
   normalizeStagesForWorkspaceBook,
   resolveWorkspaceBookGenre,
@@ -83,6 +88,12 @@ export {
   normalizeSkillType,
   resolveMaterialParentGenre,
   skillTypeLabel,
+  createEmptyMemory,
+  getBookMemories,
+  getUserMemories,
+  mergeUniqueMemories,
+  saveBookMemories,
+  saveUserMemories,
 } from '../bridge'
 
 export type {

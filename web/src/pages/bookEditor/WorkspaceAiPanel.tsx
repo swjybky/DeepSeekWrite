@@ -2,6 +2,7 @@ import { useId, type MutableRefObject } from 'react'
 import type {
   Book,
   ExpertDraft,
+  MemoryEntry,
   StageId,
   WorkspaceAgentReadAccessConfig,
 } from '../../domain/workspace'
@@ -42,6 +43,8 @@ type StartExpertWriting = (
   sectionIds: string[],
   options?: {
     userWritingPrompt?: string
+    bookMemories?: MemoryEntry[]
+    userMemories?: MemoryEntry[]
     callbacks?: Pick<
       RunExpertDraftSectionWriterOptions,
       'onSectionAgentStart' | 'onRunFinish'
@@ -103,6 +106,7 @@ type Props = {
   activeExpertDraftSectionId: string
   expertDraft: ExpertDraft
   renderedWorkspaceSessions: BookWorkspaceSessionState[]
+  userMemories: MemoryEntry[]
   workspaceAgentReadAccess: WorkspaceAgentReadAccessConfig
   linkedMaterialTitle?: string
   linkedSkillTitle?: string
@@ -126,6 +130,10 @@ type Props = {
     field: ExpertDraftSectionContentField,
     body: string,
   ) => void
+  onBookMemoriesCaptured?: (
+    bookId: string,
+    memories: MemoryEntry[],
+  ) => void | Promise<void>
   onExpertDraftStageBodyChange: (body: string) => void
   bumpActiveExpertChatEpoch: () => void
   bumpActiveStageChatEpoch: (stageId: StageId) => void
@@ -140,6 +148,7 @@ export function WorkspaceAiPanel({
   activeExpertDraftSectionId,
   expertDraft,
   renderedWorkspaceSessions,
+  userMemories,
   workspaceAgentReadAccess,
   linkedMaterialTitle,
   linkedSkillTitle,
@@ -152,6 +161,7 @@ export function WorkspaceAiPanel({
   startExpertWritingForBook,
   getRenderedExpertDraftSectionContent,
   syncExpertDraftSectionField,
+  onBookMemoriesCaptured,
   onExpertDraftStageBodyChange,
   bumpActiveExpertChatEpoch,
   bumpActiveStageChatEpoch,
@@ -292,6 +302,8 @@ export function WorkspaceAiPanel({
                       })
                     }}
                     allStages={session.stages}
+                    bookMemories={session.book.memories ?? []}
+                    userMemories={userMemories}
                     linkedMaterial={session.linkedMaterial}
                     linkedSkill={session.linkedSkill}
                     workspaceAgentReadAccess={workspaceAgentReadAccess}
@@ -310,6 +322,7 @@ export function WorkspaceAiPanel({
                     onRequestSave={async () => {
                       await saveBookSession(session.book.id)
                     }}
+                    onBookMemoriesCaptured={onBookMemoriesCaptured}
                     isPaused={!isActive}
                   />
                 </div>
@@ -334,6 +347,8 @@ export function WorkspaceAiPanel({
                 bookGenre={sessionBookGenre}
                 sessionEpoch={session.expertAiChatEpoch}
                 stages={session.stages}
+                bookMemories={session.book.memories ?? []}
+                userMemories={userMemories}
                 linkedMaterial={session.linkedMaterial}
                 linkedSkill={session.linkedSkill}
                 readAccess={resolveReadAccessForBook(
@@ -354,7 +369,11 @@ export function WorkspaceAiPanel({
                   startExpertWritingForBook(
                     session.book.id,
                     sectionIds,
-                    options,
+                    {
+                      ...options,
+                      bookMemories: session.book.memories ?? [],
+                      userMemories,
+                    },
                   )
                 }
                 getRenderedExpertDraftSectionContent={
@@ -390,6 +409,7 @@ export function WorkspaceAiPanel({
                 }
                 historyPortalTargetId={historyPortalTargetId}
                 isHistoryPortalActive={expertLayerActive}
+                onBookMemoriesCaptured={onBookMemoriesCaptured}
               />
             </div>
           )

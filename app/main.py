@@ -4,8 +4,10 @@ import base64
 import functools
 import http.client
 import importlib.util
+import inspect
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -183,7 +185,7 @@ _configure_windows_webview2_proxy_env()
 
 import webview
 
-from app.runtime_paths import bundle_root, data_root, writable_root
+from app.runtime_paths import app_data_root, bundle_root, data_root, writable_root
 from app.prompt_store import (
     read_raw_learning_imitation_prompt_for_editor,
     read_raw_material_prompt_for_editor,
@@ -213,6 +215,7 @@ from app.storage import (
     read_image_model_config,
     read_saved_workspace_root,
     read_text_display_mode,
+    read_user_memories,
     read_workspace_agent_read_access,
     read_workspace_agent_read_access_defaults,
     read_workspace_agent_read_access_for_type,
@@ -221,6 +224,7 @@ from app.storage import (
     write_ai_model_config,
     write_saved_workspace_root,
     write_text_display_mode,
+    write_user_memories,
     write_workspace_agent_read_access,
     write_workspace_agent_read_access_for_type,
 )
@@ -489,6 +493,9 @@ class DistHTTPRequestHandler(SimpleHTTPRequestHandler):
         if urlparse(self.path).path.startswith("/llm-proxy/"):
             self._handle_llm_proxy("GET")
             return
+        # WebView2 真实加载页面（非后端探活）即视为启动成功，清除"上次启动失败"标记。
+        if self.headers.get("X-WriteClaw-Probe") != "1":
+            _clear_boot_flag_once()
         return super().do_GET()
 
     def guess_type(self, path: str) -> str:
@@ -519,23 +526,112 @@ class DistHTTPRequestHandler(SimpleHTTPRequestHandler):
         super().log_message(format, *args)
 
 
+class _DistServerState:
+    """本机页面服务运行态：serve_forever 异常退出后由同线程自动重启，避免 WebView2 导航到死端口。"""
+
+    def __init__(self, httpd: ThreadingHTTPServer, port: int, handler) -> None:
+        self.httpd = httpd
+        self.port = port
+        self.handler = handler
+        self.lock = threading.Lock()
+        self.restart_count = 0
+        self.fatal = False
+
+    @property
+    def probe_url(self) -> str:
+        return f"http://127.0.0.1:{self.port}/?pywebview=1"
+
+
+def _serve_dist_with_watchdog(state: _DistServerState) -> None:
+    """serve_forever 异常退出时自动同端口重启；重启失败置 fatal 并打印致命错误。"""
+    while not state.fatal:
+        try:
+            state.httpd.serve_forever()
+            return  # 正常 shutdown（程序退出）
+        except Exception as exc:  # noqa: BLE001
+            print(f"本机页面服务异常退出：{exc}，尝试重启...", file=sys.stderr)
+        time.sleep(0.5)
+        with state.lock:
+            if state.fatal:
+                return
+            try:
+                state.httpd.server_close()
+            except Exception:  # noqa: BLE001
+                pass
+            try:
+                state.httpd = ThreadingHTTPServer(
+                    ("127.0.0.1", state.port),
+                    state.handler,
+                )
+                state.restart_count += 1
+                print(
+                    f"本机页面服务已重启（第 {state.restart_count} 次，端口 {state.port}）",
+                    file=sys.stderr,
+                )
+            except OSError as exc:
+                print(
+                    f"致命错误：本机页面服务重启失败（端口 {state.port}）：{exc}\n"
+                    "WebView2 将无法加载页面，请重启应用。",
+                    file=sys.stderr,
+                )
+                state.fatal = True
+                return
+
+
 def _start_local_dist_server(dist_dir: Path) -> tuple[ThreadingHTTPServer, str]:
-    """本机回环 HTTP 提供 dist，与 `npm run dev` 同为 http 源，避免 file:// 下 fetch 异常。"""
+    """本机回环 HTTP 提供 dist，与 `npm run dev` 同为 http 源，避免 file:// 下 fetch 异常。
+
+    绑定/探活失败时重试最多 3 次；全部失败则明确报错退出，避免 WebView2 导航到死端口
+    而显示原生错误页（错误代码 39）。serve_forever 运行期异常由看门狗自动同端口重启。
+    """
     handler = functools.partial(
         DistHTTPRequestHandler,
         directory=str(dist_dir.resolve()),
     )
-    httpd = ThreadingHTTPServer(("127.0.0.1", 0), handler)
-    port = httpd.server_address[1]
-    threading.Thread(target=httpd.serve_forever, daemon=True).start()
-    probe_url = f"http://127.0.0.1:{port}/?pywebview=1"
-    if not _wait_for_local_dist_server(probe_url):
+    last_error: BaseException | None = None
+    for attempt in range(3):
+        try:
+            httpd = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+        except OSError as exc:
+            last_error = exc
+            print(
+                f"本机页面服务绑定失败（第 {attempt + 1} 次）：{exc}",
+                file=sys.stderr,
+            )
+            time.sleep(0.2)
+            continue
+        port = httpd.server_address[1]
+        state = _DistServerState(httpd, port, handler)
+        threading.Thread(
+            target=_serve_dist_with_watchdog,
+            args=(state,),
+            daemon=True,
+            name="dist-http-server",
+        ).start()
+        if _wait_for_local_dist_server(state.probe_url):
+            host = os.environ.get("WRITECLAW_DESKTOP_HOST", "").strip() or "127.0.0.1"
+            return httpd, f"http://{host}:{port}/?pywebview=1"
         print(
-            f"警告：本机页面服务未能及时响应：{probe_url}，将尝试继续启动窗口。",
+            f"本机页面服务探活失败（第 {attempt + 1} 次）：{state.probe_url}",
             file=sys.stderr,
         )
-    host = os.environ.get("WRITECLAW_DESKTOP_HOST", "").strip() or "127.0.0.1"
-    return httpd, f"http://{host}:{port}/?pywebview=1"
+        try:
+            state.fatal = True
+            httpd.shutdown()
+            httpd.server_close()
+        except Exception:  # noqa: BLE001
+            pass
+        last_error = RuntimeError(f"probe failed: {state.probe_url}")
+        time.sleep(0.2)
+    print(
+        "致命错误：本机页面服务在多次重试后仍不可用，无法启动窗口。\n"
+        "可能原因：127.0.0.1 被防火墙拦截、端口资源耗尽、dist 目录不可读。\n"
+        "可尝试：设置 WRITECLAW_FORCE_FILE_URL=1 改用 file:// 模式启动后排查。",
+        file=sys.stderr,
+    )
+    if last_error is not None:
+        print(f"最后错误：{last_error}", file=sys.stderr)
+    sys.exit(1)
 
 
 def _wait_for_local_dist_server(url: str, timeout_seconds: float = 3.0) -> bool:
@@ -568,6 +664,119 @@ def _resolve_desktop_url(dist_dir: Path) -> tuple[ThreadingHTTPServer | None, st
     if force_file.strip().lower() in ("1", "true", "yes", "on"):
         return None, _dist_file_url(dist_dir)
     return _start_local_dist_server(dist_dir)
+
+
+def _resolve_webview_user_data_folder() -> str | None:
+    """固定 WebView2/浏览器后端用户数据目录到可写位置，避免临时目录损坏导致渲染进程启动失败。
+
+    Windows 上 WebView2 会在此目录存缓存、IndexedDB 与渲染状态；异常关机、杀毒软件隔离、
+    磁盘错误都可能让该目录损坏，表现为"此页存在问题 错误代码:39"。固定到用户数据目录后，
+    可通过 WRITECLAW_RESET_WEBVIEW_DATA=1 启动时清空重建，自愈该类故障而不必重装应用。
+    """
+    if not sys.platform.startswith("win"):
+        # macOS WKWebView / Linux Qt 后端对 user_data_folder 支持不一，保持默认行为。
+        return None
+    folder = app_data_root() / "WebViewData"
+    reset = os.environ.get("WRITECLAW_RESET_WEBVIEW_DATA", "").strip().lower()
+    if reset in ("1", "true", "yes", "on"):
+        try:
+            if folder.exists():
+                shutil.rmtree(folder)
+                print(f"已清空 WebView2 用户数据目录：{folder}", file=sys.stderr)
+        except OSError as exc:
+            print(f"清空 WebView2 用户数据目录失败：{exc}", file=sys.stderr)
+    return str(folder)
+
+
+def _webview_start_accepts_parameter(name: str) -> bool:
+    try:
+        signature = inspect.signature(webview.start)
+    except (TypeError, ValueError):
+        return False
+    if name in signature.parameters:
+        return True
+    return any(
+        parameter.kind == inspect.Parameter.VAR_KEYWORD
+        for parameter in signature.parameters.values()
+    )
+
+
+def _webview_start_options(debug: bool) -> dict[str, object]:
+    options: dict[str, object] = {
+        "debug": debug,
+        "icon": _app_icon_path(),
+    }
+    user_data_folder = _resolve_webview_user_data_folder()
+    if user_data_folder is None:
+        return options
+
+    if _webview_start_accepts_parameter("storage_path"):
+        options["storage_path"] = user_data_folder
+    elif _webview_start_accepts_parameter("user_data_folder"):
+        options["user_data_folder"] = user_data_folder
+    else:
+        print(
+            "警告：当前 pywebview 版本不支持固定浏览器用户数据目录，"
+            "将使用 pywebview 默认缓存目录启动。",
+            file=sys.stderr,
+        )
+        return options
+
+    if _webview_start_accepts_parameter("private_mode"):
+        options["private_mode"] = False
+    return options
+
+
+_BOOT_FLAG_FILE = ".webview_boot.flag"
+_boot_flag_lock = threading.Lock()
+_boot_flag_cleared = False
+
+
+def _boot_flag_path() -> Path:
+    return data_root() / _BOOT_FLAG_FILE
+
+
+def _clear_boot_flag_once() -> None:
+    """WebView2 首次真实加载页面时清除启动失败标记（幂等，线程安全）。"""
+    global _boot_flag_cleared
+    with _boot_flag_lock:
+        if _boot_flag_cleared:
+            return
+        _boot_flag_cleared = True
+    try:
+        _boot_flag_path().unlink(missing_ok=True)
+    except OSError:
+        pass
+
+
+def _mark_boot_start() -> None:
+    """记录本次启动开始；WebView2 成功加载页面后由 HTTP handler 清除。"""
+    try:
+        _boot_flag_path().write_text(str(time.time()), encoding="utf-8")
+    except OSError:
+        pass
+
+
+def _check_and_reset_stale_webview_data() -> None:
+    """启动时若上次启动的标记仍在，说明上次窗口没能成功加载页面（WebView2 渲染进程崩溃 /
+    用户数据目录损坏的典型表现，即"此页存在问题 错误代码:39"）。自动清空 WebView2 用户数据
+    目录后重建，让本次启动自愈——普通用户只需"关闭再打开"即可恢复，无需手动设置环境变量。
+    """
+    if not sys.platform.startswith("win"):
+        return
+    flag = _boot_flag_path()
+    if not flag.is_file():
+        return
+    folder = app_data_root() / "WebViewData"
+    try:
+        if folder.exists():
+            shutil.rmtree(folder)
+            print(
+                "检测到上次启动未能正常加载页面，已自动清空 WebView2 用户数据目录以尝试恢复。",
+                file=sys.stderr,
+            )
+    except OSError as exc:
+        print(f"自动清空 WebView2 用户数据目录失败：{exc}", file=sys.stderr)
 
 
 def _app_icon_path() -> str | None:
@@ -656,6 +865,26 @@ class Api:
             status=status,
             linked_skill_id=linked_skill_id,
         )
+
+    def get_book_memories(self, book_id: str) -> list[dict]:
+        return self._store.get_book_memories(book_id)
+
+    def set_book_memories(
+        self,
+        book_id: str,
+        memories: list[dict] | None = None,
+    ) -> list[dict]:
+        return self._store.set_book_memories(book_id, memories or [])
+
+    def get_user_memories(self, workspace_type: str | None = None) -> list[dict]:
+        return read_user_memories(workspace_type)
+
+    def set_user_memories(
+        self,
+        workspace_type: str | None = None,
+        memories: list[dict] | None = None,
+    ) -> list[dict]:
+        return write_user_memories(workspace_type, memories or [])
 
     def delete_book(self, book_id: str) -> bool:
         ok = self._store.delete_book(book_id)
@@ -1436,6 +1665,9 @@ def generate_image(prompt: str, output_dir: str | Path | None = None) -> Path | 
 
 def main() -> None:
     _ensure_windows_webview2()
+    # 先检查上次启动是否失败（失败则自动清空损坏的 WebView2 数据目录），再写本次启动标记。
+    _check_and_reset_stale_webview_data()
+    _mark_boot_start()
     store = BookStore()
     api = Api(store)
     _httpd, url = _resolve_desktop_url(_dist_dir())
@@ -1482,7 +1714,7 @@ def main() -> None:
         "true",
         "yes",
     )
-    webview.start(debug=_debug, icon=_app_icon_path())
+    webview.start(**_webview_start_options(debug=_debug))
 
 
 if __name__ == "__main__":

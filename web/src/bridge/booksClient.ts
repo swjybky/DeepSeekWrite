@@ -9,7 +9,8 @@ import type {
 } from '../domain/workspaceCore'
 import type { SaveBookOptions } from './apiTypes'
 import { deleteAiChatSessionsForOwner } from './aiChatHistoryClient'
-import { getBridgeApi } from './runtime'
+import { getBridgeApi, resetBridgeApiCache } from './runtime'
+import type { BridgeApi } from './runtime'
 import {
   mockCreateBook,
   mockDeleteBook,
@@ -17,6 +18,35 @@ import {
   mockListBooks,
   mockSaveBook,
 } from './mockStore'
+
+/** pywebview.api 的非空根类型（BridgeApi 含 undefined，keyof 会塌缩为 never）。 */
+type BridgeApiRoot = NonNullable<BridgeApi>
+
+/**
+ * 调用 pywebview api 方法；若 api 不完整（方法缺失，即抛 `xxx is not a function` 的根因），
+ * 重置桥接缓存后重试一次，仍不可用则返回 undefined，让调用方回退到浏览器 mock。
+ * 桌面壳偶发注入竞态下，第一次拿到不完整 api 后缓存会被锁死，此处自愈重试可恢复。
+ */
+async function callApiMethod<T>(
+  methodName: keyof BridgeApiRoot,
+  invoke: (api: BridgeApiRoot) => Promise<T>,
+): Promise<T | undefined> {
+  const api = await getBridgeApi()
+  if (api && typeof (api as Record<string, unknown>)[methodName] === 'function') {
+    return await invoke(api)
+  }
+  if (api) {
+    resetBridgeApiCache()
+    const retryApi = await getBridgeApi()
+    if (
+      retryApi &&
+      typeof (retryApi as Record<string, unknown>)[methodName] === 'function'
+    ) {
+      return await invoke(retryApi)
+    }
+  }
+  return undefined
+}
 
 export async function pickFolder(): Promise<string | null> {
   const api = await getBridgeApi()
@@ -28,9 +58,11 @@ export async function pickFolder(): Promise<string | null> {
 }
 
 export async function listBooks(): Promise<BookSummary[]> {
-  const api = await getBridgeApi()
-  if (api) {
-    const list = await api.list_books() as BookSummary[]
+  const list = await callApiMethod(
+    'list_books',
+    (api) => api.list_books() as Promise<BookSummary[]>,
+  )
+  if (list) {
     return list.map((item) => normalizeBookSummary(item))
   }
   return mockListBooks()
@@ -44,29 +76,29 @@ export async function createBook(
   linked_skill_id?: string | null,
   linked_material_id?: string | null,
 ): Promise<Book> {
-  const api = await getBridgeApi()
-  if (api) {
-    return normalizeBook(
-      await api.create_book(
-        title,
-        book_type,
-        categories,
-        workspace_root ?? null,
-        linked_skill_id ?? null,
-        linked_material_id ?? null,
-      ),
-    )
+  const raw = await callApiMethod('create_book', (api) =>
+    api.create_book(
+      title,
+      book_type,
+      categories,
+      workspace_root ?? null,
+      linked_skill_id ?? null,
+      linked_material_id ?? null,
+    ),
+  )
+  if (raw) {
+    return normalizeBook(raw)
   }
   return mockCreateBook(title, book_type, categories, workspace_root, linked_skill_id, linked_material_id)
 }
 
 export async function getBook(book_id: string): Promise<Book | null> {
-  const api = await getBridgeApi()
-  if (api) {
-    const raw = await api.get_book(book_id)
-    return raw ? normalizeBook(raw) : null
+  // 桌面端 get_book 合法返回 null 表示书籍不存在；callApiMethod 返回 undefined 表示 api 缺失，需回退 mock。
+  const raw = await callApiMethod('get_book', (api) => api.get_book(book_id))
+  if (raw === undefined) {
+    return mockGetBook(book_id)
   }
-  return mockGetBook(book_id)
+  return raw ? normalizeBook(raw) : null
 }
 
 
@@ -74,17 +106,18 @@ export async function saveBook(
   book_id: string,
   contentOrOptions?: string | SaveBookOptions,
 ): Promise<Book | null> {
-  const api = await getBridgeApi()
   if (typeof contentOrOptions === 'string') {
-    if (api) {
-      const raw = await api.save_book(book_id, contentOrOptions, null)
-      return raw ? normalizeBook(raw) : null
+    const raw = await callApiMethod('save_book', (api) =>
+      api.save_book(book_id, contentOrOptions, null),
+    )
+    if (raw === undefined) {
+      return mockSaveBook(book_id, { content: contentOrOptions })
     }
-    return mockSaveBook(book_id, { content: contentOrOptions })
+    return raw ? normalizeBook(raw) : null
   }
   const opts = contentOrOptions ?? {}
-  if (api) {
-    const raw = await api.save_book(
+  const raw = await callApiMethod('save_book', (api) =>
+    api.save_book(
       book_id,
       opts.content ?? null,
       opts.stages ?? null,
@@ -93,10 +126,12 @@ export async function saveBook(
       opts.title ?? undefined,
       opts.status ?? undefined,
       opts.linked_skill_id ?? undefined,
-    )
-    return raw ? normalizeBook(raw) : null
+    ),
+  )
+  if (raw === undefined) {
+    return mockSaveBook(book_id, opts)
   }
-  return mockSaveBook(book_id, opts)
+  return raw ? normalizeBook(raw) : null
 }
 
 export async function deleteBook(book_id: string): Promise<boolean> {

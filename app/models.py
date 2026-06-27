@@ -11,6 +11,14 @@ SkillType = Literal["long", "short", "script"]
 
 WORKSPACE_BOOK_TYPES: tuple[str, ...] = ("short", "script")
 LIBRARY_TYPES: tuple[str, ...] = ("short", "long", "script")
+MEMORY_TAGS: tuple[str, ...] = (
+    "general",
+    "character",
+    "plot",
+    "outline",
+    "draft",
+    "style",
+)
 
 # 素材分类定义
 SHORT_MATERIAL_GENRES: dict[str, list[str]] = {
@@ -363,6 +371,59 @@ def normalize_skill_type(raw: Any | None) -> SkillType:
     return st if st in LIBRARY_TYPES else "short"  # type: ignore[return-value]
 
 
+def new_memory_id() -> str:
+    return str(uuid4())
+
+
+def normalize_memory_tag(raw: Any | None) -> str:
+    tag = str(raw or "").strip()
+    return tag if tag in MEMORY_TAGS else "general"
+
+
+def normalize_memory_entry(raw: Any | None) -> dict[str, str] | None:
+    if isinstance(raw, str):
+        content = raw.strip()
+        if not content:
+            return None
+        return {
+            "id": new_memory_id(),
+            "tag": "general",
+            "content": content,
+            "created_at": "",
+            "updated_at": "",
+        }
+    if not isinstance(raw, dict):
+        return None
+    content = str(raw.get("content") or "").strip()
+    if not content:
+        return None
+    memory_id = str(raw.get("id") or "").strip() or new_memory_id()
+    return {
+        "id": memory_id,
+        "tag": normalize_memory_tag(raw.get("tag")),
+        "content": content,
+        "created_at": str(raw.get("created_at") or ""),
+        "updated_at": str(raw.get("updated_at") or ""),
+    }
+
+
+def normalize_memories_from_storage(raw: Any | None) -> list[dict[str, str]]:
+    if raw is None:
+        return []
+    source = raw if isinstance(raw, list) else [raw]
+    out: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for item in source:
+        entry = normalize_memory_entry(item)
+        if not entry:
+            continue
+        if entry["id"] in seen:
+            entry["id"] = new_memory_id()
+        seen.add(entry["id"])
+        out.append(entry)
+    return out
+
+
 @dataclass
 class Book:
     id: str
@@ -376,6 +437,7 @@ class Book:
     status: BookStatus = "editing"
     stages: dict[str, str] = field(default_factory=default_stages)
     expert_draft: dict[str, Any] = field(default_factory=default_expert_draft)
+    memories: list[dict[str, str]] = field(default_factory=list)
     created_at: str = ""
     updated_at: str = ""
 
@@ -403,6 +465,7 @@ class Book:
             expert_draft=normalize_expert_draft_from_storage(
                 data.get("expert_draft"), bt
             ),
+            memories=normalize_memories_from_storage(data.get("memories")),
             created_at=str(data.get("created_at") or ""),
             updated_at=str(data.get("updated_at") or ""),
         )

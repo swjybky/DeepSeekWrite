@@ -11,6 +11,7 @@ import type {
   BookStatus,
   BookSummary,
   ExpertDraft,
+  MemoryEntry,
   StageId,
 } from '../domain/workspaceCore'
 import type { SaveSkillOptions } from './apiTypes'
@@ -118,6 +119,7 @@ export async function mockCreateBook(
         : '',
     stages: normalizeAllBookStages({}),
     expert_draft: defaultExpertDraft(bt),
+    memories: [],
     created_at: now,
     updated_at: now,
   }
@@ -200,6 +202,27 @@ export async function mockDeleteBook(book_id: string): Promise<boolean> {
 }
 
 // ==================== 素材 Mock 数据 ====================
+
+export async function mockGetBookMemories(book_id: string): Promise<MemoryEntry[]> {
+  return loadMock().get(book_id)?.memories ?? []
+}
+
+export async function mockSetBookMemories(
+  book_id: string,
+  memories: MemoryEntry[],
+): Promise<MemoryEntry[]> {
+  const map = loadMock()
+  const b = map.get(book_id)
+  if (!b) return []
+  const now = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z')
+  map.set(book_id, {
+    ...b,
+    memories,
+    updated_at: now,
+  })
+  saveMock(map)
+  return memories
+}
 
 const MOCK_MATERIALS_KEY = 'write_claw_dev_materials'
 

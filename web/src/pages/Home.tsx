@@ -8,6 +8,7 @@ import {
   type AiModelSettings,
   type BookSummary,
   type BookType,
+  type MemoryEntry,
   type MaterialSummary,
   type MaterialType,
   type SkillSummary,
@@ -36,7 +37,9 @@ import {
   saveAiModelConfig,
   checkForUpdate,
   getMaterialParentGenres,
+  getUserMemories,
   materialTypeLabel,
+  saveUserMemories,
   skillTypeLabel,
   TEXT_MODEL_API_KEY_PLACEHOLDER,
   exportLibrary,
@@ -44,6 +47,7 @@ import {
 } from '../bridge'
 import { APPEARANCE_STYLE_LABELS, useAppearance } from '../appearance'
 import { CardGrid, bookToCardItem, materialToCardItem, skillToCardItem } from '../components/CardGrid'
+import { MemoryManagerDialog } from '../components/MemoryManagerDialog'
 import { useAppDialog } from '../components/useAppDialog'
 import { LearningImitationDialog } from '../features/learningImitation/LearningImitationDialog'
 import {
@@ -1474,6 +1478,12 @@ export function Home() {
   const [submittingBook, setSubmittingBook] = useState(false)
   const [deletingBookId, setDeletingBookId] = useState<string | null>(null)
   const [bookError, setBookError] = useState<string | null>(null)
+  const [userMemoryOpen, setUserMemoryOpen] = useState(false)
+  const [userMemoryType, setUserMemoryType] = useState<'short' | 'script'>('short')
+  const [userMemories, setUserMemories] = useState<MemoryEntry[]>([])
+  const [loadingUserMemories, setLoadingUserMemories] = useState(false)
+  const [savingUserMemories, setSavingUserMemories] = useState(false)
+  const [userMemoryError, setUserMemoryError] = useState<string | null>(null)
 
   // ==================== 素材库状态 ====================
   const [loadingMaterials, setLoadingMaterials] = useState(
@@ -2044,6 +2054,49 @@ export function Home() {
   }, [])
 
   // ==================== 渲染 ====================
+  const loadUserMemoryList = useCallback(async (type: 'short' | 'script') => {
+    setLoadingUserMemories(true)
+    setUserMemoryError(null)
+    try {
+      setUserMemories(await getUserMemories(type))
+    } catch (err) {
+      setUserMemoryError(err instanceof Error ? err.message : '读取记忆失败')
+    } finally {
+      setLoadingUserMemories(false)
+    }
+  }, [])
+
+  const openUserMemoryManager = useCallback(() => {
+    void (async () => {
+      await loadUserMemoryList(userMemoryType)
+      setUserMemoryOpen(true)
+    })()
+  }, [loadUserMemoryList, userMemoryType])
+
+  const switchUserMemoryType = useCallback(
+    (type: 'short' | 'script') => {
+      setUserMemoryType(type)
+      void loadUserMemoryList(type)
+    },
+    [loadUserMemoryList],
+  )
+
+  const handleSaveUserMemories = useCallback(
+    async (next: MemoryEntry[]) => {
+      setSavingUserMemories(true)
+      setUserMemoryError(null)
+      try {
+        setUserMemories(await saveUserMemories(userMemoryType, next))
+        setUserMemoryOpen(false)
+      } catch (err) {
+        setUserMemoryError(err instanceof Error ? err.message : '保存记忆失败')
+      } finally {
+        setSavingUserMemories(false)
+      }
+    },
+    [userMemoryType],
+  )
+
   const visibleBooks = useMemo(
     () => books.filter((book) => book.status !== 'completed'),
     [books],
@@ -2139,6 +2192,19 @@ export function Home() {
             }}
           >
             {savingTextDisplay ? '文字显示…' : '文字显示'}
+          </button>
+          <button
+            type="button"
+            className={
+              userMemoryOpen
+                ? 'home-config-trigger home-config-trigger--active'
+                : 'home-config-trigger'
+            }
+            aria-expanded={userMemoryOpen}
+            disabled={loadingUserMemories}
+            onClick={openUserMemoryManager}
+          >
+            {loadingUserMemories ? '记忆加载中' : '记忆管理'}
           </button>
           <button
             type="button"
@@ -2767,6 +2833,39 @@ export function Home() {
 
           {skillError && <p className="form-error">{skillError}</p>}
         </CreateDialog>
+      )}
+
+      {userMemoryOpen && (
+        <MemoryManagerDialog
+          key={`user-memory-${userMemoryType}-${userMemories.map((item) => `${item.id}:${item.updated_at ?? ''}`).join('|')}`}
+          title="用户记忆"
+          memories={userMemories}
+          saving={savingUserMemories || loadingUserMemories}
+          error={userMemoryError}
+          headerActions={
+            <div className="memory-dialog-tabs" role="tablist" aria-label="记忆类型">
+              {(['short', 'script'] as const).map((type) => (
+                <button
+                  key={type}
+                  type="button"
+                  className={
+                    userMemoryType === type
+                      ? 'memory-dialog-tab memory-dialog-tab--active'
+                      : 'memory-dialog-tab'
+                  }
+                  onClick={() => switchUserMemoryType(type)}
+                  disabled={savingUserMemories || loadingUserMemories}
+                >
+                  {bookTypeLabel(type)}
+                </button>
+              ))}
+            </div>
+          }
+          onClose={() => {
+            if (!savingUserMemories) setUserMemoryOpen(false)
+          }}
+          onSave={handleSaveUserMemories}
+        />
       )}
 
       {modelConfigOpen && (

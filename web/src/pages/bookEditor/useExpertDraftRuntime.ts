@@ -4,6 +4,7 @@ import {
   type Book,
   defaultExpertDraft,
   type ExpertDraft,
+  type MemoryEntry,
   mergeStagePatchIntoAll,
   normalizeExpertDraft,
   resolveWorkspaceBookGenre,
@@ -193,6 +194,8 @@ export function useExpertDraftRuntime({
       sectionIds: string[],
       options?: {
         userWritingPrompt?: string
+        bookMemories?: MemoryEntry[]
+        userMemories?: MemoryEntry[]
         callbacks?: Pick<
           RunExpertDraftSectionWriterOptions,
           'onSectionAgentStart' | 'onRunFinish'
@@ -239,6 +242,8 @@ export function useExpertDraftRuntime({
           workspaceSessionsRef.current[bookId]?.stages ?? EMPTY_STAGES,
         linkedMaterial: session.linkedMaterial,
         linkedSkill: session.linkedSkill,
+        bookMemories: options?.bookMemories ?? session.book.memories ?? [],
+        userMemories: options?.userMemories ?? [],
         userWritingPrompt: options?.userWritingPrompt,
         readAccess: resolveReadAccessForBook(
           session.book,

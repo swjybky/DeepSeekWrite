@@ -3,6 +3,7 @@ import type {
   BookStatus,
   BookSummary,
   ExpertDraft,
+  MemoryEntry,
 } from '../domain/workspaceCore'
 import type {
   AiModelDefaults,
@@ -45,6 +46,16 @@ declare global {
           linked_skill_id?: string | null,
         ): Promise<Book | null>
         delete_book(book_id: string): Promise<boolean>
+        get_book_memories(book_id: string): Promise<MemoryEntry[]>
+        set_book_memories(
+          book_id: string,
+          memories: MemoryEntry[],
+        ): Promise<MemoryEntry[]>
+        get_user_memories(workspace_type?: string | null): Promise<MemoryEntry[]>
+        set_user_memories(
+          workspace_type?: string | null,
+          memories?: MemoryEntry[] | null,
+        ): Promise<MemoryEntry[]>
         list_ai_chat_sessions(
           scope: Record<string, string>,
         ): Promise<Record<string, unknown>[]>

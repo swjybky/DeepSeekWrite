@@ -19,6 +19,10 @@ $OutDir = Join-Path $Root "dist\deepseekwrite"
 $Installer = Join-Path $Root "packaging\vendor\MicrosoftEdgeWebView2RuntimeInstallerX64.exe"
 Copy-Item $Installer $OutDir -Force
 
+# 附赠"重置并启动"脚本：双击即可清空损坏的 WebView2 缓存后启动，供普通用户在自动自愈失败时自救。
+$ResetBat = Join-Path $Root "packaging\reset_and_start.bat"
+if (Test-Path $ResetBat) { Copy-Item $ResetBat $OutDir -Force }
+
 $ZipPath = Join-Path $Root "dist\deepseekwrite.zip"
 if (Test-Path $ZipPath) { Remove-Item $ZipPath -Force }
 Compress-Archive -Path $OutDir -DestinationPath $ZipPath -Force

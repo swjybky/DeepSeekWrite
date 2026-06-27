@@ -11,6 +11,7 @@ import { memo, useEffect, useRef, useState } from 'react'
 import type {
   Material,
   BookType,
+  MemoryEntry,
   StageId,
   MaterialStageId,
   MaterialType,
@@ -50,6 +51,8 @@ import {
 import { createWorkspaceStreamFn } from '../pi/workspaceStreamFn'
 import { convertToLlmWithSkillAsUser } from '../pi/skillMessageTransform'
 import { refreshChatPanelTranscript } from '../pi/chatPanelTranscript'
+import { createMemoryAwareConvertToLlm } from '../pi/memoryMessageTransform'
+import { captureBookMemoryFromMessages } from '../pi/memoryCapture'
 import {
   EXPERT_DRAFT_COORDINATOR_AGENT_ID,
   resolveWorkspaceAgentReadAccess,
@@ -380,6 +383,12 @@ type Props = {
   ) => string | undefined
   /** 各阶段全文，用于提示词中的交叉参考 */
   allStages: Partial<Record<StageId | MaterialStageId | SkillStageId, string>>
+  bookMemories?: MemoryEntry[]
+  userMemories?: MemoryEntry[]
+  onBookMemoriesCaptured?: (
+    bookId: string,
+    memories: MemoryEntry[],
+  ) => void | Promise<void>
   /** 当前书籍关联的素材库；前期设计阶段会将其暴露为 AI 工具可读取内容 */
   linkedMaterial?: Material | null
   /** 当前书籍绑定的技能库；书籍工作台智能体可按阶段加载技能 */
@@ -531,6 +540,35 @@ function WorkspaceAiChatInner({
     setActiveHistorySessionId(saved.id)
     agent.sessionId = resolvePiSessionId(saved.id)
     await refreshHistorySessions()
+  }
+
+  const captureMemoryFromAgent = (agent: Agent) => {
+    const p = propsLatestRef.current
+    if (
+      workspaceType !== 'book' ||
+      (p.bookType !== 'short' && p.bookType !== 'script') ||
+      !p.onBookMemoriesCaptured
+    ) {
+      return
+    }
+    const messages = agent.state.messages.slice()
+    const bookMemories = [...(p.bookMemories ?? [])]
+    const userMemories = [...(p.userMemories ?? [])]
+    void (async () => {
+      try {
+        const next = await captureBookMemoryFromMessages({
+          bookId: p.sessionBookId,
+          bookTitle: p.bookTitle,
+          bookType: p.bookType,
+          messages,
+          bookMemories,
+          userMemories,
+        })
+        if (next) await p.onBookMemoriesCaptured?.(p.sessionBookId, next)
+      } catch (error) {
+        console.warn('[WriteClaw memory] capture skipped:', error)
+      }
+    })()
   }
 
   const applyHistorySession = async (sessionId: string) => {
@@ -762,7 +800,18 @@ function WorkspaceAiChatInner({
 
       const agent = new Agent({
         sessionId,
-        convertToLlm: convertToLlmWithSkillAsUser,
+        convertToLlm: createMemoryAwareConvertToLlm(
+          convertToLlmWithSkillAsUser,
+          () => {
+            const latest = propsLatestRef.current
+            return {
+              bookTitle: latest.bookTitle,
+              bookType: latest.bookType,
+              bookMemories: workspaceType === 'book' ? latest.bookMemories : [],
+              userMemories: workspaceType === 'book' ? latest.userMemories : [],
+            }
+          },
+        ),
         getApiKey: createWorkspaceModelApiKeyResolver(
           () => agentRef.current?.state.model ?? effectiveModel,
         ),
@@ -931,6 +980,7 @@ function WorkspaceAiChatInner({
           } finally {
             setHistoryDisabled(false)
           }
+          captureMemoryFromAgent(agent)
           cancelAnimationFrame(postAgentEndRaf)
           postAgentEndRaf = requestAnimationFrame(() => {
             postAgentEndRaf = 0
@@ -1275,6 +1325,8 @@ export const WorkspaceAiChat = memo(WorkspaceAiChatInner, (prev, next) => {
   if (prev.materialGenre !== next.materialGenre) return false
   if (prev.skillType !== next.skillType) return false
   if (prev.bookGenre !== next.bookGenre) return false
+  if (prev.bookMemories !== next.bookMemories) return false
+  if (prev.userMemories !== next.userMemories) return false
   if (prev.workspaceAgentReadAccess !== next.workspaceAgentReadAccess) return false
 
   // applyToStageEditor/selectPlotChildStage 函数引用不比较（总是使用最新）

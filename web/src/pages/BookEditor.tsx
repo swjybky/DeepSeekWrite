@@ -7,11 +7,17 @@ import {
   type BookStatus,
   type BookSummary,
   type ExpertDraft,
+  type MemoryEntry,
   type StageId,
+  getBookMemories,
+  getUserMemories,
   normalizeExpertDraft,
   normalizeStagesForWorkspaceBook,
   isWorkspaceBook,
   mergeStagePatchIntoAll,
+  mergeUniqueMemories,
+  saveBookMemories,
+  saveUserMemories,
   type Material,
   type Skill,
   type WorkspaceAgentReadAccessConfig,
@@ -65,6 +71,7 @@ import {
 import { useKeyedAutoSave } from '../hooks/useKeyedAutoSave'
 import { useTextHistory } from '../hooks/useTextHistory'
 import { useAppDialog } from '../components/useAppDialog'
+import { MemoryManagerDialog } from '../components/MemoryManagerDialog'
 import './BookEditor.css'
 
 export function BookEditor() {
@@ -100,6 +107,12 @@ export function BookEditor() {
   >({})
   const [expertAiChatEpoch, setExpertAiChatEpoch] = useState(0)
   const [coverData, setCoverData] = useState<string | null>(null)
+  const [bookMemoryOpen, setBookMemoryOpen] = useState(false)
+  const [bookMemories, setBookMemories] = useState<MemoryEntry[]>([])
+  const [workspaceUserMemories, setWorkspaceUserMemories] = useState<MemoryEntry[]>([])
+  const [bookMemorySaving, setBookMemorySaving] = useState(false)
+  const [bookMemoryError, setBookMemoryError] = useState<string | null>(null)
+  const [bookMemoryUnread, setBookMemoryUnread] = useState(false)
   const workspaceSessions = useWorkspaceStore((state) => state.sessions)
   const loadedBookIds = useWorkspaceStore((state) => state.loadedBookIds)
   const replaceWorkspaceSessions = useWorkspaceStore((state) => state.replaceSessions)
@@ -233,6 +246,111 @@ export function BookEditor() {
       }
     },
     [rememberLoadedBookId, replaceWorkspaceSessions, syncActiveSessionState],
+  )
+
+  const updateBookMemoriesInState = useCallback(
+    (bookId: string, memories: MemoryEntry[]) => {
+      setBookMemories(memories)
+      setBook((current) =>
+        current?.id === bookId ? { ...current, memories } : current,
+      )
+      commitWorkspaceSession(
+        bookId,
+        (session) => ({
+          ...session,
+          book: {
+            ...session.book,
+            memories,
+          },
+        }),
+        true,
+      )
+    },
+    [commitWorkspaceSession],
+  )
+
+  const loadCurrentMemories = useCallback(
+    async (targetBook: Book) => {
+      if (!isWorkspaceBook(targetBook)) return
+      setBookMemoryError(null)
+      try {
+        const [nextBookMemories, nextUserMemories] = await Promise.all([
+          getBookMemories(targetBook.id),
+          getUserMemories(targetBook.book_type),
+        ])
+        updateBookMemoriesInState(targetBook.id, nextBookMemories)
+        setWorkspaceUserMemories(nextUserMemories)
+      } catch (err) {
+        setBookMemoryError(err instanceof Error ? err.message : '读取记忆失败')
+      }
+    },
+    [updateBookMemoriesInState],
+  )
+
+  useEffect(() => {
+    const currentBook = bookRef.current
+    if (!currentBook || !isWorkspaceBook(currentBook)) {
+      setBookMemories([])
+      setWorkspaceUserMemories([])
+      return
+    }
+    setBookMemories(currentBook.memories ?? [])
+    void loadCurrentMemories(currentBook)
+  }, [book?.id, book?.book_type, bookRef, loadCurrentMemories])
+
+  const openBookMemoryManager = useCallback(() => {
+    if (bookRef.current) {
+      setBookMemories(bookRef.current.memories ?? bookMemories)
+    }
+    setBookMemoryUnread(false)
+    setBookMemoryOpen(true)
+  }, [bookMemories, bookRef])
+
+  const handleSaveBookMemories = useCallback(
+    async (next: MemoryEntry[]) => {
+      const currentBook = bookRef.current
+      if (!currentBook) return
+      setBookMemorySaving(true)
+      setBookMemoryError(null)
+      try {
+        const saved = await saveBookMemories(currentBook.id, next)
+        updateBookMemoriesInState(currentBook.id, saved)
+        setBookMemoryOpen(false)
+        setBookMemoryUnread(false)
+      } catch (err) {
+        setBookMemoryError(err instanceof Error ? err.message : '保存记忆失败')
+      } finally {
+        setBookMemorySaving(false)
+      }
+    },
+    [bookRef, updateBookMemoriesInState],
+  )
+
+  const handleSyncBookMemoryToUser = useCallback(
+    async (memory: MemoryEntry) => {
+      const currentBook = bookRef.current
+      if (!currentBook || !isWorkspaceBook(currentBook)) return
+      setBookMemoryError(null)
+      try {
+        const nextUserMemories = mergeUniqueMemories(workspaceUserMemories, [memory])
+        const saved = await saveUserMemories(currentBook.book_type, nextUserMemories)
+        setWorkspaceUserMemories(saved)
+        setMessage('已同步到用户记忆')
+      } catch (err) {
+        setBookMemoryError(err instanceof Error ? err.message : '同步记忆失败')
+      }
+    },
+    [bookRef, workspaceUserMemories],
+  )
+
+  const handleBookMemoriesCaptured = useCallback(
+    async (bookId: string, memories: MemoryEntry[]) => {
+      const saved = await saveBookMemories(bookId, memories)
+      updateBookMemoriesInState(bookId, saved)
+      if (!bookMemoryOpen) setBookMemoryUnread(true)
+      setMessage('已更新书籍记忆')
+    },
+    [bookMemoryOpen, updateBookMemoriesInState],
   )
 
   const {
@@ -833,9 +951,24 @@ export function BookEditor() {
         onCoverError={clearCoverDataForActiveBook}
         onOpenMaterialSelector={() => void openMaterialSelector()}
         onOpenSkillSelector={() => void openSkillSelector()}
+        onOpenMemoryManager={openBookMemoryManager}
         onToggleStatus={() => void handleToggleBookStatus()}
+        memoryUnread={bookMemoryUnread}
       />
       {dialog}
+      {bookMemoryOpen ? (
+        <MemoryManagerDialog
+          title="书籍记忆"
+          memories={bookMemories}
+          saving={bookMemorySaving}
+          error={bookMemoryError}
+          onClose={() => {
+            if (!bookMemorySaving) setBookMemoryOpen(false)
+          }}
+          onSave={handleSaveBookMemories}
+          onSyncMemory={handleSyncBookMemoryToUser}
+        />
+      ) : null}
 
       <div
         className={
@@ -907,6 +1040,7 @@ export function BookEditor() {
           activeExpertDraftSectionId={activeExpertDraftSectionId}
           expertDraft={expertDraft}
           renderedWorkspaceSessions={renderedWorkspaceSessions}
+          userMemories={workspaceUserMemories}
           workspaceAgentReadAccess={workspaceAgentReadAccess}
           linkedMaterialTitle={linkedMaterial?.title}
           linkedSkillTitle={linkedSkill?.title}
@@ -921,6 +1055,7 @@ export function BookEditor() {
             getRenderedExpertDraftSectionContent
           }
           syncExpertDraftSectionField={syncExpertDraftSectionField}
+          onBookMemoriesCaptured={handleBookMemoriesCaptured}
           onExpertDraftStageBodyChange={(body) =>
             handleStageBodyChange(body, 'draft')
           }

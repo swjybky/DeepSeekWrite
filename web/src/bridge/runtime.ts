@@ -38,11 +38,23 @@ function readBridgeApi(): BridgeApi | undefined {
   return pywebviewWindow().pywebview?.api
 }
 
+/**
+ * 校验 pywebview.api 是否已完整注入。
+ *
+ * pywebview 在窗口冷启动 / reload / 渲染进程重置时，可能先暴露一个不完整的占位 api 对象
+ * （`window.pywebview.api` 为 truthy 但缺少方法），此时直接调用会抛 `xxx is not a function`。
+ * 以 `list_books` 作为关键方法探针：缺失即视为未就绪，继续等待而非缓存坏对象。
+ */
+function isApiUsable(api: BridgeApi | undefined): api is BridgeApi {
+  return !!api && typeof api.list_books === 'function'
+}
+
 async function resolveBridgeApiOnce(): Promise<BridgeApi | undefined> {
   const read = readBridgeApi
 
-  if (read()) {
-    memoApi = read()!
+  const initial = read()
+  if (isApiUsable(initial)) {
+    memoApi = initial
     return memoApi
   }
 
@@ -53,23 +65,24 @@ async function resolveBridgeApiOnce(): Promise<BridgeApi | undefined> {
     }
   }
 
-  if (read()) {
-    memoApi = read()!
+  const afterFrame = read()
+  if (isApiUsable(afterFrame)) {
+    memoApi = afterFrame
     return memoApi
   }
 
   await new Promise<void>((resolve) => {
     const done = () => resolve()
     window.addEventListener(PYWEBVIEW_READY, () => queueMicrotask(done), { once: true })
-    queueMicrotask(() => read() && done())
-    setTimeout(() => read() && done(), 0)
+    queueMicrotask(() => isApiUsable(read()) && done())
+    setTimeout(() => isApiUsable(read()) && done(), 0)
     setTimeout(done, BRIDGE_WAIT_MS)
   })
 
   const pollUntil = Date.now() + API_ATTACH_POLL_MS
   while (Date.now() < pollUntil) {
     const api = read()
-    if (api) {
+    if (isApiUsable(api)) {
       memoApi = api
       return api
     }
@@ -77,7 +90,7 @@ async function resolveBridgeApiOnce(): Promise<BridgeApi | undefined> {
   }
 
   const api = read()
-  if (api) {
+  if (isApiUsable(api)) {
     memoApi = api
     return api
   }
@@ -113,4 +126,14 @@ export async function getBridgeApi(): Promise<BridgeApi | undefined> {
   } finally {
     bridgeWaitSingleton = null
   }
+}
+
+/**
+ * 重置桥接缓存，供客户端在检测到 api 不完整（如抛出 `xxx is not a function`）时自愈重试。
+ * 清除后再次调用 `getBridgeApi()` 会重新等待并解析 `pywebview.api`，避免被锁死在坏对象上。
+ */
+export function resetBridgeApiCache(): void {
+  memoApi = null
+  memoBrowserOnly = false
+  bridgeWaitSingleton = null
 }

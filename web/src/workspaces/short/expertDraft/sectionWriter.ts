@@ -6,6 +6,7 @@ import { ApiKeyPromptDialog } from '@earendil-works/pi-web-ui'
 import {
   readWorkspaceAgentPromptTemplate,
   type ExpertDraft,
+  type MemoryEntry,
   type Material,
   type MaterialStageId,
   type Skill,
@@ -27,6 +28,7 @@ import {
   resolveWorkspaceModelApiKey,
 } from '../../../pi/resolveWorkspaceChatModel'
 import { convertToLlmWithSkillAsUser } from '../../../pi/skillMessageTransform'
+import { createMemoryAwareConvertToLlm } from '../../../pi/memoryMessageTransform'
 import { createPiSessionId } from '../../../pi/sessionId'
 import { ensurePiAppStorage } from '../../../pi/setupPiWorkspace'
 import {
@@ -66,6 +68,8 @@ export type RunExpertDraftSectionWriterOptions = {
   linkedMaterial?: Material | null
   /** 书籍绑定的技能库 */
   linkedSkill?: Skill | null
+  bookMemories?: MemoryEntry[]
+  userMemories?: MemoryEntry[]
   /** 用户在启动分节写作时补充的整体写作倾向 */
   userWritingPrompt?: string
   /** 分节写手智能体的全局可读配置 */
@@ -330,7 +334,15 @@ export async function runExpertDraftSectionWriter(
             'shared',
             runStartedAt,
           ),
-          convertToLlm: convertToLlmWithSkillAsUser,
+          convertToLlm: createMemoryAwareConvertToLlm(
+            convertToLlmWithSkillAsUser,
+            () => ({
+              bookTitle: opts.bookTitle,
+              bookType: 'short',
+              bookMemories: opts.bookMemories,
+              userMemories: opts.userMemories,
+            }),
+          ),
           getApiKey: createWorkspaceModelApiKeyResolver(
             () => currentAgent?.state.model ?? model,
           ),

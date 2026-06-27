@@ -25,16 +25,20 @@ from app.models import (
     normalize_skill_type,
     WORKSPACE_BOOK_TYPES,
     Material,
+    MEMORY_TAGS,
     Skill,
     apply_stage_patch,
     default_material_stages,
     default_stages,
+    new_memory_id,
     normalize_expert_draft_from_storage,
     new_book_id,
     new_material_id,
     new_skill_id,
     new_skill_stage_item_id,
     primary_draft_stage_key,
+    normalize_memories_from_storage,
+    normalize_memory_entry,
     normalize_material_stages_from_storage,
     normalize_skill_stages_from_storage,
 )
@@ -242,6 +246,124 @@ def _save_preferences_atomic_unlocked(prefs: dict[str, Any]) -> None:
 def save_preferences_atomic(prefs: dict[str, Any]) -> None:
     with _data_file_lock():
         _save_preferences_atomic_unlocked(prefs)
+
+
+def user_memories_path() -> Path:
+    data_dir = data_root()
+    data_dir.mkdir(parents=True, exist_ok=True)
+    return data_dir / "user_memories.json"
+
+
+def _normalize_memory_workspace_type(workspace_type: str | None) -> str:
+    return "script" if normalize_book_type(workspace_type) == "script" else "short"
+
+
+def _empty_user_memory_payload() -> dict[str, list[dict[str, str]]]:
+    return {"short": [], "script": []}
+
+
+def _load_user_memories_unlocked() -> dict[str, list[dict[str, str]]]:
+    path = user_memories_path()
+    if not path.exists():
+        return _empty_user_memory_payload()
+    try:
+        raw = path.read_text(encoding="utf-8")
+        if not raw.strip():
+            return _empty_user_memory_payload()
+        data = json.loads(raw)
+    except (json.JSONDecodeError, OSError):
+        return _empty_user_memory_payload()
+    if not isinstance(data, dict):
+        return _empty_user_memory_payload()
+    return {
+        "short": normalize_memories_from_storage(data.get("short")),
+        "script": normalize_memories_from_storage(data.get("script")),
+    }
+
+
+def _save_user_memories_atomic_unlocked(
+    payload: dict[str, list[dict[str, str]]],
+) -> None:
+    path = user_memories_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    text = json.dumps(payload, ensure_ascii=False, indent=2)
+    fd, tmp = tempfile.mkstemp(
+        dir=str(path.parent),
+        prefix=".user_memories_",
+        suffix=".json.tmp",
+    )
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(text)
+        os.replace(tmp, path)
+    except Exception:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+
+def _stamp_memory_entries(
+    raw_entries: Any,
+    previous_entries: list[dict[str, str]] | None = None,
+) -> list[dict[str, str]]:
+    previous_by_id = {
+        str(item.get("id") or ""): item
+        for item in (previous_entries or [])
+        if str(item.get("id") or "").strip()
+    }
+    now = _utc_now_iso()
+    out: list[dict[str, str]] = []
+    seen_ids: set[str] = set()
+    seen_content_keys: set[tuple[str, str]] = set()
+    source = raw_entries if isinstance(raw_entries, list) else []
+    for item in source:
+        entry = normalize_memory_entry(item)
+        if not entry:
+            continue
+        if entry["id"] in seen_ids:
+            entry["id"] = new_memory_id()
+        content_key = (entry["tag"], entry["content"].strip())
+        if content_key in seen_content_keys:
+            continue
+        previous = previous_by_id.get(entry["id"])
+        created_at = entry.get("created_at")
+        if not created_at and previous:
+            created_at = previous.get("created_at")
+        if not created_at:
+            created_at = now
+        changed = (
+            not previous
+            or previous.get("tag") != entry["tag"]
+            or previous.get("content") != entry["content"]
+        )
+        updated_at = now if changed else (entry.get("updated_at") or previous.get("updated_at") or now)
+        entry["created_at"] = str(created_at)
+        entry["updated_at"] = str(updated_at)
+        seen_ids.add(entry["id"])
+        seen_content_keys.add(content_key)
+        out.append(entry)
+    return out
+
+
+def read_user_memories(workspace_type: str | None = None) -> list[dict[str, str]]:
+    key = _normalize_memory_workspace_type(workspace_type)
+    with _data_file_lock():
+        return list(_load_user_memories_unlocked().get(key, []))
+
+
+def write_user_memories(
+    workspace_type: str | None,
+    memories: list[dict[str, Any]] | None,
+) -> list[dict[str, str]]:
+    key = _normalize_memory_workspace_type(workspace_type)
+    with _data_file_lock():
+        payload = _load_user_memories_unlocked()
+        next_entries = _stamp_memory_entries(memories or [], payload.get(key, []))
+        payload[key] = next_entries
+        _save_user_memories_atomic_unlocked(payload)
+        return next_entries
 
 
 def read_saved_workspace_root() -> str | None:
@@ -1239,6 +1361,30 @@ class BookStore:
             self._mark_books_saved_unlocked()
             _write_stages_to_disk(b)
             return b.to_dict()
+
+    def get_book_memories(self, book_id: str) -> list[dict[str, str]]:
+        with _data_file_lock():
+            self._reload_books_unlocked()
+            b = self._books.get((book_id or "").strip())
+            if b is None:
+                return []
+            return list(b.memories)
+
+    def set_book_memories(
+        self,
+        book_id: str,
+        memories: list[dict[str, Any]] | None,
+    ) -> list[dict[str, str]]:
+        with _data_file_lock():
+            self._reload_books_unlocked()
+            b = self._books.get((book_id or "").strip())
+            if b is None:
+                return []
+            b.memories = _stamp_memory_entries(memories or [], b.memories)
+            b.updated_at = _utc_now_iso()
+            save_books_atomic(self._path, self._books)
+            self._mark_books_saved_unlocked()
+            return list(b.memories)
 
     def delete_book(self, book_id: str) -> bool:
         """从书架移除该书（不写磁盘目录）。若 id 不存在则返回 False。"""

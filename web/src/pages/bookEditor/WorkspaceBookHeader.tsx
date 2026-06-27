@@ -21,7 +21,9 @@ type Props = {
   onCoverError: () => void
   onOpenMaterialSelector: () => void
   onOpenSkillSelector: () => void
+  onOpenMemoryManager: () => void
   onToggleStatus: () => void
+  memoryUnread?: boolean
 }
 
 export function WorkspaceBookHeader({
@@ -40,7 +42,9 @@ export function WorkspaceBookHeader({
   onCoverError,
   onOpenMaterialSelector,
   onOpenSkillSelector,
+  onOpenMemoryManager,
   onToggleStatus,
+  memoryUnread = false,
 }: Props) {
   return (
     <header className="editor-header editor-header--agent">
@@ -139,6 +143,17 @@ export function WorkspaceBookHeader({
           onClick={onOpenSkillSelector}
         >
           技能库选择
+        </button>
+        <button
+          type="button"
+          className={
+            memoryUnread
+              ? 'btn-book-memory btn-book-memory--unread'
+              : 'btn-book-memory'
+          }
+          onClick={onOpenMemoryManager}
+        >
+          记忆管理
         </button>
         <button
           type="button"
