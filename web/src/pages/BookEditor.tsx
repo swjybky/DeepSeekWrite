@@ -76,7 +76,7 @@ import './BookEditor.css'
 
 export function BookEditor() {
   const { id } = useParams<{ id: string }>()
-  const { confirm, dialog } = useAppDialog()
+  const { alert: showAlert, confirm, dialog } = useAppDialog()
   const [book, setBook] = useState<Book | null>(null)
   const [workspaceBooks, setWorkspaceBooks] = useState<BookSummary[]>([])
   const [stages, setStages] = useState<Record<StageId, string>>(() =>
@@ -336,11 +336,15 @@ export function BookEditor() {
         const saved = await saveUserMemories(currentBook.book_type, nextUserMemories)
         setWorkspaceUserMemories(saved)
         setMessage('已同步到用户记忆')
+        await showAlert({
+          title: '同步成功',
+          message: '已同步到用户记忆管理。',
+        })
       } catch (err) {
         setBookMemoryError(err instanceof Error ? err.message : '同步记忆失败')
       }
     },
-    [bookRef, workspaceUserMemories],
+    [bookRef, showAlert, workspaceUserMemories],
   )
 
   const handleBookMemoriesCaptured = useCallback(

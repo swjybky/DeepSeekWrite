@@ -124,6 +124,9 @@ function resolveWritableTargetStageId(
 const TARGET_STAGE_ID_NOTE =
   'target_stage_id 仅供剧情智能体选择剧情子方向；人物、大纲等阶段请省略该参数，自动操作当前阶段。'
 
+const WRITE_TARGET_STAGE_ID_FIRST_NOTE =
+  '调用 write_workspace_editor 时，如果当前是「剧情」父阶段，必须先填写第一个参数 target_stage_id，再填写 text；不要先生成 text 后补 target_stage_id。剧情设计=plot_design，导语设计=intro_design，剧情细化=plot_refine。'
+
 const WRITE_TOOL_SCOPE_NOTE =
   `本工具仅挂载于人物设计、剧情、大纲阶段；正文编写阶段不挂载。${TARGET_STAGE_ID_NOTE}`
 
@@ -136,7 +139,7 @@ function targetStageIdSchema() {
       PLOT_CHILD_STAGES.map((stage) => Type.Literal(stage.id)),
       {
         description:
-          `${TARGET_STAGE_ID_NOTE}剧情子方向：plot_design=剧情设计，intro_design=导语设计，plot_refine=剧情细化。`,
+          `${TARGET_STAGE_ID_NOTE}${WRITE_TARGET_STAGE_ID_FIRST_NOTE}`,
       },
     ),
   )
@@ -742,7 +745,7 @@ export function buildWriteWorkspaceEditorTool(
     name: 'write_workspace_editor',
     label: '写入当前文本编辑框',
     description:
-      `${WRITE_TOOL_SCOPE_NOTE}\n`
+      `${WRITE_TARGET_STAGE_ID_FIRST_NOTE}\n${WRITE_TOOL_SCOPE_NOTE}\n`
       + '覆盖写入工具：只在目标文本编辑框为空白时，用它写入一份完整稿件。目标已有内容时，用户只是要求局部修改、润色、扩写某段或替换片段，必须使用 replace_current_stage_text，不能调用本工具整段覆盖。只有用户明确要求整体覆盖、重写、重新生成或替换全文时，才允许设置 allow_overwrite_existing=true 后覆盖写入。仅写入该阶段的创作正文（如人设、剧情、导语、大纲等），不要写入分析报告、修改意见、过程说明或与阶段无关的内容；这些留在对话中回复用户即可。',
     parameters: Type.Object({
       target_stage_id: targetStageIdSchema(),

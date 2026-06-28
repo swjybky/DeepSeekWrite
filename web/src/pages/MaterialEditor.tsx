@@ -245,7 +245,9 @@ export function MaterialEditor() {
         setEditorStreaming(stage, false)
         const current =
           (stagesRef.current[stage] ?? '') + (tokenBuffersRef.current[stage] ?? '')
-        const next = payload.text.trim()
+        const next = payload.preserveWhitespace
+          ? payload.text
+          : payload.text.trim()
         textHistory.record(
           `material:${id}:${stage}`,
           current,

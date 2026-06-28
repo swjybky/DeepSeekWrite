@@ -428,6 +428,15 @@ type Props = {
 }
 
 type WritableStageId = StageId | MaterialStageId | SkillStageId
+type StreamingWriteState = {
+  toolCallId: string
+  toolName: string
+  accumulatedText: string
+  hasCleared: boolean
+  targetStageId?: WritableStageId
+  targetStageIdExplicit: boolean
+  originalStageBodies: Record<string, string>
+}
 
 function targetStageIdFromArgs(args: unknown): WritableStageId | undefined {
   if (!args || typeof args !== 'object') return undefined
@@ -462,14 +471,7 @@ function WorkspaceAiChatInner({
   /** 已流式同步到编辑器的 tool call id 集合 */
   const streamedToolCallIdsRef = useRef<Set<string>>(new Set())
   /** 当前正在流式写入编辑器的 tool call 状态 */
-  const streamingWriteRef = useRef<{
-    toolCallId: string
-    toolName: string
-    accumulatedText: string
-    hasCleared: boolean
-    targetStageId?: WritableStageId
-    targetStageIdExplicit: boolean
-  } | null>(null)
+  const streamingWriteRef = useRef<StreamingWriteState | null>(null)
   const pendingPlotChildStageRef = useRef<StageId | null>(null)
 
   const resolveDefaultStreamingWriteTargetStageId = (): WritableStageId => {
@@ -482,6 +484,80 @@ function WorkspaceAiChatInner({
       ) as WritableStageId
     }
     return (p.activeStageContentId ?? p.stageId) as WritableStageId
+  }
+
+  const resolveStreamingTargetStageIdFromArgs = (
+    args: unknown,
+  ): WritableStageId | undefined => {
+    const targetStageId = targetStageIdFromArgs(args)
+    if (!targetStageId) return undefined
+    const p = propsLatestRef.current
+    if (workspaceType === 'book' && p.stageId === 'plot_design') {
+      const allowed =
+        p.bookType === 'script'
+          ? ['plot_design', 'plot_refine']
+          : ['plot_design', 'intro_design', 'plot_refine']
+      return allowed.includes(String(targetStageId)) ? targetStageId : undefined
+    }
+    return targetStageId
+  }
+
+  const sameWritableStageId = (
+    left: WritableStageId | undefined,
+    right: WritableStageId | undefined,
+  ) => String(left ?? '') === String(right ?? '')
+
+  const snapshotStreamingStageBody = (
+    state: StreamingWriteState,
+    stageId: WritableStageId | undefined,
+  ) => {
+    if (!stageId) return
+    const key = String(stageId)
+    if (key in state.originalStageBodies) return
+    state.originalStageBodies[key] = readLiveWorkspaceStageBodyFromProps(
+      propsLatestRef.current,
+      stageId,
+    )
+  }
+
+  const restoreStreamingStageBody = (
+    state: StreamingWriteState,
+    stageId: WritableStageId | undefined,
+  ) => {
+    if (!stageId) return
+    const key = String(stageId)
+    if (!(key in state.originalStageBodies)) return
+    propsLatestRef.current.applyToStageEditor?.({
+      text: state.originalStageBodies[key],
+      mode: 'replace',
+      targetStageId: stageId,
+      preserveWhitespace: true,
+    })
+  }
+
+  const migrateStreamingWriteTarget = (
+    state: StreamingWriteState,
+    nextTargetStageId: WritableStageId | undefined,
+  ) => {
+    if (!nextTargetStageId) return
+    if (sameWritableStageId(state.targetStageId, nextTargetStageId)) {
+      state.targetStageId = nextTargetStageId
+      return
+    }
+
+    restoreStreamingStageBody(state, state.targetStageId)
+    snapshotStreamingStageBody(state, nextTargetStageId)
+    state.targetStageId = nextTargetStageId
+
+    if (state.hasCleared || state.accumulatedText.length > 0) {
+      propsLatestRef.current.applyToStageEditor?.({
+        text: state.accumulatedText,
+        mode: 'replace',
+        targetStageId: nextTargetStageId,
+        preserveWhitespace: true,
+      })
+      state.hasCleared = true
+    }
   }
 
   useEffect(() => {
@@ -865,7 +941,7 @@ function WorkspaceAiChatInner({
                 block.name === 'write_skill_editor'
               if (isWriteTool) {
                 const args = block.arguments as Record<string, unknown> | undefined
-                const targetStageId = targetStageIdFromArgs(args)
+                const targetStageId = resolveStreamingTargetStageIdFromArgs(args)
                 streamingWriteRef.current = {
                   toolCallId: block.id,
                   toolName: block.name,
@@ -874,6 +950,7 @@ function WorkspaceAiChatInner({
                   targetStageId:
                     targetStageId ?? resolveDefaultStreamingWriteTargetStageId(),
                   targetStageIdExplicit: Boolean(targetStageId),
+                  originalStageBodies: {},
                 }
               }
             }
@@ -893,25 +970,29 @@ function WorkspaceAiChatInner({
                 streamingWriteRef.current.toolName === 'write_workspace_editor' && !mode
                   ? 'replace'
                   : mode
-              const targetStageId = targetStageIdFromArgs(args)
-              const canAcceptExplicitTarget =
-                !streamingWriteRef.current.targetStageIdExplicit &&
-                !streamingWriteRef.current.hasCleared &&
-                streamingWriteRef.current.accumulatedText.length === 0
-              if (targetStageId && canAcceptExplicitTarget) {
-                streamingWriteRef.current.targetStageId = targetStageId
+              const targetStageId = resolveStreamingTargetStageIdFromArgs(args)
+              if (targetStageId) {
+                migrateStreamingWriteTarget(
+                  streamingWriteRef.current,
+                  targetStageId,
+                )
                 streamingWriteRef.current.targetStageIdExplicit = true
               }
               const effectiveTargetStageId =
                 streamingWriteRef.current.targetStageId
 
               if (effectiveMode === 'replace' && !streamingWriteRef.current.hasCleared) {
+                snapshotStreamingStageBody(
+                  streamingWriteRef.current,
+                  effectiveTargetStageId,
+                )
                 streamingWriteRef.current.hasCleared = true
                 streamingWriteRef.current.accumulatedText = ''
                 apply({
                   text: '',
                   mode: 'replace',
                   targetStageId: effectiveTargetStageId || undefined,
+                  preserveWhitespace: true,
                 })
               }
 
@@ -919,6 +1000,10 @@ function WorkspaceAiChatInner({
               if (text.length > prev.length && text.startsWith(prev)) {
                 const delta = text.slice(prev.length)
                 streamingWriteRef.current.accumulatedText = text
+                snapshotStreamingStageBody(
+                  streamingWriteRef.current,
+                  effectiveTargetStageId,
+                )
                 apply({
                   text: delta,
                   mode: 'append_token',
@@ -926,10 +1011,15 @@ function WorkspaceAiChatInner({
                 })
               } else if (text !== prev) {
                 streamingWriteRef.current.accumulatedText = text
+                snapshotStreamingStageBody(
+                  streamingWriteRef.current,
+                  effectiveTargetStageId,
+                )
                 apply({
                   text: text,
                   mode: 'replace',
                   targetStageId: effectiveTargetStageId || undefined,
+                  preserveWhitespace: true,
                 })
               }
             }
@@ -942,6 +1032,16 @@ function WorkspaceAiChatInner({
               streamingWriteRef.current &&
               tc.id === streamingWriteRef.current.toolCallId
             ) {
+              const finalTargetStageId = resolveStreamingTargetStageIdFromArgs(
+                (tc as { arguments?: unknown }).arguments,
+              )
+              if (finalTargetStageId) {
+                migrateStreamingWriteTarget(
+                  streamingWriteRef.current,
+                  finalTargetStageId,
+                )
+                streamingWriteRef.current.targetStageIdExplicit = true
+              }
               const didStream =
                 streamingWriteRef.current.hasCleared ||
                 streamingWriteRef.current.accumulatedText.length > 0

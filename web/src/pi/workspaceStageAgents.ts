@@ -58,6 +58,8 @@ import {
 export type ApplyToStageEditorPayload = {
   text: string
   targetStageId?: StageId | MaterialStageId | SkillStageId
+  /** 内部流式回滚/迁移使用：保留首尾空白，不执行默认 trim。 */
+  preserveWhitespace?: boolean
   /** replace：整段替换；append：前空则整块，否则前加 \n\n；append_token：流式 delta，仅拼接不加分段；streaming_end：流式结束标记 */
   mode: 'replace' | 'append' | 'append_token' | 'streaming_end'
 }

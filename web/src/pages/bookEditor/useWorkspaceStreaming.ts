@@ -253,7 +253,9 @@ export function useWorkspaceStreaming({
         const current =
           (workspaceSessionsRef.current[bookId]?.stages[targetStage] ?? '') +
           (tokenBuffersByBookRef.current[bookId]?.[targetStage] ?? '')
-        const next = payload.text.trim()
+        const next = payload.preserveWhitespace
+          ? payload.text
+          : payload.text.trim()
         // 流式覆盖会先用空文本清空编辑器，再逐 token 写入。
         // 将清空动作并入同一个 stream 历史组，避免撤销时先回到空文本。
         recordTextChange?.(

@@ -264,7 +264,9 @@ export function SkillEditor() {
           (entry) => entry.id === entryId,
         )?.body ?? ''
         const current = currentBody + tokenBufferRef.current
-        const next = payload.text.trim()
+        const next = payload.preserveWhitespace
+          ? payload.text
+          : payload.text.trim()
         textHistory.record(
           `skill:${id}:${stageId}:${entryId}:body`,
           current,
