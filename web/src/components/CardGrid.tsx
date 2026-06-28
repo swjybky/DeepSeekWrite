@@ -118,7 +118,11 @@ export function CardGrid({ items, emptyText = '暂无项目', onDelete, deleting
 }
 
 function getCardCoverSrc(item: CardItem): string | null {
-  if (item.coverData) return `data:image/png;base64,${item.coverData}`
+  if (item.coverData) {
+    return item.coverData.startsWith('data:')
+      ? item.coverData
+      : `data:image/png;base64,${item.coverData}`
+  }
   if (item.type === 'material') return defaultMaterialCover
   if (item.type === 'skill') return defaultSkillCover
   return null

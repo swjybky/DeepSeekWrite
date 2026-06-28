@@ -21,6 +21,7 @@ type Props = {
   memories: MemoryEntry[]
   saving?: boolean
   error?: string | null
+  titleActions?: ReactNode
   headerActions?: ReactNode
   onClose: () => void
   onSave: (memories: MemoryEntry[]) => void | Promise<void>
@@ -32,6 +33,7 @@ export function MemoryManagerDialog({
   memories,
   saving = false,
   error = null,
+  titleActions,
   headerActions,
   onClose,
   onSave,
@@ -82,7 +84,10 @@ export function MemoryManagerDialog({
     <div className="memory-dialog-backdrop" role="dialog" aria-modal="true">
       <div className="memory-dialog">
         <header className="memory-dialog-head">
-          <h2>{title}</h2>
+          <div className="memory-dialog-title-row">
+            <h2>{title}</h2>
+            {titleActions}
+          </div>
           <div className="memory-dialog-head-actions">
             {headerActions}
             <button

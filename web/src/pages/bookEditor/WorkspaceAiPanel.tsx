@@ -304,6 +304,9 @@ export function WorkspaceAiPanel({
                     allStages={session.stages}
                     bookMemories={session.book.memories ?? []}
                     userMemories={userMemories}
+                    bookMemoryAutoCaptureEnabled={
+                      Boolean(session.book.memory_auto_capture_enabled)
+                    }
                     linkedMaterial={session.linkedMaterial}
                     linkedSkill={session.linkedSkill}
                     workspaceAgentReadAccess={workspaceAgentReadAccess}
@@ -349,6 +352,9 @@ export function WorkspaceAiPanel({
                 stages={session.stages}
                 bookMemories={session.book.memories ?? []}
                 userMemories={userMemories}
+                bookMemoryAutoCaptureEnabled={
+                  Boolean(session.book.memory_auto_capture_enabled)
+                }
                 linkedMaterial={session.linkedMaterial}
                 linkedSkill={session.linkedSkill}
                 readAccess={resolveReadAccessForBook(

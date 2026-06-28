@@ -308,6 +308,16 @@ export function normalizeSkillType(raw: unknown): SkillType {
   return 'short'
 }
 
+function normalizeBooleanFlag(raw: unknown, defaultValue = false): boolean {
+  if (raw == null) return defaultValue
+  if (raw === true) return true
+  if (typeof raw === 'number') return raw !== 0
+  if (typeof raw === 'string') {
+    return ['1', 'true', 'yes', 'on'].includes(raw.trim().toLowerCase())
+  }
+  return defaultValue
+}
+
 export function normalizeBookSummary(raw: Partial<BookSummary> & { id: string }): BookSummary {
   const book_type = normalizeBookType(raw.book_type)
   return {
@@ -332,6 +342,10 @@ export function normalizeBook(raw: Partial<Book> & { id: string }): Book {
     stages: raw.stages,
     expert_draft: raw.expert_draft,
     memories: normalizeMemoryEntries(raw.memories),
+    memory_auto_capture_enabled: normalizeBooleanFlag(
+      raw.memory_auto_capture_enabled,
+      true,
+    ),
     created_at: typeof raw.created_at === 'string' ? raw.created_at : undefined,
     updated_at: typeof raw.updated_at === 'string' ? raw.updated_at : undefined,
   }

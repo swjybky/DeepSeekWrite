@@ -132,6 +132,8 @@ export function SkillEditor() {
   const [aiPanelWidth, setAiPanelWidth] = useState(readStoredAiWidth)
   const [aiChatEpoch, setAiChatEpoch] = useState(0)
   const [editorStreaming, setEditorStreaming] = useState(false)
+  const [editingTitle, setEditingTitle] = useState(false)
+  const [titleDraft, setTitleDraft] = useState('')
 
   const splitDragRef = useRef<{ startX: number; startWidth: number } | null>(null)
   const textareaRef = useRef<HTMLTextAreaElement | null>(null)
@@ -148,7 +150,11 @@ export function SkillEditor() {
       try {
         const next = await saveSkill(key, { stages: snapshot })
         if (!next) throw new Error('保存失败：技能不存在')
-        setSkill({ ...next, stages: stagesRef.current })
+        setSkill((current) => ({
+          ...next,
+          title: current?.title ?? next.title,
+          stages: stagesRef.current,
+        }))
         setError(null)
       } catch (cause) {
         setError(cause instanceof Error ? cause.message : '保存失败')
@@ -624,7 +630,7 @@ export function SkillEditor() {
       >
         <aside className="workspace-rail workspace-rail--tree">
           <WorkspaceTreeNav
-            rootLabel="阶段技能"
+            rootLabel={skill.title || '未命名技能库'}
             stages={SKILL_STAGE_KEYS.map((stageId) => ({
               id: stageId,
               label: `${SKILL_STAGE_LABELS[stageId]}（${stages[stageId]?.length ?? 0}）`,
@@ -632,6 +638,59 @@ export function SkillEditor() {
             defaultExpanded
             activeStageId={activeStage}
             onStageSelect={(stageId) => handleStageSelect(stageId as SkillStageId)}
+            editingTitle={editingTitle}
+            titleDraft={titleDraft}
+            onTitleDraftChange={(value) =>
+              textHistory.change(
+                `skill:${skill.id}:title`,
+                titleDraft,
+                value,
+                setTitleDraft,
+              )
+            }
+            onTitleEditStart={() => {
+              textHistory.clear(`skill:${skill.id}:title`, skill.title)
+              setTitleDraft(skill.title)
+              setEditingTitle(true)
+            }}
+            onTitleEditEnd={() => {
+              const trimmed = titleDraft.trim()
+              if (trimmed && trimmed !== skill.title) {
+                void (async () => {
+                  try {
+                    const next = await saveSkill(skill.id, { title: trimmed })
+                    if (next) {
+                      setSkill((current) => ({
+                        ...next,
+                        stages: stagesRef.current,
+                        title: next.title || current?.title || trimmed,
+                      }))
+                      setMessage('技能库名已修改')
+                      window.setTimeout(() => setMessage(null), 2000)
+                    } else {
+                      setError('保存技能库名失败')
+                    }
+                  } catch (e) {
+                    setError(e instanceof Error ? e.message : '保存技能库名失败')
+                  }
+                })()
+              }
+              setEditingTitle(false)
+              setTitleDraft('')
+            }}
+            onTitleEditCancel={() => {
+              setEditingTitle(false)
+              setTitleDraft('')
+            }}
+            onTitleInputKeyDown={(event) =>
+              textHistory.handleKeyDown(
+                event,
+                `skill:${skill.id}:title`,
+                titleDraft,
+                setTitleDraft,
+                { redoKey: 'm', standardRedo: false },
+              )
+            }
           />
         </aside>
 

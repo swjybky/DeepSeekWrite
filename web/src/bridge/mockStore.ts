@@ -120,6 +120,7 @@ export async function mockCreateBook(
     stages: normalizeAllBookStages({}),
     expert_draft: defaultExpertDraft(bt),
     memories: [],
+    memory_auto_capture_enabled: true,
     created_at: now,
     updated_at: now,
   }
@@ -148,6 +149,7 @@ export async function mockSaveBook(
     expert_draft?: ExpertDraft | null
     title?: string | null
     status?: BookStatus | null
+    memory_auto_capture_enabled?: boolean | null
   },
 ): Promise<Book | null> {
   const map = loadMock()
@@ -188,6 +190,12 @@ export async function mockSaveBook(
   }
   if (options.status != null) {
     next = { ...next, status: normalizeBookStatus(options.status) }
+  }
+  if (options.memory_auto_capture_enabled != null) {
+    next = {
+      ...next,
+      memory_auto_capture_enabled: Boolean(options.memory_auto_capture_enabled),
+    }
   }
   map.set(book_id, next)
   saveMock(map)

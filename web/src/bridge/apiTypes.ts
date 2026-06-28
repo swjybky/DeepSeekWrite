@@ -16,6 +16,7 @@ export type SaveBookOptions = {
   expert_draft?: ExpertDraft | null
   title?: string | null
   status?: BookStatus | null
+  memory_auto_capture_enabled?: boolean | null
 }
 
 export type SaveMaterialOptions = {

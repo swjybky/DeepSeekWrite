@@ -44,6 +44,7 @@ declare global {
           title?: string | null,
           status?: BookStatus | null,
           linked_skill_id?: string | null,
+          memory_auto_capture_enabled?: boolean | null,
         ): Promise<Book | null>
         delete_book(book_id: string): Promise<boolean>
         get_book_memories(book_id: string): Promise<MemoryEntry[]>
@@ -246,6 +247,14 @@ declare global {
           book_id: string,
           prompt: string,
         ): Promise<{ cover_path: string | null; success: boolean; error: string | null }>
+
+        // ==================== 创作空间导入导出 API ====================
+        export_book(
+          book_id: string,
+        ): Promise<{ success: boolean; error: string | null; path: string | null }>
+        import_book(
+          workspace_root: string | null,
+        ): Promise<{ success: boolean; error: string | null; item: Record<string, unknown> | null }>
 
         // ==================== 素材/技能导入导出 API ====================
         export_library(

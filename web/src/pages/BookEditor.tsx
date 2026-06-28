@@ -823,6 +823,19 @@ export function BookEditor() {
     }
   }, [book, refreshWorkspaceBooks, saveCurrentBook])
 
+  const handleToggleBookMemoryAutoCapture = useCallback(
+    async (enabled: boolean) => {
+      if (!book) return
+      setBookMemoryError(null)
+      const next = await saveCurrentBook({
+        memory_auto_capture_enabled: enabled,
+        successMessage: enabled ? '已开启主动录入记忆' : '已关闭主动录入记忆',
+      })
+      if (!next) setBookMemoryError('保存记忆开关失败')
+    },
+    [book, saveCurrentBook],
+  )
+
   useWorkspaceKeyboardShortcuts({
     id,
     book,
@@ -962,6 +975,24 @@ export function BookEditor() {
           memories={bookMemories}
           saving={bookMemorySaving}
           error={bookMemoryError}
+          titleActions={
+            <label
+              className="memory-auto-capture-toggle"
+              title="开启后，模型会自动地帮你总结记忆。"
+            >
+              <input
+                type="checkbox"
+                checked={Boolean(book.memory_auto_capture_enabled)}
+                disabled={saving || bookMemorySaving}
+                aria-label="主动录入书籍记忆"
+                onChange={(event) =>
+                  void handleToggleBookMemoryAutoCapture(event.target.checked)
+                }
+              />
+              <span className="memory-auto-capture-switch" aria-hidden />
+              <span>主动录入</span>
+            </label>
+          }
           onClose={() => {
             if (!bookMemorySaving) setBookMemoryOpen(false)
           }}

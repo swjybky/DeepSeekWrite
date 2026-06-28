@@ -16,6 +16,12 @@ type CoverViewerDialogProps = {
   onClose: () => void
 }
 
+function coverDataToSrc(coverData: string): string {
+  return coverData.startsWith('data:')
+    ? coverData
+    : `data:image/png;base64,${coverData}`
+}
+
 export function CoverGenerateDialog({
   promptDraft,
   generating,
@@ -123,7 +129,7 @@ export function CoverViewerDialog({ coverData, onClose }: CoverViewerDialogProps
           ×
         </button>
         <img
-          src={`data:image/png;base64,${coverData}`}
+          src={coverDataToSrc(coverData)}
           alt="书籍封面"
           className="workspace-cover-viewer-img"
           onClick={(e) => e.stopPropagation()}

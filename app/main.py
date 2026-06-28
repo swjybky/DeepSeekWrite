@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+from datetime import datetime, timezone
 import functools
 import http.client
 import importlib.util
@@ -19,7 +20,7 @@ import uuid
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.error import HTTPError, URLError
-from urllib.parse import urlparse
+from urllib.parse import unquote_to_bytes, urlparse
 from urllib.request import Request, urlopen
 
 # 桌面壳内浏览器/WebView 无法直连部分 LLM API（无 CORS）；经本地 HTTP 转发。
@@ -207,6 +208,7 @@ from app.prompt_store import (
     save_skill_agent_prompt_override as _save_skill_agent_prompt_override,
     save_workspace_agent_prompt_override as _save_workspace_agent_prompt_override,
 )
+from app.models import SCRIPT_STAGE_KEYS, SHORT_STAGE_KEYS
 from app.storage import (
     BookStore,
     read_appearance_style,
@@ -789,15 +791,141 @@ def _app_icon_path() -> str | None:
     return str(ico.resolve()) if ico.is_file() else None
 
 
+_COVER_MIME_BY_SUFFIX: dict[str, str] = {
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".webp": "image/webp",
+    ".gif": "image/gif",
+    ".svg": "image/svg+xml",
+}
+_COVER_FILE_NAMES: tuple[str, ...] = (
+    "cover.png",
+    "cover.jpg",
+    "cover.jpeg",
+    "cover.webp",
+    "cover.gif",
+    "cover.svg",
+)
+
+
+def _safe_zip_leaf(name: str, fallback: str) -> str:
+    raw = Path(str(name or "").replace("\\", "/")).name.strip()
+    if not raw:
+        raw = fallback
+    for ch in '<>:"/\\|?*\n\r\t':
+        raw = raw.replace(ch, "_")
+    raw = raw.strip(" .")
+    return raw or fallback
+
+
+def _safe_zip_text_path(*parts: str) -> str:
+    return "/".join(_safe_zip_leaf(part, "untitled") for part in parts if part)
+
+
+def _normalize_zip_path(path: str) -> str:
+    return (
+        str(path or "")
+        .replace("\\", "/")
+        .lstrip("/")
+        .replace("//", "/")
+        .rstrip("/")
+    )
+
+
+def _find_zip_member(zf, candidates: list[str]) -> str | None:
+    normalized = [_normalize_zip_path(candidate) for candidate in candidates]
+    for name in zf.namelist():
+        path = _normalize_zip_path(name)
+        if not path:
+            continue
+        if any(path == candidate or path.endswith(f"/{candidate}") for candidate in normalized):
+            return name
+    return None
+
+
+def _read_zip_json(zf, candidates: list[str]) -> dict | None:
+    member = _find_zip_member(zf, candidates)
+    if not member:
+        return None
+    data = json.loads(zf.read(member).decode("utf-8"))
+    return data if isinstance(data, dict) else None
+
+
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _image_suffix_from_bytes(data: bytes, fallback: str = ".png") -> str:
+    if data.startswith(b"\x89PNG\r\n\x1a\n"):
+        return ".png"
+    if data.startswith(b"\xff\xd8\xff"):
+        return ".jpg"
+    if data.startswith(b"RIFF") and data[8:12] == b"WEBP":
+        return ".webp"
+    if data.startswith(b"GIF87a") or data.startswith(b"GIF89a"):
+        return ".gif"
+    return fallback
+
+
+def _cover_data_to_bytes(raw: str) -> tuple[bytes, str] | None:
+    value = (raw or "").strip()
+    if not value:
+        return None
+    suffix = ".png"
+    if value.startswith("data:"):
+        header, sep, payload = value.partition(",")
+        if not sep:
+            return None
+        mime = header[5:].split(";", 1)[0].lower()
+        suffix = next(
+            (ext for ext, ext_mime in _COVER_MIME_BY_SUFFIX.items() if ext_mime == mime),
+            suffix,
+        )
+        if mime == "image/svg+xml" and ";base64" not in header:
+            try:
+                return unquote_to_bytes(payload), ".svg"
+            except Exception:
+                return None
+        value = payload
+    try:
+        data = base64.b64decode(value, validate=False)
+    except Exception:
+        return None
+    if suffix == ".svg" or _is_supported_image(data):
+        return data, _image_suffix_from_bytes(data, suffix)
+    return None
+
+
+def _write_cover_data(output_dir: str, cover_data: str) -> None:
+    if not output_dir:
+        return
+    decoded = _cover_data_to_bytes(cover_data)
+    if not decoded:
+        return
+    data, suffix = decoded
+    try:
+        root = Path(output_dir)
+        root.mkdir(parents=True, exist_ok=True)
+        (root / f"cover{suffix}").write_bytes(data)
+    except OSError:
+        pass
+
+
 def _read_book_cover_data(output_dir: str) -> str | None:
     if not output_dir:
         return None
-    cover = Path(output_dir) / "cover.png"
-    if not cover.is_file():
+    root = Path(output_dir)
+    cover = next((root / name for name in _COVER_FILE_NAMES if (root / name).is_file()), None)
+    if cover is None:
         return None
     try:
         data = cover.read_bytes()
-        return base64.b64encode(data).decode("utf-8")
+        encoded = base64.b64encode(data).decode("utf-8")
+        if cover.suffix.lower() == ".png":
+            return encoded
+        mime = _COVER_MIME_BY_SUFFIX.get(cover.suffix.lower(), "image/png")
+        return f"data:{mime};base64,{encoded}"
     except Exception:
         return None
 
@@ -854,6 +982,7 @@ class Api:
         title: str | None = None,
         status: str | None = None,
         linked_skill_id: str | None = None,
+        memory_auto_capture_enabled: bool | None = None,
     ) -> dict | None:
         return self._store.save_book(
             book_id,
@@ -864,6 +993,7 @@ class Api:
             title=title,
             status=status,
             linked_skill_id=linked_skill_id,
+            memory_auto_capture_enabled=memory_auto_capture_enabled,
         )
 
     def get_book_memories(self, book_id: str) -> list[dict]:
@@ -1289,6 +1419,205 @@ class Api:
             return {"cover_path": None, "success": False, "error": "图片生成失败"}
         return {"cover_path": str(cover_path), "success": True, "error": None}
 
+    # ==================== 创作空间 导入导出 API ====================
+
+    def export_book(self, book_id: str) -> dict:
+        """将单个创作空间导出为 zip，兼容移动端 book.json 书籍包。"""
+        import zipfile as _zipfile
+
+        try:
+            book = self._store.get_book(book_id)
+            if not book:
+                return {"success": False, "error": "书籍不存在", "path": None}
+
+            default_name = f"{_safe_zip_leaf(book.get('title', '书籍'), '书籍')}.zip"
+            if not webview.windows:
+                return {"success": False, "error": "窗口未就绪", "path": None}
+            win = webview.windows[0]
+            result = win.create_file_dialog(
+                webview.FileDialog.SAVE,
+                save_filename=default_name,
+                file_types=("Zip 压缩包 (*.zip)",),
+            )
+            if not result:
+                return {"success": False, "error": None, "path": None}
+            save_path = str(result) if not isinstance(result, (list, tuple)) else str(result[0])
+            if not save_path:
+                return {"success": False, "error": None, "path": None}
+            if not save_path.lower().endswith(".zip"):
+                save_path += ".zip"
+
+            metadata = {
+                "library_type": "book",
+                "data": book,
+                "app": "write-claw-desktop",
+                "schemaVersion": 1,
+                "exported_at": _now_iso(),
+            }
+            stage_keys = SCRIPT_STAGE_KEYS if book.get("book_type") == "script" else SHORT_STAGE_KEYS
+
+            with _zipfile.ZipFile(save_path, "w", _zipfile.ZIP_DEFLATED) as zf:
+                book_json = json.dumps(book, ensure_ascii=False, indent=2)
+                zf.writestr("book.json", book_json)
+                zf.writestr(
+                    "metadata.json",
+                    json.dumps(metadata, ensure_ascii=False, indent=2),
+                )
+
+                stages = book.get("stages") if isinstance(book.get("stages"), dict) else {}
+                for stage_id in stage_keys:
+                    zf.writestr(
+                        _safe_zip_text_path("stages", f"{stage_id}.txt"),
+                        str(stages.get(stage_id, "") or ""),
+                    )
+
+                expert_draft = book.get("expert_draft")
+                if isinstance(expert_draft, dict):
+                    zf.writestr(
+                        "expert_draft.json",
+                        json.dumps(expert_draft, ensure_ascii=False, indent=2),
+                    )
+                    sections = expert_draft.get("sections")
+                    states = expert_draft.get("character_states")
+                    state_by_section = {
+                        str(item.get("section_id") or ""): item
+                        for item in (states if isinstance(states, list) else [])
+                        if isinstance(item, dict)
+                    }
+                    if isinstance(sections, list):
+                        for index, section in enumerate(sections, start=1):
+                            if not isinstance(section, dict):
+                                continue
+                            title = str(section.get("title") or f"小节{index}")
+                            prefix = f"{index:02d}-{_safe_zip_leaf(title, f'小节{index}')}"
+                            zf.writestr(
+                                _safe_zip_text_path("expert_draft", f"{prefix}.txt"),
+                                str(section.get("body") or ""),
+                            )
+                            state = state_by_section.get(str(section.get("id") or ""))
+                            if state:
+                                zf.writestr(
+                                    _safe_zip_text_path(
+                                        "expert_draft",
+                                        f"{prefix}-人物状态.txt",
+                                    ),
+                                    str(state.get("body") or ""),
+                                )
+
+                output_dir = str(book.get("output_dir") or "")
+                if output_dir and Path(output_dir).is_dir():
+                    for file in Path(output_dir).iterdir():
+                        if file.is_file():
+                            zf.write(file, f"files/{_safe_zip_leaf(file.name, 'file')}")
+
+            return {"success": True, "error": None, "path": save_path}
+        except Exception as e:
+            return {"success": False, "error": str(e), "path": None}
+
+    def import_book(self, workspace_root: str | None = None) -> dict:
+        """从移动端/桌面端书籍 zip 导入单个创作空间。"""
+        import zipfile as _zipfile
+
+        try:
+            if not webview.windows:
+                return {"success": False, "error": "窗口未就绪", "item": None}
+            win = webview.windows[0]
+            result = win.create_file_dialog(
+                webview.FileDialog.OPEN,
+                file_types=("Zip 压缩包 (*.zip)",),
+            )
+            if not result:
+                return {"success": False, "error": None, "item": None}
+            zip_path = str(result[0]) if isinstance(result, (list, tuple)) else str(result)
+            if not zip_path:
+                return {"success": False, "error": None, "item": None}
+            if not Path(zip_path).is_file():
+                return {"success": False, "error": "文件不存在", "item": None}
+
+            with _zipfile.ZipFile(zip_path, "r") as zf:
+                book_data = _read_zip_json(zf, ["book.json"])
+                if not book_data:
+                    metadata = _read_zip_json(zf, ["metadata.json"])
+                    if metadata and metadata.get("library_type") in ("book", "workspace"):
+                        data = metadata.get("data")
+                        book_data = data if isinstance(data, dict) else None
+                if not book_data:
+                    return {"success": False, "error": "无效的书籍包（缺少 book.json）", "item": None}
+
+                title = str(book_data.get("title") or "导入书籍")
+                book_type = str(book_data.get("book_type") or "short")
+                raw_categories = book_data.get("categories")
+                categories = [
+                    str(item)
+                    for item in (raw_categories if isinstance(raw_categories, list) else [])
+                    if str(item).strip()
+                ]
+                created = self._store.create_book(
+                    title,
+                    book_type,
+                    categories,
+                    (workspace_root or "").strip() or None,
+                    str(book_data.get("linked_skill_id") or "") or None,
+                    str(book_data.get("linked_material_id") or "") or None,
+                )
+
+                stages = book_data.get("stages")
+                expert_draft = book_data.get("expert_draft")
+                saved = self._store.save_book(
+                    created["id"],
+                    content=str(book_data.get("content") or "") if not isinstance(stages, dict) else None,
+                    stages=stages if isinstance(stages, dict) else None,
+                    linked_material_id=str(book_data.get("linked_material_id") or ""),
+                    expert_draft=expert_draft if isinstance(expert_draft, dict) else None,
+                    title=title,
+                    status=str(book_data.get("status") or "editing"),
+                    linked_skill_id=str(book_data.get("linked_skill_id") or ""),
+                    memory_auto_capture_enabled=(
+                        bool(book_data.get("memory_auto_capture_enabled"))
+                        if "memory_auto_capture_enabled" in book_data
+                        else None
+                    ),
+                )
+                if isinstance(book_data.get("memories"), list):
+                    self._store.set_book_memories(created["id"], book_data.get("memories"))
+
+                final = self._store.get_book(created["id"]) or saved or created
+                output_dir = str(final.get("output_dir") or "")
+                if output_dir:
+                    dest = Path(output_dir)
+                    dest.mkdir(parents=True, exist_ok=True)
+                    copied_cover = False
+                    for info in zf.infolist():
+                        if info.is_dir():
+                            continue
+                        name = _normalize_zip_path(info.filename)
+                        if name.startswith("files/"):
+                            fname = _safe_zip_leaf(name[len("files/"):], "")
+                            if not fname:
+                                continue
+                            (dest / fname).write_bytes(zf.read(info.filename))
+                            if fname.lower() in _COVER_FILE_NAMES:
+                                copied_cover = True
+                    for info in zf.infolist():
+                        if info.is_dir():
+                            continue
+                        name = _normalize_zip_path(info.filename)
+                        leaf = _safe_zip_leaf(name, "")
+                        if "/" not in name and leaf.lower() in _COVER_FILE_NAMES:
+                            (dest / leaf).write_bytes(zf.read(info.filename))
+                            copied_cover = True
+                    if not copied_cover:
+                        cover_data_url = book_data.get("cover_data_url")
+                        if isinstance(cover_data_url, str):
+                            _write_cover_data(output_dir, cover_data_url)
+
+                final = self._store.get_book(created["id"]) or final
+                return {"success": True, "error": None, "item": final}
+        except _zipfile.BadZipFile:
+            return {"success": False, "error": "无效的 zip 文件", "item": None}
+        except Exception as e:
+            return {"success": False, "error": str(e), "item": None}
+
     # ==================== 素材/技能 导入导出 API ====================
 
     def export_library(self, library_type: str, item_id: str) -> dict:
@@ -1484,8 +1813,11 @@ class Api:
 
             if cover_data:
                 try:
-                    image_bytes = base64.b64decode(cover_data)
-                    with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
+                    decoded_cover = _cover_data_to_bytes(cover_data)
+                    if not decoded_cover:
+                        raise ValueError("unsupported cover data")
+                    image_bytes, image_suffix = decoded_cover
+                    with tempfile.NamedTemporaryFile(suffix=image_suffix, delete=False) as tmp:
                         tmp.write(image_bytes)
                         tmp_path = tmp.name
                     paragraph = doc.add_paragraph()

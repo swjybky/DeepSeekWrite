@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import {
   SHORT_GENRE_OPTIONS,
@@ -20,6 +20,7 @@ import {
   createSkill,
   deleteBook,
   deleteSkill,
+  exportBook,
   getBookCovers,
   getAiModelConfig,
   getStoredWorkspaceRoot,
@@ -43,6 +44,7 @@ import {
   skillTypeLabel,
   TEXT_MODEL_API_KEY_PLACEHOLDER,
   exportLibrary,
+  importBook,
   importLibrary,
 } from '../bridge'
 import { APPEARANCE_STYLE_LABELS, useAppearance } from '../appearance'
@@ -1510,11 +1512,14 @@ export function Home() {
   const [skillError, setSkillError] = useState<string | null>(null)
 
   // ==================== 导入/导出状态 ====================
+  const [exportBookOpen, setExportBookOpen] = useState(false)
   const [exportMaterialOpen, setExportMaterialOpen] = useState(false)
   const [exportSkillOpen, setExportSkillOpen] = useState(false)
+  const [selectedExportBookId, setSelectedExportBookId] = useState('')
   const [selectedExportMaterialId, setSelectedExportMaterialId] = useState('')
   const [selectedExportSkillId, setSelectedExportSkillId] = useState('')
   const [exportingId, setExportingId] = useState<string | null>(null)
+  const [importingBook, setImportingBook] = useState(false)
   const [importingMaterial, setImportingMaterial] = useState(false)
   const [importingSkill, setImportingSkill] = useState(false)
 
@@ -1528,6 +1533,8 @@ export function Home() {
   const [learningImitationOpen, setLearningImitationOpen] = useState(false)
   const [learningImitationBackground, setLearningImitationBackground] = useState(false)
   const [workspaceDrawerOpen, setWorkspaceDrawerOpen] = useState(false)
+  const [otherFunctionsOpen, setOtherFunctionsOpen] = useState(false)
+  const otherFunctionsRef = useRef<HTMLDivElement | null>(null)
   const [savingAiSettings, setSavingAiSettings] = useState(false)
   const [modelConfigError, setModelConfigError] = useState<string | null>(null)
   const [styleConfigError, setStyleConfigError] = useState<string | null>(null)
@@ -1539,6 +1546,27 @@ export function Home() {
   const [updateCheckResult, setUpdateCheckResult] = useState<UpdateCheckResult | null>(null)
   const [updateError, setUpdateError] = useState<string | null>(null)
   const downloadingUpdate = backgroundUpdate.status === 'downloading'
+
+  useEffect(() => {
+    if (!otherFunctionsOpen) return
+
+    const closeOnOutsidePointer = (event: PointerEvent) => {
+      const target = event.target
+      if (target instanceof Node && otherFunctionsRef.current?.contains(target)) return
+      setOtherFunctionsOpen(false)
+    }
+
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setOtherFunctionsOpen(false)
+    }
+
+    document.addEventListener('pointerdown', closeOnOutsidePointer)
+    document.addEventListener('keydown', closeOnEscape)
+    return () => {
+      document.removeEventListener('pointerdown', closeOnOutsidePointer)
+      document.removeEventListener('keydown', closeOnEscape)
+    }
+  }, [otherFunctionsOpen])
 
   // ==================== 创作空间封面加载 ====================
   const loadBookCovers = useCallback(async (bookList: BookSummary[]) => {
@@ -1939,6 +1967,15 @@ export function Home() {
   }
 
   // ==================== 导入/导出操作 ====================
+  const openExportBookDialog = () => {
+    if (books.length === 0) return
+    setBookError(null)
+    setSelectedExportBookId((current) =>
+      books.some((item) => item.id === current) ? current : books[0]?.id ?? '',
+    )
+    setExportBookOpen(true)
+  }
+
   const openExportMaterialDialog = () => {
     if (materials.length === 0) return
     setMaterialError(null)
@@ -1955,6 +1992,25 @@ export function Home() {
       skills.some((item) => item.id === current) ? current : skills[0]?.id ?? '',
     )
     setExportSkillOpen(true)
+  }
+
+  const handleExportBook = async (bookId: string) => {
+    setExportingId(bookId)
+    setBookError(null)
+    let shouldClose = false
+    try {
+      const result = await exportBook(bookId)
+      if (result.error) {
+        setBookError(result.error)
+      } else {
+        shouldClose = true
+      }
+    } catch (err) {
+      setBookError(err instanceof Error ? err.message : '导出失败')
+    } finally {
+      setExportingId(null)
+      if (shouldClose) setExportBookOpen(false)
+    }
   }
 
   const handleExportMaterial = async (materialId: string) => {
@@ -1995,6 +2051,12 @@ export function Home() {
     }
   }
 
+  const handleExportBookSubmit = async (event: React.FormEvent) => {
+    event.preventDefault()
+    if (!selectedExportBookId) return
+    await handleExportBook(selectedExportBookId)
+  }
+
   const handleExportMaterialSubmit = async (event: React.FormEvent) => {
     event.preventDefault()
     if (!selectedExportMaterialId) return
@@ -2005,6 +2067,23 @@ export function Home() {
     event.preventDefault()
     if (!selectedExportSkillId) return
     await handleExportSkill(selectedExportSkillId)
+  }
+
+  const handleImportBook = async () => {
+    setImportingBook(true)
+    setBookError(null)
+    try {
+      const result = await importBook(workspaceRoot)
+      if (result.error) {
+        setBookError(result.error)
+      } else if (result.success) {
+        await refreshBooks()
+      }
+    } catch (err) {
+      setBookError(err instanceof Error ? err.message : '导入失败')
+    } finally {
+      setImportingBook(false)
+    }
   }
 
   const handleImportMaterial = async () => {
@@ -2115,6 +2194,10 @@ export function Home() {
   )
   const materialCardItems = useMemo(() => materials.map(materialToCardItem), [materials])
   const skillCardItems = useMemo(() => skills.map(skillToCardItem), [skills])
+  const bookExportItems = useMemo(
+    () => books.map(bookToExportDialogItem),
+    [books],
+  )
   const materialExportItems = useMemo(
     () => materials.map(materialToExportDialogItem),
     [materials],
@@ -2140,13 +2223,16 @@ export function Home() {
                 : 'home-config-trigger'
             }
             aria-expanded={workspaceDrawerOpen}
-            onClick={() => setWorkspaceDrawerOpen((open) => !open)}
+            onClick={() => {
+              setOtherFunctionsOpen(false)
+              setWorkspaceDrawerOpen((open) => !open)
+            }}
           >
             工作目录
           </button>
           <button
             type="button"
-            className="home-config-trigger"
+            className={modelConfigOpen ? 'home-config-trigger home-config-trigger--active' : 'home-config-trigger'}
             title={
               loadingAiSettings
                 ? '加载模型配置中…'
@@ -2154,6 +2240,7 @@ export function Home() {
             }
             disabled={loadingAiSettings}
             onClick={() => {
+              setOtherFunctionsOpen(false)
               setModelConfigError(null)
               setModelConfigOpen(true)
             }}
@@ -2163,80 +2250,107 @@ export function Home() {
           <button
             type="button"
             className={
-              styleConfigOpen
-                ? 'home-config-trigger home-config-trigger--active'
-                : 'home-config-trigger'
-            }
-            title={`当前：${APPEARANCE_STYLE_LABELS[appearanceStyle]}`}
-            aria-expanded={styleConfigOpen}
-            disabled={savingAppearance}
-            onClick={() => {
-              setStyleConfigError(null)
-              setStyleConfigOpen(true)
-            }}
-          >
-            风格配置
-          </button>
-          <button
-            type="button"
-            className={
-              textDisplayOpen
-                ? 'home-config-trigger home-config-trigger--active'
-                : 'home-config-trigger'
-            }
-            aria-expanded={textDisplayOpen}
-            disabled={savingTextDisplay}
-            onClick={() => {
-              setTextDisplayError(null)
-              setTextDisplayOpen(true)
-            }}
-          >
-            {savingTextDisplay ? '文字显示…' : '文字显示'}
-          </button>
-          <button
-            type="button"
-            className={
-              userMemoryOpen
-                ? 'home-config-trigger home-config-trigger--active'
-                : 'home-config-trigger'
-            }
-            aria-expanded={userMemoryOpen}
-            disabled={loadingUserMemories}
-            onClick={openUserMemoryManager}
-          >
-            {loadingUserMemories ? '记忆加载中' : '记忆管理'}
-          </button>
-          <button
-            type="button"
-            className={
               learningImitationOpen || learningImitationBackground
                 ? 'home-config-trigger home-config-trigger--active'
                 : 'home-config-trigger'
             }
             aria-expanded={learningImitationOpen}
-            onClick={() => setLearningImitationOpen(true)}
+            onClick={() => {
+              setOtherFunctionsOpen(false)
+              setLearningImitationOpen(true)
+            }}
           >
             {learningImitationBackground && !learningImitationOpen
               ? '学习仿写后台中'
               : '学习仿写'}
           </button>
-          <button
-            type="button"
-            className={
-              downloadingUpdate
-                ? 'home-config-trigger home-config-trigger--active'
-                : 'home-config-trigger'
-            }
-            title={currentAppVersion ? `当前版本：v${currentAppVersion}` : '查看版本更新信息'}
-            disabled={checkingUpdate || downloadingUpdate}
-            onClick={() => void handleCheckUpdate()}
-          >
-            {downloadingUpdate
-              ? '后台下载中'
-              : checkingUpdate
-                ? '检查中…'
-                : '软件更新'}
-          </button>
+          <div className="home-config-menu" ref={otherFunctionsRef}>
+            <button
+              type="button"
+              className={
+                otherFunctionsOpen ||
+                styleConfigOpen ||
+                textDisplayOpen ||
+                userMemoryOpen ||
+                updateDialogOpen ||
+                checkingUpdate ||
+                downloadingUpdate
+                  ? 'home-config-trigger home-config-trigger--active home-config-trigger--menu'
+                  : 'home-config-trigger home-config-trigger--menu'
+              }
+              aria-haspopup="menu"
+              aria-expanded={otherFunctionsOpen}
+              onClick={() => setOtherFunctionsOpen((open) => !open)}
+            >
+              其他功能
+            </button>
+            {otherFunctionsOpen ? (
+              <div className="home-config-menu-panel" role="menu" aria-label="其他功能">
+                <button
+                  type="button"
+                  className="home-config-menu-item"
+                  role="menuitem"
+                  title={`当前：${APPEARANCE_STYLE_LABELS[appearanceStyle]}`}
+                  disabled={savingAppearance}
+                  onClick={() => {
+                    setOtherFunctionsOpen(false)
+                    setStyleConfigError(null)
+                    setStyleConfigOpen(true)
+                  }}
+                >
+                  <span>风格配置</span>
+                  <small>{APPEARANCE_STYLE_LABELS[appearanceStyle]}</small>
+                </button>
+                <button
+                  type="button"
+                  className="home-config-menu-item"
+                  role="menuitem"
+                  disabled={savingTextDisplay}
+                  onClick={() => {
+                    setOtherFunctionsOpen(false)
+                    setTextDisplayError(null)
+                    setTextDisplayOpen(true)
+                  }}
+                >
+                  <span>{savingTextDisplay ? '文字显示…' : '文字显示'}</span>
+                  <small>{TEXT_DISPLAY_MODE_LABELS[textDisplayMode]}</small>
+                </button>
+                <button
+                  type="button"
+                  className="home-config-menu-item"
+                  role="menuitem"
+                  disabled={loadingUserMemories}
+                  onClick={() => {
+                    setOtherFunctionsOpen(false)
+                    openUserMemoryManager()
+                  }}
+                >
+                  <span>{loadingUserMemories ? '记忆加载中' : '记忆管理'}</span>
+                  <small>短篇与剧本记忆</small>
+                </button>
+                <button
+                  type="button"
+                  className="home-config-menu-item"
+                  role="menuitem"
+                  title={currentAppVersion ? `当前版本：v${currentAppVersion}` : '查看版本更新信息'}
+                  disabled={checkingUpdate || downloadingUpdate}
+                  onClick={() => {
+                    setOtherFunctionsOpen(false)
+                    void handleCheckUpdate()
+                  }}
+                >
+                  <span>
+                    {downloadingUpdate
+                      ? '后台下载中'
+                      : checkingUpdate
+                        ? '检查中…'
+                        : '软件更新'}
+                  </span>
+                  <small>{currentAppVersion ? `v${currentAppVersion}` : '检查新版本'}</small>
+                </button>
+              </div>
+            ) : null}
+          </div>
         </nav>
       </header>
 
@@ -2314,6 +2428,22 @@ export function Home() {
                 onClick={() => void refreshBooks()}
               >
                 <RefreshIcon spinning={loadingBooks} />
+              </button>
+              <button
+                type="button"
+                className="btn-secondary btn-small"
+                disabled={importingBook}
+                onClick={() => void handleImportBook()}
+              >
+                {importingBook ? '导入中…' : '导入'}
+              </button>
+              <button
+                type="button"
+                className="btn-secondary btn-small"
+                disabled={books.length === 0}
+                onClick={openExportBookDialog}
+              >
+                导出
               </button>
               <Link
                 className="btn-secondary btn-small"
@@ -2561,6 +2691,21 @@ export function Home() {
         </section>
         </div>
       </div>
+
+      {exportBookOpen && (
+        <LibraryExportDialog
+          title="导出创作空间"
+          titleId="export-book-title"
+          itemLabel="书籍"
+          items={bookExportItems}
+          selectedId={selectedExportBookId}
+          submitting={exportingId !== null}
+          error={bookError}
+          onSelect={setSelectedExportBookId}
+          onClose={() => setExportBookOpen(false)}
+          onSubmit={handleExportBookSubmit}
+        />
+      )}
 
       {exportMaterialOpen && (
         <LibraryExportDialog
@@ -3009,6 +3154,16 @@ function materialToExportDialogItem(material: MaterialSummary): ExportDialogItem
     id: material.id,
     title: material.title || '未命名素材',
     meta: [materialTypeLabel(material.material_type), material.parent_genre]
+      .filter(Boolean)
+      .join(' · '),
+  }
+}
+
+function bookToExportDialogItem(book: BookSummary): ExportDialogItem {
+  return {
+    id: book.id,
+    title: book.title || '未命名书籍',
+    meta: [bookTypeLabel(book.book_type), book.status === 'completed' ? '已完成' : '编辑中']
       .filter(Boolean)
       .join(' · '),
   }

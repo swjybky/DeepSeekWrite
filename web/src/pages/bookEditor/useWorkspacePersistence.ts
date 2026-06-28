@@ -344,6 +344,7 @@ export function useWorkspacePersistence({
           stages: merged,
           expert_draft: snapshotForSave.expertDraft,
           status: options.status,
+          memory_auto_capture_enabled: options.memory_auto_capture_enabled,
         })
         if (!next) {
           if (isActiveBook) setError('保存失败：书籍不存在')

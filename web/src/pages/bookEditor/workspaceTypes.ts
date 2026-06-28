@@ -7,6 +7,7 @@ export const EMPTY_STAGES: Record<StageId, string> = {} as Record<StageId, strin
 
 export type SaveCurrentBookOptions = {
   status?: BookStatus
+  memory_auto_capture_enabled?: boolean | null
   successMessage?: string | null
 }
 

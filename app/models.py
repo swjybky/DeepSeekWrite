@@ -361,6 +361,18 @@ def normalize_book_type(raw: Any | None) -> BookType:
     return bt if bt in ("short", "long", "script") else "short"  # type: ignore[return-value]
 
 
+def normalize_bool(raw: Any | None, default: bool = False) -> bool:
+    if raw is None:
+        return default
+    if isinstance(raw, bool):
+        return raw
+    if isinstance(raw, (int, float)):
+        return raw != 0
+    if isinstance(raw, str):
+        return raw.strip().lower() in ("1", "true", "yes", "on")
+    return default
+
+
 def normalize_material_type(raw: Any | None) -> MaterialType:
     mt = str(raw or "").strip()
     return mt if mt in LIBRARY_TYPES else "short"  # type: ignore[return-value]
@@ -438,6 +450,7 @@ class Book:
     stages: dict[str, str] = field(default_factory=default_stages)
     expert_draft: dict[str, Any] = field(default_factory=default_expert_draft)
     memories: list[dict[str, str]] = field(default_factory=list)
+    memory_auto_capture_enabled: bool = True
     created_at: str = ""
     updated_at: str = ""
 
@@ -466,6 +479,9 @@ class Book:
                 data.get("expert_draft"), bt
             ),
             memories=normalize_memories_from_storage(data.get("memories")),
+            memory_auto_capture_enabled=normalize_bool(
+                data.get("memory_auto_capture_enabled"), True
+            ),
             created_at=str(data.get("created_at") or ""),
             updated_at=str(data.get("updated_at") or ""),
         )

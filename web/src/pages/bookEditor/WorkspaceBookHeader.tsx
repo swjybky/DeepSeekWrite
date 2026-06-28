@@ -26,6 +26,12 @@ type Props = {
   memoryUnread?: boolean
 }
 
+function coverDataToSrc(coverData: string): string {
+  return coverData.startsWith('data:')
+    ? coverData
+    : `data:image/png;base64,${coverData}`
+}
+
 export function WorkspaceBookHeader({
   book,
   coverData,
@@ -91,7 +97,7 @@ export function WorkspaceBookHeader({
             onClick={onViewCover}
           >
             <img
-              src={`data:image/png;base64,${coverData}`}
+              src={coverDataToSrc(coverData)}
               alt="封面"
               className="btn-cover-thumb"
               onError={onCoverError}

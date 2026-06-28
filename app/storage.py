@@ -1330,6 +1330,7 @@ class BookStore:
         title: str | None = None,
         status: str | None = None,
         linked_skill_id: str | None = None,
+        memory_auto_capture_enabled: bool | None = None,
     ) -> dict[str, Any] | None:
         with _data_file_lock():
             self._reload_all_unlocked()
@@ -1356,6 +1357,8 @@ class BookStore:
                 )
             if status is not None:
                 b.status = normalize_book_status(status)
+            if memory_auto_capture_enabled is not None:
+                b.memory_auto_capture_enabled = bool(memory_auto_capture_enabled)
             b.updated_at = _utc_now_iso()
             save_books_atomic(self._path, self._books)
             self._mark_books_saved_unlocked()

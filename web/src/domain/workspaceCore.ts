@@ -325,6 +325,7 @@ export interface Book extends BookSummary {
   stages?: Partial<Record<StageId, string>>
   expert_draft?: ExpertDraft
   memories: MemoryEntry[]
+  memory_auto_capture_enabled: boolean
   created_at?: string
   updated_at?: string
 }

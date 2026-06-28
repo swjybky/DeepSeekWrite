@@ -30,6 +30,15 @@ type CaptureInput = {
   userMemories: MemoryEntry[]
 }
 
+const TAG_USAGE_LABELS: Record<MemoryTag, string> = {
+  general: '本书整体创作时',
+  character: '设计或修改人物设定时',
+  plot: '设计或调整剧情时',
+  outline: '整理或修改大纲时',
+  draft: '撰写或改写正文时',
+  style: '处理文风、语气、叙述方式时',
+}
+
 function textFromContent(content: unknown): string {
   if (typeof content === 'string') return content
   if (!Array.isArray(content)) return ''
@@ -118,13 +127,99 @@ ${formatExistingMemories(input.userMemories)}
 请判断用户本轮消息是否包含应长期作用于本书创作的要求。只处理人设、剧情、大纲、正文、文风、禁忌、长期偏好等创作要求。
 临时试写、一次性修改、纯提问、普通寒暄、仅要求执行当前任务的内容不要记录。
 
+记忆不是复述用户原话。每条记忆必须整理成两部分：
+作用时机：这条要求应在什么时候被使用。
+要求：可执行、可复用的创作约束。
+
+同一个 tag 分类只能保留一条书籍记忆。若本轮要求属于已有 tag，必须 update 该 tag 已有记忆，并把旧要求与新要求整理合并成一条完整记忆；不要为同一 tag create 第二条。
+如果同一轮里出现多个同类要求，也要合并为同一个 action。
+
 如果要记录，必须优先更新已有相关书籍记忆；只有没有可合并记忆时才创建。
 只输出 JSON，不要输出解释。格式：
 {"actions":[{"type":"noop"}]}
 或
-{"actions":[{"type":"update","id":"已有记忆 id","tag":"style","content":"更新后的完整记忆"},{"type":"create","tag":"plot","content":"新增记忆"}]}
+{"actions":[{"type":"update","id":"已有记忆 id","tag":"style","content":"作用时机：撰写或修改正文文风时\n要求：保持冷静克制、少用夸张比喻。"},{"type":"create","tag":"plot","content":"作用时机：设计或调整剧情时\n要求：每个反转都要提前埋线，避免无根据强行翻盘。"}]}
 
 tag 只能是：${MEMORY_TAGS.join(', ')}。`
+}
+
+function parseStructuredContent(content: string): {
+  timing: string
+  requirement: string
+} {
+  const text = content.trim()
+  const timingMatch = text.match(/作用时机[:：]\s*([\s\S]*?)(?:\n\s*要求[:：]|$)/)
+  const requirementMatch = text.match(/要求[:：]\s*([\s\S]*)/)
+  return {
+    timing: timingMatch?.[1]?.trim() ?? '',
+    requirement: requirementMatch?.[1]?.trim() ?? text,
+  }
+}
+
+function mergeTextParts(parts: string[]): string {
+  const seen = new Set<string>()
+  return parts
+    .map((part) => part.trim().replace(/[。；;]\s*$/, ''))
+    .filter((part) => {
+      if (!part || seen.has(part)) return false
+      seen.add(part)
+      return true
+    })
+    .join('；')
+}
+
+function formatStructuredContent(tag: MemoryTag, content: string): string {
+  const parsed = parseStructuredContent(content)
+  const timing = parsed.timing || TAG_USAGE_LABELS[tag]
+  const requirement = parsed.requirement || content.trim()
+  return `作用时机：${timing}\n要求：${requirement}`.trim()
+}
+
+function mergeStructuredContent(
+  tag: MemoryTag,
+  currentContent: string,
+  incomingContent: string,
+): string {
+  const current = parseStructuredContent(formatStructuredContent(tag, currentContent))
+  const incoming = parseStructuredContent(formatStructuredContent(tag, incomingContent))
+  const timing = mergeTextParts([current.timing, incoming.timing]) || TAG_USAGE_LABELS[tag]
+  const requirement = mergeTextParts([current.requirement, incoming.requirement])
+  return `作用时机：${timing}\n要求：${requirement}`.trim()
+}
+
+function collapseMemoriesByTag(memories: MemoryEntry[]): MemoryEntry[] {
+  const byTag = new Map<MemoryTag, MemoryEntry>()
+  for (const memory of normalizeMemoryEntries(memories)) {
+    const tag = normalizeMemoryTag(memory.tag)
+    const content = formatStructuredContent(tag, memory.content)
+    const previous = byTag.get(tag)
+    if (!previous) {
+      byTag.set(tag, { ...memory, tag, content })
+      continue
+    }
+    byTag.set(tag, {
+      ...previous,
+      content: mergeStructuredContent(tag, previous.content, content),
+      updated_at: memory.updated_at || previous.updated_at,
+    })
+  }
+  return MEMORY_TAGS.flatMap((tag) => {
+    const memory = byTag.get(tag)
+    return memory ? [memory] : []
+  })
+}
+
+function sameMemoryList(a: MemoryEntry[], b: MemoryEntry[]): boolean {
+  if (a.length !== b.length) return false
+  return a.every((item, index) => {
+    const other = b[index]
+    return (
+      other &&
+      item.id === other.id &&
+      item.tag === other.tag &&
+      item.content === other.content
+    )
+  })
 }
 
 function applyActions(
@@ -134,8 +229,8 @@ function applyActions(
   if (actions.length === 0 || actions.every((action) => action.type === 'noop')) {
     return null
   }
-  const byId = new Map(memories.map((memory) => [memory.id, memory]))
-  let next = [...memories]
+  let next = collapseMemoriesByTag(memories)
+  const byId = new Map(next.map((memory) => [memory.id, memory]))
   let changed = false
 
   for (const action of actions) {
@@ -143,42 +238,61 @@ function applyActions(
     const content = String(action.content ?? '').trim()
     if (!content) continue
     const tag = normalizeMemoryTag(action.tag)
+    const structuredContent = formatStructuredContent(tag, content)
     if (action.type === 'update') {
       const id = String(action.id ?? action.memory_id ?? '').trim()
-      const previous = byId.get(id)
+      const previous = byId.get(id) ?? next.find((memory) => memory.tag === tag)
       if (!previous) continue
       next = next.map((memory) =>
-        memory.id === id
+        memory.id === previous.id
           ? {
               ...memory,
               tag,
-              content,
+              content: structuredContent,
             }
           : memory,
       )
-      byId.set(id, { ...previous, tag, content })
+      byId.set(id, { ...previous, tag, content: structuredContent })
       changed = true
       continue
     }
     if (action.type === 'create') {
-      if (
-        next.some(
-          (memory) =>
-            memory.tag === tag && memory.content.trim() === content.trim(),
+      const sameTag = next.find((memory) => memory.tag === tag)
+      if (sameTag) {
+        const mergedContent = mergeStructuredContent(
+          tag,
+          sameTag.content,
+          structuredContent,
         )
-      ) {
+        if (sameTag.content.trim() === mergedContent.trim()) {
+          continue
+        }
+        next = next.map((memory) =>
+          memory.id === sameTag.id
+            ? {
+                ...memory,
+                content: mergedContent,
+              }
+            : memory,
+        )
+        byId.set(sameTag.id, { ...sameTag, content: mergedContent })
+        changed = true
         continue
       }
       next.push({
         id: crypto.randomUUID(),
         tag,
-        content,
+        content: structuredContent,
       })
       changed = true
     }
   }
 
-  return changed ? normalizeMemoryEntries(next) : null
+  const collapsed = collapseMemoriesByTag(next)
+  const normalizedOriginal = collapseMemoriesByTag(memories)
+  if (!changed && sameMemoryList(collapsed, normalizedOriginal)) return null
+  if (sameMemoryList(collapsed, normalizedOriginal)) return null
+  return collapsed
 }
 
 export async function captureBookMemoryFromMessages(

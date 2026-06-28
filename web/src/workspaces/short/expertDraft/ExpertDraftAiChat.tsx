@@ -91,6 +91,7 @@ type Props = {
   stages: Partial<Record<StageId, string>>
   bookMemories?: MemoryEntry[]
   userMemories?: MemoryEntry[]
+  bookMemoryAutoCaptureEnabled?: boolean
   linkedMaterial?: Material | null
   linkedSkill?: Skill | null
   readAccess: WorkspaceAgentReadAccessEntry
@@ -348,7 +349,7 @@ export function ExpertDraftAiChat(props: Props) {
   ) => {
     if (kind === 'section-writer' && backgroundWriterActiveRef.current) return
     const p = propsLatestRef.current
-    if (!p.onBookMemoriesCaptured) return
+    if (!p.bookMemoryAutoCaptureEnabled || !p.onBookMemoriesCaptured) return
     const messages = agent.state.messages.slice()
     const bookMemories = [...(p.bookMemories ?? [])]
     const userMemories = [...(p.userMemories ?? [])]
@@ -467,6 +468,9 @@ export function ExpertDraftAiChat(props: Props) {
         setHistoryDisabled(true)
       }
       if (ev.type === 'message_end') {
+        if (ev.message.role === 'user') {
+          window.setTimeout(() => captureMemoryFromAgent(historyKind, agent), 0)
+        }
         agent.state.messages = agent.state.messages.slice()
       }
       if (ev.type === 'agent_end') {
@@ -475,7 +479,6 @@ export function ExpertDraftAiChat(props: Props) {
         } finally {
           setHistoryDisabled(false)
         }
-        captureMemoryFromAgent(historyKind, agent)
         cancelAnimationFrame(postAgentEndRaf)
         postAgentEndRaf = requestAnimationFrame(() => {
           refreshIdleUi()

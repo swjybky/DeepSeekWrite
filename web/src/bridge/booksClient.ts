@@ -126,6 +126,7 @@ export async function saveBook(
       opts.title ?? undefined,
       opts.status ?? undefined,
       opts.linked_skill_id ?? undefined,
+      opts.memory_auto_capture_enabled ?? undefined,
     ),
   )
   if (raw === undefined) {
@@ -143,4 +144,30 @@ export async function deleteBook(book_id: string): Promise<boolean> {
     await deleteAiChatSessionsForOwner('book', book_id)
   }
   return ok
+}
+
+export async function exportBook(
+  book_id: string,
+): Promise<{ success: boolean; error: string | null; path: string | null }> {
+  const result = await callApiMethod('export_book', (api) =>
+    api.export_book(book_id),
+  )
+  if (result) return result
+  return { success: false, error: '浏览器开发模式暂不支持导出', path: null }
+}
+
+export async function importBook(
+  workspaceRoot: string | null,
+): Promise<{ success: boolean; error: string | null; item: Book | null }> {
+  const result = await callApiMethod('import_book', (api) =>
+    api.import_book(workspaceRoot),
+  )
+  if (result) {
+    return {
+      success: result.success,
+      error: result.error,
+      item: result.item ? normalizeBook(result.item as unknown as Book) : null,
+    }
+  }
+  return { success: false, error: '浏览器开发模式暂不支持导入', item: null }
 }

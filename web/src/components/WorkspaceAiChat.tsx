@@ -385,6 +385,7 @@ type Props = {
   allStages: Partial<Record<StageId | MaterialStageId | SkillStageId, string>>
   bookMemories?: MemoryEntry[]
   userMemories?: MemoryEntry[]
+  bookMemoryAutoCaptureEnabled?: boolean
   onBookMemoriesCaptured?: (
     bookId: string,
     memories: MemoryEntry[],
@@ -547,6 +548,7 @@ function WorkspaceAiChatInner({
     if (
       workspaceType !== 'book' ||
       (p.bookType !== 'short' && p.bookType !== 'script') ||
+      !p.bookMemoryAutoCaptureEnabled ||
       !p.onBookMemoriesCaptured
     ) {
       return
@@ -954,6 +956,9 @@ function WorkspaceAiChatInner({
         }
 
         if (ev.type === 'message_end') {
+          if (ev.message.role === 'user') {
+            window.setTimeout(() => captureMemoryFromAgent(agent), 0)
+          }
           // 清理未完成的流式写入
           if (streamingWriteRef.current) {
             const didStream =
@@ -980,7 +985,6 @@ function WorkspaceAiChatInner({
           } finally {
             setHistoryDisabled(false)
           }
-          captureMemoryFromAgent(agent)
           cancelAnimationFrame(postAgentEndRaf)
           postAgentEndRaf = requestAnimationFrame(() => {
             postAgentEndRaf = 0
@@ -1327,6 +1331,7 @@ export const WorkspaceAiChat = memo(WorkspaceAiChatInner, (prev, next) => {
   if (prev.bookGenre !== next.bookGenre) return false
   if (prev.bookMemories !== next.bookMemories) return false
   if (prev.userMemories !== next.userMemories) return false
+  if (prev.bookMemoryAutoCaptureEnabled !== next.bookMemoryAutoCaptureEnabled) return false
   if (prev.workspaceAgentReadAccess !== next.workspaceAgentReadAccess) return false
 
   // applyToStageEditor/selectPlotChildStage 函数引用不比较（总是使用最新）
