@@ -1,28 +1,4 @@
 {
-  "character_design": {
-    "workspace": [
-      "character_design",
-      "plot_design",
-      "plot_refine"
-    ],
-    "material": [
-      "character"
-    ]
-  },
-  "plot_design": {
-    "workspace": [
-      "character_design",
-      "plot_design",
-      "plot_refine"
-    ],
-    "material": [
-      "gimmick",
-      "character",
-      "pacing",
-      "intro",
-      "plot_refine"
-    ]
-  },
   "expert_section_writer": {
     "workspace": [
       "outline",
@@ -47,5 +23,29 @@
       "plot_refine"
     ],
     "material": []
+  },
+  "character_design": {
+    "workspace": [
+      "character_design",
+      "plot_design",
+      "plot_refine"
+    ],
+    "material": [
+      "character"
+    ]
+  },
+  "plot_design": {
+    "workspace": [
+      "character_design",
+      "plot_design",
+      "plot_refine"
+    ],
+    "material": [
+      "character",
+      "intro",
+      "gimmick",
+      "pacing",
+      "plot_refine"
+    ]
   }
 }

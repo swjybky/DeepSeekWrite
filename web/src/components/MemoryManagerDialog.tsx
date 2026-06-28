@@ -1,4 +1,4 @@
-import { useMemo, useState, type ReactNode } from 'react'
+import { useMemo, useState, type ReactNode, type SetStateAction } from 'react'
 import type { MemoryEntry, MemoryTag } from '../domain/workspaceCore'
 import {
   MEMORY_TAGS,
@@ -16,11 +16,18 @@ const MEMORY_TAG_LABELS: Record<MemoryTag, string> = {
   style: '文风',
 }
 
+type DraftState = {
+  resetKey: string | number | null
+  items: MemoryEntry[]
+}
+
 type Props = {
   title: string
   memories: MemoryEntry[]
   saving?: boolean
+  loading?: boolean
   error?: string | null
+  resetKey?: string | number
   titleActions?: ReactNode
   headerActions?: ReactNode
   onClose: () => void
@@ -32,17 +39,47 @@ export function MemoryManagerDialog({
   title,
   memories,
   saving = false,
+  loading = false,
   error = null,
+  resetKey,
   titleActions,
   headerActions,
   onClose,
   onSave,
   onSyncMemory,
 }: Props) {
-  const [draft, setDraft] = useState<MemoryEntry[]>(() =>
-    normalizeMemoryEntries(memories),
-  )
+  const normalizedMemories = useMemo(() => normalizeMemoryEntries(memories), [memories])
+  const activeResetKey = resetKey ?? null
+  const [draftState, setDraftState] = useState<DraftState>(() => ({
+    resetKey: activeResetKey,
+    items: normalizedMemories,
+  }))
   const [syncingId, setSyncingId] = useState('')
+  const busy = saving || loading
+
+  const shouldResetDraft = activeResetKey != null && draftState.resetKey !== activeResetKey
+  const draft = shouldResetDraft ? normalizedMemories : draftState.items
+  if (shouldResetDraft) {
+    setDraftState({
+      resetKey: activeResetKey,
+      items: normalizedMemories,
+    })
+  }
+
+  const setDraft = (updater: SetStateAction<MemoryEntry[]>) => {
+    setDraftState((state) => {
+      const currentItems =
+        activeResetKey != null && state.resetKey !== activeResetKey
+          ? normalizedMemories
+          : state.items
+      const nextItems =
+        typeof updater === 'function' ? updater(currentItems) : updater
+      return {
+        resetKey: activeResetKey,
+        items: nextItems,
+      }
+    })
+  }
 
   const hasContent = useMemo(
     () => draft.some((item) => item.content.trim()),
@@ -95,7 +132,7 @@ export function MemoryManagerDialog({
               className="memory-dialog-close"
               aria-label="关闭"
               onClick={onClose}
-              disabled={saving}
+              disabled={busy}
             >
               ×
             </button>
@@ -107,7 +144,9 @@ export function MemoryManagerDialog({
               {error}
             </p>
           ) : null}
-          {draft.length === 0 ? (
+          {loading ? (
+            <p className="memory-dialog-loading">记忆加载中</p>
+          ) : draft.length === 0 ? (
             <p className="memory-dialog-empty">暂无记忆</p>
           ) : (
             <div className="memory-list">
@@ -134,7 +173,7 @@ export function MemoryManagerDialog({
                         <button
                           type="button"
                           className="memory-link-button"
-                          disabled={saving || syncingId === memory.id || !memory.content.trim()}
+                          disabled={busy || syncingId === memory.id || !memory.content.trim()}
                           onClick={() => void syncMemory(memory)}
                         >
                           {syncingId === memory.id ? '同步中' : '同步到用户记忆'}
@@ -143,7 +182,7 @@ export function MemoryManagerDialog({
                       <button
                         type="button"
                         className="memory-delete-button"
-                        disabled={saving}
+                        disabled={busy}
                         onClick={() => removeMemory(memory.id)}
                       >
                         删除
@@ -168,7 +207,7 @@ export function MemoryManagerDialog({
             type="button"
             className="memory-secondary-button"
             onClick={addMemory}
-            disabled={saving}
+            disabled={busy}
           >
             新增记忆
           </button>
@@ -177,7 +216,7 @@ export function MemoryManagerDialog({
               type="button"
               className="memory-secondary-button"
               onClick={onClose}
-              disabled={saving}
+              disabled={busy}
             >
               取消
             </button>
@@ -185,7 +224,7 @@ export function MemoryManagerDialog({
               type="button"
               className="memory-primary-button"
               onClick={() => void save()}
-              disabled={saving || (!hasContent && draft.length > 0)}
+              disabled={busy || (!hasContent && draft.length > 0)}
             >
               {saving ? '保存中' : '保存'}
             </button>

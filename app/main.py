@@ -207,6 +207,7 @@ from app.prompt_store import (
     save_material_prompt_override as _save_material_prompt_override,
     save_skill_agent_prompt_override as _save_skill_agent_prompt_override,
     save_workspace_agent_prompt_override as _save_workspace_agent_prompt_override,
+    sync_workspace_prompt_defaults as _sync_workspace_prompt_defaults,
 )
 from app.models import SCRIPT_STAGE_KEYS, SHORT_STAGE_KEYS
 from app.storage import (
@@ -1213,6 +1214,18 @@ class Api:
     ) -> dict[str, object]:
         """将用户 AppData 中的读取范围覆盖同步为内置默认 JSON 文件。"""
         return sync_workspace_agent_read_access_defaults(workspace_type)
+
+    def sync_workspace_settings_defaults(
+        self,
+        workspace_type: str | None = None,
+    ) -> dict[str, object]:
+        """将用户 AppData 中的提示词覆盖和读取范围同步为内置默认配置。"""
+        prompt_paths = _sync_workspace_prompt_defaults(workspace_type)
+        read_access = sync_workspace_agent_read_access_defaults(workspace_type)
+        return {
+            "prompts": prompt_paths,
+            "read_access": read_access,
+        }
 
     def get_default_workspace_agent_read_access(
         self,

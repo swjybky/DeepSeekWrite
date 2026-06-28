@@ -15,7 +15,7 @@ import {
   resetAllWorkspaceSettings,
   saveWorkspaceAgentPromptOverride,
   saveWorkspaceAgentReadAccess,
-  syncWorkspaceAgentReadAccessDefaults,
+  syncWorkspaceSettingsDefaults,
   type BookType,
   type MaterialStageId,
   type StageId,
@@ -41,7 +41,6 @@ import {
   isRequiredWorkspaceStageForAgent as isRequiredScriptWorkspaceStageForAgent,
   normalizeWorkspaceAgentReadAccess as normalizeScriptWorkspaceAgentReadAccess,
 } from '../workspaces/script/stageReadAccess'
-import { TextHistoryControls } from '../components/TextHistoryControls'
 import {
   autoSaveStatusLabel,
   useKeyedAutoSave,
@@ -462,10 +461,10 @@ export function WorkspaceSettings() {
     }
   }, [confirm, flushPrompt, markWorkspacePromptSaved, textHistory, workspaceType])
 
-  const syncReadAccessDefaults = useCallback(async () => {
+  const syncSettingsDefaults = useCallback(async () => {
     const ok = await confirm({
-      title: '同步为内置默认',
-      message: `将当前「${bookTypeLabel(workspaceType)}」的用户读取范围配置同步为内置默认配置？此操作会修改项目源码中的默认 JSON 文件，供后续版本使用。`,
+      title: '同步提示词和读取范围',
+      message: `将当前「${bookTypeLabel(workspaceType)}」的用户提示词和读取范围同步为内置默认配置？此操作会修改项目源码中的默认提示词文件和 read_access.json，供后续版本使用。`,
       confirmText: '同步默认',
       variant: 'warning',
     })
@@ -475,13 +474,18 @@ export function WorkspaceSettings() {
     setSaveStatus('saving')
     setError(null)
     try {
-      await syncWorkspaceAgentReadAccessDefaults(workspaceType)
+      await Promise.all(
+        WORKSPACE_AGENT_IDS.map((agentId) => flushPrompt(agentId)),
+      )
+      await saveQueueRef.current
+      await saveWorkspaceAgentReadAccess(readAccessRef.current, workspaceType)
+      await syncWorkspaceSettingsDefaults(workspaceType)
       setSaveStatus('saved')
     } catch (cause) {
       setSaveStatus('error')
       setError(cause instanceof Error ? cause.message : '同步默认配置失败')
     }
-  }, [confirm, workspaceType])
+  }, [confirm, flushPrompt, workspaceType])
 
   const activePromptKey = `${workspaceType}:${activeAgentId}`
   const activePromptHistoryKey = `workspace-settings:${activePromptKey}`
@@ -545,10 +549,10 @@ export function WorkspaceSettings() {
         <button
           type="button"
           className="workspace-settings-sync-defaults"
-          onClick={() => void syncReadAccessDefaults()}
-          title="将当前类型的用户读取范围配置写入项目默认 JSON 文件"
+          onClick={() => void syncSettingsDefaults()}
+          title="将当前类型的用户提示词和读取范围写入项目默认配置"
         >
-          同步为内置默认
+          同步提示词和读取范围
         </button>
       </div>
 
@@ -631,12 +635,6 @@ export function WorkspaceSettings() {
                   <p className="workspace-settings-placeholder-hint">
                     可用占位符：<code>{WORKSPACE_PLACEHOLDER_HINT}</code>
                   </p>
-                  <TextHistoryControls
-                    history={textHistory}
-                    historyKey={activePromptHistoryKey}
-                    value={activePrompt}
-                    onChange={applyActivePrompt}
-                  />
                   <textarea
                     value={activePrompt}
                     spellCheck={false}

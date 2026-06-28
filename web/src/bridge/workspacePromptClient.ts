@@ -140,6 +140,18 @@ export async function resetAllWorkspaceSettings(
   await saveWorkspaceAgentReadAccess(defaults, workspaceType)
 }
 
+/** 将当前创作空间类型的用户提示词覆盖和读取范围同步为内置默认配置。 */
+export async function syncWorkspaceSettingsDefaults(
+  workspaceType: BookType = 'short',
+): Promise<void> {
+  const api = await getBridgeApi()
+  if (api?.sync_workspace_settings_defaults) {
+    await api.sync_workspace_settings_defaults(workspaceType)
+    return
+  }
+  throw new Error('桌面端 API 不可用：无法同步提示词和读取范围默认配置')
+}
+
 export async function getWorkspaceSystemPrompt(
   stageId: StageId,
   input: {

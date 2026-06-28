@@ -1483,6 +1483,7 @@ export function Home() {
   const [userMemoryOpen, setUserMemoryOpen] = useState(false)
   const [userMemoryType, setUserMemoryType] = useState<'short' | 'script'>('short')
   const [userMemories, setUserMemories] = useState<MemoryEntry[]>([])
+  const [userMemoryResetKey, setUserMemoryResetKey] = useState(0)
   const [loadingUserMemories, setLoadingUserMemories] = useState(false)
   const [savingUserMemories, setSavingUserMemories] = useState(false)
   const [userMemoryError, setUserMemoryError] = useState<string | null>(null)
@@ -2137,7 +2138,9 @@ export function Home() {
     setLoadingUserMemories(true)
     setUserMemoryError(null)
     try {
-      setUserMemories(await getUserMemories(type))
+      const next = await getUserMemories(type)
+      setUserMemories(next)
+      setUserMemoryResetKey((value) => value + 1)
     } catch (err) {
       setUserMemoryError(err instanceof Error ? err.message : '读取记忆失败')
     } finally {
@@ -2154,10 +2157,11 @@ export function Home() {
 
   const switchUserMemoryType = useCallback(
     (type: 'short' | 'script') => {
+      if (type === userMemoryType) return
       setUserMemoryType(type)
       void loadUserMemoryList(type)
     },
-    [loadUserMemoryList],
+    [loadUserMemoryList, userMemoryType],
   )
 
   const handleSaveUserMemories = useCallback(
@@ -2165,7 +2169,9 @@ export function Home() {
       setSavingUserMemories(true)
       setUserMemoryError(null)
       try {
-        setUserMemories(await saveUserMemories(userMemoryType, next))
+        const saved = await saveUserMemories(userMemoryType, next)
+        setUserMemories(saved)
+        setUserMemoryResetKey((value) => value + 1)
         setUserMemoryOpen(false)
       } catch (err) {
         setUserMemoryError(err instanceof Error ? err.message : '保存记忆失败')
@@ -2982,11 +2988,12 @@ export function Home() {
 
       {userMemoryOpen && (
         <MemoryManagerDialog
-          key={`user-memory-${userMemoryType}-${userMemories.map((item) => `${item.id}:${item.updated_at ?? ''}`).join('|')}`}
           title="用户记忆"
           memories={userMemories}
-          saving={savingUserMemories || loadingUserMemories}
+          saving={savingUserMemories}
+          loading={loadingUserMemories}
           error={userMemoryError}
+          resetKey={userMemoryResetKey}
           headerActions={
             <div className="memory-dialog-tabs" role="tablist" aria-label="记忆类型">
               {(['short', 'script'] as const).map((type) => (
@@ -2999,7 +3006,7 @@ export function Home() {
                       : 'memory-dialog-tab'
                   }
                   onClick={() => switchUserMemoryType(type)}
-                  disabled={savingUserMemories || loadingUserMemories}
+                  disabled={savingUserMemories || loadingUserMemories || userMemoryType === type}
                 >
                   {bookTypeLabel(type)}
                 </button>

@@ -1,8 +1,27 @@
 {
+  "expert_section_writer": {
+    "workspace": [
+      "outline",
+      "draft"
+    ],
+    "material": [
+      "draft_excerpt"
+    ]
+  },
   "expert_draft_coordinator": {
     "workspace": [
       "outline",
       "draft"
+    ],
+    "material": []
+  },
+  "outline": {
+    "workspace": [
+      "plot_design",
+      "intro_design",
+      "plot_refine",
+      "outline",
+      "character_design"
     ],
     "material": []
   },
@@ -15,16 +34,6 @@
       "character"
     ]
   },
-  "expert_section_writer": {
-    "workspace": [
-      "outline",
-      "plot_refine",
-      "draft"
-    ],
-    "material": [
-      "draft_excerpt"
-    ]
-  },
   "plot_design": {
     "workspace": [
       "character_design",
@@ -33,21 +42,11 @@
       "plot_refine"
     ],
     "material": [
-      "gimmick",
       "character",
-      "pacing",
       "intro",
+      "gimmick",
+      "pacing",
       "plot_refine"
     ]
-  },
-  "outline": {
-    "workspace": [
-      "plot_design",
-      "intro_design",
-      "plot_refine",
-      "outline",
-      "character_design"
-    ],
-    "material": []
   }
 }

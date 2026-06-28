@@ -188,6 +188,20 @@ export function useExpertDraftRuntime({
     createExpertDraftSectionForBook(currentBookId)
   }, [bookRef, createExpertDraftSectionForBook, setActiveBookStage])
 
+  const stopExpertWritingForBook = useCallback(
+    (bookId: string) => {
+      const controller = expertRunAbortByBookRef.current[bookId]
+      if (!controller || controller.signal.aborted) return false
+      controller.abort()
+      updateExpertDraftForBook(bookId, (draft) => ({
+        ...draft,
+        running: false,
+      }))
+      return true
+    },
+    [expertRunAbortByBookRef, updateExpertDraftForBook],
+  )
+
   const startExpertWritingForBook = useCallback(
     (
       bookId: string,
@@ -260,6 +274,9 @@ export function useExpertDraftRuntime({
         updateDraft: (updater) => updateExpertDraftForBook(bookId, updater),
         signal: ac.signal,
         onError: setError,
+        onAbortRequested: () => {
+          stopExpertWritingForBook(bookId)
+        },
         onSectionAgentStart: options?.callbacks?.onSectionAgentStart,
         onRunFinish: options?.callbacks?.onRunFinish,
       })
@@ -299,6 +316,7 @@ export function useExpertDraftRuntime({
       getCurrentWorkspaceStageBody,
       syncExpertDraftSectionField,
       setError,
+      stopExpertWritingForBook,
       updateExpertDraftForBook,
       workspaceAgentReadAccess,
       workspaceSessionsRef,
@@ -308,14 +326,8 @@ export function useExpertDraftRuntime({
   const stopExpertWriting = useCallback(() => {
     const currentBookId = bookRef.current?.id
     if (!currentBookId) return
-    const controller = expertRunAbortByBookRef.current[currentBookId]
-    if (!controller || controller.signal.aborted) return
-    controller.abort()
-    updateExpertDraftForBook(currentBookId, (draft) => ({
-      ...draft,
-      running: false,
-    }))
-  }, [bookRef, expertRunAbortByBookRef, updateExpertDraftForBook])
+    stopExpertWritingForBook(currentBookId)
+  }, [bookRef, stopExpertWritingForBook])
 
   const resetExpertDraft = useCallback(async () => {
     if (expertDraftRef.current.running) return

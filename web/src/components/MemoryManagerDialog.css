@@ -195,7 +195,8 @@
   background: color-mix(in oklab, var(--danger) 7%, var(--paper-elevated));
 }
 
-.memory-dialog-empty {
+.memory-dialog-empty,
+.memory-dialog-loading {
   margin: 52px 0;
   color: var(--ink-faint);
   text-align: center;

@@ -118,6 +118,12 @@ declare global {
         sync_workspace_agent_read_access_defaults(
           workspace_type?: string,
         ): Promise<Record<string, unknown>>
+        sync_workspace_settings_defaults(
+          workspace_type?: string,
+        ): Promise<{
+          prompts: Record<string, string>
+          read_access: Record<string, unknown>
+        }>
         get_default_workspace_agent_read_access(
           workspace_type?: string,
         ): Promise<Record<string, unknown>>

@@ -1,4 +1,4 @@
-import { TextHistoryControls } from '../../components/TextHistoryControls'
+import { useEffect } from 'react'
 import type { TextHistoryController } from '../../hooks/useTextHistory'
 
 type CoverGenerateDialogProps = {
@@ -31,6 +31,10 @@ export function CoverGenerateDialog({
   textHistory,
   historyKey,
 }: CoverGenerateDialogProps) {
+  useEffect(() => {
+    textHistory.observe(historyKey, promptDraft)
+  }, [historyKey, promptDraft, textHistory])
+
   return (
     <div
       className="workspace-cover-dialog-backdrop"
@@ -57,13 +61,6 @@ export function CoverGenerateDialog({
           <label className="workspace-cover-dialog-label" htmlFor="cover-prompt">
             提示词（可修改）
           </label>
-          <TextHistoryControls
-            history={textHistory}
-            historyKey={historyKey}
-            value={promptDraft}
-            onChange={onPromptChange}
-            disabled={generating}
-          />
           <textarea
             id="cover-prompt"
             className="workspace-cover-dialog-area"

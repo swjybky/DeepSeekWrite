@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import json
+import os
 import re
+import tempfile
 from pathlib import Path
 
-from app.runtime_paths import bundle_root, data_root
+from app.runtime_paths import bundle_root, data_root, is_frozen
 
 # --- 创作空间共享提示词管线，与工作台 TS 对齐 ---
 
@@ -121,6 +123,25 @@ def workspace_agent_builtin_default_path(
         / SHARED_WORKSPACE_PROMPT_DIR
         / f"{agent_id}.txt"
     )
+
+
+def _write_text_atomic(path: Path, text: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(
+        dir=str(path.parent),
+        prefix=f".{path.stem}_",
+        suffix=f"{path.suffix}.tmp",
+    )
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(text)
+        os.replace(tmp, path)
+    except Exception:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
 
 
 def _ensure_shared_prompt_override_migrated() -> None:
@@ -326,6 +347,31 @@ def read_raw_workspace_agent_prompt_for_editor(
         return ""
     text = path.read_text(encoding="utf-8")
     return text[:-1] if text.endswith("\n") else text
+
+
+def sync_workspace_prompt_defaults(
+    workspace_type: str | None = None,
+) -> dict[str, str]:
+    """将当前生效的创作空间提示词同步为内置默认 .txt 文件。"""
+    if is_frozen():
+        raise RuntimeError("已打包环境下无法同步源码默认配置，请在源码运行模式下操作。")
+
+    normalized = normalize_workspace_prompt_type(workspace_type)
+    _ensure_workspace_prompt_prepared(normalized)
+
+    synced: dict[str, str] = {}
+    for agent_id in WORKSPACE_AGENT_IDS:
+        source_path = resolve_workspace_agent_read_path(agent_id, normalized)
+        if not source_path.is_file():
+            raise FileNotFoundError(f"缺少创作空间提示词模板: {source_path}")
+        target_path = workspace_agent_builtin_default_path(agent_id, normalized)
+        text = source_path.read_text(encoding="utf-8")
+        _write_text_atomic(
+            target_path,
+            text if text.endswith("\n") else text + "\n",
+        )
+        synced[agent_id] = str(target_path)
+    return synced
 
 
 # ==================== 素材库提示词管线 ====================

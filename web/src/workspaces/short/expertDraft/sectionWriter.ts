@@ -78,6 +78,7 @@ export type RunExpertDraftSectionWriterOptions = {
   updateDraft: ExpertDraftUpdater
   signal?: AbortSignal
   onError?: (message: string) => void
+  onAbortRequested?: () => void
   onSectionAgentStart?: (info: {
     agent: Agent
     sectionId: string
@@ -87,6 +88,19 @@ export type RunExpertDraftSectionWriterOptions = {
     userPrompt: string
   }) => void | Promise<void>
   onRunFinish?: (info: { aborted: boolean }) => void | Promise<void>
+}
+
+function linkAgentAbortToRunAbort(agent: Agent, opts: RunExpertDraftSectionWriterOptions) {
+  if (!opts.onAbortRequested) return
+  const originalAbort = agent.abort.bind(agent)
+  let notified = false
+  agent.abort = () => {
+    if (!notified && !opts.signal?.aborted) {
+      notified = true
+      opts.onAbortRequested?.()
+    }
+    originalAbort()
+  }
 }
 
 function messageText(message: AgentMessage): string {
@@ -357,6 +371,7 @@ export async function runExpertDraftSectionWriter(
           },
         })
         currentAgent = agent
+        linkAgentAbortToRunAbort(agent, opts)
       } else {
         agent.state.systemPrompt = systemPrompt
         agent.state.tools = tools
