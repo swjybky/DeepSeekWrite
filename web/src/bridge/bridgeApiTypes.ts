@@ -280,6 +280,14 @@ declare global {
           content: string,
           cover_data: string | null,
         ): Promise<{ success: boolean; error: string | null; path: string | null }>
+        export_text?(
+          book_id: string,
+          stage_id: string,
+          folder_path: string,
+          content: string,
+          cover_data: string | null,
+          export_format: string,
+        ): Promise<{ success: boolean; error: string | null; path: string | null }>
       }
     }
   }

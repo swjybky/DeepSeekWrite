@@ -22,6 +22,7 @@ import {
   MATERIAL_STAGE_LABELS,
   SKILL_STAGE_LABELS,
 } from '../bridge/libraryDomain'
+import { LEARNING_STAGE_LABELS } from '../bridge/learningImitationClient'
 import { SCRIPT_STAGE_LABELS } from '../workspaces/script/stages'
 import { SHORT_STAGE_LABELS } from '../workspaces/short/stages'
 
@@ -59,6 +60,10 @@ const WRITE_CLAW_TOOL_NAMES = [
   'manuscript_metrics',
   'editorial_rubric',
   'line_level_quick_scan',
+  'list_learning_documents',
+  'read_learning_document',
+  'search_learning_documents',
+  'write_learning_result',
 ] as const
 
 type WriteClawToolName = (typeof WRITE_CLAW_TOOL_NAMES)[number]
@@ -86,6 +91,7 @@ function resolveStageLabel(stageId: string): string {
     SCRIPT_STAGE_LABELS,
     MATERIAL_STAGE_LABELS,
     SKILL_STAGE_LABELS,
+    LEARNING_STAGE_LABELS,
   ]
   for (const map of maps) {
     if (stageId in map) return map[stageId as keyof typeof map]
@@ -251,6 +257,33 @@ function summarizeToolCall(
       return verb('正在获取编审量表', '已获取编审量表')
     case 'line_level_quick_scan':
       return verb('正在进行行文快扫', '已完成行文快扫')
+    case 'list_learning_documents':
+      return verb('正在列出学习样本', '已列出学习样本')
+    case 'read_learning_document': {
+      const documentId = pickString(params, 'document_id')
+      const chunkIndex = params?.chunk_index
+      const chunkHint =
+        typeof chunkIndex === 'number' && chunkIndex > 0
+          ? `（第 ${chunkIndex} 块）`
+          : ''
+      return documentId
+        ? verb('正在读取学习样本', '已读取学习样本')
+          + `「${truncate(documentId, 24)}」${chunkHint}`
+        : verb('正在读取学习样本', '已读取学习样本')
+    }
+    case 'search_learning_documents': {
+      const query = pickString(params, 'query', 'search_text', 'text')
+      return query
+        ? verb('正在搜索学习样本', '已搜索学习样本')
+          + `「${truncate(query)}」`
+        : verb('正在搜索学习样本', '已搜索学习样本')
+    }
+    case 'write_learning_result': {
+      const mode = pickString(params, 'mode')
+      const modeHint =
+        mode === 'append' ? '（追加）' : mode === 'replace' ? '（覆盖）' : ''
+      return verb('正在写入学习结果预览', '已写入学习结果预览') + modeHint
+    }
     default:
       return done ? '工具调用完成' : '正在调用工具'
   }

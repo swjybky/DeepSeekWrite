@@ -8,7 +8,9 @@ import {
   type SkillSummary,
 } from '../bridge'
 import defaultMaterialCover from '../assets/default-material-cover.png'
+import defaultMaterialCoverModern from '../assets/default-material-cover-modern.png'
 import defaultSkillCover from '../assets/default-skill-cover.png'
+import defaultSkillCoverModern from '../assets/default-skill-cover-modern.png'
 import './CardGrid.css'
 
 export interface CardItem {
@@ -31,6 +33,16 @@ interface CardGridProps {
   deletingId?: string | null
 }
 
+type CardCoverSource = {
+  src: string
+  appearance?: 'classic' | 'modern'
+}
+
+type CardCover = {
+  sources: CardCoverSource[]
+  isDefault: boolean
+}
+
 export function CardGrid({ items, emptyText = '暂无项目', onDelete, deletingId }: CardGridProps) {
   if (items.length === 0) {
     return <p className="card-grid-empty muted">{emptyText}</p>
@@ -39,7 +51,8 @@ export function CardGrid({ items, emptyText = '暂无项目', onDelete, deleting
   return (
     <div className="card-grid">
       {items.map((item) => {
-        const coverSrc = getCardCoverSrc(item)
+        const cover = getCardCover(item)
+        const hasCover = cover.sources.length > 0
 
         return (
           <div
@@ -48,17 +61,22 @@ export function CardGrid({ items, emptyText = '暂无项目', onDelete, deleting
             data-type={item.type}
             data-subtype={item.subtype}
             data-genre={item.genre}
-            data-has-cover={coverSrc ? 'true' : undefined}
+            data-has-cover={hasCover ? 'true' : undefined}
+            data-default-cover={cover.isDefault ? 'true' : undefined}
           >
             <Link className="card-link" to={item.to}>
-              {coverSrc ? (
+              {cover.sources.map((source) => (
                 <img
-                  className="card-cover"
-                  src={coverSrc}
+                  key={source.appearance ?? 'custom'}
+                  className={[
+                    'card-cover',
+                    source.appearance ? `card-cover--${source.appearance}` : '',
+                  ].filter(Boolean).join(' ')}
+                  src={source.src}
                   alt=""
                   loading="lazy"
                 />
-              ) : null}
+              ))}
               <div className="card-content">
                 <h3 className="card-title">{item.title || '未命名'}</h3>
                 <div className="card-meta">
@@ -117,15 +135,32 @@ export function CardGrid({ items, emptyText = '暂无项目', onDelete, deleting
   )
 }
 
-function getCardCoverSrc(item: CardItem): string | null {
+function getCardCover(item: CardItem): CardCover {
   if (item.coverData) {
-    return item.coverData.startsWith('data:')
+    const src = item.coverData.startsWith('data:')
       ? item.coverData
       : `data:image/png;base64,${item.coverData}`
+    return { sources: [{ src }], isDefault: false }
   }
-  if (item.type === 'material') return defaultMaterialCover
-  if (item.type === 'skill') return defaultSkillCover
-  return null
+  if (item.type === 'material') {
+    return {
+      sources: [
+        { src: defaultMaterialCover, appearance: 'classic' },
+        { src: defaultMaterialCoverModern, appearance: 'modern' },
+      ],
+      isDefault: true,
+    }
+  }
+  if (item.type === 'skill') {
+    return {
+      sources: [
+        { src: defaultSkillCover, appearance: 'classic' },
+        { src: defaultSkillCoverModern, appearance: 'modern' },
+      ],
+      isDefault: true,
+    }
+  }
+  return { sources: [], isDefault: false }
 }
 
 function truncatePath(path: string, maxLen: number): string {

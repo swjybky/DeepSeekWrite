@@ -1,7 +1,9 @@
+import { useState } from 'react'
 import type {
   ExpertDraft,
   ExpertDraftCharacterState,
   ExpertDraftSection,
+  ManuscriptExportFormat,
 } from '../../../bridge'
 import { TextHistoryControls } from '../../../components/TextHistoryControls'
 import { MarkdownTextEditor } from '../../../components/MarkdownTextEditor'
@@ -22,7 +24,7 @@ type Props = {
   onMainStageTextareaRef?: (node: HTMLTextAreaElement | null) => void
   stopWriting: () => void
   resetDraft: () => void
-  exportDraft: () => void
+  exportDraft: (format: ManuscriptExportFormat) => void
   textHistory: TextHistoryController
   historyPrefix: string
   onTextBlur: () => void
@@ -86,6 +88,7 @@ export function ExpertDraftEditor({
   onTextBlur,
 }: Props) {
   const { confirm, dialog } = useAppDialog()
+  const [exportDialogOpen, setExportDialogOpen] = useState(false)
   const selectedSection = draft.sections.find(
     (section) => section.id === draft.active_section_id,
   )
@@ -130,6 +133,11 @@ export function ExpertDraftEditor({
         active_section_id: nextActiveSectionId,
       }
     })
+  }
+
+  const selectExportFormat = (format: ManuscriptExportFormat) => {
+    setExportDialogOpen(false)
+    exportDraft(format)
   }
 
   return (
@@ -180,7 +188,7 @@ export function ExpertDraftEditor({
               <button
                 type="button"
                 className="expert-draft-action"
-                onClick={exportDraft}
+                onClick={() => setExportDialogOpen(true)}
               >
                 导出正文
               </button>
@@ -202,6 +210,64 @@ export function ExpertDraftEditor({
         </span>
       </div>
       {dialog}
+      {exportDialogOpen ? (
+        <div
+          className="app-dialog-backdrop"
+          role="presentation"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) setExportDialogOpen(false)
+          }}
+        >
+          <section
+            className="app-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="expert-draft-export-title"
+          >
+            <header className="app-dialog-head">
+              <span className="app-dialog-mark" aria-hidden="true">
+                i
+              </span>
+              <h2 id="expert-draft-export-title">选择导出格式</h2>
+            </header>
+            <div className="app-dialog-body">
+              <p>请选择正文导出的文件类型。</p>
+              <div className="expert-draft-export-options">
+                <button
+                  type="button"
+                  className="app-dialog-btn app-dialog-btn--secondary"
+                  onClick={() => selectExportFormat('docx')}
+                >
+                  DOCX
+                </button>
+                <button
+                  type="button"
+                  className="app-dialog-btn app-dialog-btn--secondary"
+                  onClick={() => selectExportFormat('txt')}
+                >
+                  TXT
+                </button>
+                <button
+                  type="button"
+                  className="app-dialog-btn app-dialog-btn--secondary"
+                  onClick={() => selectExportFormat('epub')}
+                >
+                  EPUB
+                </button>
+              </div>
+            </div>
+            <footer className="app-dialog-foot">
+              <button
+                type="button"
+                className="app-dialog-btn app-dialog-btn--secondary"
+                onClick={() => setExportDialogOpen(false)}
+              >
+                取消
+              </button>
+            </footer>
+          </section>
+        </div>
+      ) : null}
 
       <div className="expert-draft-workbench">
         {isSectionMode && selectedSection && selectedState ? (

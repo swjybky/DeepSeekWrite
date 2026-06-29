@@ -56,6 +56,17 @@ function safariRegexCompatPlugin(): Plugin {
         )
       }
 
+      if (
+        id.includes(
+          '/node_modules/@earendil-works/pi-web-ui/dist/components/ThinkingBlock.js',
+        )
+      ) {
+        next = next.replace(
+          '${this.isExpanded ? html `<markdown-block .content=${this.content} .isThinking=${true}></markdown-block>` : ""}',
+          '${this.isExpanded ? this.isStreaming ? html `<pre style="margin: 0.25rem 0 0; white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word; font-family: inherit; font-size: 0.875rem; line-height: 1.6; color: var(--muted-foreground); font-style: italic;">${this.content}</pre>` : html `<markdown-block .content=${this.content} .isThinking=${true}></markdown-block>` : ""}',
+        )
+      }
+
       if (id.includes('/node_modules/formdata-polyfill/')) {
         const normalizeLineBreakReplacer =
           "(_match, prefix) => prefix === undefined ? '\\r\\n' : `${prefix}\\r\\n`"

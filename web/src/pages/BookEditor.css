@@ -1086,6 +1086,13 @@ button.back-link:hover {
   outline-offset: 2px;
 }
 
+.expert-draft-export-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+}
+
 .expert-draft-workbench {
   min-height: 0;
   flex: 1;

@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 from datetime import datetime, timezone
 import functools
+import html
 import http.client
 import importlib.util
 import inspect
@@ -921,6 +922,205 @@ def _cover_data_to_bytes(raw: str) -> tuple[bytes, str] | None:
     return None
 
 
+def _safe_export_title(title: object) -> str:
+    value = str(title or "未命名").strip() or "未命名"
+    return "".join(c for c in value if c not in r'\/:*?"<>|').strip() or "未命名"
+
+
+def _normalize_export_body(content: str | None) -> str:
+    return (content or "").replace("\r\n", "\n").replace("\r", "\n")
+
+
+def _export_paragraphs(content: str | None) -> list[str]:
+    paragraphs = [
+        line
+        for line in _normalize_export_body(content).split("\n")
+        if line.strip()
+    ]
+    return paragraphs or [""]
+
+
+def _write_docx_export(
+    output_path: Path,
+    content: str | None,
+    cover_data: str | None = None,
+) -> None:
+    from docx import Document
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
+    from docx.shared import Inches
+
+    doc = Document()
+
+    if cover_data:
+        tmp_path: str | None = None
+        try:
+            decoded_cover = _cover_data_to_bytes(cover_data)
+            if not decoded_cover:
+                raise ValueError("unsupported cover data")
+            image_bytes, image_suffix = decoded_cover
+            with tempfile.NamedTemporaryFile(suffix=image_suffix, delete=False) as tmp:
+                tmp.write(image_bytes)
+                tmp_path = tmp.name
+            paragraph = doc.add_paragraph()
+            paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            run = paragraph.add_run()
+            run.add_picture(tmp_path, width=Inches(4.5))
+            doc.add_page_break()
+        except Exception as e:
+            print(f"插入封面失败: {e}")
+        finally:
+            if tmp_path:
+                try:
+                    os.unlink(tmp_path)
+                except OSError:
+                    pass
+
+    for paragraph_text in _export_paragraphs(content):
+        doc.add_paragraph(paragraph_text)
+
+    doc.save(str(output_path))
+
+
+def _write_txt_export(output_path: Path, content: str | None) -> None:
+    output_path.write_text(_normalize_export_body(content), encoding="utf-8")
+
+
+def _write_epub_export(
+    output_path: Path,
+    title: str,
+    book_id: str,
+    stage_id: str,
+    content: str | None,
+    cover_data: str | None = None,
+) -> None:
+    import zipfile
+
+    escaped_title = html.escape(title, quote=True)
+    identifier = f"urn:uuid:{uuid.uuid5(uuid.NAMESPACE_URL, f'writeclaw:{book_id}:{stage_id}')}"
+    modified = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    paragraphs = _export_paragraphs(content)
+    paragraph_html = "\n".join(
+        f"      <p>{html.escape(paragraph)}</p>"
+        for paragraph in paragraphs
+    )
+
+    cover_manifest = ""
+    cover_section = ""
+    cover_payload: tuple[bytes, str, str] | None = None
+    if cover_data:
+        decoded_cover = _cover_data_to_bytes(cover_data)
+        if decoded_cover:
+            cover_bytes, cover_suffix = decoded_cover
+            cover_mime = _COVER_MIME_BY_SUFFIX.get(cover_suffix.lower())
+            if cover_mime:
+                cover_payload = (cover_bytes, cover_suffix.lower(), cover_mime)
+                cover_href = f"images/cover{cover_suffix.lower()}"
+                cover_manifest = (
+                    f'    <item id="cover-image" href="{cover_href}" '
+                    f'media-type="{cover_mime}" properties="cover-image"/>\n'
+                )
+                cover_section = (
+                    '    <section epub:type="cover" class="cover">\n'
+                    f'      <img src="../{cover_href}" alt="{escaped_title}"/>\n'
+                    "    </section>\n"
+                )
+
+    container_xml = """<?xml version="1.0" encoding="UTF-8"?>
+<container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+  <rootfiles>
+    <rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/>
+  </rootfiles>
+</container>
+"""
+    package_xml = f"""<?xml version="1.0" encoding="UTF-8"?>
+<package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="bookid" xml:lang="zh-CN">
+  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+    <dc:identifier id="bookid">{identifier}</dc:identifier>
+    <dc:title>{escaped_title}</dc:title>
+    <dc:language>zh-CN</dc:language>
+    <meta property="dcterms:modified">{modified}</meta>
+  </metadata>
+  <manifest>
+{cover_manifest}    <item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>
+    <item id="style" href="styles/style.css" media-type="text/css"/>
+    <item id="body" href="text/body.xhtml" media-type="application/xhtml+xml"/>
+  </manifest>
+  <spine>
+    <itemref idref="body"/>
+  </spine>
+</package>
+"""
+    nav_xhtml = f"""<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops" xml:lang="zh-CN" lang="zh-CN">
+  <head>
+    <title>{escaped_title}</title>
+  </head>
+  <body>
+    <nav epub:type="toc" id="toc">
+      <h1>目录</h1>
+      <ol>
+        <li><a href="text/body.xhtml">{escaped_title}</a></li>
+      </ol>
+    </nav>
+  </body>
+</html>
+"""
+    body_xhtml = f"""<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops" xml:lang="zh-CN" lang="zh-CN">
+  <head>
+    <title>{escaped_title}</title>
+    <link rel="stylesheet" type="text/css" href="../styles/style.css"/>
+  </head>
+  <body>
+{cover_section}    <section epub:type="bodymatter">
+      <h1>{escaped_title}</h1>
+{paragraph_html}
+    </section>
+  </body>
+</html>
+"""
+    style_css = """body {
+  font-family: serif;
+  line-height: 1.75;
+}
+h1 {
+  text-align: center;
+  margin: 1.2em 0 1.6em;
+}
+p {
+  margin: 0 0 0.75em;
+  text-indent: 2em;
+}
+.cover {
+  text-align: center;
+  page-break-after: always;
+}
+.cover img {
+  max-width: 100%;
+  max-height: 95vh;
+}
+"""
+
+    with zipfile.ZipFile(output_path, "w") as zf:
+        mimetype_info = zipfile.ZipInfo("mimetype")
+        mimetype_info.compress_type = zipfile.ZIP_STORED
+        zf.writestr(mimetype_info, "application/epub+zip")
+        zf.writestr("META-INF/container.xml", container_xml, compress_type=zipfile.ZIP_DEFLATED)
+        zf.writestr("OEBPS/content.opf", package_xml, compress_type=zipfile.ZIP_DEFLATED)
+        zf.writestr("OEBPS/nav.xhtml", nav_xhtml, compress_type=zipfile.ZIP_DEFLATED)
+        zf.writestr("OEBPS/text/body.xhtml", body_xhtml, compress_type=zipfile.ZIP_DEFLATED)
+        zf.writestr("OEBPS/styles/style.css", style_css, compress_type=zipfile.ZIP_DEFLATED)
+        if cover_payload:
+            cover_bytes, cover_suffix, _cover_mime = cover_payload
+            zf.writestr(
+                f"OEBPS/images/cover{cover_suffix}",
+                cover_bytes,
+                compress_type=zipfile.ZIP_DEFLATED,
+            )
+
+
 def _write_cover_data(output_dir: str, cover_data: str) -> None:
     if not output_dir:
         return
@@ -1822,15 +2022,16 @@ class Api:
         except Exception as e:
             return {"success": False, "error": str(e), "item": None}
 
-    def export_docx(
+    def export_text(
         self,
         book_id: str,
         stage_id: str,
         folder_path: str,
         content: str,
         cover_data: str | None = None,
+        export_format: str = "docx",
     ) -> dict:
-        """将指定阶段内容导出为 docx，文件名使用小说名，第一页插入封面（如有）。
+        """将指定阶段内容导出为 docx / txt / epub，文件名使用小说名。
 
         Args:
             book_id: 书籍 ID
@@ -1838,6 +2039,7 @@ class Api:
             folder_path: 用户选择的保存文件夹
             content: 阶段文本内容
             cover_data: 封面图片 base64（不含 data URI 前缀），可选
+            export_format: 导出格式，支持 docx / txt / epub
 
         Returns:
             {"success": bool, "error": str | None, "path": str | None}
@@ -1847,46 +2049,41 @@ class Api:
             if not book:
                 return {"success": False, "error": "书籍不存在", "path": None}
 
-            from docx import Document
-            from docx.enum.text import WD_ALIGN_PARAGRAPH
-            from docx.shared import Inches
+            normalized_format = str(export_format or "docx").lower().lstrip(".")
+            if normalized_format not in {"docx", "txt", "epub"}:
+                return {
+                    "success": False,
+                    "error": f"不支持的导出格式: {export_format}",
+                    "path": None,
+                }
 
-            title = book.get("title", "未命名").strip() or "未命名"
-            safe_title = "".join(c for c in title if c not in r'\/:*?"<>|').strip() or "未命名"
-            filename = f"{safe_title}.docx"
-            output_path = Path(folder_path) / filename
+            title = str(book.get("title", "未命名")).strip() or "未命名"
+            safe_title = _safe_export_title(title)
+            output_dir = Path(folder_path)
+            output_dir.mkdir(parents=True, exist_ok=True)
+            output_path = output_dir / f"{safe_title}.{normalized_format}"
 
-            doc = Document()
-
-            if cover_data:
-                try:
-                    decoded_cover = _cover_data_to_bytes(cover_data)
-                    if not decoded_cover:
-                        raise ValueError("unsupported cover data")
-                    image_bytes, image_suffix = decoded_cover
-                    with tempfile.NamedTemporaryFile(suffix=image_suffix, delete=False) as tmp:
-                        tmp.write(image_bytes)
-                        tmp_path = tmp.name
-                    paragraph = doc.add_paragraph()
-                    paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                    run = paragraph.add_run()
-                    run.add_picture(tmp_path, width=Inches(4.5))
-                    os.unlink(tmp_path)
-                    doc.add_page_break()
-                except Exception as e:
-                    print(f"插入封面失败: {e}")
-
-            if content:
-                for line in content.split("\n"):
-                    if line.strip():
-                        doc.add_paragraph(line)
+            if normalized_format == "docx":
+                _write_docx_export(output_path, content, cover_data)
+            elif normalized_format == "txt":
+                _write_txt_export(output_path, content)
             else:
-                doc.add_paragraph("")
+                _write_epub_export(output_path, title, book_id, stage_id, content, cover_data)
 
-            doc.save(str(output_path))
             return {"success": True, "error": None, "path": str(output_path)}
         except Exception as e:
             return {"success": False, "error": str(e), "path": None}
+
+    def export_docx(
+        self,
+        book_id: str,
+        stage_id: str,
+        folder_path: str,
+        content: str,
+        cover_data: str | None = None,
+    ) -> dict:
+        """兼容旧前端：仍导出 docx。"""
+        return self.export_text(book_id, stage_id, folder_path, content, cover_data, "docx")
 
 
 def _truncate_image_response(value: object, max_len: int = 1200) -> str:

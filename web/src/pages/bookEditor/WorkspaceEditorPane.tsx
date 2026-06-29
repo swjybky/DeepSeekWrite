@@ -1,5 +1,6 @@
 import { useState, type ComponentType, type MutableRefObject } from 'react'
 import type { ExpertDraft, StageId } from '../../domain/workspace'
+import type { ManuscriptExportFormat } from '../../bridge'
 import type { PlotChildStageDefinition, PlotChildStageId } from './workspaceTypes'
 import { PLOT_STAGE_ID } from '../../workspaces/short/stages'
 import { stageTextCounts } from './stageEditing'
@@ -22,7 +23,7 @@ type ExpertDraftEditorProps = {
   onMainStageTextareaRef?: (node: HTMLTextAreaElement | null) => void
   stopWriting: () => void
   resetDraft: () => void
-  exportDraft: () => void
+  exportDraft: (format: ManuscriptExportFormat) => void
   textHistory: TextHistoryController
   historyPrefix: string
   onTextBlur: () => void
@@ -43,7 +44,7 @@ type Props = {
   ) => void
   stopExpertWriting: () => void
   resetExpertDraft: () => void
-  exportExpertDraft: () => void
+  exportExpertDraft: (format: ManuscriptExportFormat) => void
   activeStage: StageId
   activeContentStage: StageId
   activePlotChildStage: PlotChildStageId | ''

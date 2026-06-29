@@ -1,5 +1,7 @@
 import { getBridgeApi } from './runtime'
 
+export type ManuscriptExportFormat = 'docx' | 'txt' | 'epub'
+
 function normalizeCoverMap(raw: Record<string, string | null | undefined>): Record<string, string> {
   const out: Record<string, string> = {}
   for (const [bookId, coverData] of Object.entries(raw)) {
@@ -63,12 +65,29 @@ export async function exportDocx(
   content: string,
   cover_data: string | null,
 ): Promise<{ success: boolean; error: string | null; path: string | null }> {
+  return exportManuscript(book_id, stage_id, folder_path, content, cover_data, 'docx')
+}
+
+export async function exportManuscript(
+  book_id: string,
+  stage_id: string,
+  folder_path: string,
+  content: string,
+  cover_data: string | null,
+  format: ManuscriptExportFormat,
+): Promise<{ success: boolean; error: string | null; path: string | null }> {
   const api = await getBridgeApi()
-  if (api?.export_docx) {
+  if (api?.export_text) {
+    return api.export_text(book_id, stage_id, folder_path, content, cover_data, format)
+  }
+  if (format === 'docx' && api?.export_docx) {
     return api.export_docx(book_id, stage_id, folder_path, content, cover_data)
   }
-  // 浏览器开发模式：提供下载
+  // 浏览器开发模式：保留原有 TXT 兜底；EPUB 需要桌面后端生成。
   try {
+    if (format === 'epub') {
+      return { success: false, error: '浏览器开发模式暂不支持该格式导出', path: null }
+    }
     const title = content.slice(0, 20).replace(/[\\/:*?"<>|\n\r\t]/g, '_') || '未命名'
     const blob = new Blob([content], { type: 'text/plain;charset=utf-8' })
     const url = URL.createObjectURL(blob)

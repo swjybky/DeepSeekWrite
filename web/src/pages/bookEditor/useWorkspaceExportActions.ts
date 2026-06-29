@@ -3,8 +3,9 @@ import type { Dispatch, MutableRefObject, SetStateAction } from 'react'
 import {
   type Book,
   type ExpertDraft,
+  type ManuscriptExportFormat,
   type StageId,
-  exportDocx,
+  exportManuscript,
   pickFolder,
 } from '../../bridge'
 import { combineExpertDraftSections } from './expertDraftUtils'
@@ -26,19 +27,24 @@ export function useWorkspaceExportActions({
   setMessage,
   setError,
 }: UseWorkspaceExportActionsInput) {
-  const exportStageDocx = useCallback(async (stageId: StageId, body: string) => {
+  const exportStage = useCallback(async (
+    stageId: StageId,
+    body: string,
+    format: ManuscriptExportFormat,
+  ) => {
     if (!book) return
     const folder = await pickFolder()
     if (!folder) return
     setMessage(null)
     setError(null)
     try {
-      const res = await exportDocx(
+      const res = await exportManuscript(
         book.id,
         stageId,
         folder,
         body,
         coverData,
+        format,
       )
       if (res.success) {
         setMessage('导出成功')
@@ -51,7 +57,9 @@ export function useWorkspaceExportActions({
     }
   }, [book, coverData, setError, setMessage])
 
-  const handleExportExpertDraftDocx = useCallback(async () => {
+  const handleExportExpertDraft = useCallback(async (
+    format: ManuscriptExportFormat = 'docx',
+  ) => {
     const currentStageBody = stagesRef.current.draft ?? ''
     const combinedBody = combineExpertDraftSections(expertDraftRef.current)
     const body = currentStageBody.trim() ? currentStageBody : combinedBody
@@ -60,10 +68,10 @@ export function useWorkspaceExportActions({
       setError('正文编写没有可导出的正文')
       return
     }
-    await exportStageDocx('draft', body)
-  }, [exportStageDocx, expertDraftRef, setError, setMessage, stagesRef])
+    await exportStage('draft', body, format)
+  }, [exportStage, expertDraftRef, setError, setMessage, stagesRef])
 
   return {
-    handleExportExpertDraftDocx,
+    handleExportExpertDraftDocx: handleExportExpertDraft,
   }
 }
