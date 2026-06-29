@@ -325,4 +325,8 @@ pyinstaller packaging/WriteClaw.spec
 
 ## 许可证
 
-请在发布开源版本前为本仓库添加 `LICENSE` 文件并在此处注明许可证类型。
+本项目采用 [PolyForm Noncommercial License 1.0.0](LICENSE) 授权。
+
+源码可供学习、研究、修改和非商业用途使用。未经版权持有人事先书面许可，不允许将本项目用于商业产品、付费服务、SaaS 服务、应用商店分发或其它商业场景。
+
+如需商业授权，请通过 GitHub Issues 或仓库主页联系作者。
