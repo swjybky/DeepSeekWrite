@@ -576,7 +576,7 @@ function ModelConfigDialog({
 
                         {builtinFreeModel ? (
                           <div className="model-config-locked-summary">
-                            <strong>{model.label || 'DeepseekWriteFree'}</strong>
+                            <strong>{model.label || 'DeepSeekWriteFree'}</strong>
                             <span>{model.model_id}</span>
                           </div>
                         ) : officialPreset ? (
@@ -2217,7 +2217,7 @@ export function Home() {
     <div className="home">
       <header className="home-header">
         <div className="home-brand">
-          <h1 className="home-title">DeepseekWrite</h1>
+          <h1 className="home-title">DeepSeekWrite</h1>
           <span className="home-tagline muted">简素为骨 · 笔墨为形</span>
         </div>
         <nav className="home-config-nav" aria-label="系统设置">

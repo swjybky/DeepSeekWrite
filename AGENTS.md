@@ -1,4 +1,4 @@
-# Write Claw（DeepseekWrite）项目指南
+# DeepSeekWrite 项目指南
 
 本文件为 AI 编码代理提供在操作本仓库代码时的指引。读者应被假设为对项目一无所知。若与源码冲突，以源码为准。
 
@@ -6,7 +6,7 @@
 
 ## 项目概述
 
-Write Claw（DeepseekWrite）是一款**本地桌面写作应用**，面向网文、短篇小说与**剧本**创作。采用**混合架构**：
+DeepSeekWrite 是一款**本地桌面写作应用**，面向网文、短篇小说与**剧本**创作。采用**混合架构**：
 
 - **后端**：Python 3.10+，基于 [pywebview](https://pywebview.flowrl.com/) 提供桌面壳窗口，通过 `js_api` 向前端暴露原生 API。
 - **前端**：React 19 + TypeScript + Vite 构建的静态 SPA。
@@ -52,7 +52,7 @@ npm run build
 
 ### 运行桌面应用
 
-在项目根目录（`write-claw/`）执行：
+在项目根目录（`DeepSeekWrite/`）执行：
 
 ```bash
 pip install -r requirements.txt
@@ -93,17 +93,17 @@ cd web && npm install && npm run build && cd ..
 pip install pyinstaller
 
 # 3. 执行打包
-pyinstaller packaging/WriteClaw.spec
+pyinstaller packaging/DeepSeekWrite.spec
 ```
 
-产出 `dist/WriteClaw/` 文件夹，压缩后分发。用户需安装 WebView2 Runtime（或同目录已捆绑）。
+产出 `dist/DeepSeekWrite/` 文件夹，压缩后分发。用户需安装 WebView2 Runtime（或同目录已捆绑）。
 
 ---
 
 ## 项目结构
 
 ```
-write-claw/
+DeepSeekWrite/
 ├── app/                          # Python 后端
 │   ├── main.py                   # pywebview 窗口、Api 类、本地 HTTP 服务、LLM 代理
 │   ├── storage.py                # BookStore：原子化 JSON 读写 + 磁盘阶段文件导出 + 偏好配置
@@ -192,7 +192,7 @@ write-claw/
 │   ├── vite.config.ts              # base: './'，支持 file:// 加载
 │   └── tsconfig.json
 ├── packaging/
-│   ├── WriteClaw.spec              # PyInstaller onedir 配置
+│   ├── DeepSeekWrite.spec              # PyInstaller onedir 配置
 │   └── pyi_entry.py                # PyInstaller 入口脚本
 ├── docs/                           # 产品、智能体与架构设计文档
 ├── run.sh                          # 本地调试启动脚本
@@ -237,7 +237,7 @@ write-claw/
 - **`ai_env.py`**：
   - 按优先级读取 `.env`、`.deepseek.env`、`.kimi.env`（先 `writable_root()`，再模块目录，再 `app/` 目录）；冻结版优先读取可执行文件旁的配置。
   - 支持旧配置迁移：`model_name_main`（或旧键 `model_name`）、`model_name_flash`、`model_api_key`、`model_source`。
-  - 内置默认文字模型（`DeepseekWriteFree`）和内置图像模型配置，用于新用户零配置体验。
+  - 内置默认文字模型（`DeepSeekWriteFree`）和内置图像模型配置，用于新用户零配置体验。
   - 支持 `models_type=owner` 自定义多模型列表，以及 `models_type=pi` 走 Pi 原生模型选择。
 
 - **`prompt_store.py`**：
@@ -278,7 +278,7 @@ write-claw/
   - 书籍分类仅作为 `{{BOOK_GENRE}}` 上下文传入模板，不影响提示词路径、工具集或会话标识。
 
 - **`pi/` 目录**：
-  - `setupPiWorkspace.ts`：初始化 IndexedDB 后端（`dbName: 'write_claw_pi'`），存储会话、API Key、设置。
+  - `setupPiWorkspace.ts`：初始化 IndexedDB 后端（`dbName: 'deepseekwrite_pi'`），存储会话、API Key、设置。
   - `resolveWorkspaceChatModel.ts`：从本地模型配置或 Pi 的 `ProviderKeysStore` 解析模型与密钥。
   - `workspaceStageAgents.ts`：根据 `book_type` 分发短篇/剧本/素材/技能工作台的 Agent 工具。
 
@@ -462,7 +462,7 @@ UI 可见阶段：
 
 | 现象 | 排查方向 |
 |------|----------|
-| 窗口白屏（Windows） | 检查是否安装 WebView2 Runtime，或同目录是否有 `webview2_runtime` 捆绑目录 / `MicrosoftEdgeWebView2RuntimeInstallerX64.exe`；检查 `web/dist/` 是否已构建；设置 `WRITECLAW_DEBUG=1` 后启动打开 DevTools 查看控制台。 |
+| 窗口白屏（Windows） | 检查是否安装 WebView2 Runtime，或同目录是否有 `webview2_runtime` 捆绑目录 / `MicrosoftEdgeWebView2RuntimeInstallerX64.exe`；检查 `web/dist/` 是否已构建；设置 `DEEPSEEKWRITE_DEBUG=1` 后启动打开 DevTools 查看控制台。 |
 | 前端未构建报错 | 执行 `cd web && npm install && npm run build`。 |
 | Linux 无法输入中文 | 检查 `QT_IM_MODULE`；尝试 `export QT_IM_MODULE=fcitx` 后启动；确保安装了 `fcitx5-frontend-qt6`。 |
 | 提示词修改未生效 | 检查 `.data/prompt_overrides/` 下是否有同名覆盖文件；覆盖优先级高于内置默认。 |

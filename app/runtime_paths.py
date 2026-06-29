@@ -12,9 +12,11 @@ import shutil
 import sys
 from pathlib import Path
 
-APP_DATA_DIR_NAME = "WriteClaw"
+APP_DATA_DIR_NAME = "DeepSeekWrite"
+LEGACY_APP_DATA_DIR_NAME = "Write" + "Claw"
 DATA_DIR_NAME = ".data"
-_LEGACY_LOCK_FILE = ".write_claw.lock"
+_DATA_LOCK_FILE = ".deepseekwrite.lock"
+_LEGACY_DATA_LOCK_FILE = ".write" + "_claw.lock"
 _LEGACY_MIGRATION_MARKER = ".legacy_data_migration_v1"
 _DATA_ROOT_READY = False
 
@@ -39,15 +41,22 @@ def writable_root() -> Path:
 
 def app_data_root() -> Path:
     """返回当前用户的应用数据目录。"""
+    return (_app_data_base_root() / APP_DATA_DIR_NAME).resolve()
+
+
+def _app_data_base_root() -> Path:
     if sys.platform.startswith("win"):
         base = os.environ.get("APPDATA")
-        root = Path(base).expanduser() if base else Path.home() / "AppData" / "Roaming"
+        return Path(base).expanduser() if base else Path.home() / "AppData" / "Roaming"
     elif sys.platform == "darwin":
-        root = Path.home() / "Library" / "Application Support"
-    else:
-        base = os.environ.get("XDG_DATA_HOME")
-        root = Path(base).expanduser() if base else Path.home() / ".local" / "share"
-    return (root / APP_DATA_DIR_NAME).resolve()
+        return Path.home() / "Library" / "Application Support"
+    base = os.environ.get("XDG_DATA_HOME")
+    return Path(base).expanduser() if base else Path.home() / ".local" / "share"
+
+
+def legacy_app_data_root() -> Path:
+    """旧品牌名使用过的用户数据目录。"""
+    return (_app_data_base_root() / LEGACY_APP_DATA_DIR_NAME).resolve()
 
 
 def legacy_data_root() -> Path:
@@ -57,9 +66,11 @@ def legacy_data_root() -> Path:
 
 def _should_skip_legacy_data_item(path: Path) -> bool:
     name = path.name
-    return name in {_LEGACY_LOCK_FILE, _LEGACY_MIGRATION_MARKER} or name.endswith(
-        ".tmp"
-    )
+    return name in {
+        _DATA_LOCK_FILE,
+        _LEGACY_DATA_LOCK_FILE,
+        _LEGACY_MIGRATION_MARKER,
+    } or name.endswith(".tmp")
 
 
 def _copy_missing_legacy_data(source: Path, target: Path) -> None:
@@ -79,18 +90,24 @@ def _copy_missing_legacy_data(source: Path, target: Path) -> None:
 
 
 def _migrate_legacy_data_root(target: Path) -> None:
-    """首次使用用户数据目录时，从旧 `.data` 复制缺失文件。"""
+    """首次使用用户数据目录时，从旧位置复制缺失文件。"""
     marker = target / _LEGACY_MIGRATION_MARKER
     if marker.is_file():
         return
 
-    source = legacy_data_root()
-    if source.is_dir():
+    sources = [legacy_app_data_root() / DATA_DIR_NAME, legacy_data_root()]
+    seen: set[Path] = set()
+    for source in sources:
+        if not source.is_dir():
+            continue
         try:
-            if source.resolve() != target.resolve():
-                _copy_missing_legacy_data(source, target)
+            resolved_source = source.resolve()
+            if resolved_source == target.resolve() or resolved_source in seen:
+                continue
+            seen.add(resolved_source)
         except OSError:
-            _copy_missing_legacy_data(source, target)
+            pass
+        _copy_missing_legacy_data(source, target)
 
     try:
         marker.write_text("migrated\n", encoding="utf-8")

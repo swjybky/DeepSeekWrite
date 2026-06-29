@@ -14,8 +14,8 @@ type ResolvedModelConfig = AiModelConfig & {
   model: Model<Api>
 }
 
-const WORKSPACE_MODEL_REAL_ID_KEY = '__writeClawRealModelId'
-const WORKSPACE_MODEL_CONFIG_ID_KEY = '__writeClawConfigId'
+const WORKSPACE_MODEL_REAL_ID_KEY = '__deepSeekWriteRealModelId'
+const WORKSPACE_MODEL_CONFIG_ID_KEY = '__deepSeekWriteConfigId'
 
 type LegacyWorkspaceDisplayModel = Model<Api> & {
   [WORKSPACE_MODEL_REAL_ID_KEY]?: string
@@ -316,7 +316,7 @@ async function syncOwnerModelsToCustomProvidersStore(
     try {
       const existing = await storage.customProviders.getAll()
       for (const p of existing) {
-        if (p.id.startsWith('writeclaw-owner-')) {
+        if (p.id.startsWith('deepseekwrite-owner-')) {
           await storage.customProviders.delete(p.id)
         }
       }
@@ -327,7 +327,7 @@ async function syncOwnerModelsToCustomProvidersStore(
       if (!config.base_url) continue
       const api = (config.api || 'openai-completions') as Api
       if (!canStoreCustomProvider(api)) continue
-      const providerId = `writeclaw-owner-${config.id}`
+      const providerId = `deepseekwrite-owner-${config.id}`
       const model = createOwnerModel(config)
       await storage.customProviders.set({
         id: providerId,

@@ -25,10 +25,10 @@ for cmd in node npm python3 sips iconutil hdiutil ditto codesign; do
   require_cmd "$cmd"
 done
 
-[[ -f "$ROOT/packaging/pyi_entry.py" ]] || fail "Not a Write Claw repo root: missing packaging/pyi_entry.py"
-[[ -f "$ROOT/app/main.py" ]] || fail "Not a Write Claw repo root: missing app/main.py"
-[[ -f "$ROOT/web/package.json" ]] || fail "Not a Write Claw repo root: missing web/package.json"
-[[ -f "$ROOT/requirements.txt" ]] || fail "Not a Write Claw repo root: missing requirements.txt"
+[[ -f "$ROOT/packaging/pyi_entry.py" ]] || fail "Not a DeepSeekWrite repo root: missing packaging/pyi_entry.py"
+[[ -f "$ROOT/app/main.py" ]] || fail "Not a DeepSeekWrite repo root: missing app/main.py"
+[[ -f "$ROOT/web/package.json" ]] || fail "Not a DeepSeekWrite repo root: missing web/package.json"
+[[ -f "$ROOT/requirements.txt" ]] || fail "Not a DeepSeekWrite repo root: missing requirements.txt"
 
 BUILD_DIR="$ROOT/build/macos-arm"
 VENV_DIR="$ROOT/.venv-macarm-build"
@@ -93,8 +93,8 @@ fi
 
 log "Building DeepSeekWrite.app with PyInstaller"
 rm -rf "$APP_PATH" "$DIST_DIR/DeepSeekWrite" "$DMG_PATH"
-WRITECLAW_PROJECT_ROOT="$ROOT" \
-WRITECLAW_MAC_ICON="$ICON_ICNS" \
+DEEPSEEKWRITE_PROJECT_ROOT="$ROOT" \
+DEEPSEEKWRITE_MAC_ICON="$ICON_ICNS" \
   "$PYTHON_BIN" -m PyInstaller \
     --clean \
     --noconfirm \

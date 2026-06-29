@@ -1,4 +1,4 @@
-const AI_PANEL_WIDTH_KEY = 'write-claw:workspace-ai-width'
+const AI_PANEL_WIDTH_KEY = 'deepseekwrite:workspace-ai-width'
 const AI_PANEL_MIN = 240
 /** 超宽屏下的绝对上限，避免 AI 栏占满整屏 */
 const AI_PANEL_HARD_MAX = 1000

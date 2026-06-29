@@ -84,7 +84,7 @@ function resolvePromptReadAccess(
     : resolveWorkspaceAgentReadAccess(config, agentId)
 }
 const WORKSPACE_ATTACHMENT_MAX_FILE_SIZE = 20 * 1024 * 1024
-const WORKSPACE_SEND_VALIDATION_ERROR_NAME = 'WriteClawSendValidationError'
+const WORKSPACE_SEND_VALIDATION_ERROR_NAME = 'DeepSeekWriteSendValidationError'
 
 type ShowWorkspaceAlert = (
   options: Omit<AppDialogOptions, 'cancelText' | 'hideCancel'>,
@@ -100,14 +100,14 @@ type MessageEditorElement = HTMLElement & {
   onFilesChange?: (attachments: Attachment[]) => void
   handleFilesSelected?: (event: Event) => void | Promise<void>
   handleDrop?: (event: DragEvent) => void | Promise<void>
-  __writeClawWorkspaceAttachmentLoader?: boolean
+  __deepSeekWriteWorkspaceAttachmentLoader?: boolean
   requestUpdate?: () => void
 }
 
 type AgentInterfaceElement = HTMLElement & {
   requestUpdate?: () => void
   sendMessage?: (input: string, attachments?: Attachment[]) => void | Promise<void>
-  __writeClawSendValidationGuard?: boolean
+  __deepSeekWriteSendValidationGuard?: boolean
 }
 
 class WorkspaceSendValidationError extends Error {
@@ -196,7 +196,7 @@ function installWorkspaceAttachmentLoader(
   editor: MessageEditorElement,
   showAlert: ShowWorkspaceAlert,
 ) {
-  if (editor.__writeClawWorkspaceAttachmentLoader) return
+  if (editor.__deepSeekWriteWorkspaceAttachmentLoader) return
 
   editor.handleFilesSelected = async (event: Event) => {
     event.stopImmediatePropagation()
@@ -214,7 +214,7 @@ function installWorkspaceAttachmentLoader(
       showAlert,
     )
   }
-  editor.__writeClawWorkspaceAttachmentLoader = true
+  editor.__deepSeekWriteWorkspaceAttachmentLoader = true
   editor.requestUpdate?.()
 }
 
@@ -271,7 +271,7 @@ function installWorkspaceSendValidationGuard(chatPanel: ChatPanel) {
   const iface = getAgentInterface(chatPanel)
   if (
     !iface ||
-    iface.__writeClawSendValidationGuard ||
+    iface.__deepSeekWriteSendValidationGuard ||
     typeof iface.sendMessage !== 'function'
   ) {
     return
@@ -283,14 +283,14 @@ function installWorkspaceSendValidationGuard(chatPanel: ChatPanel) {
       await originalSendMessage(input, attachments)
     } catch (error) {
       if (isWorkspaceSendValidationError(error)) {
-        console.warn('[DeepseekWrite·AI面板] 发送已取消:', error.message)
+        console.warn('[DeepSeekWrite·AI面板] 发送已取消:', error.message)
         refreshWorkspaceChatInput(chatPanel)
         return
       }
       throw error
     }
   }
-  iface.__writeClawSendValidationGuard = true
+  iface.__deepSeekWriteSendValidationGuard = true
 }
 
 function useDebounced<T>(value: T, ms: number): T {
@@ -644,7 +644,7 @@ function WorkspaceAiChatInner({
         })
         if (next) await p.onBookMemoriesCaptured?.(p.sessionBookId, next)
       } catch (error) {
-        console.warn('[WriteClaw memory] capture skipped:', error)
+        console.warn('[DeepSeekWrite memory] capture skipped:', error)
       }
     })()
   }
@@ -713,13 +713,13 @@ function WorkspaceAiChatInner({
       try {
         await ensurePiAppStorage()
       } catch (e) {
-        console.warn('[DeepseekWrite·AI面板] Pi 存储初始化失败，将重试:', e)
+        console.warn('[DeepSeekWrite·AI面板] Pi 存储初始化失败，将重试:', e)
         await new Promise((r) => window.setTimeout(r, 500))
         if (cancelled) return
         try {
           await ensurePiAppStorage()
         } catch (e2) {
-          console.error('[DeepseekWrite·AI面板] Pi 存储初始化最终失败:', e2)
+          console.error('[DeepSeekWrite·AI面板] Pi 存储初始化最终失败:', e2)
           return
         }
       }
@@ -1313,7 +1313,7 @@ function WorkspaceAiChatInner({
       agent.state.tools = includePiArtifacts
         ? mergeAgentToolsPreservingArtifacts(agent.state.tools, extras)
         : extras
-    })().catch((e: unknown) => console.warn('[DeepseekWrite·工作台提示词]', e))
+    })().catch((e: unknown) => console.warn('[DeepSeekWrite·工作台提示词]', e))
   }, [
     chatReady,
     props.bookTitle,

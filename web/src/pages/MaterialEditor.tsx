@@ -31,7 +31,7 @@ const MATERIAL_STAGE_KEYS: MaterialStageId[] = [
   'draft_excerpt',
 ]
 
-const AI_PANEL_WIDTH_KEY = 'write-claw:material-ai-width'
+const AI_PANEL_WIDTH_KEY = 'deepseekwrite:material-ai-width'
 const AI_PANEL_MIN = 240
 const AI_PANEL_HARD_MAX = 1000
 const WORKSPACE_AI_INCLUDE_PI_ARTIFACTS = false

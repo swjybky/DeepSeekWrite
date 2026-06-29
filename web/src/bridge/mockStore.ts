@@ -46,7 +46,7 @@ const DEFAULT_SKILL_TEMPLATE_MODULES = import.meta.glob(
 ) as Record<string, { title?: string; stages?: Record<string, unknown> }>
 
 const defaultSkillTemplate = Object.values(DEFAULT_SKILL_TEMPLATE_MODULES)[0] ?? null
-const MOCK_STORAGE_KEY = 'write_claw_dev_books'
+const MOCK_STORAGE_KEY = 'deepseekwrite_dev_books'
 
 function loadMock(): Map<string, Book> {
   try {
@@ -232,7 +232,7 @@ export async function mockSetBookMemories(
   return memories
 }
 
-const MOCK_MATERIALS_KEY = 'write_claw_dev_materials'
+const MOCK_MATERIALS_KEY = 'deepseekwrite_dev_materials'
 
 export function loadMockMaterials(): Map<string, Material> {
   try {
@@ -341,7 +341,7 @@ export async function mockGetMaterialGenres(): Promise<Record<string, string[]>>
 
 // ==================== 技能 Mock 数据 ====================
 
-const MOCK_SKILLS_KEY = 'write_claw_dev_skills'
+const MOCK_SKILLS_KEY = 'deepseekwrite_dev_skills'
 
 export function loadMockSkills(): Map<string, Skill> {
   try {

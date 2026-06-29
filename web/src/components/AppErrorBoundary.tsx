@@ -12,7 +12,7 @@ export class AppErrorBoundary extends Component<Props, State> {
   }
 
   componentDidCatch(error: Error, info: ErrorInfo) {
-    console.error('[Write Claw] UI error', error, info.componentStack)
+    console.error('[DeepSeekWrite] UI error', error, info.componentStack)
   }
 
   render() {

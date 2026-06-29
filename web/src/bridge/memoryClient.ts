@@ -12,7 +12,7 @@ import {
 
 type BridgeApiRoot = NonNullable<BridgeApi>
 
-const USER_MEMORY_STORAGE_KEY = 'write_claw_dev_user_memories'
+const USER_MEMORY_STORAGE_KEY = 'deepseekwrite_dev_user_memories'
 
 async function callApiMethod<T>(
   methodName: keyof BridgeApiRoot,

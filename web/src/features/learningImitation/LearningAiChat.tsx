@@ -277,7 +277,7 @@ function LearningAiChat({
       }
       chatPanelRef.current?.requestUpdate?.()
     })().catch((error: unknown) => {
-      console.warn('[WriteClaw] 学习仿写提示词更新失败', error)
+      console.warn('[DeepSeekWrite] 学习仿写提示词更新失败', error)
     })
   }, [
     activeStage,

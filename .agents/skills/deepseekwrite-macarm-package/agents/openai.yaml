@@ -1,4 +1,4 @@
 interface:
   display_name: "DeepSeekWrite mac-arm 打包"
-  short_description: "为 Write Claw/DeepSeekWrite 构建 macOS Apple Silicon DMG。"
+  short_description: "为 DeepSeekWrite 构建 macOS Apple Silicon DMG。"
   default_prompt: "打macarm包"

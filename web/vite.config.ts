@@ -9,7 +9,7 @@ const webRoot = path.dirname(fileURLToPath(import.meta.url))
 
 function safariRegexCompatPlugin(): Plugin {
   return {
-    name: 'write-claw-safari-regex-compat',
+    name: 'deepseekwrite-safari-regex-compat',
     transform(code, id) {
       let next = code
 

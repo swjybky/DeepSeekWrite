@@ -1,13 +1,13 @@
 ---
 name: deepseekwrite-macarm-package
-description: Build the local Write Claw/DeepSeekWrite repository into a macOS Apple Silicon arm64 installer DMG. Use when the user says "打macarm包", "打 mac-arm 包", "打 mac arm 包", "构建 DeepSeekWrite-arm.dmg", or asks to package this project for macOS arm64 distribution.
+description: Build the local DeepSeekWrite repository into a macOS Apple Silicon arm64 installer DMG. Use when the user says "打macarm包", "打 mac-arm 包", "打 mac arm 包", "构建 DeepSeekWrite-arm.dmg", or asks to package this project for macOS arm64 distribution.
 ---
 
 # DeepSeekWrite mac-arm Package
 
 ## Workflow
 
-When this skill triggers, package the current Write Claw/DeepSeekWrite repo for macOS Apple Silicon by running the bundled script:
+When this skill triggers, package the current DeepSeekWrite repo for macOS Apple Silicon by running the bundled script:
 
 ```bash
 /Users/fafeng/.codex/skills/deepseekwrite-macarm-package/scripts/build_macarm_dmg.sh /Users/fafeng/project/openwrite/write-claw

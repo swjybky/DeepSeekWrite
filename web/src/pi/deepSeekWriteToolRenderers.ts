@@ -1,5 +1,5 @@
 /**
- * Write Claw 工作台工具在 Pi ChatPanel 中的折叠式展示。
+ * DeepSeekWrite 工作台工具在 Pi ChatPanel 中的折叠式展示。
  * 默认一行中文摘要，点击可展开 Input / Output 详情。
  */
 import type { ToolResultMessage } from '@earendil-works/pi-ai'
@@ -25,7 +25,7 @@ import {
 import { SCRIPT_STAGE_LABELS } from '../workspaces/script/stages'
 import { SHORT_STAGE_LABELS } from '../workspaces/short/stages'
 
-const WRITE_CLAW_TOOL_NAMES = [
+const DEEPSEEKWRITE_TOOL_NAMES = [
   'load_skill',
   'read_workspace_content',
   'search_workspace_text',
@@ -61,7 +61,7 @@ const WRITE_CLAW_TOOL_NAMES = [
   'line_level_quick_scan',
 ] as const
 
-type WriteClawToolName = (typeof WRITE_CLAW_TOOL_NAMES)[number]
+type DeepSeekWriteToolName = (typeof DEEPSEEKWRITE_TOOL_NAMES)[number]
 
 type ToolRenderState = 'inprogress' | 'complete' | 'error'
 
@@ -99,7 +99,7 @@ function truncate(text: string, max = 48): string {
 }
 
 function summarizeToolCall(
-  toolName: WriteClawToolName,
+  toolName: DeepSeekWriteToolName,
   params: Record<string, unknown> | undefined,
   done: boolean,
 ): string {
@@ -306,37 +306,37 @@ function resolveRenderState(
 function renderThemedToolIcon(state: ToolRenderState): TemplateResult {
   const stateClass =
     state === 'complete'
-      ? 'write-claw-tool-icon--complete'
+      ? 'deepseekwrite-tool-icon--complete'
       : state === 'error'
-        ? 'write-claw-tool-icon--error'
-        : 'write-claw-tool-icon--progress'
+        ? 'deepseekwrite-tool-icon--error'
+        : 'deepseekwrite-tool-icon--progress'
 
   return html`
-    <span class="write-claw-tool-icon inline-block ${stateClass}">
-      <span class="write-claw-tool-glyph write-claw-tool-glyph--classic"
+    <span class="deepseekwrite-tool-icon inline-block ${stateClass}">
+      <span class="deepseekwrite-tool-glyph deepseekwrite-tool-glyph--classic"
         >${icon(ScrollText, 'sm')}</span
       >
-      <span class="write-claw-tool-glyph write-claw-tool-glyph--modern"
+      <span class="deepseekwrite-tool-glyph deepseekwrite-tool-glyph--modern"
         >${icon(Wrench, 'sm')}</span
       >
     </span>
   `
 }
 
-function renderWriteClawToolHeader(
+function renderDeepSeekWriteToolHeader(
   state: ToolRenderState,
   text: string,
 ): TemplateResult {
   if (state === 'inprogress') {
     return html`
       <div
-        class="write-claw-tool-header flex items-center justify-between gap-2 text-sm"
+        class="deepseekwrite-tool-header flex items-center justify-between gap-2 text-sm"
       >
         <div class="flex items-center gap-2 min-w-0">
           ${renderThemedToolIcon(state)}
-          <span class="write-claw-tool-summary truncate">${text}</span>
+          <span class="deepseekwrite-tool-summary truncate">${text}</span>
         </div>
-        <span class="write-claw-tool-spinner inline-block animate-spin"
+        <span class="deepseekwrite-tool-spinner inline-block animate-spin"
           >${icon(Loader, 'sm')}</span
         >
       </div>
@@ -344,14 +344,14 @@ function renderWriteClawToolHeader(
   }
 
   return html`
-    <div class="write-claw-tool-header flex items-center gap-2 text-sm">
+    <div class="deepseekwrite-tool-header flex items-center gap-2 text-sm">
       ${renderThemedToolIcon(state)}
-      <span class="write-claw-tool-summary">${text}</span>
+      <span class="deepseekwrite-tool-summary">${text}</span>
     </div>
   `
 }
 
-function renderWriteClawCollapsibleHeader(
+function renderDeepSeekWriteCollapsibleHeader(
   state: ToolRenderState,
   text: string,
   contentRef: ReturnType<typeof createRef<HTMLDivElement>>,
@@ -382,18 +382,18 @@ function renderWriteClawCollapsibleHeader(
     <button
       type="button"
       @click=${toggleContent}
-      class="write-claw-tool-header-btn flex items-center justify-between gap-2 text-sm w-full text-left transition-colors cursor-pointer"
+      class="deepseekwrite-tool-header-btn flex items-center justify-between gap-2 text-sm w-full text-left transition-colors cursor-pointer"
     >
       <div class="flex items-center gap-2 min-w-0">
         ${state === 'inprogress'
-          ? html`<span class="write-claw-tool-spinner inline-block animate-spin"
+          ? html`<span class="deepseekwrite-tool-spinner inline-block animate-spin"
               >${icon(Loader, 'sm')}</span
             >`
           : ''}
         ${renderThemedToolIcon(state)}
-        <span class="write-claw-tool-summary truncate">${text}</span>
+        <span class="deepseekwrite-tool-summary truncate">${text}</span>
       </div>
-      <span class="write-claw-tool-chevron inline-block" ${ref(chevronRef)}>
+      <span class="deepseekwrite-tool-chevron inline-block" ${ref(chevronRef)}>
         <span class="chevron-up ${defaultExpanded ? '' : 'hidden'}"
           >${icon(ChevronUp, 'sm')}</span
         >
@@ -431,10 +431,10 @@ function renderToolDetails(
   `
 }
 
-class WriteClawToolRenderer implements ToolRenderer {
-  private readonly toolName: WriteClawToolName
+class DeepSeekWriteToolRenderer implements ToolRenderer {
+  private readonly toolName: DeepSeekWriteToolName
 
-  constructor(toolName: WriteClawToolName) {
+  constructor(toolName: DeepSeekWriteToolName) {
     this.toolName = toolName
   }
 
@@ -449,7 +449,7 @@ class WriteClawToolRenderer implements ToolRenderer {
 
     if (state === 'inprogress') {
       return {
-        content: html`<div>${renderWriteClawToolHeader(state, summary)}</div>`,
+        content: html`<div>${renderDeepSeekWriteToolHeader(state, summary)}</div>`,
         isCustom: false,
       }
     }
@@ -463,7 +463,7 @@ class WriteClawToolRenderer implements ToolRenderer {
 
     if (!hasDetails) {
       return {
-        content: html`<div>${renderWriteClawToolHeader(state, summary)}</div>`,
+        content: html`<div>${renderDeepSeekWriteToolHeader(state, summary)}</div>`,
         isCustom: false,
       }
     }
@@ -471,7 +471,7 @@ class WriteClawToolRenderer implements ToolRenderer {
     return {
       content: html`
         <div>
-          ${renderWriteClawCollapsibleHeader(
+          ${renderDeepSeekWriteCollapsibleHeader(
             state,
             summary,
             contentRef,
@@ -491,10 +491,10 @@ class WriteClawToolRenderer implements ToolRenderer {
   }
 }
 
-export function registerWriteClawToolRenderers(): void {
+export function registerDeepSeekWriteToolRenderers(): void {
   if (registered) return
   registered = true
-  for (const toolName of WRITE_CLAW_TOOL_NAMES) {
-    registerToolRenderer(toolName, new WriteClawToolRenderer(toolName))
+  for (const toolName of DEEPSEEKWRITE_TOOL_NAMES) {
+    registerToolRenderer(toolName, new DeepSeekWriteToolRenderer(toolName))
   }
 }

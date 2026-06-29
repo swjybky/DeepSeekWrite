@@ -12,14 +12,14 @@ import { getBridgeApi, isPywebviewDesktopBundle } from './runtime'
 import type { AppearanceStyle } from './aiModelConfig'
 
 /** 书架「工作文件夹」持久化键（浏览器 / pywebview 同源存储） */
-export const WORKSPACE_ROOT_STORAGE_KEY = 'write_claw_workspace_root'
+export const WORKSPACE_ROOT_STORAGE_KEY = 'deepseekwrite_workspace_root'
 
 /** 全局创作空间智能体读取配置（浏览器开发模式 localStorage） */
 export const WORKSPACE_AGENT_READ_ACCESS_STORAGE_KEY =
-  'write-claw:workspace_agent_read_access'
-const LEGACY_STAGE_READ_ACCESS_STORAGE_KEY = 'write-claw:stage_read_access'
-export const APPEARANCE_STYLE_STORAGE_KEY = 'write-claw:appearance_style'
-export const TEXT_DISPLAY_MODE_STORAGE_KEY = 'write-claw:text_display_mode'
+  'deepseekwrite:workspace_agent_read_access'
+const LEGACY_STAGE_READ_ACCESS_STORAGE_KEY = 'deepseekwrite:stage_read_access'
+export const APPEARANCE_STYLE_STORAGE_KEY = 'deepseekwrite:appearance_style'
+export const TEXT_DISPLAY_MODE_STORAGE_KEY = 'deepseekwrite:text_display_mode'
 export type TextDisplayMode = 'text' | 'markdown'
 
 export function getStoredWorkspaceRoot(): string | null {

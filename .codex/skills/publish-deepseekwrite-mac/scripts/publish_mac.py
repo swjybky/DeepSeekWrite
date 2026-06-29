@@ -41,7 +41,7 @@ def parse_args() -> argparse.Namespace:
         "--source-root",
         type=Path,
         default=DEFAULT_SOURCE_ROOT,
-        help="Write Claw repository root.",
+        help="DeepSeekWrite repository root.",
     )
     parser.add_argument(
         "--publish-root",

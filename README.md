@@ -1,4 +1,4 @@
-# Write Claw
+# DeepSeekWrite
 
 面向网文与短篇小说创作的**本地桌面写作应用**。Python（pywebview）提供桌面壳与数据持久化，React 构建前端界面，内嵌 [Pi](https://github.com/badlogic/pi) 框架实现多阶段 AI 协作写作。所有数据保存在本机，无需联网服务器。
 
@@ -50,7 +50,7 @@
 
 ```bash
 git clone <仓库地址>
-cd write-claw
+cd DeepSeekWrite
 
 # Python 虚拟环境（推荐）
 python3 -m venv .venv
@@ -95,14 +95,14 @@ python -m app.main
 **白屏排查：**
 
 - 控制台提示缺少 `AppKit` / `WebKit` / `objc` → 重新 `pip install -r requirements.txt`
-- 排查前端控制台：`WRITECLAW_DEBUG=1 python -m app.main`
+- 排查前端控制台：`DEEPSEEKWRITE_DEBUG=1 python -m app.main`
 
 ### Windows
 
 依赖 **Microsoft Edge WebView2 Runtime**（Chromium 内核）。未安装时可能退回 MSHTML（IE），无法执行现代 JavaScript，窗口会一片空白。
 
 - 安装 Evergreen：[WebView2 Runtime 下载页](https://developer.microsoft.com/microsoft-edge/webview2/)
-- 排查：`WRITECLAW_DEBUG=1 python -m app.main`（PowerShell：`$env:WRITECLAW_DEBUG='1'`）
+- 排查：`DEEPSEEKWRITE_DEBUG=1 python -m app.main`（PowerShell：`$env:DEEPSEEKWRITE_DEBUG='1'`）
 
 ### Linux
 
@@ -155,7 +155,7 @@ python -m app.main
 ## 项目结构
 
 ```
-write-claw/
+DeepSeekWrite/
 ├── app/                          # Python 后端
 │   ├── main.py                   # pywebview 窗口、本地 HTTP 服务、JS API
 │   ├── storage.py                # JSON 原子读写、阶段 txt 导出
@@ -297,10 +297,10 @@ cd web && npm install && npm run build && cd ..
 pip install pyinstaller
 
 # 3. 打包
-pyinstaller packaging/WriteClaw.spec
+pyinstaller packaging/DeepSeekWrite.spec
 ```
 
-产出 `dist/WriteClaw/` 目录，压缩后分发。用户需安装 WebView2 Runtime。
+产出 `dist/DeepSeekWrite/` 目录，压缩后分发。用户需安装 WebView2 Runtime。
 
 ## 文档
 

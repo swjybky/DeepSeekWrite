@@ -309,7 +309,7 @@ export async function captureBookMemoryFromMessages(
     streamFn: createWorkspaceStreamFn(),
     initialState: {
       systemPrompt:
-        '你是 Write Claw 的创作记忆整理器。你只维护当前书籍记忆，不维护用户记忆。你必须只输出合法 JSON。',
+        '你是 DeepSeekWrite 的创作记忆整理器。你只维护当前书籍记忆，不维护用户记忆。你必须只输出合法 JSON。',
       model,
       thinkingLevel: getPreferredWorkspaceThinkingLevel(),
       messages: [],

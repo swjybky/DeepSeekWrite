@@ -4,12 +4,12 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/png" sizes="256x256" href="./favicon.png" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>DeepseekWrite</title>
+    <title>DeepSeekWrite</title>
   </head>
   <body>
     <div id="root">
       <div class="boot-splash" role="status" aria-live="polite">
-        <p class="boot-splash-title">DeepseekWrite</p>
+        <p class="boot-splash-title">DeepSeekWrite</p>
         <p class="boot-splash-hint">正在启动…</p>
       </div>
     </div>
@@ -62,13 +62,13 @@
           var root = document.getElementById('root')
           if (
             !root ||
-            document.documentElement.dataset.writeClawMounted === '1' ||
+            document.documentElement.dataset.deepSeekWriteMounted === '1' ||
             event.filename === location.href
           ) {
             return
           }
           root.innerHTML =
-            '<div class="boot-splash" role="alert"><p class="boot-splash-title">DeepseekWrite</p>' +
+            '<div class="boot-splash" role="alert"><p class="boot-splash-title">DeepSeekWrite</p>' +
             '<p class="boot-splash-hint" style="max-width:28rem;text-align:center;">' +
             escapeBootMessage(msg) +
             '</p></div>'
