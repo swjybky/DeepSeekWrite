@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import sys
+from pathlib import Path
 
 
 class _NullTextStream:
@@ -46,6 +47,37 @@ def _ensure_windowed_stdio() -> None:
 
 
 _ensure_windowed_stdio()
+
+
+def _delete_zone_identifier(path: Path) -> None:
+    if not sys.platform.startswith("win"):
+        return
+    try:
+        os.remove(f"{path}:Zone.Identifier")
+    except OSError:
+        return
+
+
+def _unblock_packaged_dotnet_assemblies() -> None:
+    """Remove Mark-of-the-Web from bundled .NET DLLs before pythonnet loads CLR."""
+    if not sys.platform.startswith("win") or not getattr(sys, "frozen", False):
+        return
+
+    bundle_root = Path(getattr(sys, "_MEIPASS", Path(sys.executable).parent))
+    candidates = [
+        bundle_root / "pythonnet" / "runtime" / "Python.Runtime.dll",
+        bundle_root / "webview" / "lib" / "Microsoft.Web.WebView2.Core.dll",
+        bundle_root / "webview" / "lib" / "Microsoft.Web.WebView2.WinForms.dll",
+    ]
+    candidates.extend((bundle_root / "clr_loader" / "ffi" / "dlls").glob("**/*.dll"))
+    candidates.extend((bundle_root / "webview" / "lib" / "runtimes").glob("**/*.dll"))
+
+    for candidate in candidates:
+        if candidate.is_file():
+            _delete_zone_identifier(candidate)
+
+
+_unblock_packaged_dotnet_assemblies()
 
 from app.main import main
 

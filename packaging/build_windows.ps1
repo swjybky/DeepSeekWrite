@@ -7,20 +7,17 @@ Set-Location (Join-Path $Root "web")
 npm install
 npm run build
 
-Write-Host "==> Prepare WebView2 offline installer"
-Set-Location $Root
-python packaging/prepare_webview2.py
-if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-
 Write-Host "==> PyInstaller"
+Set-Location $Root
 pyinstaller (Join-Path $Root "packaging\Deepseekwrite.spec") --noconfirm --distpath (Join-Path $Root "dist") --workpath (Join-Path $Root "build")
 
 $OutDir = Join-Path $Root "dist\deepseekwrite"
-$Installer = Join-Path $Root "packaging\vendor\MicrosoftEdgeWebView2RuntimeInstallerX64.exe"
-Copy-Item $Installer $OutDir -Force
 
 $ResetBat = Join-Path $Root "packaging\reset_and_start.bat"
 if (Test-Path $ResetBat) { Copy-Item $ResetBat $OutDir -Force }
+
+$ExeConfig = Join-Path $Root "packaging\deepseekwrite.exe.config"
+if (Test-Path $ExeConfig) { Copy-Item $ExeConfig $OutDir -Force }
 
 $ZipPath = Join-Path $Root "dist\deepseekwrite.zip"
 if (Test-Path $ZipPath) { Remove-Item $ZipPath -Force }

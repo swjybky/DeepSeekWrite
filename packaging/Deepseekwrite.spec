@@ -2,9 +2,9 @@
 """DeepseekWrite Windows 便携目录包（PyInstaller onedir）。在项目根目录执行:
     pip install pyinstaller
     cd web && npm ci && npm run build
-    python packaging/prepare_webview2.py
     pyinstaller packaging/Deepseekwrite.spec
 产出: dist/deepseekwrite/（含 deepseekwrite.exe，双击即可运行）。
+用户本机需已安装 Microsoft Edge WebView2 Runtime。
 """
 import sys
 from pathlib import Path

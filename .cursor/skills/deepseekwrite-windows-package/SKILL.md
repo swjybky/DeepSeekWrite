@@ -15,7 +15,7 @@ description: >-
 .\packaging\build_windows.ps1
 ```
 
-脚本依次完成：前端构建 → 下载/缓存 WebView2 离线安装包 → PyInstaller 打包 → 复制 WebView2 安装器 → 生成 `dist\deepseekwrite.zip`。
+脚本依次完成：前端构建 → PyInstaller 打包 → 生成 `dist\deepseekwrite.zip`。
 
 **不要**用 `&&` 链接命令（旧版 PowerShell 不支持）；用 `;` 或分步执行。
 
@@ -25,10 +25,11 @@ description: >-
 |------|------|
 | `dist/deepseekwrite/deepseekwrite.exe` | 主程序 |
 | `dist/deepseekwrite/_internal/` | 运行时依赖（必须与 exe 同发） |
-| `dist/deepseekwrite/MicrosoftEdgeWebView2RuntimeInstallerX64.exe` | WebView2 离线安装器（本机无 WebView2 时自动静默安装） |
-| `dist/deepseekwrite.zip` | 可直接分发的压缩包 |
+| `dist/deepseekwrite.zip` | 可直接分发的压缩包（约 50–60 MB） |
 
 应用名固定为 **deepseekwrite**（非 WriteClaw）。
+
+**不捆绑** `MicrosoftEdgeWebView2RuntimeInstallerX64.exe`（约 192 MB），以控制分发包体积。用户本机需已安装 [Microsoft Edge WebView2 Runtime](https://developer.microsoft.com/microsoft-edge/webview2/)；未安装时应用会显示 `webview2-required.html` 页面弹窗，引导用户下载安装。
 
 ## 环境要求
 
@@ -43,9 +44,7 @@ description: >-
 
 ```powershell
 Set-Location web; npm install; npm run build; Set-Location ..
-python packaging/prepare_webview2.py
 pyinstaller packaging/Deepseekwrite.spec --noconfirm
-Copy-Item packaging/vendor/MicrosoftEdgeWebView2RuntimeInstallerX64.exe dist/deepseekwrite/ -Force
 Compress-Archive -Path dist/deepseekwrite -DestinationPath dist/deepseekwrite.zip -Force
 ```
 
@@ -61,18 +60,17 @@ Compress-Archive -Path dist/deepseekwrite -DestinationPath dist/deepseekwrite.zi
 
 1. **platformdirs**：`collect_all("platformdirs")` + 预加载 hook `pyi_rth_preload_platformdirs.py` + 排除 `pyi_rth_pkgres`
 2. **OpenSSL DLL**：从 `{sys.prefix}/Library/bin` 收集 `libssl-3-x64.dll` 等（Miniconda 必需）
-3. **WebView2**：`app/main.py` 的 `_ensure_windows_webview2()` 会在缺少运行时静默安装捆绑的离线包
+3. **WebView2**：未检测到运行时时，窗口加载 `webview2-required.html` 页面弹窗提示用户安装；`app/main.py` 不再向控制台打印警告
 
 ## 分发注意
 
 - **不要**将 `.env` / API Key 打入 zip
 - 提醒用户：更新时需**整目录替换**（含 `_internal`），不能只换 exe
-- `packaging/vendor/` 已在 `.gitignore`，WebView2 安装器由 `prepare_webview2.py` 自动下载缓存（约 192 MB）
+- 提醒用户：首次运行若提示安装 WebView2，按页面指引安装后重启即可
 
 ## 相关文件
 
 - `packaging/Deepseekwrite.spec` — PyInstaller 配置
 - `packaging/build_windows.ps1` — 一键构建脚本
-- `packaging/prepare_webview2.py` — WebView2 离线安装包下载
 - `packaging/pyi_entry.py` — 冻结入口
-- `app/main.py` — WebView2 自动安装逻辑
+- `app/main.py` — WebView2 运行时检测与提示

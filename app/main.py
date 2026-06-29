@@ -245,6 +245,8 @@ from app.update_service import (
 
 
 _WEBVIEW2_INSTALLER_NAME = "MicrosoftEdgeWebView2RuntimeInstallerX64.exe"
+_WEBVIEW2_DOWNLOAD_URL = "https://developer.microsoft.com/microsoft-edge/webview2/"
+_WEBVIEW2_REQUIRED_PAGE = "webview2-required.html"
 
 
 def _find_msedgewebview2_dir(root: Path) -> Path | None:
@@ -659,7 +661,28 @@ def _wait_for_local_dist_server(url: str, timeout_seconds: float = 3.0) -> bool:
 
 
 def _dist_file_url(dist_dir: Path) -> str:
-    return f"{(dist_dir / 'index.html').resolve().as_uri()}?pywebview=1"
+    return _dist_file_url_for_page(dist_dir, "index.html")
+
+
+def _dist_file_url_for_page(dist_dir: Path, page_name: str) -> str:
+    return f"{(dist_dir / page_name).resolve().as_uri()}?pywebview=1"
+
+
+def _resolve_main_window_url(
+    dist_dir: Path,
+    base_url: str,
+) -> str:
+    """未检测到 WebView2 时加载独立提示页（兼容 MSHTML 回退，避免白屏无提示）。"""
+    if not sys.platform.startswith("win") or _windows_webview2_runtime_hint():
+        return base_url
+    page = dist_dir / _WEBVIEW2_REQUIRED_PAGE
+    if not page.is_file():
+        return base_url
+    parsed = urlparse(base_url)
+    query = f"?{parsed.query}" if parsed.query else ""
+    if parsed.scheme in ("http", "https") and parsed.netloc:
+        return f"{parsed.scheme}://{parsed.netloc}/{_WEBVIEW2_REQUIRED_PAGE}{query}"
+    return _dist_file_url_for_page(dist_dir, _WEBVIEW2_REQUIRED_PAGE)
 
 
 def _resolve_desktop_url(dist_dir: Path) -> tuple[ThreadingHTTPServer | None, str]:
@@ -951,6 +974,17 @@ class Api:
             return str(result) if result else None
         except Exception:
             return None
+
+    def open_external_url(self, url: str) -> bool:
+        target = str(url or "").strip()
+        if not target.startswith(("http://", "https://")):
+            return False
+        try:
+            import webbrowser  # noqa: PLC0415
+
+            return bool(webbrowser.open(target))
+        except Exception:
+            return False
 
     def create_book(
         self,
@@ -2016,6 +2050,7 @@ def main() -> None:
     store = BookStore()
     api = Api(store)
     _httpd, url = _resolve_desktop_url(_dist_dir())
+    url = _resolve_main_window_url(_dist_dir(), url)
     webview.create_window(
         "DeepseekWrite",
         url,
@@ -2024,23 +2059,6 @@ def main() -> None:
         height=1048,
         min_size=(640, 480),
     )
-    if sys.platform.startswith("win") and not _windows_webview2_runtime_hint():
-        bundled = _bundled_webview2_installer()
-        if bundled is not None:
-            print(
-                "警告：WebView2 自动安装可能未完成；请重新启动应用。\n"
-                "若仍为白屏，可手动运行同目录下的 "
-                f"{_WEBVIEW2_INSTALLER_NAME}，或设置 WRITECLAW_DEBUG=1 查看控制台。\n",
-                file=sys.stderr,
-            )
-        else:
-            print(
-                "警告：未检测到 Microsoft Edge WebView2 Runtime。\n"
-                "在未安装时窗口可能白屏。请安装 Evergreen WebView2 Runtime："
-                "https://developer.microsoft.com/microsoft-edge/webview2/\n"
-                "若安装后仍为白屏，可设置环境变量 WRITECLAW_DEBUG=1 后重新启动。\n",
-                file=sys.stderr,
-            )
     if (
         sys.platform == "darwin"
         and os.environ.get("PYWEBVIEW_GUI", "").lower() == "cocoa"
