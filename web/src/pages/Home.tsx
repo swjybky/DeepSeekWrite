@@ -171,12 +171,16 @@ type ModelConfigDialogProps = {
   initialSettings: AiModelSettings
   saving: boolean
   onClose: () => void
-  onSave: (settings: AiModelSettings) => Promise<void>
+  onSave: (settings: AiModelSettings) => Promise<AiModelSettings>
   onRefresh: () => Promise<AiModelSettings>
 }
 
 type RefreshOptions = {
   showLoading?: boolean
+}
+
+type ModelRefreshOptions = {
+  silentIfBusy?: boolean
 }
 
 function ModelConfigDialog({
@@ -190,28 +194,76 @@ function ModelConfigDialog({
     cloneAiSettings(initialSettings),
   )
   const [error, setError] = useState<string | null>(null)
+  const [notice, setNotice] = useState<string | null>(null)
   const [modelPickerOpen, setModelPickerOpen] = useState(false)
   const [modelEditor, setModelEditor] = useState<ModelEditorState | null>(null)
   const [refreshing, setRefreshing] = useState(false)
+  const draftDirtyRef = useRef(false)
+  const modelPickerOpenRef = useRef(false)
+  const modelEditorOpenRef = useRef(false)
 
-  const handleRefresh = useCallback(async () => {
+  const markDraftDirty = useCallback(() => {
+    draftDirtyRef.current = true
+    setNotice(null)
+  }, [])
+
+  const canApplyRefreshedSettings = useCallback(
+    () =>
+      !draftDirtyRef.current &&
+      !modelPickerOpenRef.current &&
+      !modelEditorOpenRef.current,
+    [],
+  )
+
+  const openModelPicker = useCallback(() => {
+    modelPickerOpenRef.current = true
+    setModelPickerOpen(true)
+    setError(null)
+    setNotice(null)
+  }, [])
+
+  const closeModelPicker = useCallback(() => {
+    modelPickerOpenRef.current = false
+    setModelPickerOpen(false)
+  }, [])
+
+  const closeModelEditor = useCallback(() => {
+    modelEditorOpenRef.current = false
+    setModelEditor(null)
+  }, [])
+
+  const handleRefresh = useCallback(async (options?: ModelRefreshOptions) => {
+    if (!canApplyRefreshedSettings()) {
+      if (!options?.silentIfBusy) {
+        setError('当前有未保存的模型配置，请先保存或取消后再刷新')
+      }
+      return
+    }
     setRefreshing(true)
     setError(null)
+    setNotice(null)
     try {
       const settings = await onRefresh()
+      if (!canApplyRefreshedSettings()) {
+        if (!options?.silentIfBusy) {
+          setError('模型配置已刷新，但当前正在编辑，暂未覆盖本地内容')
+        }
+        return
+      }
       setDraft(cloneAiSettings(settings))
+      draftDirtyRef.current = false
     } catch (e) {
       setError(e instanceof Error ? e.message : '刷新模型配置失败')
     } finally {
       setRefreshing(false)
     }
-  }, [onRefresh])
+  }, [canApplyRefreshedSettings, onRefresh])
 
   useEffect(() => {
     let cancelled = false
     const timer = window.setTimeout(() => {
       if (cancelled) return
-      void handleRefresh()
+      void handleRefresh({ silentIfBusy: true })
     }, 0)
     return () => {
       cancelled = true
@@ -224,9 +276,9 @@ function ModelConfigDialog({
       if (event.key === 'Escape' && !saving) {
         event.preventDefault()
         if (modelEditor) {
-          setModelEditor(null)
+          closeModelEditor()
         } else if (modelPickerOpen) {
-          setModelPickerOpen(false)
+          closeModelPicker()
         } else {
           onClose()
         }
@@ -234,10 +286,11 @@ function ModelConfigDialog({
     }
     document.addEventListener('keydown', onKeyDown)
     return () => document.removeEventListener('keydown', onKeyDown)
-  }, [modelEditor, modelPickerOpen, onClose, saving])
+  }, [closeModelEditor, closeModelPicker, modelEditor, modelPickerOpen, onClose, saving])
 
   const updateModel = useCallback(
     (index: number, patch: Partial<AiModelConfig>) => {
+      markDraftDirty()
       setDraft((prev) => {
         const previous = prev.text.models[index]
         const models = prev.text.models.map((model, i) =>
@@ -257,10 +310,11 @@ function ModelConfigDialog({
         }
       })
     },
-    [],
+    [markDraftDirty],
   )
 
   const appendModel = useCallback((next: AiModelConfig) => {
+    markDraftDirty()
     setDraft((prev) => {
       if (prev.text.models.some((model) => model.id === next.id)) {
         return prev
@@ -275,13 +329,15 @@ function ModelConfigDialog({
       }
     })
     setError(null)
-  }, [])
+  }, [markDraftDirty])
 
   const openModelEditor = useCallback(
     (preset?: OfficialTextModelPreset) => {
       const draftModel = preset
         ? { ...preset, api_key: '' }
         : createAvailableDraftModel(draft.text.models)
+      modelEditorOpenRef.current = true
+      modelPickerOpenRef.current = false
       setModelEditor({
         mode: preset ? 'official' : 'custom',
         draft: draftModel,
@@ -290,6 +346,7 @@ function ModelConfigDialog({
       })
       setModelPickerOpen(false)
       setError(null)
+      setNotice(null)
     },
     [draft.text.models],
   )
@@ -332,7 +389,7 @@ function ModelConfigDialog({
           model_id,
           api_key,
         })
-        setModelEditor(null)
+        closeModelEditor()
         return
       }
 
@@ -370,12 +427,13 @@ function ModelConfigDialog({
         next.stream = Boolean(modelEditor.draft.stream)
       }
       appendModel(next)
-      setModelEditor(null)
+      closeModelEditor()
     },
-    [appendModel, draft.text.models, modelEditor],
+    [appendModel, closeModelEditor, draft.text.models, modelEditor],
   )
 
   const removeModel = useCallback((index: number) => {
+    markDraftDirty()
     setDraft((prev) => {
       const removed = prev.text.models[index]
       const models = prev.text.models.filter((_, i) => i !== index)
@@ -391,9 +449,10 @@ function ModelConfigDialog({
         },
       }
     })
-  }, [])
+  }, [markDraftDirty])
 
   const updateImage = useCallback((field: keyof NonNullable<AiModelSettings['image']>, value: string) => {
+    markDraftDirty()
     setDraft((prev) => ({
       ...prev,
       image: {
@@ -401,15 +460,17 @@ function ModelConfigDialog({
         [field]: value,
       },
     }))
-  }, [])
+  }, [markDraftDirty])
 
   const clearImage = useCallback(() => {
+    markDraftDirty()
     setDraft((prev) => ({ ...prev, image: null }))
-  }, [])
+  }, [markDraftDirty])
 
   const validateAndSave = async (event: React.FormEvent) => {
     event.preventDefault()
     setError(null)
+    setNotice(null)
 
     const models = draft.text.models.map((model) => {
       const officialPreset = getOfficialTextModelPreset(model)
@@ -470,7 +531,10 @@ function ModelConfigDialog({
       image: imageDraft?.model && imageDraft.api_key ? imageDraft : null,
     })
     try {
-      await onSave(settings)
+      const saved = await onSave(settings)
+      setDraft(cloneAiSettings(saved))
+      draftDirtyRef.current = false
+      setNotice('模型配置已保存')
     } catch (err) {
       setError(err instanceof Error ? err.message : '保存模型配置失败')
     }
@@ -522,7 +586,7 @@ function ModelConfigDialog({
                   <button
                     type="button"
                     className="btn-secondary btn-small"
-                    onClick={() => setModelPickerOpen(true)}
+                    onClick={openModelPicker}
                   >
                     添加模型
                   </button>
@@ -551,12 +615,13 @@ function ModelConfigDialog({
                               type="radio"
                               name="defaultTextModel"
                               checked={draft.text.default_model_id === model.id}
-                              onChange={() =>
+                              onChange={() => {
+                                markDraftDirty()
                                 setDraft((prev) => ({
                                   ...prev,
                                   text: { ...prev.text, default_model_id: model.id },
                                 }))
-                              }
+                              }}
                             />
                             默认
                           </label>
@@ -759,6 +824,7 @@ function ModelConfigDialog({
               </div>
             </section>
 
+            {notice && <p className="form-success" role="status">{notice}</p>}
             {error && <p className="form-error">{error}</p>}
           </div>
 
@@ -783,7 +849,7 @@ function ModelConfigDialog({
             className="model-picker-backdrop"
             role="presentation"
             onClick={(event) => {
-              if (event.target === event.currentTarget) setModelPickerOpen(false)
+              if (event.target === event.currentTarget) closeModelPicker()
             }}
           >
             <section
@@ -798,7 +864,7 @@ function ModelConfigDialog({
                   type="button"
                   className="model-config-close"
                   aria-label="关闭模型选择"
-                  onClick={() => setModelPickerOpen(false)}
+                  onClick={closeModelPicker}
                 >
                   ×
                 </button>
@@ -845,7 +911,7 @@ function ModelConfigDialog({
             className="model-editor-backdrop"
             role="presentation"
             onClick={(event) => {
-              if (event.target === event.currentTarget) setModelEditor(null)
+              if (event.target === event.currentTarget) closeModelEditor()
             }}
           >
             <section
@@ -865,7 +931,7 @@ function ModelConfigDialog({
                     type="button"
                     className="model-config-close"
                     aria-label="关闭模型配置"
-                    onClick={() => setModelEditor(null)}
+                    onClick={closeModelEditor}
                   >
                     ×
                   </button>
@@ -1005,7 +1071,7 @@ function ModelConfigDialog({
                   <button
                     type="button"
                     className="btn-secondary"
-                    onClick={() => setModelEditor(null)}
+                    onClick={closeModelEditor}
                   >
                     取消
                   </button>
@@ -1743,14 +1809,20 @@ export function Home() {
     }
   }
 
-  const handleSaveAiSettings = async (settings: AiModelSettings) => {
+  const handleSaveAiSettings = async (
+    settings: AiModelSettings,
+  ): Promise<AiModelSettings> => {
     setSavingAiSettings(true)
     setModelConfigError(null)
     try {
       const saved = await saveAiModelConfig(settings)
       setAiSettings(saved)
-      await refreshPreferredWorkspaceChatModel()
-      setModelConfigOpen(false)
+      try {
+        await refreshPreferredWorkspaceChatModel()
+      } catch (e) {
+        console.warn('[WriteClaw] 刷新 AI 模型偏好失败，模型配置已保存。', e)
+      }
+      return saved
     } catch (e) {
       const message = e instanceof Error ? e.message : '保存模型配置失败'
       setModelConfigError(message)

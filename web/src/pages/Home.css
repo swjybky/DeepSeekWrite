@@ -556,6 +556,15 @@
   background: color-mix(in oklab, var(--danger) 8%, var(--paper));
 }
 
+.form-success {
+  color: var(--jade);
+  font-size: 0.8125rem;
+  margin: 0 0 0.75rem;
+  padding: 0.5rem 0.65rem;
+  border-radius: var(--radius-sm);
+  background: color-mix(in oklab, var(--jade) 8%, var(--paper));
+}
+
 /* —— 创建书籍 / 素材 / 技能弹窗 —— */
 .create-dialog-backdrop {
   position: fixed;
