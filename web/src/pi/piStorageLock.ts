@@ -1,4 +1,4 @@
-const LOCK_NAME = 'write_claw_pi_storage'
+const LOCK_NAME = 'deepseekwrite_pi_storage'
 
 let inProcessChain: Promise<void> = Promise.resolve()
 

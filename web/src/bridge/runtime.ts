@@ -119,7 +119,7 @@ export async function getBridgeApi(): Promise<BridgeApi | undefined> {
     if (memoBrowserOnly) return undefined
     if (!resolved && isPywebviewDesktopBundle()) {
       throw new Error(
-        '桌面桥接不可用：pywebview.api 未在限定时间内注入。请重启应用；若仍复现，请设置 WRITECLAW_DEBUG=1 查看控制台。',
+        '桌面桥接不可用：pywebview.api 未在限定时间内注入。请重启应用；若仍复现，请设置 DEEPSEEKWRITE_DEBUG=1 查看控制台。',
       )
     }
     return resolved

@@ -7,9 +7,9 @@ import type {
   StageId,
 } from '../../domain/workspace'
 import {
-  WORKSPACE_CONTENT_STAGES,
   normalizeExpertDraft,
   normalizeStagesForWorkspaceBook,
+  resolveWorkspaceContentStagesForBook,
 } from '../../domain/workspace'
 import { PLOT_STAGE_ID } from '../../workspaces/short/stages'
 import type {
@@ -64,6 +64,18 @@ function resolvePersistedSnapshot(
   )
 }
 
+function contentStageIdsForSession(
+  session: BookWorkspaceSessionState,
+  snapshot?: BookPersistedSnapshot,
+): string[] {
+  const ids = new Set<string>(
+    resolveWorkspaceContentStagesForBook(session.book).map((stage) => stage.id),
+  )
+  for (const key of Object.keys(session.stages)) ids.add(key)
+  for (const key of Object.keys(snapshot?.stages ?? {})) ids.add(key)
+  return [...ids].sort()
+}
+
 export function bookSessionHasUnsavedChanges(
   session: BookWorkspaceSessionState,
   tokenBuffers: Partial<Record<StageId, string>> | undefined,
@@ -75,8 +87,8 @@ export function bookSessionHasUnsavedChanges(
     return true
   }
   const snapshot = resolvePersistedSnapshot(session)
-  for (const stage of WORKSPACE_CONTENT_STAGES) {
-    if ((session.stages[stage.id] ?? '') !== (snapshot.stages[stage.id] ?? '')) {
+  for (const stageId of contentStageIdsForSession(session, snapshot)) {
+    if ((session.stages[stageId] ?? '') !== (snapshot.stages[stageId] ?? '')) {
       return true
     }
   }
@@ -90,9 +102,9 @@ export function workspaceSessionContentFingerprint(
   session: BookWorkspaceSessionState,
 ): string {
   return JSON.stringify({
-    stages: WORKSPACE_CONTENT_STAGES.map((stage) => [
-      stage.id,
-      session.stages[stage.id] ?? '',
+    stages: contentStageIdsForSession(session).map((stageId) => [
+      stageId,
+      session.stages[stageId] ?? '',
     ]),
     expertDraft: expertDraftPersistedFingerprint(session.expertDraft),
   })
@@ -150,18 +162,22 @@ export function createBookWorkspaceSession(input: {
     input.resetExpertRuntime,
     input.book.book_type,
   )
-  const expertDraft = hydrateExpertDraftFromDraftStage(
-    normalizedExpertDraft,
-    normalizedStages.draft ?? '',
-    input.book.book_type,
-  )
-  const stages = (normalizedStages.draft ?? '').trim()
-    ? normalizedStages
-    : mapExpertDraftToDraftStage(normalizedStages, expertDraft)
+  const expertDraft =
+    input.book.book_type === 'long'
+      ? normalizedExpertDraft
+      : hydrateExpertDraftFromDraftStage(
+          normalizedExpertDraft,
+          normalizedStages.draft ?? '',
+          input.book.book_type,
+        )
+  const stages =
+    input.book.book_type === 'long' || (normalizedStages.draft ?? '').trim()
+      ? normalizedStages
+      : mapExpertDraftToDraftStage(normalizedStages, expertDraft)
   const book = {
     ...input.book,
     stages,
-    content: stages.draft,
+    content: stages.draft ?? input.book.content,
     expert_draft: expertDraft,
   }
   const persistedSnapshot =

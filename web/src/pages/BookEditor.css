@@ -790,6 +790,22 @@ button.back-link:hover {
   gap: 0.18rem;
 }
 
+.workspace-tree-stage-children--nested {
+  margin-top: 0.08rem;
+  margin-left: 0.72rem;
+  padding-left: 0.62rem;
+}
+
+.workspace-tree-stage-child-node {
+  min-width: 0;
+}
+
+.workspace-tree-stage-child-row {
+  display: flex;
+  align-items: stretch;
+  gap: 0.1rem;
+}
+
 .workspace-tree-stage-child {
   position: relative;
   width: 100%;
@@ -808,6 +824,12 @@ button.back-link:hover {
   white-space: normal;
   overflow-wrap: anywhere;
   word-break: break-word;
+}
+
+.workspace-tree-stage-child--branch {
+  flex: 1;
+  min-width: 0;
+  font-weight: 600;
 }
 
 .workspace-tree-stage-child::before {
@@ -1569,60 +1591,60 @@ button.back-link:hover {
   box-shadow: 0 1px 0 rgb(255 255 255 / 36%) inset;
 }
 
-/* Write Claw 工具调用：古风/现代双图标 + 主题色（随 data-appearance 切换，无需重渲染） */
-.workspace-ai .write-claw-tool-glyph--modern {
+/* DeepSeekWrite 工具调用：古风/现代双图标 + 主题色（随 data-appearance 切换，无需重渲染） */
+.workspace-ai .deepseekwrite-tool-glyph--modern {
   display: none;
 }
 
-.workspace-ai .write-claw-tool-glyph--classic {
+.workspace-ai .deepseekwrite-tool-glyph--classic {
   display: inline-block;
 }
 
-:root[data-appearance='modern'] .workspace-ai .write-claw-tool-glyph--classic {
+:root[data-appearance='modern'] .workspace-ai .deepseekwrite-tool-glyph--classic {
   display: none;
 }
 
-:root[data-appearance='modern'] .workspace-ai .write-claw-tool-glyph--modern {
+:root[data-appearance='modern'] .workspace-ai .deepseekwrite-tool-glyph--modern {
   display: inline-block;
 }
 
-.workspace-ai .write-claw-tool-header,
-.workspace-ai .write-claw-tool-header-btn {
+.workspace-ai .deepseekwrite-tool-header,
+.workspace-ai .deepseekwrite-tool-header-btn {
   color: var(--ink-faint);
 }
 
-.workspace-ai .write-claw-tool-header-btn:hover {
+.workspace-ai .deepseekwrite-tool-header-btn:hover {
   color: var(--ink);
 }
 
-.workspace-ai .write-claw-tool-summary {
+.workspace-ai .deepseekwrite-tool-summary {
   color: var(--ink-faint);
 }
 
-.workspace-ai .write-claw-tool-header-btn:hover .write-claw-tool-summary {
+.workspace-ai .deepseekwrite-tool-header-btn:hover .deepseekwrite-tool-summary {
   color: var(--ink);
 }
 
-.workspace-ai .write-claw-tool-icon--complete,
-.workspace-ai .write-claw-tool-icon--progress {
+.workspace-ai .deepseekwrite-tool-icon--complete,
+.workspace-ai .deepseekwrite-tool-icon--progress {
   color: var(--gold);
 }
 
-:root[data-appearance='modern'] .workspace-ai .write-claw-tool-icon--complete,
-:root[data-appearance='modern'] .workspace-ai .write-claw-tool-icon--progress {
+:root[data-appearance='modern'] .workspace-ai .deepseekwrite-tool-icon--complete,
+:root[data-appearance='modern'] .workspace-ai .deepseekwrite-tool-icon--progress {
   color: var(--accent);
 }
 
-.workspace-ai .write-claw-tool-icon--error {
+.workspace-ai .deepseekwrite-tool-icon--error {
   color: var(--danger);
 }
 
-.workspace-ai .write-claw-tool-spinner,
-.workspace-ai .write-claw-tool-chevron {
+.workspace-ai .deepseekwrite-tool-spinner,
+.workspace-ai .deepseekwrite-tool-chevron {
   color: var(--ink-faint);
 }
 
-.workspace-ai .write-claw-tool-header-btn:hover .write-claw-tool-chevron {
+.workspace-ai .deepseekwrite-tool-header-btn:hover .deepseekwrite-tool-chevron {
   color: var(--ink-soft);
 }
 

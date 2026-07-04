@@ -641,7 +641,7 @@ function ModelConfigDialog({
 
                         {builtinFreeModel ? (
                           <div className="model-config-locked-summary">
-                            <strong>{model.label || 'DeepseekWriteFree'}</strong>
+                            <strong>{model.label || 'DeepSeekWriteFree'}</strong>
                             <span>{model.model_id}</span>
                           </div>
                         ) : officialPreset ? (
@@ -1547,7 +1547,8 @@ export function Home() {
   const [deletingBookId, setDeletingBookId] = useState<string | null>(null)
   const [bookError, setBookError] = useState<string | null>(null)
   const [userMemoryOpen, setUserMemoryOpen] = useState(false)
-  const [userMemoryType, setUserMemoryType] = useState<'short' | 'script'>('short')
+  const [userMemoryType, setUserMemoryType] =
+    useState<'short' | 'long' | 'script'>('short')
   const [userMemories, setUserMemories] = useState<MemoryEntry[]>([])
   const [userMemoryResetKey, setUserMemoryResetKey] = useState(0)
   const [loadingUserMemories, setLoadingUserMemories] = useState(false)
@@ -1903,8 +1904,8 @@ export function Home() {
     setBookError(null)
     try {
       const cats = bookType === 'short' || bookType === 'script' ? [shortGenre] : []
-      const linkedSkillId = bookType === 'short' || bookType === 'script' ? bookLinkedSkillId : ''
-      const linkedMaterialId = bookType === 'short' || bookType === 'script' ? bookLinkedMaterialId : ''
+      const linkedSkillId = bookLinkedSkillId
+      const linkedMaterialId = bookLinkedMaterialId
       await createBook(bookTitle, bookType, cats, ws, linkedSkillId || null, linkedMaterialId || null)
       setBookTitle('')
       setBookType('short')
@@ -2206,7 +2207,7 @@ export function Home() {
   }, [])
 
   // ==================== 渲染 ====================
-  const loadUserMemoryList = useCallback(async (type: 'short' | 'script') => {
+  const loadUserMemoryList = useCallback(async (type: 'short' | 'long' | 'script') => {
     setLoadingUserMemories(true)
     setUserMemoryError(null)
     try {
@@ -2228,7 +2229,7 @@ export function Home() {
   }, [loadUserMemoryList, userMemoryType])
 
   const switchUserMemoryType = useCallback(
-    (type: 'short' | 'script') => {
+    (type: 'short' | 'long' | 'script') => {
       if (type === userMemoryType) return
       setUserMemoryType(type)
       void loadUserMemoryList(type)
@@ -2289,7 +2290,7 @@ export function Home() {
     <div className="home">
       <header className="home-header">
         <div className="home-brand">
-          <h1 className="home-title">DeepseekWrite</h1>
+          <h1 className="home-title">DeepSeekWrite</h1>
           <span className="home-tagline muted">简素为骨 · 笔墨为形</span>
         </div>
         <nav className="home-config-nav" aria-label="系统设置">
@@ -2843,7 +2844,11 @@ export function Home() {
                   type="radio"
                   name="bookType"
                   checked={bookType === 'short'}
-                  onChange={() => setBookType('short')}
+                  onChange={() => {
+                    setBookType('short')
+                    setBookLinkedSkillId('')
+                    setBookLinkedMaterialId('')
+                  }}
                 />
                 短篇
               </label>
@@ -2852,7 +2857,11 @@ export function Home() {
                   type="radio"
                   name="bookType"
                   checked={bookType === 'script'}
-                  onChange={() => setBookType('script')}
+                  onChange={() => {
+                    setBookType('script')
+                    setBookLinkedSkillId('')
+                    setBookLinkedMaterialId('')
+                  }}
                 />
                 剧本
               </label>
@@ -2891,39 +2900,44 @@ export function Home() {
                 </div>
               </fieldset>
 
-              <label className="field">
-                <span className="field-label">绑定技能库</span>
-                <select
-                  value={bookLinkedSkillId}
-                  onChange={(e) => setBookLinkedSkillId(e.target.value)}
-                  disabled={loadingSkills}
-                >
-                  <option value="">不绑定</option>
-                  {skills.map((skill) => (
-                    <option key={skill.id} value={skill.id}>
-                      {skill.title}
-                    </option>
-                  ))}
-                </select>
-              </label>
-
-              <label className="field">
-                <span className="field-label">绑定素材库</span>
-                <select
-                  value={bookLinkedMaterialId}
-                  onChange={(e) => setBookLinkedMaterialId(e.target.value)}
-                  disabled={loadingMaterials}
-                >
-                  <option value="">不绑定</option>
-                  {materials.map((material) => (
-                    <option key={material.id} value={material.id}>
-                      {material.title}
-                    </option>
-                  ))}
-                </select>
-              </label>
             </>
           )}
+
+          <label className="field">
+            <span className="field-label">绑定技能库</span>
+            <select
+              value={bookLinkedSkillId}
+              onChange={(e) => setBookLinkedSkillId(e.target.value)}
+              disabled={loadingSkills}
+            >
+              <option value="">不绑定</option>
+              {skills
+                .filter((skill) => skill.skill_type === bookType)
+                .map((skill) => (
+                  <option key={skill.id} value={skill.id}>
+                    {skill.title}
+                  </option>
+                ))}
+            </select>
+          </label>
+
+          <label className="field">
+            <span className="field-label">绑定素材库</span>
+            <select
+              value={bookLinkedMaterialId}
+              onChange={(e) => setBookLinkedMaterialId(e.target.value)}
+              disabled={loadingMaterials}
+            >
+              <option value="">不绑定</option>
+              {materials
+                .filter((material) => material.material_type === bookType)
+                .map((material) => (
+                  <option key={material.id} value={material.id}>
+                    {material.title}
+                  </option>
+                ))}
+            </select>
+          </label>
 
           {bookError && <p className="form-error">{bookError}</p>}
         </CreateDialog>
@@ -3068,7 +3082,7 @@ export function Home() {
           resetKey={userMemoryResetKey}
           headerActions={
             <div className="memory-dialog-tabs" role="tablist" aria-label="记忆类型">
-              {(['short', 'script'] as const).map((type) => (
+              {(['short', 'long', 'script'] as const).map((type) => (
                 <button
                   key={type}
                   type="button"

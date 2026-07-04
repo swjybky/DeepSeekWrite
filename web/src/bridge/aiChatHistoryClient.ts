@@ -2,7 +2,7 @@ import type { AgentMessage, ThinkingLevel } from '@earendil-works/pi-agent-core'
 import type { Api, Model } from '@earendil-works/pi-ai'
 import { getBridgeApi } from './runtime'
 
-const AI_CHAT_HISTORY_MOCK_KEY = 'write_claw_dev_ai_chat_history'
+const AI_CHAT_HISTORY_MOCK_KEY = 'deepseekwrite_dev_ai_chat_history'
 const MAX_SESSIONS_PER_SCOPE = 20
 
 export type AiChatOwnerType = 'book' | 'material' | 'skill'

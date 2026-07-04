@@ -681,59 +681,59 @@
   box-shadow: 0 1px 0 rgb(255 255 255 / 36%) inset;
 }
 
-.learning-ai-pane .write-claw-tool-glyph--modern {
+.learning-ai-pane .deepseekwrite-tool-glyph--modern {
   display: none;
 }
 
-.learning-ai-pane .write-claw-tool-glyph--classic {
+.learning-ai-pane .deepseekwrite-tool-glyph--classic {
   display: inline-block;
 }
 
-:root[data-appearance='modern'] .learning-ai-pane .write-claw-tool-glyph--classic {
+:root[data-appearance='modern'] .learning-ai-pane .deepseekwrite-tool-glyph--classic {
   display: none;
 }
 
-:root[data-appearance='modern'] .learning-ai-pane .write-claw-tool-glyph--modern {
+:root[data-appearance='modern'] .learning-ai-pane .deepseekwrite-tool-glyph--modern {
   display: inline-block;
 }
 
-.learning-ai-pane .write-claw-tool-header,
-.learning-ai-pane .write-claw-tool-header-btn {
+.learning-ai-pane .deepseekwrite-tool-header,
+.learning-ai-pane .deepseekwrite-tool-header-btn {
   color: var(--ink-faint);
 }
 
-.learning-ai-pane .write-claw-tool-header-btn:hover {
+.learning-ai-pane .deepseekwrite-tool-header-btn:hover {
   color: var(--ink);
 }
 
-.learning-ai-pane .write-claw-tool-summary {
+.learning-ai-pane .deepseekwrite-tool-summary {
   color: var(--ink-faint);
 }
 
-.learning-ai-pane .write-claw-tool-header-btn:hover .write-claw-tool-summary {
+.learning-ai-pane .deepseekwrite-tool-header-btn:hover .deepseekwrite-tool-summary {
   color: var(--ink);
 }
 
-.learning-ai-pane .write-claw-tool-icon--complete,
-.learning-ai-pane .write-claw-tool-icon--progress {
+.learning-ai-pane .deepseekwrite-tool-icon--complete,
+.learning-ai-pane .deepseekwrite-tool-icon--progress {
   color: var(--gold);
 }
 
-:root[data-appearance='modern'] .learning-ai-pane .write-claw-tool-icon--complete,
-:root[data-appearance='modern'] .learning-ai-pane .write-claw-tool-icon--progress {
+:root[data-appearance='modern'] .learning-ai-pane .deepseekwrite-tool-icon--complete,
+:root[data-appearance='modern'] .learning-ai-pane .deepseekwrite-tool-icon--progress {
   color: var(--accent);
 }
 
-.learning-ai-pane .write-claw-tool-icon--error {
+.learning-ai-pane .deepseekwrite-tool-icon--error {
   color: var(--danger);
 }
 
-.learning-ai-pane .write-claw-tool-spinner,
-.learning-ai-pane .write-claw-tool-chevron {
+.learning-ai-pane .deepseekwrite-tool-spinner,
+.learning-ai-pane .deepseekwrite-tool-chevron {
   color: var(--ink-faint);
 }
 
-.learning-ai-pane .write-claw-tool-header-btn:hover .write-claw-tool-chevron {
+.learning-ai-pane .deepseekwrite-tool-header-btn:hover .deepseekwrite-tool-chevron {
   color: var(--ink-soft);
 }
 

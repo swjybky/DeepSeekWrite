@@ -1,5 +1,7 @@
 import { WorkspaceTreeNav } from '../../components/WorkspaceTreeNav'
 import type { Book, StageId } from '../../domain/workspace'
+import { LongWorkspaceTree } from '../../workspaces/long/LongWorkspaceTree'
+import type { LongStageId } from '../../workspaces/long/stages'
 import { PLOT_STAGE_ID } from '../../workspaces/short/stages'
 import type { PlotChildStageId } from './workspaceTypes'
 import { isPlotChildStageId } from './stageEditing'
@@ -25,6 +27,7 @@ type Props = {
   book: Book
   workspaceTreeStages: TreeStage[]
   workspaceTreeBooks: TreeBook[]
+  stages: Record<StageId, string>
   activeStage: StageId
   activePlotChildStage: PlotChildStageId | ''
   activeExpertDraftSectionId: string
@@ -48,6 +51,9 @@ type Props = {
     childId: string,
   ) => void
   onTreeBookStageChildCreate: (bookId: string, stageId: StageId) => void
+  onLongDraftVolumeCreate: () => void
+  onLongDraftArcCreate: (volumeNumber: number) => void
+  onLongDraftChapterCreate: (volumeNumber: number, arcNumber: number) => void
 }
 
 function activeStageChildId(
@@ -64,6 +70,7 @@ export function WorkspaceRailPanel({
   book,
   workspaceTreeStages,
   workspaceTreeBooks,
+  stages,
   activeStage,
   activePlotChildStage,
   activeExpertDraftSectionId,
@@ -83,12 +90,39 @@ export function WorkspaceRailPanel({
   onTreeBookStageSelect,
   onTreeBookStageChildSelect,
   onTreeBookStageChildCreate,
+  onLongDraftVolumeCreate,
+  onLongDraftArcCreate,
+  onLongDraftChapterCreate,
 }: Props) {
   const childId = activeStageChildId(
     activeStage,
     activePlotChildStage,
     activeExpertDraftSectionId,
   )
+
+  if (book.book_type === 'long') {
+    return (
+      <aside className="workspace-rail workspace-rail--tree">
+        <LongWorkspaceTree
+          rootLabel={book.title}
+          stages={stages}
+          activeStageId={activeStage as LongStageId}
+          onStageSelect={(stageId) => onActiveStageSelect(stageId as StageId)}
+          onCreateDraftVolume={onLongDraftVolumeCreate}
+          onCreateDraftArc={onLongDraftArcCreate}
+          onCreateDraftChapter={onLongDraftChapterCreate}
+          editingTitle={editingTitle}
+          titleDraft={titleDraft}
+          onTitleDraftChange={onTitleDraftChange}
+          onTitleEditStart={onTitleEditStart}
+          onTitleEditEnd={onTitleEditEnd}
+          onTitleEditCancel={onTitleEditCancel}
+          titleInputControls={titleInputControls}
+          onTitleInputKeyDown={onTitleInputKeyDown}
+        />
+      </aside>
+    )
+  }
 
   return (
     <aside className="workspace-rail workspace-rail--tree">

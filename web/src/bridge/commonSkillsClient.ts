@@ -5,7 +5,7 @@ import {
   type SkillStageId,
 } from './libraryDomain'
 
-const COMMON_SKILLS_MOCK_KEY = 'write_claw_dev_common_skills'
+const COMMON_SKILLS_MOCK_KEY = 'deepseekwrite_dev_common_skills'
 const COMMON_SKILLS_MODULES = import.meta.glob(
   '../../../app/prompt_defaults/skill/common_skills.json',
   { eager: true, import: 'default' },

@@ -6,11 +6,18 @@ import {
   type ShortStageId,
 } from '../workspaces/short/stages'
 import {
+  SCRIPT_WORKSPACE_CONTENT_STAGES,
   SCRIPT_WORKSPACE_STAGES,
   migrateLegacyStages as migrateLegacyScriptStages,
   normalizeScriptStages,
   type ScriptStageId,
 } from '../workspaces/script/stages'
+import {
+  LONG_WORKSPACE_CONTENT_STAGES,
+  LONG_WORKSPACE_STAGES,
+  normalizeLongStages,
+  type LongStageId,
+} from '../workspaces/long/stages'
 import { isWorkspaceTypeEnabled } from '../workspaces/registry'
 
 export type BookType = 'short' | 'long' | 'script'
@@ -71,14 +78,14 @@ export function normalizeMemoryEntries(raw: unknown): MemoryEntry[] {
   return out
 }
 
-export type { ShortStageId, ScriptStageId }
+export type { ShortStageId, ScriptStageId, LongStageId }
 
 type BookWorkspaceSlice = {
   book_type: BookType
   categories: string[]
 }
 
-/** 短篇和剧本拥有完整创作空间；长篇暂未开放工作台。 */
+/** 短篇、剧本和长篇拥有各自隔离的创作空间。 */
 export function isWorkspaceBook(book: BookWorkspaceSlice): boolean {
   return isWorkspaceTypeEnabled(book.book_type)
 }
@@ -100,7 +107,7 @@ export function bookTypeLabel(bookType: BookType): string {
 }
 
 // 统一阶段ID类型
-export type StageId = ShortStageId | ScriptStageId
+export type StageId = ShortStageId | ScriptStageId | LongStageId
 
 // 导出统一阶段定义
 export const WORKSPACE_STAGES = SHORT_WORKSPACE_STAGES
@@ -127,6 +134,14 @@ export interface ExpertDraft {
 }
 
 export function defaultExpertDraft(bookType: BookType = 'short'): ExpertDraft {
+  if (bookType === 'long') {
+    return {
+      sections: [],
+      character_states: [],
+      running: false,
+      active_section_id: '',
+    }
+  }
   if (bookType === 'script') {
     return {
       sections: [
@@ -162,6 +177,7 @@ export function normalizeExpertDraft(
   resetRuntime = false,
   bookType: BookType = 'short',
 ): ExpertDraft {
+  if (bookType === 'long') return defaultExpertDraft('long')
   const base = defaultExpertDraft(bookType)
   if (!raw || typeof raw !== 'object') return base
 
@@ -248,11 +264,22 @@ export const SCRIPT_GENRE_OPTIONS = ['世情', '追妻', '科幻', '悬疑', '�
 
 /** 获取统一阶段列表（所有短篇书籍使用同一套阶段） */
 export function resolveWorkspaceStagesForBook(
-  book?: Pick<Book, 'book_type' | 'categories'>,
-): typeof SHORT_WORKSPACE_STAGES | typeof SCRIPT_WORKSPACE_STAGES {
+  book?: Pick<Book, 'book_type'> | null,
+): typeof SHORT_WORKSPACE_STAGES | typeof SCRIPT_WORKSPACE_STAGES | typeof LONG_WORKSPACE_STAGES {
+  if (book?.book_type === 'long') return LONG_WORKSPACE_STAGES
+  return book?.book_type === 'script' ? SCRIPT_WORKSPACE_STAGES : SHORT_WORKSPACE_STAGES
+}
+
+export function resolveWorkspaceContentStagesForBook(
+  book?: Pick<Book, 'book_type'> | null,
+):
+  | typeof SHORT_WORKSPACE_CONTENT_STAGES
+  | typeof SCRIPT_WORKSPACE_CONTENT_STAGES
+  | typeof LONG_WORKSPACE_CONTENT_STAGES {
+  if (book?.book_type === 'long') return LONG_WORKSPACE_CONTENT_STAGES
   return book?.book_type === 'script'
-    ? SCRIPT_WORKSPACE_STAGES
-    : SHORT_WORKSPACE_STAGES
+    ? SCRIPT_WORKSPACE_CONTENT_STAGES
+    : SHORT_WORKSPACE_CONTENT_STAGES
 }
 
 /** 两端存储中的「全字段」工作台 stages（统一阶段键） */
@@ -264,9 +291,14 @@ export function normalizeAllBookStages(
 
 /** 仅当前工作台在用的阶段子集（用于编辑区 state） */
 export function normalizeStagesForWorkspaceBook(
-  book?: Pick<Book, 'book_type' | 'categories'>,
+  book?: Pick<Book, 'book_type'> | null,
   raw?: Partial<Record<StageId, string>> | null,
 ): Record<StageId, string> {
+  if (book?.book_type === 'long') {
+    return normalizeLongStages(
+      raw as Partial<Record<LongStageId, string>>,
+    ) as Record<StageId, string>
+  }
   if (book?.book_type === 'script') {
     const migrated = migrateLegacyScriptStages(raw)
     return normalizeScriptStages(migrated) as Record<StageId, string>
@@ -279,12 +311,18 @@ export function normalizeStagesForWorkspaceBook(
 export function mergeStagePatchIntoAll(
   previous: Partial<Record<StageId, string>> | undefined,
   patch: Partial<Record<StageId, string>>,
+  book?: Pick<Book, 'book_type'> | null,
 ): Record<StageId, string> {
   const next = { ...(previous ?? {}) } as Record<string, string>
-  for (const stage of WORKSPACE_CONTENT_STAGES) {
+  for (const stage of resolveWorkspaceContentStagesForBook(book)) {
     if (!(stage.id in next)) next[stage.id] = ''
   }
-  const migratedPatch = migrateLegacyStages(patch)
+  const migratedPatch =
+    book?.book_type === 'script'
+      ? migrateLegacyScriptStages(patch)
+      : book?.book_type === 'long'
+        ? patch
+        : migrateLegacyStages(patch)
   for (const [k, v] of Object.entries(migratedPatch)) {
     next[k] = String(v ?? '')
   }
@@ -292,7 +330,7 @@ export function mergeStagePatchIntoAll(
 }
 
 export function primaryDraftStageId(
-  _book?: Pick<Book, 'book_type' | 'categories'>,
+  _book?: Pick<Book, 'book_type'> | null,
 ): StageId {
   void _book
   return 'draft'

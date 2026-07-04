@@ -8,6 +8,10 @@ import {
   SCRIPT_WORKSPACE_CONTENT_STAGES,
   SCRIPT_WORKSPACE_STAGES,
 } from './script/stages'
+import {
+  LONG_WORKSPACE_CONTENT_STAGES,
+  LONG_WORKSPACE_STAGES,
+} from './long/stages'
 
 export type WorkspaceType = 'short' | 'script' | 'long'
 
@@ -25,8 +29,6 @@ export type WorkspaceDefinition = {
   plotChildStages: readonly WorkspaceStageDefinition[]
   expertDraftMode: 'short' | 'script' | 'none'
 }
-
-const LONG_WORKSPACE_STAGES: readonly WorkspaceStageDefinition[] = []
 
 export const WORKSPACE_DEFINITIONS: Record<WorkspaceType, WorkspaceDefinition> = {
   short: {
@@ -50,10 +52,10 @@ export const WORKSPACE_DEFINITIONS: Record<WorkspaceType, WorkspaceDefinition> =
   long: {
     type: 'long',
     label: '长篇',
-    enabled: false,
+    enabled: true,
     visibleStages: LONG_WORKSPACE_STAGES,
-    contentStages: LONG_WORKSPACE_STAGES,
-    plotChildStages: LONG_WORKSPACE_STAGES,
+    contentStages: LONG_WORKSPACE_CONTENT_STAGES,
+    plotChildStages: [],
     expertDraftMode: 'none',
   },
 }

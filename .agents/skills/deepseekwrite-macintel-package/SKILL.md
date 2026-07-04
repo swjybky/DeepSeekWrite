@@ -1,13 +1,13 @@
 ---
 name: deepseekwrite-macintel-package
-description: Build the local Write Claw/DeepSeekWrite repository into a macOS Intel x86_64 installer DMG. Use when the user says "打intel包", "打 mac intel 包", "打 mac-intel 包", "打包intel芯片dmg", "构建 DeepSeekWrite-intel.dmg", or asks to package this project for Intel Mac distribution.
+description: Build the local DeepSeekWrite repository into a macOS Intel x86_64 installer DMG. Use when the user says "打intel包", "打 mac intel 包", "打 mac-intel 包", "打包intel芯片dmg", "构建 DeepSeekWrite-intel.dmg", or asks to package this project for Intel Mac distribution.
 ---
 
 # DeepSeekWrite Intel Package
 
 ## Workflow
 
-When this skill triggers, package the current Write Claw/DeepSeekWrite repo for Intel Mac by running:
+When this skill triggers, package the current DeepSeekWrite repo for Intel Mac by running:
 
 ```bash
 /Users/fafeng/.codex/skills/deepseekwrite-macintel-package/scripts/build_macintel_dmg.sh /Users/fafeng/project/openwrite/write-claw

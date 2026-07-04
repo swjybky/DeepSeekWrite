@@ -19,6 +19,7 @@ import {
   type StageId,
   type WorkspaceAgentReadAccessConfig,
 } from '../../bridge'
+import { coerceLongStageId } from '../../workspaces/long/stages'
 import type {
   BookPersistedSnapshot,
   BookWorkspaceSessionState,
@@ -43,6 +44,17 @@ type CommitWorkspaceSession = (
   updater: (current: BookWorkspaceSessionState) => BookWorkspaceSessionState,
   syncActive?: boolean,
 ) => BookWorkspaceSessionState | null
+
+function resolveInitialStageForBook(
+  book: Pick<Book, 'book_type'>,
+  requestedStageId: StageId | undefined,
+  fallbackStageId: StageId,
+): StageId {
+  if (book.book_type === 'long') {
+    return coerceLongStageId(requestedStageId ?? fallbackStageId) as StageId
+  }
+  return requestedStageId ?? fallbackStageId
+}
 
 type UseWorkspacePersistenceInput = {
   id: string | undefined
@@ -162,21 +174,45 @@ export function useWorkspacePersistence({
           pendingInitialStageRef.current = null
         }
         const rows = resolveWorkspaceStagesForBook(cached.book)
+        const fallbackStage = rows[0]!.id
+        const pendingStage =
+          pending?.bookId === id
+            ? resolveInitialStageForBook(
+                cached.book,
+                pending.stageId,
+                fallbackStage,
+              )
+            : null
         let nextCached =
-          pending?.bookId === id && rows.some((row) => row.id === pending.stageId)
+          pending?.bookId === id && pendingStage
             ? commitWorkspaceSession(
                 id,
                 (session) => ({
                   ...session,
-                  activeStage: pending.stageId,
+                  activeStage: pendingStage,
                   activePlotChildStage:
-                    pending.stageId === PLOT_STAGE_ID
+                    pendingStage === PLOT_STAGE_ID
                       ? pending.childId ?? session.activePlotChildStage
                       : '',
                 }),
                 false,
               ) ?? cached
             : cached
+        if (nextCached.book.book_type === 'long') {
+          const coercedStage = coerceLongStageId(nextCached.activeStage) as StageId
+          if (coercedStage !== nextCached.activeStage) {
+            nextCached =
+              commitWorkspaceSession(
+                id,
+                (session) => ({
+                  ...session,
+                  activeStage: coercedStage,
+                  activePlotChildStage: '',
+                }),
+                false,
+              ) ?? nextCached
+          }
+        }
         const ensuredCached = ensurePlotChildSelection(nextCached)
         nextCached =
           ensuredCached === nextCached
@@ -190,7 +226,11 @@ export function useWorkspacePersistence({
             stages: cachedStages,
             book: {
               ...nextCached.book,
-              stages: mergeStagePatchIntoAll(nextCached.book.stages, cachedStages),
+              stages: mergeStagePatchIntoAll(
+                nextCached.book.stages,
+                cachedStages,
+                nextCached.book,
+              ),
               content: cachedStages.draft,
               expert_draft: nextCached.expertDraft,
             },
@@ -200,6 +240,7 @@ export function useWorkspacePersistence({
                 stages: mergeStagePatchIntoAll(
                   nextCached.book.stages,
                   cachedStages,
+                  nextCached.book,
                 ),
                 content: cachedStages.draft,
                 expert_draft: nextCached.expertDraft,
@@ -251,10 +292,9 @@ export function useWorkspacePersistence({
       const rows = resolveWorkspaceStagesForBook(b)
       const pending = pendingInitialStageRef.current
       const pendingForBook = pending?.bookId === b.id ? pending : null
-      const pendingStage =
-        pendingForBook && rows.some((row) => row.id === pendingForBook.stageId)
-          ? pendingForBook.stageId
-          : null
+      const pendingStage = pendingForBook
+        ? resolveInitialStageForBook(b, pendingForBook.stageId, rows[0]!.id)
+        : null
       const pendingPlotChild =
         pendingStage === PLOT_STAGE_ID && pendingForBook?.childId
           ? pendingForBook.childId
@@ -268,7 +308,11 @@ export function useWorkspacePersistence({
         linkedMaterial: material,
         linkedSkill: skill,
         coverData: nextCoverData,
-        activeStage: pendingStage ?? previous?.activeStage ?? rows[0]!.id,
+        activeStage: resolveInitialStageForBook(
+          b,
+          pendingStage ?? previous?.activeStage,
+          rows[0]!.id,
+        ),
         activePlotChildStage: pendingPlotChild || previous?.activePlotChildStage || '',
         resetExpertRuntime: previous == null,
         previous,
@@ -339,6 +383,7 @@ export function useWorkspacePersistence({
         const merged = mergeStagePatchIntoAll(
           beforeSave.book.stages,
           stagesForSave,
+          beforeSave.book,
         )
         const next = await saveBook(bookId, {
           stages: merged,
@@ -352,7 +397,11 @@ export function useWorkspacePersistence({
         }
         const latest = workspaceSessionsRef.current[bookId] ?? beforeSave
         const latestStages = latest.stages
-        const nextBookStages = mergeStagePatchIntoAll(next.stages, latestStages)
+        const nextBookStages = mergeStagePatchIntoAll(
+          next.stages,
+          latestStages,
+          next,
+        )
         const nextSession: BookWorkspaceSessionState = {
           ...latest,
           book: {

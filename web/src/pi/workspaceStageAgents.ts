@@ -31,6 +31,15 @@ import {
   type ScriptWorkspaceStageAgentContext,
 } from '../workspaces/script/stageAgents'
 import {
+  resolveWorkspaceAgentIdForStage as resolveLongWorkspaceAgentIdForStage,
+  resolveWorkspaceAgentReadAccess as resolveLongWorkspaceAgentReadAccess,
+} from '../workspaces/long/stageReadAccess'
+import type { LongStageId } from '../workspaces/long/stages'
+import {
+  buildLongWorkspaceAdditionalTools,
+  type LongWorkspaceStageAgentContext,
+} from '../workspaces/long/stageAgents'
+import {
   buildMaterialWorkspaceAdditionalTools as buildShortMaterialWorkspaceAdditionalTools,
   type MaterialWorkspaceStageAgentContext as ShortMaterialWorkspaceStageAgentContext,
 } from '../workspaces/material/short/materialStageAgents'
@@ -172,6 +181,28 @@ export function getWorkspaceStageAdditionalTools(
       isToolCallStreamed: ctx.isToolCallStreamed,
     }
     return buildScriptWorkspaceAdditionalTools(scriptCtx)
+  }
+
+  if (ctx.bookType === 'long') {
+    const longStageId = ctx.stageId as LongStageId
+    const readAccessAgentId = resolveLongWorkspaceAgentIdForStage(longStageId)
+    const readAccess = resolveLongWorkspaceAgentReadAccess(
+      ctx.workspaceAgentReadAccess,
+      readAccessAgentId,
+    )
+    const longCtx: LongWorkspaceStageAgentContext = {
+      bookTitle: ctx.bookTitle,
+      stageId: longStageId,
+      stageBody: ctx.stageBody,
+      getCurrentStageBody: (stageId) => ctx.getCurrentStageBody?.(stageId),
+      allStages: ctx.allStages as Partial<Record<LongStageId, string>>,
+      allowedWorkspaceStages: readAccess?.workspace as readonly LongStageId[] | undefined,
+      applyToStageEditor: ctx.applyToStageEditor
+        ? (payload) => ctx.applyToStageEditor?.(payload)
+        : undefined,
+      isToolCallStreamed: ctx.isToolCallStreamed,
+    }
+    return buildLongWorkspaceAdditionalTools(longCtx)
   }
 
   // 书籍短篇工作台模式

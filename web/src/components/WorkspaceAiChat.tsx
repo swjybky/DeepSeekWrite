@@ -62,6 +62,9 @@ import {
   resolveWorkspaceAgentReadAccess as resolveScriptWorkspaceAgentReadAccess,
 } from '../workspaces/script/stageReadAccess'
 import {
+  resolveWorkspaceAgentReadAccess as resolveLongWorkspaceAgentReadAccess,
+} from '../workspaces/long/stageReadAccess'
+import {
   isWorkspaceSupportedAttachment,
   loadWorkspaceAttachment,
   WORKSPACE_ATTACHMENT_ACCEPTED_TYPES,
@@ -77,14 +80,33 @@ const WORKSPACE_ATTACHMENT_MAX_FILES = 10
 function resolvePromptReadAccess(
   bookType: BookType | undefined,
   config: WorkspaceAgentReadAccessConfig | null | undefined,
-  agentId: WorkspaceAgentId,
+  agentId: WorkspaceAgentId | string,
 ) {
+  if (bookType === 'long') {
+    return resolveLongWorkspaceAgentReadAccess(config, agentId)
+  }
   return bookType === 'script'
-    ? resolveScriptWorkspaceAgentReadAccess(config, agentId)
-    : resolveWorkspaceAgentReadAccess(config, agentId)
+    ? resolveScriptWorkspaceAgentReadAccess(
+        config,
+        agentId as Parameters<typeof resolveScriptWorkspaceAgentReadAccess>[1],
+      )
+    : resolveWorkspaceAgentReadAccess(config, agentId as WorkspaceAgentId)
+}
+
+function resolvePromptAllowedWorkspaceStages(
+  bookType: BookType | undefined,
+  config: WorkspaceAgentReadAccessConfig | null | undefined,
+  agentId: WorkspaceAgentId | string,
+  currentStageId: StageId,
+): readonly StageId[] {
+  const workspace = resolvePromptReadAccess(bookType, config, agentId)
+    .workspace as readonly StageId[]
+  return bookType === 'long'
+    ? [...new Set([...workspace, currentStageId])]
+    : workspace
 }
 const WORKSPACE_ATTACHMENT_MAX_FILE_SIZE = 20 * 1024 * 1024
-const WORKSPACE_SEND_VALIDATION_ERROR_NAME = 'WriteClawSendValidationError'
+const WORKSPACE_SEND_VALIDATION_ERROR_NAME = 'DeepSeekWriteSendValidationError'
 
 type ShowWorkspaceAlert = (
   options: Omit<AppDialogOptions, 'cancelText' | 'hideCancel'>,
@@ -100,14 +122,14 @@ type MessageEditorElement = HTMLElement & {
   onFilesChange?: (attachments: Attachment[]) => void
   handleFilesSelected?: (event: Event) => void | Promise<void>
   handleDrop?: (event: DragEvent) => void | Promise<void>
-  __writeClawWorkspaceAttachmentLoader?: boolean
+  __deepSeekWriteWorkspaceAttachmentLoader?: boolean
   requestUpdate?: () => void
 }
 
 type AgentInterfaceElement = HTMLElement & {
   requestUpdate?: () => void
   sendMessage?: (input: string, attachments?: Attachment[]) => void | Promise<void>
-  __writeClawSendValidationGuard?: boolean
+  __deepSeekWriteSendValidationGuard?: boolean
 }
 
 class WorkspaceSendValidationError extends Error {
@@ -196,7 +218,7 @@ function installWorkspaceAttachmentLoader(
   editor: MessageEditorElement,
   showAlert: ShowWorkspaceAlert,
 ) {
-  if (editor.__writeClawWorkspaceAttachmentLoader) return
+  if (editor.__deepSeekWriteWorkspaceAttachmentLoader) return
 
   editor.handleFilesSelected = async (event: Event) => {
     event.stopImmediatePropagation()
@@ -214,7 +236,7 @@ function installWorkspaceAttachmentLoader(
       showAlert,
     )
   }
-  editor.__writeClawWorkspaceAttachmentLoader = true
+  editor.__deepSeekWriteWorkspaceAttachmentLoader = true
   editor.requestUpdate?.()
 }
 
@@ -271,7 +293,7 @@ function installWorkspaceSendValidationGuard(chatPanel: ChatPanel) {
   const iface = getAgentInterface(chatPanel)
   if (
     !iface ||
-    iface.__writeClawSendValidationGuard ||
+    iface.__deepSeekWriteSendValidationGuard ||
     typeof iface.sendMessage !== 'function'
   ) {
     return
@@ -283,14 +305,14 @@ function installWorkspaceSendValidationGuard(chatPanel: ChatPanel) {
       await originalSendMessage(input, attachments)
     } catch (error) {
       if (isWorkspaceSendValidationError(error)) {
-        console.warn('[DeepseekWrite·AI面板] 发送已取消:', error.message)
+        console.warn('[DeepSeekWrite·AI面板] 发送已取消:', error.message)
         refreshWorkspaceChatInput(chatPanel)
         return
       }
       throw error
     }
   }
-  iface.__writeClawSendValidationGuard = true
+  iface.__deepSeekWriteSendValidationGuard = true
 }
 
 function useDebounced<T>(value: T, ms: number): T {
@@ -476,7 +498,11 @@ function WorkspaceAiChatInner({
 
   const resolveDefaultStreamingWriteTargetStageId = (): WritableStageId => {
     const p = propsLatestRef.current
-    if (workspaceType === 'book' && p.stageId === 'plot_design') {
+    if (
+      workspaceType === 'book' &&
+      p.bookType !== 'long' &&
+      p.stageId === 'plot_design'
+    ) {
       return (
         pendingPlotChildStageRef.current ??
         p.activeStageContentId ??
@@ -492,7 +518,11 @@ function WorkspaceAiChatInner({
     const targetStageId = targetStageIdFromArgs(args)
     if (!targetStageId) return undefined
     const p = propsLatestRef.current
-    if (workspaceType === 'book' && p.stageId === 'plot_design') {
+    if (
+      workspaceType === 'book' &&
+      p.bookType !== 'long' &&
+      p.stageId === 'plot_design'
+    ) {
       const allowed =
         p.bookType === 'script'
           ? ['plot_design', 'plot_refine']
@@ -578,7 +608,9 @@ function WorkspaceAiChatInner({
           ? `material_${p.materialTypeKey ?? 'short'}_manager`
           : p.bookType === 'script'
             ? 'script_shared'
-            : 'shared',
+            : p.bookType === 'long'
+              ? 'long_shared'
+              : 'shared',
       workspaceType === 'material' || workspaceType === 'skill'
         ? undefined
         : p.stageId,
@@ -644,7 +676,7 @@ function WorkspaceAiChatInner({
         })
         if (next) await p.onBookMemoriesCaptured?.(p.sessionBookId, next)
       } catch (error) {
-        console.warn('[WriteClaw memory] capture skipped:', error)
+        console.warn('[DeepSeekWrite memory] capture skipped:', error)
       }
     })()
   }
@@ -713,13 +745,13 @@ function WorkspaceAiChatInner({
       try {
         await ensurePiAppStorage()
       } catch (e) {
-        console.warn('[DeepseekWrite·AI面板] Pi 存储初始化失败，将重试:', e)
+        console.warn('[DeepSeekWrite·AI面板] Pi 存储初始化失败，将重试:', e)
         await new Promise((r) => window.setTimeout(r, 500))
         if (cancelled) return
         try {
           await ensurePiAppStorage()
         } catch (e2) {
-          console.error('[DeepseekWrite·AI面板] Pi 存储初始化最终失败:', e2)
+          console.error('[DeepSeekWrite·AI面板] Pi 存储初始化最终失败:', e2)
           return
         }
       }
@@ -758,7 +790,9 @@ function WorkspaceAiChatInner({
       const ctxTools = (): AgentTool[] => {
         const rawLatest = propsLatestRef.current
         const pendingPlotChildStage =
-          workspaceType === 'book' && rawLatest.stageId === 'plot_design'
+          workspaceType === 'book' &&
+          rawLatest.bookType !== 'long' &&
+          rawLatest.stageId === 'plot_design'
             ? pendingPlotChildStageRef.current
             : null
         const latest = pendingPlotChildStage
@@ -791,6 +825,7 @@ function WorkspaceAiChatInner({
             const p = propsLatestRef.current
             if (
               workspaceType === 'book' &&
+              p.bookType !== 'long' &&
               p.stageId === 'plot_design' &&
               pendingPlotChildStageRef.current
             ) {
@@ -846,13 +881,14 @@ function WorkspaceAiChatInner({
                 bookGenre: props.bookGenre ?? '未分类',
                 stageBody: resolveCurrentStageBody(props),
                 allStages: mergeCurrentStageIntoAllStages(props) as Partial<Record<StageId, string>>,
-                allowedWorkspaceStages: resolvePromptReadAccess(
+                allowedWorkspaceStages: resolvePromptAllowedWorkspaceStages(
                   props.bookType,
                   props.workspaceAgentReadAccess,
-                  (props.stageId === 'draft'
+                  (props.bookType !== 'long' && props.stageId === 'draft'
                     ? EXPERT_DRAFT_COORDINATOR_AGENT_ID
                     : props.stageId) as WorkspaceAgentId,
-                ).workspace as readonly StageId[],
+                  props.stageId as StageId,
+                ),
                 linkedSkill: props.linkedSkill,
               },
             )
@@ -1242,13 +1278,14 @@ function WorkspaceAiChatInner({
                 bookGenre: p.bookGenre ?? '未分类',
                 stageBody: latestStageBody,
                 allStages: latestAllStages as Partial<Record<StageId, string>>,
-                allowedWorkspaceStages: resolvePromptReadAccess(
+                allowedWorkspaceStages: resolvePromptAllowedWorkspaceStages(
                   p.bookType,
                   p.workspaceAgentReadAccess,
-                  (p.stageId === 'draft'
+                  (p.bookType !== 'long' && p.stageId === 'draft'
                     ? EXPERT_DRAFT_COORDINATOR_AGENT_ID
                     : p.stageId) as WorkspaceAgentId,
-                ).workspace as readonly StageId[],
+                  p.stageId as StageId,
+                ),
                 linkedSkill: p.linkedSkill,
               },
             )
@@ -1256,7 +1293,9 @@ function WorkspaceAiChatInner({
       const agent = agentRef.current
       agent.state.systemPrompt = nextPrompt
       const pendingPlotChildStage =
-        workspaceType === 'book' && p.stageId === 'plot_design'
+        workspaceType === 'book' &&
+        p.bookType !== 'long' &&
+        p.stageId === 'plot_design'
           ? pendingPlotChildStageRef.current
           : null
       const toolProps = pendingPlotChildStage
@@ -1289,6 +1328,7 @@ function WorkspaceAiChatInner({
           const live = propsLatestRef.current
           if (
             workspaceType === 'book' &&
+            live.bookType !== 'long' &&
             live.stageId === 'plot_design' &&
             pendingPlotChildStageRef.current
           ) {
@@ -1313,7 +1353,7 @@ function WorkspaceAiChatInner({
       agent.state.tools = includePiArtifacts
         ? mergeAgentToolsPreservingArtifacts(agent.state.tools, extras)
         : extras
-    })().catch((e: unknown) => console.warn('[DeepseekWrite·工作台提示词]', e))
+    })().catch((e: unknown) => console.warn('[DeepSeekWrite·工作台提示词]', e))
   }, [
     chatReady,
     props.bookTitle,

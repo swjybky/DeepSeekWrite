@@ -45,10 +45,10 @@ for cmd in node npm sips iconutil hdiutil ditto codesign file; do
   require_cmd "$cmd"
 done
 
-[[ -f "$ROOT/packaging/pyi_entry.py" ]] || fail "Not a Write Claw repo root: missing packaging/pyi_entry.py"
-[[ -f "$ROOT/app/main.py" ]] || fail "Not a Write Claw repo root: missing app/main.py"
-[[ -f "$ROOT/web/package.json" ]] || fail "Not a Write Claw repo root: missing web/package.json"
-[[ -f "$ROOT/requirements.txt" ]] || fail "Not a Write Claw repo root: missing requirements.txt"
+[[ -f "$ROOT/packaging/pyi_entry.py" ]] || fail "Not a DeepSeekWrite repo root: missing packaging/pyi_entry.py"
+[[ -f "$ROOT/app/main.py" ]] || fail "Not a DeepSeekWrite repo root: missing app/main.py"
+[[ -f "$ROOT/web/package.json" ]] || fail "Not a DeepSeekWrite repo root: missing web/package.json"
+[[ -f "$ROOT/requirements.txt" ]] || fail "Not a DeepSeekWrite repo root: missing requirements.txt"
 
 BUILD_DIR="$ROOT/build/macos-intel"
 INTEL_PYTHON_DIR="$ROOT/.macintel-python"
@@ -67,8 +67,8 @@ ICON_ICNS="$BUILD_DIR/app-icon.icns"
 mkdir -p "$BUILD_DIR" "$DIST_DIR"
 
 log "Locating Intel Python"
-if [[ -n "${WRITECLAW_INTEL_PYTHON:-}" ]]; then
-  INTEL_PYTHON="$WRITECLAW_INTEL_PYTHON"
+if [[ -n "${DEEPSEEKWRITE_INTEL_PYTHON:-}" ]]; then
+  INTEL_PYTHON="$DEEPSEEKWRITE_INTEL_PYTHON"
 fi
 
 if [[ ! -x "$INTEL_PYTHON" ]]; then
@@ -136,8 +136,8 @@ fi
 
 log "Building DeepSeekWrite.app with PyInstaller"
 rm -rf "$APP_PATH" "$DIST_DIR/DeepSeekWrite" "$DMG_PATH"
-env WRITECLAW_PROJECT_ROOT="$ROOT" \
-  WRITECLAW_MAC_ICON="$ICON_ICNS" \
+env DEEPSEEKWRITE_PROJECT_ROOT="$ROOT" \
+  DEEPSEEKWRITE_MAC_ICON="$ICON_ICNS" \
   arch -x86_64 "$PYTHON_BIN" -m PyInstaller \
     --clean \
     --noconfirm \

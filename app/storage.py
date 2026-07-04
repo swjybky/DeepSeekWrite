@@ -15,6 +15,7 @@ from app.common_skill_store import read_common_skills
 
 from app.models import (
     Book,
+    LONG_STAGE_KEYS,
     MATERIAL_STAGE_KEYS,
     SCRIPT_STAGE_KEYS,
     SHORT_STAGE_KEYS,
@@ -41,6 +42,7 @@ from app.models import (
     normalize_memory_entry,
     normalize_material_stages_from_storage,
     normalize_skill_stages_from_storage,
+    long_stage_keys_from_stages,
 )
 
 ISO_FMT = "%Y-%m-%dT%H:%M:%SZ"
@@ -62,7 +64,7 @@ def _data_file_lock():
     """
     data_dir = data_root()
     data_dir.mkdir(parents=True, exist_ok=True)
-    lock_path = data_dir / ".write_claw.lock"
+    lock_path = data_dir / ".deepseekwrite.lock"
     with lock_path.open("a+b") as f:
         if sys.platform.startswith("win"):
             import msvcrt  # noqa: PLC0415
@@ -118,7 +120,10 @@ def _write_stages_to_disk(book: Book) -> None:
     except OSError:
         return
 
-    keys = SCRIPT_STAGE_KEYS if book.book_type == "script" else SHORT_STAGE_KEYS
+    if book.book_type == "long":
+        keys = long_stage_keys_from_stages(book.stages)
+    else:
+        keys = SCRIPT_STAGE_KEYS if book.book_type == "script" else SHORT_STAGE_KEYS
     for key in keys:
         text = str(book.stages.get(key, "") or "")
         try:
@@ -255,11 +260,14 @@ def user_memories_path() -> Path:
 
 
 def _normalize_memory_workspace_type(workspace_type: str | None) -> str:
-    return "script" if normalize_book_type(workspace_type) == "script" else "short"
+    normalized = normalize_book_type(workspace_type)
+    if normalized == "long":
+        return "long"
+    return "script" if normalized == "script" else "short"
 
 
 def _empty_user_memory_payload() -> dict[str, list[dict[str, str]]]:
-    return {"short": [], "script": []}
+    return {"short": [], "long": [], "script": []}
 
 
 def _load_user_memories_unlocked() -> dict[str, list[dict[str, str]]]:
@@ -277,6 +285,7 @@ def _load_user_memories_unlocked() -> dict[str, list[dict[str, str]]]:
         return _empty_user_memory_payload()
     return {
         "short": normalize_memories_from_storage(data.get("short")),
+        "long": normalize_memories_from_storage(data.get("long")),
         "script": normalize_memories_from_storage(data.get("script")),
     }
 
@@ -438,6 +447,8 @@ def write_workspace_agent_read_access(config: dict[str, Any]) -> None:
 
 def _workspace_agent_read_access_pref_key(workspace_type: str) -> str:
     normalized = normalize_book_type(workspace_type)
+    if normalized == "long":
+        return "long_workspace_agent_read_access"
     if normalized == "script":
         return "script_workspace_agent_read_access"
     return "workspace_agent_read_access"
@@ -479,12 +490,28 @@ def write_workspace_agent_read_access_for_type(workspace_type: str, config: dict
         _save_preferences_atomic_unlocked(prefs)
 
 
-_READ_ACCESS_DEFAULT_AGENT_IDS = {
-    "character_design",
-    "plot_design",
-    "outline",
-    "expert_draft_coordinator",
-    "expert_section_writer",
+_READ_ACCESS_DEFAULT_AGENT_IDS: dict[str, tuple[str, ...]] = {
+    "short": (
+        "character_design",
+        "plot_design",
+        "outline",
+        "expert_draft_coordinator",
+        "expert_section_writer",
+    ),
+    "script": (
+        "character_design",
+        "plot_design",
+        "outline",
+        "expert_draft_coordinator",
+        "expert_section_writer",
+    ),
+    "long": (
+        "worldbuilding",
+        "character_design",
+        "plot_design",
+        "draft",
+        "continuity_ledger",
+    ),
 }
 
 _READ_ACCESS_REQUIRED_WORKSPACE_STAGES: dict[str, dict[str, tuple[str, ...]]] = {
@@ -502,6 +529,13 @@ _READ_ACCESS_REQUIRED_WORKSPACE_STAGES: dict[str, dict[str, tuple[str, ...]]] = 
         "expert_draft_coordinator": ("draft",),
         "expert_section_writer": ("draft",),
     },
+    "long": {
+        "worldbuilding": ("worldbuilding.rules",),
+        "character_design": ("character_design.protagonists",),
+        "plot_design": ("plot_design.book_line",),
+        "draft": ("draft.volume-1.arc-1.chapter-1",),
+        "continuity_ledger": ("continuity_ledger.timeline",),
+    },
 }
 
 
@@ -509,15 +543,16 @@ def _required_workspace_stages_for_read_access(
     workspace_type: str,
     agent_id: str,
 ) -> tuple[str, ...]:
-    normalized = (
-        "script" if normalize_book_type(workspace_type) == "script" else "short"
-    )
+    normalized = normalize_book_type(workspace_type)
     return _READ_ACCESS_REQUIRED_WORKSPACE_STAGES.get(normalized, {}).get(agent_id, ())
 
 
 def _builtin_read_access_default_path(workspace_type: str) -> Path:
     normalized = normalize_book_type(workspace_type)
-    prefix = "script" if normalized == "script" else "short"
+    if normalized == "long":
+        prefix = "long"
+    else:
+        prefix = "script" if normalized == "script" else "short"
     return (
         bundle_root() / "app" / "prompt_defaults" / prefix / "shared" / "read_access.json"
     )
@@ -560,14 +595,17 @@ def sync_workspace_agent_read_access_defaults(
         raise RuntimeError("已打包环境下无法同步源码默认配置，请在源码运行模式下操作。")
 
     normalized = normalize_book_type(workspace_type or "short")
-    is_script = normalized == "script"
-    valid_workspace = set(SCRIPT_STAGE_KEYS if is_script else SHORT_STAGE_KEYS)
+    if normalized == "long":
+        valid_workspace = set(LONG_STAGE_KEYS)
+    else:
+        is_script = normalized == "script"
+        valid_workspace = set(SCRIPT_STAGE_KEYS if is_script else SHORT_STAGE_KEYS)
     valid_material = set(MATERIAL_STAGE_KEYS)
 
     user_config = read_workspace_agent_read_access_for_type(normalized)
 
     output: dict[str, Any] = {}
-    for agent_id in _READ_ACCESS_DEFAULT_AGENT_IDS:
+    for agent_id in _READ_ACCESS_DEFAULT_AGENT_IDS.get(normalized, ()):
         raw_entry = user_config.get(agent_id)
         if not isinstance(raw_entry, dict):
             continue
@@ -608,8 +646,11 @@ def read_workspace_agent_read_access_defaults(
 ) -> dict[str, Any]:
     """从内置默认 JSON 文件读取读取范围默认配置；文件不存在时返回空对象。"""
     normalized = normalize_book_type(workspace_type or "short")
-    is_script = normalized == "script"
-    valid_workspace = set(SCRIPT_STAGE_KEYS if is_script else SHORT_STAGE_KEYS)
+    if normalized == "long":
+        valid_workspace = set(LONG_STAGE_KEYS)
+    else:
+        is_script = normalized == "script"
+        valid_workspace = set(SCRIPT_STAGE_KEYS if is_script else SHORT_STAGE_KEYS)
     valid_material = set(MATERIAL_STAGE_KEYS)
 
     target_path = _builtin_read_access_default_path(normalized)
@@ -625,7 +666,7 @@ def read_workspace_agent_read_access_defaults(
         return {}
 
     output: dict[str, Any] = {}
-    for agent_id in _READ_ACCESS_DEFAULT_AGENT_IDS:
+    for agent_id in _READ_ACCESS_DEFAULT_AGENT_IDS.get(normalized, ()):
         entry = raw.get(agent_id)
         if not isinstance(entry, dict):
             continue

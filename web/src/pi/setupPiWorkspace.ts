@@ -16,7 +16,7 @@ import {
 
 import { warmupWorkspaceModelStorage } from './resolveWorkspaceChatModel'
 
-const PI_STORAGE_INIT_LOCK = 'write_claw_pi_init'
+const PI_STORAGE_INIT_LOCK = 'deepseekwrite_pi_init'
 const MAX_INIT_ATTEMPTS = 3
 
 let ready: Promise<void> | null = null
@@ -36,7 +36,7 @@ async function initPiStorage(): Promise<void> {
   ]
 
   const backend = new IndexedDBStorageBackend({
-    dbName: 'write_claw_pi',
+    dbName: 'deepseekwrite_pi',
     version: 2,
     stores: configs,
   })

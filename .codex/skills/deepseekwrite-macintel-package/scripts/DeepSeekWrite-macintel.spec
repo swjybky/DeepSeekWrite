@@ -2,8 +2,8 @@
 """PyInstaller spec for DeepSeekWrite macOS Intel x86_64 builds.
 
 This file is invoked by build_macintel_dmg.sh with:
-  WRITECLAW_PROJECT_ROOT=/path/to/write-claw
-  WRITECLAW_MAC_ICON=/path/to/generated/app-icon.icns
+  DEEPSEEKWRITE_PROJECT_ROOT=/path/to/DeepSeekWrite
+  DEEPSEEKWRITE_MAC_ICON=/path/to/generated/app-icon.icns
 """
 
 from __future__ import annotations
@@ -15,9 +15,9 @@ from pathlib import Path
 from PyInstaller.utils.hooks import collect_all, collect_submodules
 
 
-project_root_env = os.environ.get("WRITECLAW_PROJECT_ROOT")
+project_root_env = os.environ.get("DEEPSEEKWRITE_PROJECT_ROOT")
 if not project_root_env:
-    raise SystemExit("WRITECLAW_PROJECT_ROOT is required")
+    raise SystemExit("DEEPSEEKWRITE_PROJECT_ROOT is required")
 
 project_root = Path(project_root_env).resolve()
 entry_script = project_root / "packaging" / "pyi_entry.py"
@@ -28,7 +28,7 @@ version_config = project_root / "app" / "version.json"
 app_version = str(
     json.loads(version_config.read_text(encoding="utf-8")).get("version") or "1.0.0"
 )
-icon_env = os.environ.get("WRITECLAW_MAC_ICON")
+icon_env = os.environ.get("DEEPSEEKWRITE_MAC_ICON")
 icns_path = Path(icon_env).resolve() if icon_env else assets_dir / "app-icon.icns"
 
 if not entry_script.is_file():

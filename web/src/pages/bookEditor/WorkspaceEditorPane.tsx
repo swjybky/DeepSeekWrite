@@ -2,6 +2,7 @@ import { useState, type ComponentType, type MutableRefObject } from 'react'
 import type { ExpertDraft, StageId } from '../../domain/workspace'
 import type { ManuscriptExportFormat } from '../../bridge'
 import type { PlotChildStageDefinition, PlotChildStageId } from './workspaceTypes'
+import { longStageLabel } from '../../workspaces/long/stages'
 import { PLOT_STAGE_ID } from '../../workspaces/short/stages'
 import { stageTextCounts } from './stageEditing'
 import { TextHistoryControls } from '../../components/TextHistoryControls'
@@ -224,7 +225,8 @@ export function WorkspaceEditorPane({
         <>
           <div className="workspace-stage-heading">
             <label className="workspace-stage-label" htmlFor="stage-body">
-              {railStages.find((s) => s.id === activeStage)?.label}
+              {railStages.find((s) => s.id === activeStage)?.label ??
+                longStageLabel(activeContentStage)}
             </label>
             <TextHistoryControls
               history={textHistory}

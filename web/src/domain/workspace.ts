@@ -8,6 +8,7 @@ export type {
   ExpertDraftSection,
   MemoryEntry,
   MemoryTag,
+  LongStageId,
   ScriptStageId,
   ShortStageId,
   StageId,
@@ -30,6 +31,7 @@ export {
   normalizeMemoryTag,
   normalizeStages,
   normalizeStagesForWorkspaceBook,
+  resolveWorkspaceContentStagesForBook,
   resolveWorkspaceBookGenre,
   resolveWorkspaceStagesForBook,
 } from './workspaceCore'

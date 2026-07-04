@@ -25,6 +25,12 @@ import {
 import {
   getDefaultWorkspaceAgentReadAccess,
 } from '../workspaces/short/stageReadAccess'
+import {
+  longStageLabel,
+  nextLongDraftArcStageId,
+  nextLongDraftChapterStageId,
+  nextLongDraftVolumeStageId,
+} from '../workspaces/long/stages'
 import { PLOT_STAGE_ID } from '../workspaces/short/stages'
 import {
   MaterialSelectorDialog,
@@ -80,7 +86,7 @@ export function BookEditor() {
   const [book, setBook] = useState<Book | null>(null)
   const [workspaceBooks, setWorkspaceBooks] = useState<BookSummary[]>([])
   const [stages, setStages] = useState<Record<StageId, string>>(() =>
-    normalizeStagesForWorkspaceBook({ book_type: 'short', categories: ['世情'] }, {}),
+    normalizeStagesForWorkspaceBook({ book_type: 'short' }, {}),
   )
   const [expertDraft, setExpertDraftState] = useState<ExpertDraft>(() =>
     normalizeExpertDraft(null),
@@ -466,7 +472,11 @@ export function BookEditor() {
           expertDraft: nextExpertDraft,
           book: {
             ...session.book,
-            stages: mergeStagePatchIntoAll(session.book.stages, nextStages),
+            stages: mergeStagePatchIntoAll(
+              session.book.stages,
+              nextStages,
+              session.book,
+            ),
             content: nextStages.draft ?? session.book.content,
             expert_draft: nextExpertDraft,
           },
@@ -735,6 +745,87 @@ export function BookEditor() {
     updateStage,
     textareaRefsRef,
   })
+
+  const createLongDraftStage = useCallback(
+    (stageId: StageId) => {
+      const currentBookId = bookRef.current?.id
+      if (!currentBookId) return
+      const created = commitWorkspaceSession(currentBookId, (session) => {
+        if (session.book.book_type !== 'long') return session
+        const nextStages = {
+          ...session.stages,
+          [stageId]: session.stages[stageId] ?? '',
+        }
+        return {
+          ...session,
+          stages: nextStages,
+          activeStage: stageId,
+          activePlotChildStage: '',
+          book: {
+            ...session.book,
+            stages: mergeStagePatchIntoAll(
+              session.book.stages,
+              nextStages,
+              session.book,
+            ),
+            content: session.book.content,
+          },
+        }
+      })
+      if (!created) return
+      activeStageRef.current = stageId
+      setActiveStage(stageId)
+      activePlotChildStageRef.current = ''
+      setActivePlotChildStage('')
+      textHistory.clear(`workspace:${currentBookId}:stage:${stageId}`, '')
+      setMessage(`已创建${longStageLabel(stageId)}`)
+    },
+    [
+      activePlotChildStageRef,
+      activeStageRef,
+      bookRef,
+      commitWorkspaceSession,
+      setActivePlotChildStage,
+      setActiveStage,
+      setMessage,
+      textHistory,
+    ],
+  )
+
+  const handleLongDraftVolumeCreate = useCallback(() => {
+    void (async () => {
+      await flushActiveWorkspaceBook()
+      createLongDraftStage(nextLongDraftVolumeStageId(stagesRef.current))
+    })()
+  }, [createLongDraftStage, flushActiveWorkspaceBook, stagesRef])
+
+  const handleLongDraftArcCreate = useCallback(
+    (volumeNumber: number) => {
+      void (async () => {
+        await flushActiveWorkspaceBook()
+        createLongDraftStage(
+          nextLongDraftArcStageId(stagesRef.current, volumeNumber),
+        )
+      })()
+    },
+    [createLongDraftStage, flushActiveWorkspaceBook, stagesRef],
+  )
+
+  const handleLongDraftChapterCreate = useCallback(
+    (volumeNumber: number, arcNumber: number) => {
+      void (async () => {
+        await flushActiveWorkspaceBook()
+        createLongDraftStage(
+          nextLongDraftChapterStageId(
+            stagesRef.current,
+            volumeNumber,
+            arcNumber,
+          ),
+        )
+      })()
+    },
+    [createLongDraftStage, flushActiveWorkspaceBook, stagesRef],
+  )
 
   const confirmResetExpertDraft = useCallback(
     () =>
@@ -1026,6 +1117,7 @@ export function BookEditor() {
           book={book}
           workspaceTreeStages={workspaceTreeStages}
           workspaceTreeBooks={workspaceTreeBooks}
+          stages={stages}
           activeStage={activeStage}
           activePlotChildStage={activePlotChildStage}
           activeExpertDraftSectionId={activeExpertDraftSectionId}
@@ -1064,6 +1156,9 @@ export function BookEditor() {
             void handleTreeBookStageChildSelect(bookId, stageId, childId)
           }
           onTreeBookStageChildCreate={handleTreeBookStageChildCreate}
+          onLongDraftVolumeCreate={handleLongDraftVolumeCreate}
+          onLongDraftArcCreate={handleLongDraftArcCreate}
+          onLongDraftChapterCreate={handleLongDraftChapterCreate}
         />
 
         <WorkspaceAiPanel

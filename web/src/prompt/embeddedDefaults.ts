@@ -12,6 +12,12 @@ const RAW_SCRIPT = import.meta.glob('../../../app/prompt_defaults/script/shared/
   import: 'default',
 })
 
+const RAW_LONG = import.meta.glob('../../../app/prompt_defaults/long/shared/*.txt', {
+  eager: true,
+  query: '?raw',
+  import: 'default',
+})
+
 const RAW_MATERIAL_TYPED = import.meta.glob('../../../app/prompt_defaults/material/*/shared/*.txt', {
   eager: true,
   query: '?raw',
@@ -53,6 +59,8 @@ function normalizeGlobKey(importPath: string): string | null {
   // script: prompt_defaults/script/shared/xxx.txt → script_shared/xxx
   const scriptM = up.match(/prompt_defaults\/script\/shared\/(.+)\.txt$/i)
   if (scriptM) return `script_shared/${scriptM[1]}`
+  const longM = up.match(/prompt_defaults\/long\/shared\/(.+)\.txt$/i)
+  if (longM) return `long_shared/${longM[1]}`
   // typed material: prompt_defaults/material/script/shared/material_manager.txt → material_script/material_manager
   const typedMaterialM = up.match(
     /prompt_defaults\/material\/([^/]+)\/shared\/material_manager\.txt$/i,
@@ -86,6 +94,7 @@ const CACHE = new Map<string, string>()
 for (const [k, v] of Object.entries({
   ...RAW_SHORT,
   ...RAW_SCRIPT,
+  ...RAW_LONG,
   ...RAW_MATERIAL_LEGACY,
   ...RAW_MATERIAL_TYPED,
   ...RAW_SKILL_LEGACY,

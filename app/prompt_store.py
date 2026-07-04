@@ -8,12 +8,14 @@ import re
 import tempfile
 from pathlib import Path
 
+from app.models import LONG_STAGE_KEYS, is_long_stage_key
 from app.runtime_paths import bundle_root, data_root, is_frozen
 
 # --- 创作空间共享提示词管线，与工作台 TS 对齐 ---
 
 SHORT_PREFIX = Path("short")
 SCRIPT_PREFIX = Path("script")
+LONG_PREFIX = Path("long")
 SHARED_WORKSPACE_PROMPT_DIR = "shared"
 LEGACY_QINGGAN_PROMPT_DIR = "qinggan"
 SHARED_PROMPT_MIGRATION_MARKER = ".shared_prompt_migration_from_qinggan_v1"
@@ -31,6 +33,15 @@ SHORT_STAGES_ORDER: tuple[str, ...] = (
 
 SCRIPT_STAGES_ORDER: tuple[str, ...] = tuple(
     stage_id for stage_id in SHORT_STAGES_ORDER if stage_id != "intro_design"
+)
+
+LONG_STAGES_ORDER: tuple[str, ...] = LONG_STAGE_KEYS
+LONG_WORKSPACE_AGENT_IDS: tuple[str, ...] = (
+    "worldbuilding",
+    "character_design",
+    "plot_design",
+    "draft",
+    "continuity_ledger",
 )
 
 EXPERT_DRAFT_COORDINATOR_AGENT_ID = "expert_draft_coordinator"
@@ -68,8 +79,19 @@ def excerpt(text: str, _max_len: int = STAGE_BODY_EXCERPT_CAP) -> str:
     return stripped if stripped else "（暂无）"
 
 
-def validate_workspace_agent_id(agent_id: str) -> None:
-    if agent_id not in WORKSPACE_AGENT_IDS:
+def workspace_agent_ids_for_type(workspace_type: str | None = None) -> tuple[str, ...]:
+    return (
+        LONG_WORKSPACE_AGENT_IDS
+        if normalize_workspace_prompt_type(workspace_type) == "long"
+        else WORKSPACE_AGENT_IDS
+    )
+
+
+def validate_workspace_agent_id(
+    agent_id: str,
+    workspace_type: str | None = None,
+) -> None:
+    if agent_id not in workspace_agent_ids_for_type(workspace_type):
         raise ValueError(f"未知的 workspace_agent_id: {agent_id!r}")
 
 
@@ -77,21 +99,28 @@ def validate_workspace_stage_id(
     stage_id: str,
     workspace_type: str | None = None,
 ) -> None:
-    order = (
-        SCRIPT_STAGES_ORDER
-        if normalize_workspace_prompt_type(workspace_type) == "script"
-        else SHORT_STAGES_ORDER
-    )
+    prompt_type = normalize_workspace_prompt_type(workspace_type)
+    if prompt_type == "long":
+        if stage_id not in LONG_WORKSPACE_AGENT_IDS and not is_long_stage_key(stage_id):
+            raise ValueError(f"未知的 stage_id: {stage_id!r}")
+        return
+    order = SCRIPT_STAGES_ORDER if prompt_type == "script" else SHORT_STAGES_ORDER
     if stage_id not in order:
         raise ValueError(f"未知的 stage_id: {stage_id!r}")
 
 
 def normalize_workspace_prompt_type(raw: str | None = None) -> str:
-    return "script" if str(raw or "").strip() == "script" else "short"
+    value = str(raw or "").strip()
+    if value == "long":
+        return "long"
+    return "script" if value == "script" else "short"
 
 
 def _workspace_prefix(workspace_type: str | None = None) -> Path:
-    return SCRIPT_PREFIX if normalize_workspace_prompt_type(workspace_type) == "script" else SHORT_PREFIX
+    prompt_type = normalize_workspace_prompt_type(workspace_type)
+    if prompt_type == "long":
+        return LONG_PREFIX
+    return SCRIPT_PREFIX if prompt_type == "script" else SHORT_PREFIX
 
 
 def _workspace_override_root(workspace_type: str | None = None) -> Path:
@@ -102,7 +131,7 @@ def workspace_agent_override_absolute_path(
     agent_id: str,
     workspace_type: str | None = None,
 ) -> Path:
-    validate_workspace_agent_id(agent_id)
+    validate_workspace_agent_id(agent_id, workspace_type)
     return (
         _workspace_override_root(workspace_type)
         / SHARED_WORKSPACE_PROMPT_DIR
@@ -114,7 +143,7 @@ def workspace_agent_builtin_default_path(
     agent_id: str,
     workspace_type: str | None = None,
 ) -> Path:
-    validate_workspace_agent_id(agent_id)
+    validate_workspace_agent_id(agent_id, workspace_type)
     return (
         bundle_root()
         / "app"
@@ -218,7 +247,10 @@ def _ensure_script_prompt_overrides_seeded() -> None:
 
 
 def _ensure_workspace_prompt_prepared(workspace_type: str | None = None) -> None:
-    if normalize_workspace_prompt_type(workspace_type) == "script":
+    prompt_type = normalize_workspace_prompt_type(workspace_type)
+    if prompt_type == "long":
+        return
+    if prompt_type == "script":
         _ensure_script_prompt_overrides_seeded()
         return
     _ensure_shared_prompt_override_migrated()
@@ -274,6 +306,20 @@ def reset_workspace_agent_prompt_override(
     return False
 
 
+def _long_workspace_agent_id_for_stage(stage_id: str) -> str:
+    if stage_id in LONG_WORKSPACE_AGENT_IDS:
+        return stage_id
+    if stage_id.startswith("worldbuilding."):
+        return "worldbuilding"
+    if stage_id.startswith("character_design."):
+        return "character_design"
+    if stage_id.startswith("plot_design."):
+        return "plot_design"
+    if stage_id.startswith("continuity_ledger."):
+        return "continuity_ledger"
+    return "draft"
+
+
 def render_workspace_system_prompt(
     stage_id: str,
     *,
@@ -283,12 +329,16 @@ def render_workspace_system_prompt(
     stage_body: str,
     all_stages_for_peek: dict[str, str] | None = None,
 ) -> str:
-    validate_workspace_stage_id(stage_id, workspace_type)
-    template_id = (
-        EXPERT_DRAFT_COORDINATOR_AGENT_ID if stage_id == "draft" else stage_id
-    )
-    if template_id in {"intro_design", "plot_refine"}:
-        template_id = "plot_design"
+    prompt_type = normalize_workspace_prompt_type(workspace_type)
+    validate_workspace_stage_id(stage_id, prompt_type)
+    if prompt_type == "long":
+        template_id = _long_workspace_agent_id_for_stage(stage_id)
+    else:
+        template_id = (
+            EXPERT_DRAFT_COORDINATOR_AGENT_ID if stage_id == "draft" else stage_id
+        )
+        if template_id in {"intro_design", "plot_refine"}:
+            template_id = "plot_design"
     raw = read_workspace_agent_prompt_template(template_id, workspace_type)
 
     title = (book_title or "").strip()
@@ -360,7 +410,7 @@ def sync_workspace_prompt_defaults(
     _ensure_workspace_prompt_prepared(normalized)
 
     synced: dict[str, str] = {}
-    for agent_id in WORKSPACE_AGENT_IDS:
+    for agent_id in workspace_agent_ids_for_type(normalized):
         source_path = resolve_workspace_agent_read_path(agent_id, normalized)
         if not source_path.is_file():
             raise FileNotFoundError(f"缺少创作空间提示词模板: {source_path}")

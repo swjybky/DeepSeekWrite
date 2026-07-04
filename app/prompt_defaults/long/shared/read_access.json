@@ -1,0 +1,100 @@
+{
+  "worldbuilding": {
+    "workspace": [
+      "worldbuilding.rules",
+      "worldbuilding.factions",
+      "worldbuilding.geography",
+      "worldbuilding.history",
+      "worldbuilding.terminology",
+      "worldbuilding.items",
+      "plot_design.book_line",
+      "plot_design.foreshadowing",
+      "continuity_ledger.timeline",
+      "continuity_ledger.continuity_notes"
+    ],
+    "material": [
+      "gimmick",
+      "pacing"
+    ]
+  },
+  "character_design": {
+    "workspace": [
+      "character_design.protagonists",
+      "character_design.major_supporting",
+      "character_design.minor_supporting",
+      "character_design.passersby",
+      "worldbuilding.rules",
+      "worldbuilding.factions",
+      "plot_design.book_line",
+      "plot_design.story_arcs",
+      "continuity_ledger.timeline",
+      "continuity_ledger.character_states"
+    ],
+    "material": [
+      "character"
+    ]
+  },
+  "plot_design": {
+    "workspace": [
+      "plot_design.book_line",
+      "plot_design.volumes",
+      "plot_design.story_arcs",
+      "plot_design.chapter_cards",
+      "plot_design.foreshadowing",
+      "character_design.protagonists",
+      "character_design.major_supporting",
+      "character_design.minor_supporting",
+      "character_design.passersby",
+      "worldbuilding.rules",
+      "worldbuilding.factions",
+      "worldbuilding.geography",
+      "worldbuilding.history",
+      "continuity_ledger.timeline",
+      "continuity_ledger.open_foreshadowing"
+    ],
+    "material": [
+      "gimmick",
+      "character",
+      "pacing",
+      "plot_refine"
+    ]
+  },
+  "draft": {
+    "workspace": [
+      "draft.volume-1.arc-1.chapter-1",
+      "draft.volume-2.arc-1.chapter-1",
+      "plot_design.chapter_cards",
+      "plot_design.story_arcs",
+      "plot_design.foreshadowing",
+      "character_design.protagonists",
+      "character_design.major_supporting",
+      "character_design.minor_supporting",
+      "character_design.passersby",
+      "worldbuilding.rules",
+      "worldbuilding.items",
+      "continuity_ledger.timeline",
+      "continuity_ledger.character_states",
+      "continuity_ledger.open_foreshadowing",
+      "continuity_ledger.continuity_notes"
+    ],
+    "material": [
+      "draft_excerpt"
+    ]
+  },
+  "continuity_ledger": {
+    "workspace": [
+      "continuity_ledger.timeline",
+      "continuity_ledger.character_states",
+      "continuity_ledger.open_foreshadowing",
+      "continuity_ledger.continuity_notes",
+      "draft.volume-1.arc-1.chapter-1",
+      "draft.volume-2.arc-1.chapter-1",
+      "plot_design.chapter_cards",
+      "plot_design.foreshadowing",
+      "character_design.protagonists",
+      "character_design.major_supporting",
+      "worldbuilding.rules"
+    ],
+    "material": []
+  }
+}

@@ -23,7 +23,7 @@ VALID_OWNER_TYPES = {"book", "material", "skill"}
 def _data_file_lock():
     data_dir = data_root()
     data_dir.mkdir(parents=True, exist_ok=True)
-    lock_path = data_dir / ".write_claw.lock"
+    lock_path = data_dir / ".deepseekwrite.lock"
     with lock_path.open("a+b") as f:
         if sys.platform.startswith("win"):
             import msvcrt  # noqa: PLC0415

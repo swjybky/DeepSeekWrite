@@ -14,6 +14,7 @@ import {
 import {
   ExpertDraftEditor as ScriptExpertDraftEditor,
 } from '../../workspaces/script/expertDraft/ExpertDraftEditor'
+import { longContentStageRowsFromStages } from '../../workspaces/long/stages'
 import { PLOT_STAGE_ID } from '../../workspaces/short/stages'
 import {
   expertDraftSectionTreeLabel,
@@ -60,7 +61,7 @@ export function useWorkspaceViewModel({
         activeExpertDraftSectionId,
         activePlotChildLabel: '',
         activePlotChildStages: [],
-        expertDraftActive: activeStage === 'draft',
+        expertDraftActive: false,
         railStages: [],
         renderedWorkspaceSessions: [],
         stageBody,
@@ -69,12 +70,16 @@ export function useWorkspaceViewModel({
       }
     }
 
-    const railStages = resolveWorkspaceStagesForBook(book)
+    const railStages =
+      book.book_type === 'long'
+        ? longContentStageRowsFromStages(stages)
+        : resolveWorkspaceStagesForBook(book)
     const activePlotChildStages = plotChildStagesForBook(book)
+    const supportsExpertDraft = book.book_type !== 'long'
     const workspaceTreeBaseStages = railStages.map((s) => ({
       id: s.id,
       label: s.label,
-      ...(s.id === PLOT_STAGE_ID
+      ...(s.id === PLOT_STAGE_ID && activePlotChildStages.length > 0
         ? {
             children: activePlotChildStages.map((child) => ({
               id: child.id,
@@ -86,7 +91,7 @@ export function useWorkspaceViewModel({
     }))
     const activeTreeDraft = workspaceSessions[book.id]?.expertDraft ?? expertDraft
     const workspaceTreeStages = workspaceTreeBaseStages.map((stage) => {
-      if (stage.id !== 'draft') return stage
+      if (stage.id !== 'draft' || !supportsExpertDraft) return stage
       return {
         ...stage,
         children: activeTreeDraft.sections.map((section) => ({
@@ -132,7 +137,7 @@ export function useWorkspaceViewModel({
       activeExpertDraftSectionId,
       activePlotChildLabel,
       activePlotChildStages,
-      expertDraftActive: activeStage === 'draft',
+      expertDraftActive: supportsExpertDraft && activeStage === 'draft',
       railStages,
       renderedWorkspaceSessions,
       stageBody,

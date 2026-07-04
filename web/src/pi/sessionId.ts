@@ -1,4 +1,4 @@
-const RUNTIME_INSTANCE_STORAGE_KEY = 'write_claw_pi_runtime_id'
+const RUNTIME_INSTANCE_STORAGE_KEY = 'deepseekwrite_pi_runtime_id'
 
 let runtimeInstanceId: string | null = null
 

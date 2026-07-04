@@ -12,7 +12,7 @@ import {
 
 type BridgeApiRoot = NonNullable<BridgeApi>
 
-const USER_MEMORY_STORAGE_KEY = 'write_claw_dev_user_memories'
+const USER_MEMORY_STORAGE_KEY = 'deepseekwrite_dev_user_memories'
 
 async function callApiMethod<T>(
   methodName: keyof BridgeApiRoot,
@@ -35,8 +35,12 @@ async function callApiMethod<T>(
   return undefined
 }
 
-function normalizeMemoryType(raw: BookType | string | null | undefined): 'short' | 'script' {
-  return raw === 'script' ? 'script' : 'short'
+function normalizeMemoryType(
+  raw: BookType | string | null | undefined,
+): 'short' | 'long' | 'script' {
+  if (raw === 'script') return 'script'
+  if (raw === 'long') return 'long'
+  return 'short'
 }
 
 function nowIso(): string {
@@ -74,21 +78,24 @@ function stampMemoryEntries(
   return out
 }
 
-function readMockUserMemoryPayload(): Record<'short' | 'script', MemoryEntry[]> {
+function readMockUserMemoryPayload(): Record<'short' | 'long' | 'script', MemoryEntry[]> {
   try {
     const raw = localStorage.getItem(USER_MEMORY_STORAGE_KEY)
-    if (!raw) return { short: [], script: [] }
+    if (!raw) return { short: [], long: [], script: [] }
     const parsed = JSON.parse(raw) as Record<string, unknown>
     return {
       short: normalizeMemoryEntries(parsed.short),
+      long: normalizeMemoryEntries(parsed.long),
       script: normalizeMemoryEntries(parsed.script),
     }
   } catch {
-    return { short: [], script: [] }
+    return { short: [], long: [], script: [] }
   }
 }
 
-function writeMockUserMemoryPayload(payload: Record<'short' | 'script', MemoryEntry[]>) {
+function writeMockUserMemoryPayload(
+  payload: Record<'short' | 'long' | 'script', MemoryEntry[]>,
+) {
   localStorage.setItem(USER_MEMORY_STORAGE_KEY, JSON.stringify(payload))
 }
 

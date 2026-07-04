@@ -6,6 +6,12 @@ import {
   resolveWorkspaceAgentIdForStage,
   type WorkspaceAgentId,
 } from '../workspaces/short/stageReadAccess'
+import {
+  WORKSPACE_AGENT_IDS as LONG_WORKSPACE_AGENT_IDS,
+  resolveWorkspaceAgentIdForStage as resolveLongWorkspaceAgentIdForStage,
+  type LongWorkspaceAgentId,
+} from '../workspaces/long/stageReadAccess'
+import type { LongStageId } from '../workspaces/long/stages'
 import type {
   BookType,
   StageId,
@@ -21,13 +27,27 @@ import {
   ensureLocalScriptPromptSeeded,
   ensureLocalSharedPromptMigrated,
   localPromptLsKey,
+  LONG_SHARED_WORKSPACE_PROMPT_KIND,
   SCRIPT_SHARED_WORKSPACE_PROMPT_KIND,
   SHARED_WORKSPACE_PROMPT_KIND,
 } from './promptLocalStorage'
 
+type AnyWorkspaceAgentId = WorkspaceAgentId | LongWorkspaceAgentId
+
+function promptKindForWorkspaceType(workspaceType: BookType): string {
+  if (workspaceType === 'long') return LONG_SHARED_WORKSPACE_PROMPT_KIND
+  return workspaceType === 'script'
+    ? SCRIPT_SHARED_WORKSPACE_PROMPT_KIND
+    : SHARED_WORKSPACE_PROMPT_KIND
+}
+
+function agentIdsForWorkspaceType(workspaceType: BookType): readonly AnyWorkspaceAgentId[] {
+  return workspaceType === 'long' ? LONG_WORKSPACE_AGENT_IDS : WORKSPACE_AGENT_IDS
+}
+
 /** 磁盘 / 嵌入式默认 + （浏览器）localStorage 覆盖；供集中设置页使用。 */
 export async function readWorkspaceAgentPromptTemplate(
-  agentId: WorkspaceAgentId,
+  agentId: AnyWorkspaceAgentId,
   workspaceType: BookType = 'short',
 ): Promise<string> {
   const api = await getBridgeApi()
@@ -40,23 +60,20 @@ export async function readWorkspaceAgentPromptTemplate(
   if (workspaceType === 'script') ensureLocalScriptPromptSeeded()
   try {
     const ls = localStorage.getItem(
-      localPromptLsKey(
-        workspaceType === 'script' ? SCRIPT_SHARED_WORKSPACE_PROMPT_KIND : SHARED_WORKSPACE_PROMPT_KIND,
-        agentId,
-      ),
+      localPromptLsKey(promptKindForWorkspaceType(workspaceType), agentId),
     )
     if (ls != null) return ls.endsWith('\n') ? ls.slice(0, -1) : ls
   } catch {
     /* ignore */
   }
   return getEmbeddedPromptTemplate(
-    workspaceType === 'script' ? SCRIPT_SHARED_WORKSPACE_PROMPT_KIND : SHARED_WORKSPACE_PROMPT_KIND,
+    promptKindForWorkspaceType(workspaceType),
     agentId,
   )
 }
 
 export async function saveWorkspaceAgentPromptOverride(
-  agentId: WorkspaceAgentId,
+  agentId: AnyWorkspaceAgentId,
   body: string,
   workspaceType: BookType = 'short',
 ): Promise<void> {
@@ -70,19 +87,16 @@ export async function saveWorkspaceAgentPromptOverride(
   if (workspaceType === 'script') ensureLocalScriptPromptSeeded()
   try {
     localStorage.setItem(
-      localPromptLsKey(
-        workspaceType === 'script' ? SCRIPT_SHARED_WORKSPACE_PROMPT_KIND : SHARED_WORKSPACE_PROMPT_KIND,
-        agentId,
-      ),
+      localPromptLsKey(promptKindForWorkspaceType(workspaceType), agentId),
       body,
     )
   } catch {
-    console.warn('[DeepseekWrite] 无法保存创作空间提示词覆盖：无桌面桥接且无可用 localStorage')
+    console.warn('[DeepSeekWrite] 无法保存创作空间提示词覆盖：无桌面桥接且无可用 localStorage')
   }
 }
 
 export async function resetWorkspaceAgentPromptOverride(
-  agentId: WorkspaceAgentId,
+  agentId: AnyWorkspaceAgentId,
   workspaceType: BookType = 'short',
 ): Promise<boolean> {
   const api = await getBridgeApi()
@@ -93,10 +107,7 @@ export async function resetWorkspaceAgentPromptOverride(
   ensureLocalPlotPromptMerged()
   if (workspaceType === 'script') ensureLocalScriptPromptSeeded()
   try {
-    const k = localPromptLsKey(
-      workspaceType === 'script' ? SCRIPT_SHARED_WORKSPACE_PROMPT_KIND : SHARED_WORKSPACE_PROMPT_KIND,
-      agentId,
-    )
+    const k = localPromptLsKey(promptKindForWorkspaceType(workspaceType), agentId)
     const had = localStorage.getItem(k) != null
     localStorage.removeItem(k)
     return had
@@ -114,7 +125,7 @@ export async function resetAllWorkspaceSettings(
   // 1. 重置所有提示词覆盖
   if (api?.reset_workspace_agent_prompt_override) {
     await Promise.all(
-      WORKSPACE_AGENT_IDS.map((agentId) =>
+      agentIdsForWorkspaceType(workspaceType).map((agentId) =>
         api.reset_workspace_agent_prompt_override(agentId, workspaceType),
       ),
     )
@@ -123,11 +134,8 @@ export async function resetAllWorkspaceSettings(
     ensureLocalPlotPromptMerged()
     if (workspaceType === 'script') ensureLocalScriptPromptSeeded()
     try {
-      const prefix =
-        workspaceType === 'script'
-          ? SCRIPT_SHARED_WORKSPACE_PROMPT_KIND
-          : SHARED_WORKSPACE_PROMPT_KIND
-      for (const agentId of WORKSPACE_AGENT_IDS) {
+      const prefix = promptKindForWorkspaceType(workspaceType)
+      for (const agentId of agentIdsForWorkspaceType(workspaceType)) {
         localStorage.removeItem(localPromptLsKey(prefix, agentId))
       }
     } catch {
@@ -191,7 +199,12 @@ export async function getWorkspaceSystemPrompt(
   const filteredStages = Object.fromEntries(
     Object.entries(input.allStages).filter(([id]) => allowed.has(id as StageId)),
   ) as Partial<Record<StageId, string>>
-  const promptAgentId = resolveWorkspaceAgentIdForStage(stageId)
+  const promptAgentId =
+    workspaceType === 'long'
+      ? resolveLongWorkspaceAgentIdForStage(stageId as LongStageId)
+      : resolveWorkspaceAgentIdForStage(
+          stageId as Parameters<typeof resolveWorkspaceAgentIdForStage>[0],
+        )
   const raw = await readWorkspaceAgentPromptTemplate(promptAgentId, workspaceType)
   const prompt = renderPromptFromTemplateRaw(raw, {
     bookTitle: input.bookTitle,

@@ -172,7 +172,7 @@ _configure_macos_pywebview_env()
 def _configure_windows_webview2_proxy_env() -> None:
     if not sys.platform.startswith("win"):
         return
-    disable_proxy = os.environ.get("WRITECLAW_WEBVIEW2_DISABLE_PROXY", "")
+    disable_proxy = os.environ.get("DEEPSEEKWRITE_WEBVIEW2_DISABLE_PROXY", "")
     if disable_proxy.strip().lower() not in ("1", "true", "yes", "on"):
         return
     key = "WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS"
@@ -210,7 +210,7 @@ from app.prompt_store import (
     save_workspace_agent_prompt_override as _save_workspace_agent_prompt_override,
     sync_workspace_prompt_defaults as _sync_workspace_prompt_defaults,
 )
-from app.models import SCRIPT_STAGE_KEYS, SHORT_STAGE_KEYS
+from app.models import SCRIPT_STAGE_KEYS, SHORT_STAGE_KEYS, long_stage_keys_from_stages
 from app.storage import (
     BookStore,
     read_appearance_style,
@@ -500,7 +500,7 @@ class DistHTTPRequestHandler(SimpleHTTPRequestHandler):
             self._handle_llm_proxy("GET")
             return
         # WebView2 真实加载页面（非后端探活）即视为启动成功，清除"上次启动失败"标记。
-        if self.headers.get("X-WriteClaw-Probe") != "1":
+        if self.headers.get("X-DeepSeekWrite-Probe") != "1":
             _clear_boot_flag_once()
         return super().do_GET()
 
@@ -527,7 +527,7 @@ class DistHTTPRequestHandler(SimpleHTTPRequestHandler):
         super().end_headers()
 
     def log_message(self, format: str, *args: object) -> None:
-        if self.headers.get("X-WriteClaw-Probe") == "1":
+        if self.headers.get("X-DeepSeekWrite-Probe") == "1":
             return
         super().log_message(format, *args)
 
@@ -615,7 +615,7 @@ def _start_local_dist_server(dist_dir: Path) -> tuple[ThreadingHTTPServer, str]:
             name="dist-http-server",
         ).start()
         if _wait_for_local_dist_server(state.probe_url):
-            host = os.environ.get("WRITECLAW_DESKTOP_HOST", "").strip() or "127.0.0.1"
+            host = os.environ.get("DEEPSEEKWRITE_DESKTOP_HOST", "").strip() or "127.0.0.1"
             return httpd, f"http://{host}:{port}/?pywebview=1"
         print(
             f"本机页面服务探活失败（第 {attempt + 1} 次）：{state.probe_url}",
@@ -632,7 +632,7 @@ def _start_local_dist_server(dist_dir: Path) -> tuple[ThreadingHTTPServer, str]:
     print(
         "致命错误：本机页面服务在多次重试后仍不可用，无法启动窗口。\n"
         "可能原因：127.0.0.1 被防火墙拦截、端口资源耗尽、dist 目录不可读。\n"
-        "可尝试：设置 WRITECLAW_FORCE_FILE_URL=1 改用 file:// 模式启动后排查。",
+        "可尝试：设置 DEEPSEEKWRITE_FORCE_FILE_URL=1 改用 file:// 模式启动后排查。",
         file=sys.stderr,
     )
     if last_error is not None:
@@ -647,7 +647,7 @@ def _wait_for_local_dist_server(url: str, timeout_seconds: float = 3.0) -> bool:
         try:
             request = Request(
                 url,
-                headers={"Cache-Control": "no-cache", "X-WriteClaw-Probe": "1"},
+                headers={"Cache-Control": "no-cache", "X-DeepSeekWrite-Probe": "1"},
             )
             with urlopen(request, timeout=0.5) as response:
                 return 200 <= response.status < 500
@@ -687,7 +687,7 @@ def _resolve_main_window_url(
 
 
 def _resolve_desktop_url(dist_dir: Path) -> tuple[ThreadingHTTPServer | None, str]:
-    force_file = os.environ.get("WRITECLAW_FORCE_FILE_URL", "")
+    force_file = os.environ.get("DEEPSEEKWRITE_FORCE_FILE_URL", "")
     if force_file.strip().lower() in ("1", "true", "yes", "on"):
         return None, _dist_file_url(dist_dir)
     return _start_local_dist_server(dist_dir)
@@ -698,13 +698,13 @@ def _resolve_webview_user_data_folder() -> str | None:
 
     Windows 上 WebView2 会在此目录存缓存、IndexedDB 与渲染状态；异常关机、杀毒软件隔离、
     磁盘错误都可能让该目录损坏，表现为"此页存在问题 错误代码:39"。固定到用户数据目录后，
-    可通过 WRITECLAW_RESET_WEBVIEW_DATA=1 启动时清空重建，自愈该类故障而不必重装应用。
+    可通过 DEEPSEEKWRITE_RESET_WEBVIEW_DATA=1 启动时清空重建，自愈该类故障而不必重装应用。
     """
     if not sys.platform.startswith("win"):
         # macOS WKWebView / Linux Qt 后端对 user_data_folder 支持不一，保持默认行为。
         return None
     folder = app_data_root() / "WebViewData"
-    reset = os.environ.get("WRITECLAW_RESET_WEBVIEW_DATA", "").strip().lower()
+    reset = os.environ.get("DEEPSEEKWRITE_RESET_WEBVIEW_DATA", "").strip().lower()
     if reset in ("1", "true", "yes", "on"):
         try:
             if folder.exists():
@@ -1697,11 +1697,16 @@ class Api:
             metadata = {
                 "library_type": "book",
                 "data": book,
-                "app": "write-claw-desktop",
+                "app": "deepseekwrite-desktop",
                 "schemaVersion": 1,
                 "exported_at": _now_iso(),
             }
-            stage_keys = SCRIPT_STAGE_KEYS if book.get("book_type") == "script" else SHORT_STAGE_KEYS
+            book_type = str(book.get("book_type") or "short")
+            stages = book.get("stages") if isinstance(book.get("stages"), dict) else {}
+            if book_type == "long":
+                stage_keys = long_stage_keys_from_stages(stages)
+            else:
+                stage_keys = SCRIPT_STAGE_KEYS if book_type == "script" else SHORT_STAGE_KEYS
 
             with _zipfile.ZipFile(save_path, "w", _zipfile.ZIP_DEFLATED) as zf:
                 book_json = json.dumps(book, ensure_ascii=False, indent=2)
@@ -1711,7 +1716,6 @@ class Api:
                     json.dumps(metadata, ensure_ascii=False, indent=2),
                 )
 
-                stages = book.get("stages") if isinstance(book.get("stages"), dict) else {}
                 for stage_id in stage_keys:
                     zf.writestr(
                         _safe_zip_text_path("stages", f"{stage_id}.txt"),
@@ -2249,7 +2253,7 @@ def main() -> None:
     _httpd, url = _resolve_desktop_url(_dist_dir())
     url = _resolve_main_window_url(_dist_dir(), url)
     webview.create_window(
-        "DeepseekWrite",
+        "DeepSeekWrite",
         url,
         js_api=api,
         width=1500,
@@ -2269,7 +2273,7 @@ def main() -> None:
             "后再启动。\n",
             file=sys.stderr,
         )
-    _debug = os.environ.get("WRITECLAW_DEBUG", "").strip().lower() in (
+    _debug = os.environ.get("DEEPSEEKWRITE_DEBUG", "").strip().lower() in (
         "1",
         "true",
         "yes",

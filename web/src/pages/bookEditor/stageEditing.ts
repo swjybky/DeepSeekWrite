@@ -1,10 +1,12 @@
 import type {
   Book,
+  BookType,
   BookSummary,
   StageId,
   WorkspaceAgentId,
   WorkspaceAgentReadAccessConfig,
 } from '../../domain/workspace'
+import { resolveWorkspaceContentStagesForBook } from '../../domain/workspace'
 import {
   PLOT_CHILD_STAGES as SHORT_PLOT_CHILD_STAGES,
   PLOT_STAGE_ID,
@@ -18,6 +20,10 @@ import {
 import {
   resolveWorkspaceAgentReadAccess as resolveScriptWorkspaceAgentReadAccess,
 } from '../../workspaces/script/stageReadAccess'
+import {
+  resolveWorkspaceAgentReadAccess as resolveLongWorkspaceAgentReadAccess,
+} from '../../workspaces/long/stageReadAccess'
+import { isLongStageId } from '../../workspaces/long/stages'
 import type {
   PlotChildStageDefinition,
   PlotChildStageId,
@@ -25,7 +31,8 @@ import type {
 
 export function workspaceBookType(
   book: Pick<Book, 'book_type'> | BookSummary | null | undefined,
-): 'short' | 'script' {
+): BookType {
+  if (book?.book_type === 'long') return 'long'
   return book?.book_type === 'script' ? 'script' : 'short'
 }
 
@@ -46,17 +53,32 @@ export function defaultPlotChildStageForBook(
 export function resolveReadAccessForBook(
   book: Pick<Book, 'book_type'> | BookSummary | null | undefined,
   config: WorkspaceAgentReadAccessConfig | null | undefined,
-  agentId: WorkspaceAgentId,
+  agentId: WorkspaceAgentId | string,
 ) {
-  return workspaceBookType(book) === 'script'
-    ? resolveScriptWorkspaceAgentReadAccess(config, agentId)
-    : resolveShortWorkspaceAgentReadAccess(config, agentId)
+  const type = workspaceBookType(book)
+  if (type === 'long') return resolveLongWorkspaceAgentReadAccess(config, agentId)
+  return type === 'script'
+    ? resolveScriptWorkspaceAgentReadAccess(
+        config,
+        agentId as Parameters<typeof resolveScriptWorkspaceAgentReadAccess>[1],
+      )
+    : resolveShortWorkspaceAgentReadAccess(config, agentId as WorkspaceAgentId)
 }
 
 export function isPlotChildStageId(stageId: string): stageId is PlotChildStageId {
   return (
     SHORT_PLOT_CHILD_STAGES.some((stage) => stage.id === stageId) ||
     SCRIPT_PLOT_CHILD_STAGES.some((stage) => stage.id === stageId)
+  )
+}
+
+export function isContentStageIdForBook(
+  book: Pick<Book, 'book_type'> | BookSummary | null | undefined,
+  stageId: string,
+): stageId is StageId {
+  if (workspaceBookType(book) === 'long') return isLongStageId(stageId)
+  return resolveWorkspaceContentStagesForBook(book).some(
+    (stage) => stage.id === stageId,
   )
 }
 

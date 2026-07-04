@@ -1,14 +1,15 @@
 import { getEmbeddedPromptTemplate } from '../prompt/embeddedDefaults'
 import { WORKSPACE_AGENT_IDS } from '../workspaces/short/stageReadAccess'
 
-const PROMPT_TEMPLATE_LS_PREFIX = 'write_claw_prompt_template_override:'
+const PROMPT_TEMPLATE_LS_PREFIX = 'deepseekwrite_prompt_template_override:'
 export const SHARED_WORKSPACE_PROMPT_KIND = 'shared'
 export const SCRIPT_SHARED_WORKSPACE_PROMPT_KIND = 'script_shared'
+export const LONG_SHARED_WORKSPACE_PROMPT_KIND = 'long_shared'
 const LEGACY_QINGGAN_PROMPT_KIND = 'qinggan'
 const SHARED_PROMPT_LS_MIGRATION_MARKER =
-  'write_claw_shared_prompt_migration_from_qinggan_v1'
-const PLOT_PROMPT_LS_MERGE_MARKER = 'write_claw_plot_prompt_merge_v1'
-const SCRIPT_PROMPT_LS_SEED_MARKER = 'write_claw_script_prompt_seed_from_short_v1'
+  'deepseekwrite_shared_prompt_migration_from_qinggan_v1'
+const PLOT_PROMPT_LS_MERGE_MARKER = 'deepseekwrite_plot_prompt_merge_v1'
+const SCRIPT_PROMPT_LS_SEED_MARKER = 'deepseekwrite_script_prompt_seed_from_short_v1'
 
 export function localPromptLsKey(promptKind: string, stage: string): string {
   return PROMPT_TEMPLATE_LS_PREFIX + `${promptKind}:${stage}`

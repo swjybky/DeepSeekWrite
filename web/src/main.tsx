@@ -5,7 +5,7 @@ import '@earendil-works/pi-web-ui/app.css'
 import './index.css'
 import App from './App.tsx'
 import './bridge'
-import { registerWriteClawToolRenderers } from './pi/writeClawToolRenderers'
+import { registerDeepSeekWriteToolRenderers } from './pi/deepSeekWriteToolRenderers'
 
 const rootEl = document.getElementById('root')
 let appMounted = false
@@ -30,11 +30,11 @@ function showBootFatalError(message: string) {
   if (!rootEl) return
   rootEl.innerHTML = `
     <div class="boot-splash" role="alert">
-      <p class="boot-splash-title">DeepseekWrite</p>
+      <p class="boot-splash-title">DeepSeekWrite</p>
       <p class="boot-splash-hint" style="max-width: 28rem; text-align: center; white-space: pre-wrap;">
         ${escapeHtml(message)}
       </p>
-      <p class="boot-splash-hint">可在终端设置 WRITECLAW_DEBUG=1 后重启，用开发者工具查看详细错误。</p>
+      <p class="boot-splash-hint">可在终端设置 DEEPSEEKWRITE_DEBUG=1 后重启，用开发者工具查看详细错误。</p>
     </div>
   `
 }
@@ -47,7 +47,7 @@ function mount() {
     </StrictMode>,
   )
   appMounted = true
-  document.documentElement.dataset.writeClawMounted = '1'
+  document.documentElement.dataset.deepSeekWriteMounted = '1'
 }
 
 /**
@@ -60,12 +60,12 @@ function boot() {
     const message = String(event.message || '')
     if (isBenignResizeObserverError(message)) {
       event.preventDefault()
-      console.warn('[DeepseekWrite] 已忽略 ResizeObserver 布局通知:', message)
+      console.warn('[DeepSeekWrite] 已忽略 ResizeObserver 布局通知:', message)
       return
     }
     if (appMounted) {
       event.preventDefault()
-      console.error('[DeepseekWrite] 未处理脚本错误:', event.error ?? message)
+      console.error('[DeepSeekWrite] 未处理脚本错误:', event.error ?? message)
       return
     }
     const detail =
@@ -78,10 +78,10 @@ function boot() {
     const reason = event.reason
     const msg = reason instanceof Error ? reason.message : String(reason ?? '')
     const isExpectedSendCancel =
-      reason instanceof Error && reason.name === 'WriteClawSendValidationError'
+      reason instanceof Error && reason.name === 'DeepSeekWriteSendValidationError'
     if (isExpectedSendCancel) {
       event.preventDefault()
-      console.warn('[DeepseekWrite] 用户操作已取消:', msg)
+      console.warn('[DeepSeekWrite] 用户操作已取消:', msg)
       return
     }
     if (
@@ -90,12 +90,12 @@ function boot() {
       msg.includes('IndexedDB')
     ) {
       event.preventDefault()
-      console.warn('[DeepseekWrite] IndexedDB 瞬态错误（多窗口并发），已忽略:', msg)
+      console.warn('[DeepSeekWrite] IndexedDB 瞬态错误（多窗口并发），已忽略:', msg)
       return
     }
     if (appMounted) {
       event.preventDefault()
-      console.error('[DeepseekWrite] 未处理 Promise 错误:', reason)
+      console.error('[DeepSeekWrite] 未处理 Promise 错误:', reason)
       return
     }
     const detail =
@@ -106,7 +106,7 @@ function boot() {
   })
 
   // 立即挂载；桌面端 API 由 bridge.getBridgeApi() 单例等待，勿在此阻塞。
-  registerWriteClawToolRenderers()
+  registerDeepSeekWriteToolRenderers()
   mount()
 }
 
