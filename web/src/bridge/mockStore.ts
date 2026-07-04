@@ -2,8 +2,8 @@ import {
   defaultExpertDraft,
   isWorkspaceBook,
   mergeStagePatchIntoAll,
-  normalizeAllBookStages,
   normalizeExpertDraft,
+  normalizeStagesForWorkspaceBook,
   primaryDraftStageId,
 } from '../domain/workspaceCore'
 import type {
@@ -117,7 +117,7 @@ export async function mockCreateBook(
       isWsBook && linked_skill_id && loadMockSkills().has(linked_skill_id)
         ? linked_skill_id
         : '',
-    stages: normalizeAllBookStages({}),
+    stages: normalizeStagesForWorkspaceBook({ book_type: bt }, {}),
     expert_draft: defaultExpertDraft(bt),
     memories: [],
     memory_auto_capture_enabled: true,
@@ -135,6 +135,7 @@ export async function mockGetBook(book_id: string): Promise<Book | null> {
   return {
     ...book,
     status: normalizeBookStatus(book.status),
+    stages: normalizeStagesForWorkspaceBook(book, book.stages),
     expert_draft: normalizeExpertDraft(book.expert_draft, false, book.book_type),
   }
 }
@@ -161,7 +162,11 @@ export async function mockSaveBook(
     next = { ...next, title: options.title.trim() }
   }
   if (options.stages != null) {
-    const merged = mergeStagePatchIntoAll(b.stages, options.stages as Partial<Record<StageId, string>>)
+    const merged = mergeStagePatchIntoAll(
+      b.stages,
+      options.stages as Partial<Record<StageId, string>>,
+      next,
+    )
     next = { ...next, stages: merged, content: merged[primaryDraftStageId(next)] ?? '' }
   } else if (options.content != null) {
     next = { ...next, content: options.content }

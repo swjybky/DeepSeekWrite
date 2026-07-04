@@ -7,6 +7,10 @@ import {
   getDefaultWorkspaceAgentReadAccess as getDefaultScriptWorkspaceAgentReadAccess,
   normalizeWorkspaceAgentReadAccess as normalizeScriptWorkspaceAgentReadAccess,
 } from '../workspaces/script/stageReadAccess'
+import {
+  getDefaultWorkspaceAgentReadAccess as getDefaultLongWorkspaceAgentReadAccess,
+  normalizeWorkspaceAgentReadAccess as normalizeLongWorkspaceAgentReadAccess,
+} from '../workspaces/long/stageReadAccess'
 import type { WorkspaceAgentReadAccessConfig } from '../workspaces/shared/readAccess'
 import { getBridgeApi, isPywebviewDesktopBundle } from './runtime'
 import type { AppearanceStyle } from './aiModelConfig'
@@ -194,6 +198,9 @@ export async function persistWorkspaceRoot(path: string | null): Promise<void> {
 }
 
 function workspaceAgentReadAccessStorageKey(workspaceType: BookType): string {
+  if (workspaceType === 'long') {
+    return `${WORKSPACE_AGENT_READ_ACCESS_STORAGE_KEY}:long`
+  }
   return workspaceType === 'script'
     ? `${WORKSPACE_AGENT_READ_ACCESS_STORAGE_KEY}:script`
     : WORKSPACE_AGENT_READ_ACCESS_STORAGE_KEY
@@ -236,9 +243,17 @@ export async function getWorkspaceAgentReadAccess(
     try {
       const fromDisk = await api.get_workspace_agent_read_access(workspaceType)
       const normalized =
-        workspaceType === 'script'
-          ? normalizeScriptWorkspaceAgentReadAccess(fromDisk)
-          : normalizeWorkspaceAgentReadAccess(fromDisk)
+        workspaceType === 'long'
+          ? normalizeLongWorkspaceAgentReadAccess(
+              fromDisk as WorkspaceAgentReadAccessConfig,
+            )
+          : workspaceType === 'script'
+            ? normalizeScriptWorkspaceAgentReadAccess(
+                fromDisk as WorkspaceAgentReadAccessConfig,
+              )
+            : normalizeWorkspaceAgentReadAccess(
+                fromDisk as WorkspaceAgentReadAccessConfig,
+              )
       setStoredWorkspaceAgentReadAccess(normalized, workspaceType)
       try {
         await api.set_workspace_agent_read_access(
@@ -254,9 +269,17 @@ export async function getWorkspaceAgentReadAccess(
     }
   }
   const normalized =
-    workspaceType === 'script'
-      ? normalizeScriptWorkspaceAgentReadAccess(getStoredWorkspaceAgentReadAccessRaw(workspaceType))
-      : normalizeWorkspaceAgentReadAccess(getStoredWorkspaceAgentReadAccessRaw(workspaceType))
+    workspaceType === 'long'
+      ? normalizeLongWorkspaceAgentReadAccess(
+          getStoredWorkspaceAgentReadAccessRaw(workspaceType) as WorkspaceAgentReadAccessConfig,
+        )
+      : workspaceType === 'script'
+        ? normalizeScriptWorkspaceAgentReadAccess(
+            getStoredWorkspaceAgentReadAccessRaw(workspaceType) as WorkspaceAgentReadAccessConfig,
+          )
+        : normalizeWorkspaceAgentReadAccess(
+            getStoredWorkspaceAgentReadAccessRaw(workspaceType) as WorkspaceAgentReadAccessConfig,
+          )
   setStoredWorkspaceAgentReadAccess(normalized, workspaceType)
   return normalized
 }
@@ -267,9 +290,11 @@ export async function saveWorkspaceAgentReadAccess(
   workspaceType: BookType = 'short',
 ): Promise<WorkspaceAgentReadAccessConfig> {
   const normalized =
-    workspaceType === 'script'
-      ? normalizeScriptWorkspaceAgentReadAccess(config)
-      : normalizeWorkspaceAgentReadAccess(config)
+    workspaceType === 'long'
+      ? normalizeLongWorkspaceAgentReadAccess(config)
+      : workspaceType === 'script'
+        ? normalizeScriptWorkspaceAgentReadAccess(config)
+        : normalizeWorkspaceAgentReadAccess(config)
   setStoredWorkspaceAgentReadAccess(normalized, workspaceType)
   const api = await getBridgeApi()
   if (api?.set_workspace_agent_read_access) {
@@ -288,9 +313,11 @@ export async function syncWorkspaceAgentReadAccessDefaults(
   const api = await getBridgeApi()
   if (api?.sync_workspace_agent_read_access_defaults) {
     const result = await api.sync_workspace_agent_read_access_defaults(workspaceType)
-    return workspaceType === 'script'
-      ? normalizeScriptWorkspaceAgentReadAccess(result)
-      : normalizeWorkspaceAgentReadAccess(result)
+    return workspaceType === 'long'
+      ? normalizeLongWorkspaceAgentReadAccess(result as WorkspaceAgentReadAccessConfig)
+      : workspaceType === 'script'
+        ? normalizeScriptWorkspaceAgentReadAccess(result as WorkspaceAgentReadAccessConfig)
+        : normalizeWorkspaceAgentReadAccess(result as WorkspaceAgentReadAccessConfig)
   }
   throw new Error('桌面端 API 不可用：无法同步读取范围默认配置')
 }
@@ -303,13 +330,16 @@ export async function getWorkspaceAgentReadAccessDefaults(
   if (api?.get_default_workspace_agent_read_access) {
     try {
       const result = await api.get_default_workspace_agent_read_access(workspaceType)
-      return workspaceType === 'script'
-        ? normalizeScriptWorkspaceAgentReadAccess(result)
-        : normalizeWorkspaceAgentReadAccess(result)
+      return workspaceType === 'long'
+        ? normalizeLongWorkspaceAgentReadAccess(result as WorkspaceAgentReadAccessConfig)
+        : workspaceType === 'script'
+          ? normalizeScriptWorkspaceAgentReadAccess(result as WorkspaceAgentReadAccessConfig)
+          : normalizeWorkspaceAgentReadAccess(result as WorkspaceAgentReadAccessConfig)
     } catch {
       /* fall through */
     }
   }
+  if (workspaceType === 'long') return getDefaultLongWorkspaceAgentReadAccess()
   return workspaceType === 'script'
     ? getDefaultScriptWorkspaceAgentReadAccess()
     : getDefaultWorkspaceAgentReadAccess()

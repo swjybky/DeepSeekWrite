@@ -790,6 +790,22 @@ button.back-link:hover {
   gap: 0.18rem;
 }
 
+.workspace-tree-stage-children--nested {
+  margin-top: 0.08rem;
+  margin-left: 0.72rem;
+  padding-left: 0.62rem;
+}
+
+.workspace-tree-stage-child-node {
+  min-width: 0;
+}
+
+.workspace-tree-stage-child-row {
+  display: flex;
+  align-items: stretch;
+  gap: 0.1rem;
+}
+
 .workspace-tree-stage-child {
   position: relative;
   width: 100%;
@@ -808,6 +824,12 @@ button.back-link:hover {
   white-space: normal;
   overflow-wrap: anywhere;
   word-break: break-word;
+}
+
+.workspace-tree-stage-child--branch {
+  flex: 1;
+  min-width: 0;
+  font-weight: 600;
 }
 
 .workspace-tree-stage-child::before {

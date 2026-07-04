@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from dataclasses import asdict, dataclass, field
 from typing import Any, Literal
 from uuid import uuid4
@@ -9,7 +10,7 @@ BookStatus = Literal["editing", "completed"]
 MaterialType = Literal["long", "short", "script"]
 SkillType = Literal["long", "short", "script"]
 
-WORKSPACE_BOOK_TYPES: tuple[str, ...] = ("short", "script")
+WORKSPACE_BOOK_TYPES: tuple[str, ...] = ("short", "long", "script")
 LIBRARY_TYPES: tuple[str, ...] = ("short", "long", "script")
 MEMORY_TAGS: tuple[str, ...] = (
     "general",
@@ -93,6 +94,35 @@ SCRIPT_STAGE_KEYS: tuple[str, ...] = tuple(
     key for key in SHORT_STAGE_KEYS if key != "intro_design"
 )
 
+# 长篇工作台阶段键：独立于短篇/剧本，保存实际可编辑叶子节点。
+LONG_STAGE_KEYS: tuple[str, ...] = (
+    "worldbuilding.rules",
+    "worldbuilding.factions",
+    "worldbuilding.geography",
+    "worldbuilding.history",
+    "worldbuilding.terminology",
+    "worldbuilding.items",
+    "character_design.protagonists",
+    "character_design.major_supporting",
+    "character_design.minor_supporting",
+    "character_design.passersby",
+    "plot_design.book_line",
+    "plot_design.volumes",
+    "plot_design.story_arcs",
+    "plot_design.chapter_cards",
+    "plot_design.foreshadowing",
+    "draft.volume-1.arc-1.chapter-1",
+    "draft.volume-2.arc-1.chapter-1",
+    "continuity_ledger.timeline",
+    "continuity_ledger.character_states",
+    "continuity_ledger.open_foreshadowing",
+    "continuity_ledger.continuity_notes",
+)
+
+_LONG_DRAFT_STAGE_RE = re.compile(
+    r"^draft\.volume-[1-9]\d*\.arc-[1-9]\d*\.chapter-[1-9]\d*$"
+)
+
 # 保留旧键用于数据迁移
 LEGACY_QINGGAN_STAGE_KEYS: tuple[str, ...] = (
     "qinggan_character",
@@ -104,12 +134,36 @@ LEGACY_QINGGAN_STAGE_KEYS: tuple[str, ...] = (
 )
 
 # 所有可能的阶段键（包括统一新键和遗留旧键）
-ALL_STAGE_KEYS: tuple[str, ...] = SHORT_STAGE_KEYS + LEGACY_QINGGAN_STAGE_KEYS
+ALL_STAGE_KEYS: tuple[str, ...] = (
+    SHORT_STAGE_KEYS + LONG_STAGE_KEYS + LEGACY_QINGGAN_STAGE_KEYS
+)
 
 
 def _stage_keys_for_book_type(book_type: str | None = None) -> tuple[str, ...]:
     """根据书籍类型返回适用的阶段键列表。"""
-    return SCRIPT_STAGE_KEYS if str(book_type or "").strip() == "script" else SHORT_STAGE_KEYS
+    normalized = str(book_type or "").strip()
+    if normalized == "long":
+        return LONG_STAGE_KEYS
+    return SCRIPT_STAGE_KEYS if normalized == "script" else SHORT_STAGE_KEYS
+
+
+def is_long_stage_key(stage_id: str) -> bool:
+    """长篇允许固定叶子节点和动态正文卷/剧情弧线/章节节点。"""
+    key = str(stage_id or "").strip()
+    if key in LONG_STAGE_KEYS:
+        return True
+    if _LONG_DRAFT_STAGE_RE.match(key):
+        return True
+    return False
+
+
+def long_stage_keys_from_stages(stages: dict[str, Any] | None) -> tuple[str, ...]:
+    """导出/落盘时使用：默认键在前，动态长篇键随后稳定排序。"""
+    keys = list(LONG_STAGE_KEYS)
+    for key in sorted(str(k) for k in (stages or {}).keys()):
+        if key not in keys and is_long_stage_key(key):
+            keys.append(key)
+    return tuple(keys)
 
 
 def _legacy_key_mapping() -> dict[str, str]:
@@ -170,6 +224,13 @@ def normalize_stages_from_storage(
     if not raw:
         return out
 
+    if str(book_type or "").strip() == "long":
+        for key, value in raw.items():
+            stage_id = str(key)
+            if is_long_stage_key(stage_id):
+                out[stage_id] = str(value or "")
+        return out
+
     # 先迁移旧键
     migrated = migrate_legacy_stages({k: str(v or "") for k, v in raw.items()})
 
@@ -191,6 +252,13 @@ def apply_stage_patch(
     同时处理可能的旧键映射。
     """
     out = normalize_stages_from_storage(base, book_type)
+    if str(book_type or "").strip() == "long":
+        if patch:
+            for key, value in patch.items():
+                stage_id = str(key)
+                if is_long_stage_key(stage_id):
+                    out[stage_id] = str(value or "")
+        return out
     keys = _stage_keys_for_book_type(book_type)
     if patch:
         # 先对patch进行迁移
@@ -203,6 +271,13 @@ def apply_stage_patch(
 
 def default_expert_draft(book_type: str | None = None) -> dict[str, Any]:
     """创建专家模式正文编写的默认空结构。剧本从第一节开始，短篇保留导语。"""
+    if str(book_type or "").strip() == "long":
+        return {
+            "sections": [],
+            "character_states": [],
+            "running": False,
+            "active_section_id": "",
+        }
     if str(book_type or "").strip() == "script":
         return {
             "sections": [
@@ -253,6 +328,8 @@ def normalize_expert_draft_from_storage(
     book_type: str | None = None,
 ) -> dict[str, Any]:
     """从 JSON 载入专家模式正文结构，补齐对应书籍类型的默认小节和人物状态。"""
+    if str(book_type or "").strip() == "long":
+        return default_expert_draft("long")
     base = default_expert_draft(book_type)
     if not isinstance(raw, dict):
         return base

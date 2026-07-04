@@ -23,6 +23,11 @@ import {
   EXPERT_DRAFT_COORDINATOR_AGENT_ID,
   EXPERT_SECTION_WRITER_AGENT_ID,
 } from '../../workspaces/short/stageReadAccess'
+import {
+  longContentStageRowsFromStages,
+  longRootStageIdForStage,
+  longStageLabel,
+} from '../../workspaces/long/stages'
 import { PLOT_STAGE_ID } from '../../workspaces/short/stages'
 import type { BookWorkspaceSessionState } from '../../stores/workspaceStore'
 import { resolveLiveWorkspaceStageBody } from './liveStageBody'
@@ -53,10 +58,19 @@ type StartExpertWriting = (
 ) => boolean
 
 function workspaceAgentTitle(
+  bookType: Book['book_type'],
   activeStage: StageId,
   activeExpertDraftSectionId: string,
 ): string {
   if (activeExpertDraftSectionId) return '小节智能体'
+  if (bookType === 'long') {
+    const rootStage = longRootStageIdForStage(activeStage)
+    if (rootStage === 'worldbuilding') return '世界观智能体'
+    if (rootStage === 'character_design') return '人物智能体'
+    if (rootStage === 'plot_design') return '剧情总控智能体'
+    if (rootStage === 'draft') return '正文智能体'
+    if (rootStage === 'continuity_ledger') return '状态账本智能体'
+  }
   if (activeStage === 'character_design') return '人物智能体'
   if (
     activeStage === 'plot_design' ||
@@ -71,12 +85,21 @@ function workspaceAgentTitle(
 }
 
 function workspaceAgentTip(
+  bookType: Book['book_type'],
   activeStage: StageId,
   activeExpertDraftSectionId: string,
   activePlotChildLabel: string,
 ): string {
   if (activeExpertDraftSectionId) {
     return '输入“帮我开始xx小节编写，要求如下：xxxx”'
+  }
+  if (bookType === 'long') {
+    const rootStage = longRootStageIdForStage(activeStage)
+    if (rootStage === 'worldbuilding') return '输入“帮我细化当前世界观节点”开始'
+    if (rootStage === 'character_design') return '输入“帮我维护当前人物分组”开始'
+    if (rootStage === 'plot_design') return '输入“帮我规划当前剧情节点”开始'
+    if (rootStage === 'draft') return '输入“根据当前章卡写这一章”开始'
+    if (rootStage === 'continuity_ledger') return '输入“帮我整理本章状态变化”开始'
   }
   if (activeStage === 'character_design') {
     return '输入“帮我设计xxx的人物设计”开始'
@@ -171,10 +194,12 @@ export function WorkspaceAiPanel({
     ? activeExpertDraftSectionId
     : ''
   const activeAgentTitle = workspaceAgentTitle(
+    book.book_type,
     activeStage,
     activeExpertSectionForHeader,
   )
   const activeAgentTip = workspaceAgentTip(
+    book.book_type,
     activeStage,
     activeExpertSectionForHeader,
     activePlotChildLabel,
@@ -227,7 +252,8 @@ export function WorkspaceAiPanel({
         </div>
       </div>
       <div className="workspace-ai-hint muted">
-        {railStages.find((s) => s.id === activeStage)?.label}
+        {railStages.find((s) => s.id === activeStage)?.label ??
+          (book.book_type === 'long' ? longStageLabel(activeStage) : '')}
         {activePlotChildLabel ? ` · ${activePlotChildLabel}` : ''}
         {expertDraftActive
           ? activeExpertSectionForHeader
@@ -242,15 +268,20 @@ export function WorkspaceAiPanel({
       <div className="workspace-ai-chat-stack">
         {renderedWorkspaceSessions.flatMap((session) => {
           const sessionBookGenre = resolveWorkspaceBookGenre(session.book)
-          const sessionStages = resolveWorkspaceStagesForBook(session.book)
-          const sessionExpertActive = session.activeStage === 'draft'
+          const sessionStages =
+            session.book.book_type === 'long'
+              ? longContentStageRowsFromStages(session.stages)
+              : resolveWorkspaceStagesForBook(session.book)
+          const supportsExpertDraft = session.book.book_type !== 'long'
+          const sessionExpertActive =
+            supportsExpertDraft && session.activeStage === 'draft'
           const isVisibleBook = session.book.id === book.id
           const SessionExpertDraftAiChat =
             session.book.book_type === 'script'
               ? ScriptExpertDraftAiChat
               : ShortExpertDraftAiChat
           const stageLayers = sessionStages
-            .filter((s) => s.id !== 'draft')
+            .filter((s) => supportsExpertDraft ? s.id !== 'draft' : true)
             .map((s) => {
               const epoch = session.aiChatEpochByStage[s.id] ?? 0
               const activeContentStageForLayer =
@@ -331,6 +362,8 @@ export function WorkspaceAiPanel({
                 </div>
               )
             })
+
+          if (!supportsExpertDraft) return stageLayers
 
           const expertLayerActive = isVisibleBook && sessionExpertActive
           const expertLayer = (

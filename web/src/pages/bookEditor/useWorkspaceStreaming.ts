@@ -8,7 +8,7 @@ import {
 import type { ApplyToStageEditorPayload } from '../../pi/workspaceStageAgents'
 import type { BookWorkspaceSessionState } from '../../stores/workspaceStore'
 import { PLOT_STAGE_ID } from '../../workspaces/short/stages'
-import { isPlotChildStageId } from './stageEditing'
+import { isContentStageIdForBook, isPlotChildStageId } from './stageEditing'
 import { syncWorkspaceStageTextarea } from './liveStageBody'
 
 type CommitWorkspaceSession = (
@@ -101,7 +101,11 @@ export function useWorkspaceStreaming({
           stages: updatedStages,
           book: {
             ...session.book,
-            stages: mergeStagePatchIntoAll(session.book.stages, updatedStages),
+            stages: mergeStagePatchIntoAll(
+              session.book.stages,
+              updatedStages,
+              session.book,
+            ),
             content: updatedStages.draft ?? session.book.content,
           },
         }
@@ -232,13 +236,17 @@ export function useWorkspaceStreaming({
   const applyToStageEditorForBook = useCallback(
     (bookId: string, stage: StageId, payload: ApplyToStageEditorPayload) => {
       const requestedTarget = String(payload.targetStageId ?? '').trim()
+      const session = workspaceSessionsRef.current[bookId]
       const targetStage =
-        stage === PLOT_STAGE_ID
-          ? isPlotChildStageId(requestedTarget)
-            ? requestedTarget
-            : workspaceSessionsRef.current[bookId]?.activePlotChildStage ||
-              PLOT_STAGE_ID
-          : stage
+        session?.book.book_type === 'long' &&
+        isContentStageIdForBook(session.book, requestedTarget)
+          ? requestedTarget
+          : stage === PLOT_STAGE_ID
+            ? isPlotChildStageId(requestedTarget)
+              ? requestedTarget
+              : workspaceSessionsRef.current[bookId]?.activePlotChildStage ||
+                PLOT_STAGE_ID
+            : stage
       tokenBuffersByBookRef.current[bookId] =
         tokenBuffersByBookRef.current[bookId] ?? {}
       tokenBufferRafByBookRef.current[bookId] =

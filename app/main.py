@@ -209,7 +209,7 @@ from app.prompt_store import (
     save_workspace_agent_prompt_override as _save_workspace_agent_prompt_override,
     sync_workspace_prompt_defaults as _sync_workspace_prompt_defaults,
 )
-from app.models import SCRIPT_STAGE_KEYS, SHORT_STAGE_KEYS
+from app.models import SCRIPT_STAGE_KEYS, SHORT_STAGE_KEYS, long_stage_keys_from_stages
 from app.storage import (
     BookStore,
     read_appearance_style,
@@ -1501,7 +1501,12 @@ class Api:
                 "schemaVersion": 1,
                 "exported_at": _now_iso(),
             }
-            stage_keys = SCRIPT_STAGE_KEYS if book.get("book_type") == "script" else SHORT_STAGE_KEYS
+            book_type = str(book.get("book_type") or "short")
+            stages = book.get("stages") if isinstance(book.get("stages"), dict) else {}
+            if book_type == "long":
+                stage_keys = long_stage_keys_from_stages(stages)
+            else:
+                stage_keys = SCRIPT_STAGE_KEYS if book_type == "script" else SHORT_STAGE_KEYS
 
             with _zipfile.ZipFile(save_path, "w", _zipfile.ZIP_DEFLATED) as zf:
                 book_json = json.dumps(book, ensure_ascii=False, indent=2)
@@ -1511,7 +1516,6 @@ class Api:
                     json.dumps(metadata, ensure_ascii=False, indent=2),
                 )
 
-                stages = book.get("stages") if isinstance(book.get("stages"), dict) else {}
                 for stage_id in stage_keys:
                     zf.writestr(
                         _safe_zip_text_path("stages", f"{stage_id}.txt"),

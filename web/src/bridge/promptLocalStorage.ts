@@ -4,6 +4,7 @@ import { WORKSPACE_AGENT_IDS } from '../workspaces/short/stageReadAccess'
 const PROMPT_TEMPLATE_LS_PREFIX = 'deepseekwrite_prompt_template_override:'
 export const SHARED_WORKSPACE_PROMPT_KIND = 'shared'
 export const SCRIPT_SHARED_WORKSPACE_PROMPT_KIND = 'script_shared'
+export const LONG_SHARED_WORKSPACE_PROMPT_KIND = 'long_shared'
 const LEGACY_QINGGAN_PROMPT_KIND = 'qinggan'
 const SHARED_PROMPT_LS_MIGRATION_MARKER =
   'deepseekwrite_shared_prompt_migration_from_qinggan_v1'

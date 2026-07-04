@@ -347,7 +347,11 @@ export function useExpertDraftRuntime({
           expertDraft: next,
           book: {
             ...session.book,
-            stages: mergeStagePatchIntoAll(session.book.stages, updatedStages),
+            stages: mergeStagePatchIntoAll(
+              session.book.stages,
+              updatedStages,
+              session.book,
+            ),
             content: '',
             expert_draft: next,
           },

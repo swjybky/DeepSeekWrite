@@ -9,6 +9,7 @@ import {
   normalizeExpertDraft,
 } from '../../bridge'
 import type { BookWorkspaceSessionState } from '../../stores/workspaceStore'
+import { coerceLongStageId } from '../../workspaces/long/stages'
 import { PLOT_STAGE_ID } from '../../workspaces/short/stages'
 import { syncExpertDraftFromDraftStage } from './expertDraftUtils'
 import { syncWorkspaceStageTextarea } from './liveStageBody'
@@ -59,22 +60,29 @@ export function useWorkspaceStageRuntime({
   const setActiveBookStage = useCallback(
     (stageId: StageId) => {
       const currentBookId = bookRef.current?.id
+      const normalizedStageId =
+        bookRef.current?.book_type === 'long'
+          ? coerceLongStageId(stageId) as StageId
+          : stageId
       const nextPlotChild =
-        stageId === PLOT_STAGE_ID
+        normalizedStageId === PLOT_STAGE_ID
           ? defaultPlotChildStageForBook(bookRef.current)
           : ''
-      activeStageRef.current = stageId
-      setActiveStage(stageId)
+      activeStageRef.current = normalizedStageId
+      setActiveStage(normalizedStageId)
       activePlotChildStageRef.current = nextPlotChild
       setActivePlotChildStage(nextPlotChild)
       if (currentBookId) {
         commitWorkspaceSession(
           currentBookId,
           (session) => {
-            if (stageId !== 'draft' || !session.expertDraft.active_section_id) {
+            if (
+              normalizedStageId !== 'draft' ||
+              !session.expertDraft.active_section_id
+            ) {
               return {
                 ...session,
-                activeStage: stageId,
+                activeStage: normalizedStageId,
                 activePlotChildStage: nextPlotChild,
               }
             }
@@ -84,7 +92,7 @@ export function useWorkspaceStageRuntime({
             }
             return {
               ...session,
-              activeStage: stageId,
+              activeStage: normalizedStageId,
               activePlotChildStage: nextPlotChild,
               expertDraft: nextExpertDraft,
               book: {
@@ -152,7 +160,11 @@ export function useWorkspaceStageRuntime({
         tokenBuffersByBookRef.current[currentBookId] = buffers
         tokenBuffersRef.current = buffers
       }
-      if (targetStage === 'draft' && currentBookId) {
+      if (
+        targetStage === 'draft' &&
+        currentBookId &&
+        bookRef.current?.book_type !== 'long'
+      ) {
         const session = commitWorkspaceSession(currentBookId, (session) => {
           const updatedStages = { ...session.stages, draft: value }
           const nextExpertDraft = normalizeExpertDraft(
@@ -170,7 +182,11 @@ export function useWorkspaceStageRuntime({
             expertDraft: nextExpertDraft,
             book: {
               ...session.book,
-              stages: mergeStagePatchIntoAll(session.book.stages, updatedStages),
+              stages: mergeStagePatchIntoAll(
+                session.book.stages,
+                updatedStages,
+                session.book,
+              ),
               content: value,
               expert_draft: nextExpertDraft,
             },

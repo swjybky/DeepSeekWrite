@@ -62,6 +62,9 @@ import {
   resolveWorkspaceAgentReadAccess as resolveScriptWorkspaceAgentReadAccess,
 } from '../workspaces/script/stageReadAccess'
 import {
+  resolveWorkspaceAgentReadAccess as resolveLongWorkspaceAgentReadAccess,
+} from '../workspaces/long/stageReadAccess'
+import {
   isWorkspaceSupportedAttachment,
   loadWorkspaceAttachment,
   WORKSPACE_ATTACHMENT_ACCEPTED_TYPES,
@@ -77,11 +80,30 @@ const WORKSPACE_ATTACHMENT_MAX_FILES = 10
 function resolvePromptReadAccess(
   bookType: BookType | undefined,
   config: WorkspaceAgentReadAccessConfig | null | undefined,
-  agentId: WorkspaceAgentId,
+  agentId: WorkspaceAgentId | string,
 ) {
+  if (bookType === 'long') {
+    return resolveLongWorkspaceAgentReadAccess(config, agentId)
+  }
   return bookType === 'script'
-    ? resolveScriptWorkspaceAgentReadAccess(config, agentId)
-    : resolveWorkspaceAgentReadAccess(config, agentId)
+    ? resolveScriptWorkspaceAgentReadAccess(
+        config,
+        agentId as Parameters<typeof resolveScriptWorkspaceAgentReadAccess>[1],
+      )
+    : resolveWorkspaceAgentReadAccess(config, agentId as WorkspaceAgentId)
+}
+
+function resolvePromptAllowedWorkspaceStages(
+  bookType: BookType | undefined,
+  config: WorkspaceAgentReadAccessConfig | null | undefined,
+  agentId: WorkspaceAgentId | string,
+  currentStageId: StageId,
+): readonly StageId[] {
+  const workspace = resolvePromptReadAccess(bookType, config, agentId)
+    .workspace as readonly StageId[]
+  return bookType === 'long'
+    ? [...new Set([...workspace, currentStageId])]
+    : workspace
 }
 const WORKSPACE_ATTACHMENT_MAX_FILE_SIZE = 20 * 1024 * 1024
 const WORKSPACE_SEND_VALIDATION_ERROR_NAME = 'DeepSeekWriteSendValidationError'
@@ -476,7 +498,11 @@ function WorkspaceAiChatInner({
 
   const resolveDefaultStreamingWriteTargetStageId = (): WritableStageId => {
     const p = propsLatestRef.current
-    if (workspaceType === 'book' && p.stageId === 'plot_design') {
+    if (
+      workspaceType === 'book' &&
+      p.bookType !== 'long' &&
+      p.stageId === 'plot_design'
+    ) {
       return (
         pendingPlotChildStageRef.current ??
         p.activeStageContentId ??
@@ -492,7 +518,11 @@ function WorkspaceAiChatInner({
     const targetStageId = targetStageIdFromArgs(args)
     if (!targetStageId) return undefined
     const p = propsLatestRef.current
-    if (workspaceType === 'book' && p.stageId === 'plot_design') {
+    if (
+      workspaceType === 'book' &&
+      p.bookType !== 'long' &&
+      p.stageId === 'plot_design'
+    ) {
       const allowed =
         p.bookType === 'script'
           ? ['plot_design', 'plot_refine']
@@ -578,7 +608,9 @@ function WorkspaceAiChatInner({
           ? `material_${p.materialTypeKey ?? 'short'}_manager`
           : p.bookType === 'script'
             ? 'script_shared'
-            : 'shared',
+            : p.bookType === 'long'
+              ? 'long_shared'
+              : 'shared',
       workspaceType === 'material' || workspaceType === 'skill'
         ? undefined
         : p.stageId,
@@ -758,7 +790,9 @@ function WorkspaceAiChatInner({
       const ctxTools = (): AgentTool[] => {
         const rawLatest = propsLatestRef.current
         const pendingPlotChildStage =
-          workspaceType === 'book' && rawLatest.stageId === 'plot_design'
+          workspaceType === 'book' &&
+          rawLatest.bookType !== 'long' &&
+          rawLatest.stageId === 'plot_design'
             ? pendingPlotChildStageRef.current
             : null
         const latest = pendingPlotChildStage
@@ -791,6 +825,7 @@ function WorkspaceAiChatInner({
             const p = propsLatestRef.current
             if (
               workspaceType === 'book' &&
+              p.bookType !== 'long' &&
               p.stageId === 'plot_design' &&
               pendingPlotChildStageRef.current
             ) {
@@ -846,13 +881,14 @@ function WorkspaceAiChatInner({
                 bookGenre: props.bookGenre ?? '未分类',
                 stageBody: resolveCurrentStageBody(props),
                 allStages: mergeCurrentStageIntoAllStages(props) as Partial<Record<StageId, string>>,
-                allowedWorkspaceStages: resolvePromptReadAccess(
+                allowedWorkspaceStages: resolvePromptAllowedWorkspaceStages(
                   props.bookType,
                   props.workspaceAgentReadAccess,
-                  (props.stageId === 'draft'
+                  (props.bookType !== 'long' && props.stageId === 'draft'
                     ? EXPERT_DRAFT_COORDINATOR_AGENT_ID
                     : props.stageId) as WorkspaceAgentId,
-                ).workspace as readonly StageId[],
+                  props.stageId as StageId,
+                ),
                 linkedSkill: props.linkedSkill,
               },
             )
@@ -1242,13 +1278,14 @@ function WorkspaceAiChatInner({
                 bookGenre: p.bookGenre ?? '未分类',
                 stageBody: latestStageBody,
                 allStages: latestAllStages as Partial<Record<StageId, string>>,
-                allowedWorkspaceStages: resolvePromptReadAccess(
+                allowedWorkspaceStages: resolvePromptAllowedWorkspaceStages(
                   p.bookType,
                   p.workspaceAgentReadAccess,
-                  (p.stageId === 'draft'
+                  (p.bookType !== 'long' && p.stageId === 'draft'
                     ? EXPERT_DRAFT_COORDINATOR_AGENT_ID
                     : p.stageId) as WorkspaceAgentId,
-                ).workspace as readonly StageId[],
+                  p.stageId as StageId,
+                ),
                 linkedSkill: p.linkedSkill,
               },
             )
@@ -1256,7 +1293,9 @@ function WorkspaceAiChatInner({
       const agent = agentRef.current
       agent.state.systemPrompt = nextPrompt
       const pendingPlotChildStage =
-        workspaceType === 'book' && p.stageId === 'plot_design'
+        workspaceType === 'book' &&
+        p.bookType !== 'long' &&
+        p.stageId === 'plot_design'
           ? pendingPlotChildStageRef.current
           : null
       const toolProps = pendingPlotChildStage
@@ -1289,6 +1328,7 @@ function WorkspaceAiChatInner({
           const live = propsLatestRef.current
           if (
             workspaceType === 'book' &&
+            live.bookType !== 'long' &&
             live.stageId === 'plot_design' &&
             pendingPlotChildStageRef.current
           ) {
