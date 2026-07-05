@@ -611,6 +611,8 @@
 .create-dialog {
   width: min(560px, 100%);
   max-height: min(720px, calc(100vh - 2.5rem));
+  display: flex;
+  flex-direction: column;
   overflow: hidden;
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-lg);
@@ -620,13 +622,16 @@
 }
 
 .create-dialog-form {
+  width: 100%;
   min-height: 0;
+  max-height: inherit;
   display: flex;
   flex-direction: column;
 }
 
 .create-dialog-head,
 .create-dialog-foot {
+  flex-shrink: 0;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -665,6 +670,7 @@
 }
 
 .create-dialog-body {
+  flex: 1 1 auto;
   min-height: 0;
   overflow-y: auto;
   padding: 1.15rem 1.25rem 0.3rem;
