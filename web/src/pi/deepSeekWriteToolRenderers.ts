@@ -142,11 +142,16 @@ function summarizeToolCall(
     case 'query_linked_material_entries': {
       const mode = pickString(params, 'mode')
       const query = pickString(params, 'query')
-      const entryId = pickString(params, 'entry_id')
+      const entryName = pickString(params, 'entry_name')
       if (mode === 'read') {
-        return entryId
-          ? verb('正在读取关联素材条目', '已读取关联素材条目') + `「${entryId}」`
+        return entryName
+          ? verb('正在读取关联素材条目', '已读取关联素材条目') + `「${truncate(entryName)}」`
           : verb('正在读取关联素材条目', '已读取关联素材条目')
+      }
+      if (mode === 'list') {
+        return entryName
+          ? verb('正在列出关联素材条目', '已列出关联素材条目') + `「${truncate(entryName)}」`
+          : verb('正在列出关联素材条目', '已列出关联素材条目')
       }
       return query
         ? verb('正在查询关联素材条目', '已查询关联素材条目') + `「${truncate(query)}」`

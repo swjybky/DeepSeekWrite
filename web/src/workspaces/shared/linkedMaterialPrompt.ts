@@ -58,6 +58,7 @@ export function appendReadableLinkedMaterialsToPrompt(
 
 当前智能体可读取的关联素材库：
 以下列表只包含当前读取范围允许访问的素材部门。需要检索或读取具体素材条目时，调用 query_linked_material_entries；不要臆造未读取的条目正文。
+调用规则：优先用 mode=read + entry_name 读取条目；如果不知道条目名称，先用 mode=list 或 mode=search。无需传内部 ID；同名条目无法区分时，补充 material_kind 或 stage_id 缩小范围，或换成更完整的条目名称。
 
 ${sections.join('\n')}`
 }

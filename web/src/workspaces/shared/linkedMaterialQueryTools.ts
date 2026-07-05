@@ -172,15 +172,68 @@ function snippetForQuery(text: string, query: string): string {
   return `${start > 0 ? '…' : ''}${body.slice(start, end)}${end < body.length ? '…' : ''}`
 }
 
+function normalizedEntryName(raw: string): string {
+  return raw.trim().toLowerCase()
+}
+
+function findRowsByEntryName(
+  rows: readonly LinkedMaterialEntryRow[],
+  entryName: string,
+): LinkedMaterialEntryRow[] {
+  const target = normalizedEntryName(entryName)
+  if (!target) return []
+  const exact = rows.filter((row) => normalizedEntryName(entryTitle(row)) === target)
+  if (exact.length > 0) return exact
+  return rows.filter((row) => {
+    const title = normalizedEntryName(entryTitle(row))
+    return title.includes(target) || target.includes(title)
+  })
+}
+
+function rankRowsByQuery(
+  rows: readonly LinkedMaterialEntryRow[],
+  query: string,
+  maxResults: number,
+): LinkedMaterialEntryRow[] {
+  const tokens = tokensForSearch(query)
+  return rows
+    .map((row) => ({ row, score: scoreRow(row, tokens) }))
+    .filter((item) => item.score > 0)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, maxResults)
+    .map((item) => item.row)
+}
+
+function formatEntryListRow(row: LinkedMaterialEntryRow): string {
+  const body = row.entry.body ?? ''
+  const genre = materialGenreLine(row.material)
+  return [
+    `- 素材库：《${row.material.title}》`,
+    genre ? `  类型：${genre}` : '',
+    `  部门：${MATERIAL_KIND_LABELS[row.mountKind]}(${row.mountKind})`,
+    `  栏目：${MATERIAL_STAGE_LABELS[row.stageId]}(${row.stageId})`,
+    `  条目：${entryTitle(row)}`,
+    `  字数：${countNonWhitespaceChars(body).toLocaleString('zh-CN')}`,
+  ].filter(Boolean).join('\n')
+}
+
+function formatEntryList(rows: readonly LinkedMaterialEntryRow[]): string {
+  return [
+    '读取全文时使用 mode=read + entry_name=条目名称；同名时可补充 material_kind 或 stage_id 缩小范围。',
+    '',
+    rows.map((row) => formatEntryListRow(row)).join('\n'),
+  ].join('\n')
+}
+
 function formatSearchRow(row: LinkedMaterialEntryRow, query: string): string {
   const body = row.entry.body ?? ''
   const genre = materialGenreLine(row.material)
   return [
-    `素材库：《${row.material.title}》 material_id=${row.material.id}`,
+    `素材库：《${row.material.title}》`,
     genre ? `类型：${genre}` : '',
     `部门：${MATERIAL_KIND_LABELS[row.mountKind]}(${row.mountKind})`,
     `栏目：${MATERIAL_STAGE_LABELS[row.stageId]}(${row.stageId})`,
-    `条目：${entryTitle(row)} entry_id=${row.entry.id}`,
+    `条目：${entryTitle(row)}`,
     `字数：${countNonWhitespaceChars(body).toLocaleString('zh-CN')}`,
     '',
     snippetForQuery(body, query),
@@ -191,11 +244,11 @@ function formatFullRow(row: LinkedMaterialEntryRow): string {
   const body = row.entry.body?.trim() ?? ''
   const genre = materialGenreLine(row.material)
   return [
-    `素材库：《${row.material.title}》 material_id=${row.material.id}`,
+    `素材库：《${row.material.title}》`,
     genre ? `类型：${genre}` : '',
     `部门：${MATERIAL_KIND_LABELS[row.mountKind]}(${row.mountKind})`,
     `栏目：${MATERIAL_STAGE_LABELS[row.stageId]}(${row.stageId})`,
-    `条目：${entryTitle(row)} entry_id=${row.entry.id}`,
+    `条目：${entryTitle(row)}`,
     `字数：${countNonWhitespaceChars(body).toLocaleString('zh-CN')}`,
     '',
     body || '（该素材条目暂无正文）',
@@ -256,72 +309,134 @@ export function buildQueryLinkedMaterialEntriesTool(
     label: '查询关联素材条目',
     description:
       `在当前书籍已关联且当前智能体可读的素材库中查询条目。当前可读部门：${description}。`
-      + '\nmode=search 用 query 搜索条目并返回 material_id/entry_id；mode=read 用 material_id + entry_id 读取完整条目正文。',
+      + '\nmode=list 列出可读条目；mode=search 用 query 搜索条目；mode=read 优先用 entry_name 读取完整条目正文。'
+      + '\n无需传内部 ID；同名条目无法区分时，补充 material_kind 或 stage_id 缩小范围。',
     parameters: Type.Object({
-      mode: Type.Union([Type.Literal('search'), Type.Literal('read')], {
-        description: 'search=搜索相关素材条目；read=读取指定素材条目全文。',
+      mode: Type.Union([Type.Literal('list'), Type.Literal('search'), Type.Literal('read')], {
+        description: 'list=列出可读素材条目；search=搜索相关素材条目；read=读取指定素材条目全文。',
       }),
       material_kind: Type.Optional(kindSchema),
       material_id: Type.Optional(Type.String({
-        description: '可选：限定某个素材库；read 时建议填写 search 返回的 material_id。',
+        description: '可选：限定某个素材库；通常不需要填写。',
       })),
       stage_id: Type.Optional(materialStageIdSchema(allowedKinds)),
       query: Type.Optional(Type.String({
         maxLength: MAX_QUERY_CHARS,
         description: 'search 模式必填：关键词、短句或原文片段。',
       })),
-      entry_id: Type.Optional(Type.String({
-        description: 'read 模式必填：search 返回的 entry_id。',
+      entry_name: Type.Optional(Type.String({
+        maxLength: MAX_QUERY_CHARS,
+        description: 'read 模式推荐填写：素材条目名称或人物名；工具会按标题匹配，匹配不到则返回候选。',
       })),
       max_results: Type.Optional(Type.Integer({
         minimum: 1,
         maximum: MAX_RESULTS,
-        description: `search 模式最多返回条数，默认 ${DEFAULT_MAX_RESULTS}，最高 ${MAX_RESULTS}。`,
+        description: `list/search 模式最多返回条数，默认 ${DEFAULT_MAX_RESULTS}，最高 ${MAX_RESULTS}。`,
       })),
     }),
     execute: async (_toolCallId, params) => {
-      const mode = params.mode as 'search' | 'read'
+      const mode = params.mode as 'list' | 'search' | 'read'
       const resolved = resolveReadableRows(ctx, allowedKinds, params)
       if (typeof resolved === 'string') return textBlock(resolved)
       if (!resolved.length) {
         return textBlock('当前可读范围内暂无已关联素材条目。')
       }
 
+      const maxResults = clampMaxResults(params.max_results)
+      const entryName = String(params.entry_name ?? '').trim()
+
       if (mode === 'read') {
-        const entryId = String(params.entry_id ?? '').trim()
-        if (!entryId) return textBlock('read 模式需要提供 entry_id。')
-        const matches = resolved.filter((row) => row.entry.id === entryId)
-        if (matches.length === 0) {
-          return textBlock(`未在当前可读关联素材中找到 entry_id=${entryId} 的条目。`)
+        const legacyParams = params as Record<string, unknown>
+        const entryId = String(legacyParams.entry_id ?? '').trim()
+        if (entryId) {
+          const matches = resolved.filter((row) => row.entry.id === entryId)
+          if (matches.length > 0) {
+            if (matches.length > 1 && !params.material_id) {
+              return textBlock(
+                [
+                  '旧版内部 ID 匹配到多个素材条目，请改用 entry_name，并补充 material_kind 或 stage_id 缩小范围：',
+                  formatEntryList(matches.slice(0, maxResults)),
+                ].join('\n'),
+              )
+            }
+            return textBlock(formatFullRow(matches[0]!))
+          }
+          if (!entryName) {
+            const related = rankRowsByQuery(resolved, entryId, maxResults)
+            return textBlock(
+              [
+                '未在当前可读关联素材中找到这个内部条目 ID。',
+                related.length
+                  ? `\n可能相关的可读条目：\n${formatEntryList(related)}`
+                  : '\n请优先用 mode=read + entry_name=条目名称 读取，或先用 mode=list / mode=search 查询条目名称。',
+              ].join('\n'),
+            )
+          }
         }
-        if (matches.length > 1 && !params.material_id) {
+
+        if (!entryName) {
+          return textBlock('read 模式请提供 entry_name。无需传内部 ID；如果不知道条目名称，请先用 mode=list 或 mode=search。')
+        }
+
+        const nameMatches = findRowsByEntryName(resolved, entryName)
+        if (nameMatches.length === 1) {
+          return textBlock(formatFullRow(nameMatches[0]!))
+        }
+        if (nameMatches.length > 1) {
           return textBlock(
             [
-              `entry_id=${entryId} 匹配到多个素材条目，请补充 material_id 后重试：`,
-              ...matches.map((row) =>
-                `- 《${row.material.title}》 material_id=${row.material.id} / ${entryTitle(row)}`,
-              ),
+              `entry_name=${entryName} 匹配到多个同名素材条目，请补充 material_kind 或 stage_id 缩小范围，或换成更完整的条目名称：`,
+              formatEntryList(nameMatches.slice(0, maxResults)),
             ].join('\n'),
           )
         }
-        return textBlock(formatFullRow(matches[0]!))
+
+        const related = rankRowsByQuery(resolved, entryName, maxResults)
+        if (related.length === 1) {
+          return textBlock(formatFullRow(related[0]!))
+        }
+        return textBlock(
+          related.length
+            ? [
+                `未找到标题匹配 entry_name=${entryName} 的素材条目。以下是相关候选，请用目标条目的名称作为 entry_name 后用 mode=read 读取全文：`,
+                formatEntryList(related),
+              ].join('\n')
+            : `未找到 entry_name=${entryName} 的素材条目。请先用 mode=list 查看当前可读条目，或用 mode=search 换关键词检索。`,
+        )
       }
 
-      const query = String(params.query ?? '').trim()
+      if (mode === 'list') {
+        const rows = entryName
+          ? findRowsByEntryName(resolved, entryName)
+          : resolved.slice(0, maxResults)
+        if (rows.length > 0) {
+          return textBlock(formatEntryList(rows.slice(0, maxResults)))
+        }
+        const related = rankRowsByQuery(resolved, entryName, maxResults)
+        return textBlock(
+          related.length
+            ? [
+                `未找到标题匹配 entry_name=${entryName} 的素材条目。以下是相关候选：`,
+                formatEntryList(related),
+              ].join('\n')
+            : `未找到 entry_name=${entryName} 的素材条目。`,
+        )
+      }
+
+      const query = String(params.query ?? entryName).trim()
       if (!query) return textBlock('search 模式需要提供 query。')
       if (query.length > MAX_QUERY_CHARS) {
         return textBlock(`query 过长，最多 ${MAX_QUERY_CHARS} 个字符。`)
       }
-      const tokens = tokensForSearch(query)
-      const rows = resolved
-        .map((row) => ({ row, score: scoreRow(row, tokens) }))
-        .filter((item) => item.score > 0)
-        .sort((a, b) => b.score - a.score)
-        .slice(0, clampMaxResults(params.max_results))
-        .map((item) => item.row)
+      const rows = rankRowsByQuery(resolved, query, maxResults)
 
       if (!rows.length) {
-        return textBlock(`未在当前可读关联素材中检索到「${query}」。`)
+        return textBlock(
+          [
+            `未在当前可读关联素材中检索到「${query}」。`,
+            '如果你只知道概述里的条目名称，可尝试 mode=read 并填写 entry_name；如果不知道条目名称，请先用 mode=list 查看当前可读条目。',
+          ].join('\n'),
+        )
       }
       return textBlock(rows.map((row) => formatSearchRow(row, query)).join('\n\n---\n\n'))
     },

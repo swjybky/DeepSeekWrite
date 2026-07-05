@@ -238,8 +238,7 @@ export function useWorkspaceStreaming({
       const requestedTarget = String(payload.targetStageId ?? '').trim()
       const session = workspaceSessionsRef.current[bookId]
       const targetStage =
-        session?.book.book_type === 'long' &&
-        isContentStageIdForBook(session.book, requestedTarget)
+        session && isContentStageIdForBook(session.book, requestedTarget)
           ? requestedTarget
           : stage === PLOT_STAGE_ID
             ? isPlotChildStageId(requestedTarget)

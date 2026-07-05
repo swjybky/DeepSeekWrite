@@ -109,6 +109,24 @@ function isPlotChildStageId(id: string): id is PlotChildStageId {
   return PLOT_CHILD_STAGES.some((stage) => stage.id === id)
 }
 
+const WRITE_WORKSPACE_TARGET_STAGE_IDS: readonly ScriptStageId[] = [
+  'character_design',
+  ...PLOT_CHILD_STAGES.map((stage) => stage.id),
+  'outline',
+]
+
+const REPLACE_TARGET_STAGE_IDS: readonly ScriptStageId[] = [
+  ...WRITE_WORKSPACE_TARGET_STAGE_IDS,
+  'draft',
+]
+
+function isAllowedTargetStageId(
+  id: string,
+  allowedStageIds: readonly ScriptStageId[],
+): id is ScriptStageId {
+  return allowedStageIds.includes(id as ScriptStageId)
+}
+
 function defaultWriteStageId(ctx: ScriptWorkspaceStageAgentContext): ScriptStageId {
   if (ctx.stageId === PLOT_STAGE_ID) {
     const resolved = ctx.getDefaultWriteStageId?.() ?? ctx.defaultWriteStageId
@@ -120,18 +138,20 @@ function defaultWriteStageId(ctx: ScriptWorkspaceStageAgentContext): ScriptStage
 function resolveWritableTargetStageId(
   ctx: ScriptWorkspaceStageAgentContext,
   raw: unknown,
+  allowedStageIds: readonly ScriptStageId[],
 ): ScriptStageId {
-  if (ctx.stageId !== PLOT_STAGE_ID) return ctx.stageId
   const requested = String(raw ?? '').trim()
-  if (isPlotChildStageId(requested)) return requested
-  return defaultWriteStageId(ctx)
+  if (isAllowedTargetStageId(requested, allowedStageIds)) return requested
+  const fallback = defaultWriteStageId(ctx)
+  if (isAllowedTargetStageId(fallback, allowedStageIds)) return fallback
+  return ctx.stageId
 }
 
 const TARGET_STAGE_ID_NOTE =
-  'target_stage_id 仅供剧情智能体选择剧情子方向；人物、大纲等阶段请省略该参数，自动操作当前阶段。'
+  'target_stage_id 可显式指定写入/替换的目标阶段；省略时自动操作当前阶段。'
 
 const WRITE_TARGET_STAGE_ID_FIRST_NOTE =
-  '调用 write_workspace_editor 时，如果当前是「剧情」父阶段，必须先填写第一个参数 target_stage_id，再填写 text；不要先生成 text 后补 target_stage_id。剧情设计=plot_design，剧情细化=plot_refine。'
+  '调用 write_workspace_editor 时，如需写入非当前编辑框，必须先填写第一个参数 target_stage_id，再填写 text；不要先生成 text 后补 target_stage_id。可写入：character_design、plot_design、plot_refine、outline。'
 
 const WRITE_TOOL_SCOPE_NOTE =
   `本工具仅挂载于人物设计、剧情、大纲阶段；正文编写阶段不挂载。${TARGET_STAGE_ID_NOTE}`
@@ -139,13 +159,16 @@ const WRITE_TOOL_SCOPE_NOTE =
 const REPLACE_TOOL_SCOPE_NOTE =
   `本工具挂载于所有可编辑阶段（含正文编写、正文审阅、格式转换等）。${TARGET_STAGE_ID_NOTE}`
 
-function targetStageIdSchema() {
+function targetStageIdSchema(allowedStageIds: readonly ScriptStageId[]) {
+  const description = allowedStageIds
+    .map((id) => `${SCRIPT_STAGE_LABELS[id]}=${id}`)
+    .join('、')
   return Type.Optional(
     Type.Union(
-      PLOT_CHILD_STAGES.map((stage) => Type.Literal(stage.id)),
+      allowedStageIds.map((id) => Type.Literal(id)),
       {
         description:
-          `${TARGET_STAGE_ID_NOTE}${WRITE_TARGET_STAGE_ID_FIRST_NOTE}`,
+          `${TARGET_STAGE_ID_NOTE}允许目标：${description}。${WRITE_TARGET_STAGE_ID_FIRST_NOTE}`,
       },
     ),
   )
@@ -848,7 +871,7 @@ export function buildReplaceCurrentStageTextTool(
       + '\n若替换失败，不要立刻重新读取全文；先调用 search_workspace_text 搜索失败片段中的关键词或短句，确认当前文本编辑框真实原文后再重试。'
       + '\n需要多处修改时传 replacements 数组；每项只替换一个小段，不要把整篇作为 original_text 或 new_text。',
     parameters: Type.Object({
-      target_stage_id: targetStageIdSchema(),
+      target_stage_id: targetStageIdSchema(REPLACE_TARGET_STAGE_IDS),
       replacements: Type.Array(
         Type.Object({
           original_text: Type.String({
@@ -879,6 +902,7 @@ export function buildReplaceCurrentStageTextTool(
       const targetStageId = resolveWritableTargetStageId(
         ctx,
         params.target_stage_id,
+        REPLACE_TARGET_STAGE_IDS,
       )
       const label = SCRIPT_STAGE_LABELS[targetStageId]
       const currentBody = readWorkspaceStageBody(ctx, targetStageId)
@@ -916,7 +940,7 @@ export function buildWriteWorkspaceEditorTool(
       `${WRITE_TARGET_STAGE_ID_FIRST_NOTE}\n${WRITE_TOOL_SCOPE_NOTE}\n`
       + '覆盖写入工具：只在目标文本编辑框为空白时，用它写入一份完整稿件。目标已有内容时，用户只是要求局部修改、润色、扩写某段或替换片段，必须使用 replace_current_stage_text，不能调用本工具整段覆盖。只有用户明确要求整体覆盖、重写、重新生成或替换全文时，才允许设置 allow_overwrite_existing=true 后覆盖写入。仅写入该阶段的创作正文（如人设、剧情、大纲等），不要写入分析报告、修改意见、过程说明或与阶段无关的内容；这些留在对话中回复用户即可。',
     parameters: Type.Object({
-      target_stage_id: targetStageIdSchema(),
+      target_stage_id: targetStageIdSchema(WRITE_WORKSPACE_TARGET_STAGE_IDS),
       text: Type.String({
         description: '当前阶段正文稿件（建议 Markdown）。不含分析报告、修改意见或过程说明。',
       }),
@@ -936,7 +960,11 @@ export function buildWriteWorkspaceEditorTool(
       if (!apply) {
         return textBlock('（当前环境无法写入编辑区：未连接界面）')
       }
-      const targetStageId = resolveWritableTargetStageId(ctx, target_stage_id)
+      const targetStageId = resolveWritableTargetStageId(
+        ctx,
+        target_stage_id,
+        WRITE_WORKSPACE_TARGET_STAGE_IDS,
+      )
       const label = SCRIPT_STAGE_LABELS[targetStageId]
       // 若该 tool call 已在流式生成阶段同步到编辑器，避免重复写入
       if (ctx.isToolCallStreamed?.(toolCallId)) {

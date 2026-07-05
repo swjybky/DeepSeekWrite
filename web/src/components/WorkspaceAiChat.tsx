@@ -67,6 +67,9 @@ import {
 import {
   resolveWorkspaceAgentReadAccess as resolveLongWorkspaceAgentReadAccess,
 } from '../workspaces/long/stageReadAccess'
+import { SHORT_WORKSPACE_CONTENT_STAGES } from '../workspaces/short/stages'
+import { SCRIPT_WORKSPACE_CONTENT_STAGES } from '../workspaces/script/stages'
+import { isLongStageId } from '../workspaces/long/stages'
 import {
   isWorkspaceSupportedAttachment,
   loadWorkspaceAttachment,
@@ -79,6 +82,21 @@ import { AiChatHistoryMenu } from './AiChatHistoryMenu'
 
 const ARTIFACTS_TOOL_NAME = 'artifacts'
 const WORKSPACE_ATTACHMENT_MAX_FILES = 10
+const SHORT_BOOK_CONTENT_STAGE_IDS = new Set<string>(
+  SHORT_WORKSPACE_CONTENT_STAGES.map((stage) => stage.id),
+)
+const SCRIPT_BOOK_CONTENT_STAGE_IDS = new Set<string>(
+  SCRIPT_WORKSPACE_CONTENT_STAGES.map((stage) => stage.id),
+)
+
+function isBookContentStageTarget(
+  bookType: BookType | undefined,
+  stageId: string,
+): boolean {
+  if (bookType === 'long') return isLongStageId(stageId)
+  if (bookType === 'script') return SCRIPT_BOOK_CONTENT_STAGE_IDS.has(stageId)
+  return SHORT_BOOK_CONTENT_STAGE_IDS.has(stageId)
+}
 
 function resolvePromptReadAccess(
   bookType: BookType | undefined,
@@ -594,16 +612,10 @@ function WorkspaceAiChatInner({
     const targetStageId = targetStageIdFromArgs(args)
     if (!targetStageId) return undefined
     const p = propsLatestRef.current
-    if (
-      workspaceType === 'book' &&
-      p.bookType !== 'long' &&
-      p.stageId === 'plot_design'
-    ) {
-      const allowed =
-        p.bookType === 'script'
-          ? ['plot_design', 'plot_refine']
-          : ['plot_design', 'intro_design', 'plot_refine']
-      return allowed.includes(String(targetStageId)) ? targetStageId : undefined
+    if (workspaceType === 'book') {
+      return isBookContentStageTarget(p.bookType, String(targetStageId))
+        ? targetStageId
+        : undefined
     }
     return targetStageId
   }
