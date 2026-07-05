@@ -1,4 +1,5 @@
-import type { ExpertDraft, Skill, StageId } from '../../../bridge'
+import type { ExpertDraft, Material, MaterialKind, Skill, StageId } from '../../../bridge'
+import { appendReadableLinkedMaterialsToPrompt } from '../../shared/linkedMaterialPrompt'
 import { appendLoadableSkillsToPrompt } from '../loadSkill'
 
 const EXPERT_PLACEHOLDER_RE =
@@ -13,7 +14,7 @@ export const DEFAULT_SECTION_WRITER_SYSTEM_PROMPT = `当前书籍：《{{BOOK_TI
 
 硬性规则：
 - 先基于当前任务上下文编写当前小节正文。
-- 如需普通创作阶段或关联素材内容，调用 read_workspace_content / read_linked_material_content；如需读取其它已完成小节的正文或人物状态，调用 read_expert_draft_section（优先读当前文本编辑框，读不到再读已保存内容）。编写前必须至少读取前三节正文描写，逐节调用 read_expert_draft_section；某节正文尚为空时可跳过该节。
+- 如需普通创作阶段，调用 read_workspace_content；如需关联素材内容，调用 query_linked_material_entries：先用 mode=search 检索相关条目，再用 mode=read 读取需要的条目全文；如需读取其它已完成小节的正文或人物状态，调用 read_expert_draft_section（优先读当前文本编辑框，读不到再读已保存内容）。编写前必须至少读取前三节正文描写，逐节调用 read_expert_draft_section；某节正文尚为空时可跳过该节。
 - 当前小节正文为空白时，正文完成后必须调用 write_section_body，传入干净正文，覆盖当前小节正文框。
 - 当前小节正文已有内容且用户要求修改、润色、去 AI 味或局部调整时，必须调用 replace_section_body_text 按原文片段替换，不要调用 write_section_body 整段覆盖，也不要重新启动小节写作，除非用户明确要求重写本小节。
 - 用户要求修改当前章节名称时，直接调用 replace_section_body_text，把当前章节名替换为新章节名；章节树和合并正文会自动同步，不要重新初始化正文结构。
@@ -31,7 +32,7 @@ export const DEFAULT_COORDINATOR_SYSTEM_PROMPT = `当前书籍：《{{BOOK_TITLE
 
 工作规则：
 - 必须使用工具修改正文编写编辑器，不要只在聊天里输出列表。
-- 如需普通创作阶段或关联素材内容，调用可用的读取工具。
+- 如需普通创作阶段，调用 read_workspace_content；如需关联素材内容，调用 query_linked_material_entries：先用 mode=search 检索相关条目，再用 mode=read 读取需要的条目全文。
 - 用户要求修改已有正文时，先调用 read_workspace_content（stage_id=draft）读取当前专家正文，再使用 edit_expert_draft_section 按原文片段替换；总控不负责修改人物状态。不要为了局部修改重新调用 start_expert_writing 或 write_single_expert_section，除非用户明确要求重写整个小节或重跑分节写作。
 - 正文列表和人物状态列表必须一一对应。
 - 启动写作前必须确认目标小节已经初始化；如果没有对应章节，先调用 initialize_expert_draft 初始化正文小节列表，或提醒用户先初始化。
@@ -49,6 +50,8 @@ export function buildExpertDraftCoordinatorSystemPrompt(input: {
   draft: ExpertDraft
   workspaceStages: Partial<Record<StageId, string>>
   allowedWorkspaceStages: readonly StageId[]
+  allowedMaterialKinds?: readonly MaterialKind[]
+  linkedMaterialsByKind?: Partial<Record<MaterialKind, Material[]>>
   template?: string
   linkedSkill?: Skill | null
 }): string {
@@ -58,7 +61,11 @@ export function buildExpertDraftCoordinatorSystemPrompt(input: {
     bookGenre: input.bookGenre,
   })
   return appendLoadableSkillsToPrompt(
-    prompt,
+    appendReadableLinkedMaterialsToPrompt(
+      prompt,
+      input.linkedMaterialsByKind,
+      input.allowedMaterialKinds,
+    ),
     input.linkedSkill,
     'expert_draft_coordinator',
   )
@@ -70,6 +77,8 @@ export function buildSectionWriterSystemPrompt(input: {
   stageBody: string
   workspaceStages: Partial<Record<StageId, string>>
   allowedWorkspaceStages: readonly StageId[]
+  allowedMaterialKinds?: readonly MaterialKind[]
+  linkedMaterialsByKind?: Partial<Record<MaterialKind, Material[]>>
   template?: string
   linkedSkill?: Skill | null
 }): string {
@@ -79,7 +88,11 @@ export function buildSectionWriterSystemPrompt(input: {
     bookGenre: input.bookGenre,
   })
   return appendLoadableSkillsToPrompt(
-    prompt,
+    appendReadableLinkedMaterialsToPrompt(
+      prompt,
+      input.linkedMaterialsByKind,
+      input.allowedMaterialKinds,
+    ),
     input.linkedSkill,
     'expert_section_writer',
   )
@@ -141,7 +154,7 @@ export function buildSectionWriterUserPrompt(input: {
 - 本章节字数要求：${currentWordRequirement}
 
 上下文读取（本消息不附带正文、人物状态或创作阶段内容，请按需调用工具）：
-- 普通创作阶段、关联素材等：调用 read_workspace_content / read_linked_material_content 等工具。
+- 普通创作阶段：调用 read_workspace_content；关联素材：调用 query_linked_material_entries，先用 mode=search 检索相关片段，再用 mode=read 读取需要的条目全文。
 - 已完成小节或当前小节（${sectionId}）的正文与人物状态：调用 read_expert_draft_section，传入 section_id；默认同时返回正文与人物状态。
 - 【必做】编写前必须至少读取前三节正文描写${requiredBodyReadHint ? `：${requiredBodyReadHint}` : ''}，逐节调用 read_expert_draft_section；某节正文尚为空时可跳过该节。紧邻上一节的人物状态也应读取以保持连贯。
 

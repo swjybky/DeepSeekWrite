@@ -255,6 +255,7 @@ export function useExpertDraftRuntime({
         getWorkspaceStages: () =>
           workspaceSessionsRef.current[bookId]?.stages ?? EMPTY_STAGES,
         linkedMaterial: session.linkedMaterial,
+        linkedMaterialsByKind: session.linkedMaterialsByKind,
         linkedSkill: session.linkedSkill,
         bookMemories: options?.bookMemories ?? session.book.memories ?? [],
         userMemories: options?.userMemories ?? [],

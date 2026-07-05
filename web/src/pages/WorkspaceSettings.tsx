@@ -6,7 +6,8 @@ import {
 } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
-  MATERIAL_STAGE_LABELS,
+  MATERIAL_KIND_KEYS,
+  MATERIAL_KIND_LABELS,
   bookTypeLabel,
   getWorkspaceAgentReadAccess,
   getWorkspaceAgentReadAccessDefaults,
@@ -17,7 +18,7 @@ import {
   saveWorkspaceAgentReadAccess,
   syncWorkspaceSettingsDefaults,
   type BookType,
-  type MaterialStageId,
+  type MaterialKind,
   type StageId,
   type WorkspaceAgentId,
   type WorkspaceAgentReadAccessConfig,
@@ -25,7 +26,6 @@ import {
 import { SHORT_WORKSPACE_CONTENT_STAGES } from '../workspaces/short/stages'
 import { SCRIPT_WORKSPACE_CONTENT_STAGES } from '../workspaces/script/stages'
 import {
-  ALL_MATERIAL_STAGE_IDS,
   EXPERT_DRAFT_COORDINATOR_AGENT_ID,
   EXPERT_SECTION_WRITER_AGENT_ID,
   WORKSPACE_STANDARD_AGENT_IDS,
@@ -305,7 +305,7 @@ export function WorkspaceSettings() {
   const patchReadAccess = useCallback(
     (
       kind: 'workspace' | 'material',
-      id: StageId | MaterialStageId,
+      id: StageId | MaterialKind,
       checked: boolean,
     ) => {
       if (
@@ -332,7 +332,7 @@ export function WorkspaceSettings() {
           : {
               ...entry,
               material: checked
-                ? [...new Set([...entry.material, id as MaterialStageId])]
+                ? [...new Set([...entry.material, id as MaterialKind])]
                 : entry.material.filter((stageId) => stageId !== id),
             }
       const next = normalizeReadAccessForType(workspaceType, {
@@ -703,21 +703,21 @@ export function WorkspaceSettings() {
                   </fieldset>
 
                   <fieldset>
-                    <legend>关联素材库栏目</legend>
-                    {ALL_MATERIAL_STAGE_IDS.map((stageId) => (
-                      <label key={stageId}>
+                    <legend>关联素材库部门</legend>
+                    {MATERIAL_KIND_KEYS.map((materialKind) => (
+                      <label key={materialKind}>
                         <input
                           type="checkbox"
-                          checked={activeEntry.material.includes(stageId)}
+                          checked={activeEntry.material.includes(materialKind)}
                           onChange={(event) =>
                             patchReadAccess(
                               'material',
-                              stageId,
+                              materialKind,
                               event.target.checked,
                             )
                           }
                         />
-                        <span>{MATERIAL_STAGE_LABELS[stageId]}</span>
+                        <span>{MATERIAL_KIND_LABELS[materialKind]}</span>
                       </label>
                     ))}
                   </fieldset>

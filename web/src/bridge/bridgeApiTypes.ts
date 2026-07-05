@@ -14,6 +14,10 @@ import type {
   CommonSkill,
   LoadCommonSkillsResult,
   Material,
+  MaterialKind,
+  MaterialKindWithMixed,
+  MaterialStageEntry,
+  MaterialStageId,
   MaterialSummary,
   Skill,
   SkillSummary,
@@ -33,6 +37,7 @@ declare global {
           workspace_root?: string | null,
           linked_skill_id?: string | null,
           linked_material_id?: string | null,
+          linked_material_ids_by_kind?: Partial<Record<MaterialKind, string[]>> | null,
         ): Promise<Book>
         get_book(book_id: string): Promise<Book | null>
         save_book(
@@ -45,6 +50,7 @@ declare global {
           status?: BookStatus | null,
           linked_skill_id?: string | null,
           memory_auto_capture_enabled?: boolean | null,
+          linked_material_ids_by_kind?: Partial<Record<MaterialKind, string[]>> | null,
         ): Promise<Book | null>
         delete_book(book_id: string): Promise<boolean>
         get_book_memories(book_id: string): Promise<MemoryEntry[]>
@@ -163,11 +169,14 @@ declare global {
           parent_genre?: string | null,
           sub_genre?: string | null,
           workspace_root?: string | null,
+          material_kind?: MaterialKindWithMixed | null,
         ): Promise<Material>
         save_material(
           material_id: string,
           stages?: Record<string, string> | null,
           title?: string | null,
+          stage_items?: Partial<Record<MaterialStageId, MaterialStageEntry[]>> | null,
+          overview?: string | null,
         ): Promise<Material | null>
         delete_material(material_id: string): Promise<boolean>
         get_material_genres(): Promise<Record<string, string[]>>
@@ -218,6 +227,19 @@ declare global {
           material_type?: string | null,
         ): Promise<void>
         reset_material_agent_prompt_override(material_type?: string | null): Promise<boolean>
+        read_material_kind_prompt_template(
+          material_type?: string | null,
+          material_kind?: string | null,
+        ): Promise<string>
+        save_material_kind_prompt_override(
+          body: string,
+          material_type?: string | null,
+          material_kind?: string | null,
+        ): Promise<void>
+        reset_material_kind_prompt_override(
+          material_type?: string | null,
+          material_kind?: string | null,
+        ): Promise<boolean>
 
         // ==================== 技能库提示词 API ====================
         get_skill_system_prompt(

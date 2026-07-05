@@ -9,7 +9,16 @@ import { normalizeMemoryEntries } from '../domain/workspaceCore'
 // ==================== 素材提示词类型 ====================
 export const MATERIAL_MANAGER_AGENT_ID = 'material_manager' as const
 export const MATERIAL_MANAGER_PROMPT_KIND = 'material_manager' as const
-export type MaterialPromptKind = typeof MATERIAL_MANAGER_PROMPT_KIND
+export const MATERIAL_KIND_PROMPT_PREFIX = 'material_kind_' as const
+export type MaterialKindPromptKind =
+  | 'material_kind_character'
+  | 'material_kind_gimmick'
+  | 'material_kind_plot'
+  | 'material_kind_draft'
+  | 'material_kind_other'
+export type MaterialPromptKind =
+  | typeof MATERIAL_MANAGER_PROMPT_KIND
+  | MaterialKindPromptKind
 export const SKILL_MANAGER_AGENT_ID = 'skill_manager' as const
 export const SKILL_MANAGER_PROMPT_KIND = 'skill_manager' as const
 export type SkillPromptKind = typeof SKILL_MANAGER_PROMPT_KIND
@@ -32,6 +41,32 @@ export type MaterialStageId =
   | 'intro'
   | 'plot_refine'
   | 'draft_excerpt'
+  | 'other'
+
+export const MATERIAL_STAGE_KEYS: MaterialStageId[] = [
+  'gimmick',
+  'character',
+  'pacing',
+  'intro',
+  'plot_refine',
+  'draft_excerpt',
+  'other',
+]
+
+export type MaterialKind = 'character' | 'gimmick' | 'plot' | 'draft' | 'other'
+export type MaterialKindWithMixed = MaterialKind | 'mixed'
+
+export function materialKindPromptKind(kind: MaterialKind): MaterialKindPromptKind {
+  return `${MATERIAL_KIND_PROMPT_PREFIX}${kind}` as MaterialKindPromptKind
+}
+
+export const MATERIAL_KIND_KEYS: MaterialKind[] = [
+  'character',
+  'gimmick',
+  'plot',
+  'draft',
+  'other',
+]
 
 export const MATERIAL_STAGE_LABELS: Record<MaterialStageId, string> = {
   gimmick: '梗',
@@ -40,6 +75,52 @@ export const MATERIAL_STAGE_LABELS: Record<MaterialStageId, string> = {
   intro: '导语设计',
   plot_refine: '剧情细化',
   draft_excerpt: '优秀正文片段',
+  other: '其他素材',
+}
+
+export const MATERIAL_KIND_LABELS: Record<MaterialKindWithMixed, string> = {
+  character: '人设素材库',
+  gimmick: '梗素材库',
+  plot: '剧情素材库',
+  draft: '正文素材库',
+  other: '其他素材库',
+  mixed: '综合素材库',
+}
+
+export const MATERIAL_KIND_STAGE_IDS: Record<MaterialKindWithMixed, MaterialStageId[]> = {
+  character: ['character'],
+  gimmick: ['gimmick'],
+  plot: ['pacing', 'intro', 'plot_refine'],
+  draft: ['draft_excerpt'],
+  other: ['other'],
+  mixed: ['gimmick', 'character', 'pacing', 'intro', 'plot_refine', 'draft_excerpt', 'other'],
+}
+
+export const MATERIAL_STAGE_KIND: Record<MaterialStageId, MaterialKind> = {
+  character: 'character',
+  gimmick: 'gimmick',
+  pacing: 'plot',
+  intro: 'plot',
+  plot_refine: 'plot',
+  draft_excerpt: 'draft',
+  other: 'other',
+}
+
+export function materialKindFromStageId(stageId: MaterialStageId | string): MaterialKind | null {
+  return (MATERIAL_STAGE_KIND as Record<string, MaterialKind>)[stageId] ?? null
+}
+
+export function normalizeMaterialKindAccess(raw: unknown): MaterialKind[] {
+  const values = Array.isArray(raw) ? raw : raw ? [raw] : []
+  const out: MaterialKind[] = []
+  for (const item of values) {
+    const id = String(item ?? '').trim()
+    const kind = normalizeMaterialKind(id, 'mixed')
+    const resolved = kind === 'mixed' ? materialKindFromStageId(id) : kind
+    if (!resolved || out.includes(resolved)) continue
+    out.push(resolved)
+  }
+  return out
 }
 
 export const SHORT_MATERIAL_GENRES: Record<string, string[]> = {
@@ -96,13 +177,24 @@ export interface MaterialSummary {
   id: string
   title: string
   material_type: MaterialType
+  material_kind: MaterialKindWithMixed
   parent_genre?: string  // 世情/追妻（short/script 时有效）
   sub_genre?: string     // legacy: 旧版子分类
   output_dir?: string
 }
 
 export interface Material extends MaterialSummary {
+  overview?: string
   stages?: Partial<Record<MaterialStageId, string>>
+  stage_items?: Partial<Record<MaterialStageId, MaterialStageEntry[]>>
+  created_at?: string
+  updated_at?: string
+}
+
+export interface MaterialStageEntry {
+  id: string
+  title: string
+  body: string
   created_at?: string
   updated_at?: string
 }
@@ -117,6 +209,7 @@ export function normalizeMaterialStages(
     intro: '',
     plot_refine: '',
     draft_excerpt: '',
+    other: '',
   }
   if (!raw) return out
   for (const k of Object.keys(out) as MaterialStageId[]) {
@@ -303,6 +396,173 @@ export function normalizeMaterialType(raw: unknown): MaterialType {
   return 'short'
 }
 
+export function normalizeMaterialKind(
+  raw: unknown,
+  defaultKind: MaterialKindWithMixed = 'mixed',
+): MaterialKindWithMixed {
+  if (
+    raw === 'character' ||
+    raw === 'gimmick' ||
+    raw === 'plot' ||
+    raw === 'draft' ||
+    raw === 'other' ||
+    raw === 'mixed'
+  ) {
+    return raw
+  }
+  return defaultKind
+}
+
+export function emptyLinkedMaterialIdsByKind(): Record<MaterialKind, string[]> {
+  return MATERIAL_KIND_KEYS.reduce(
+    (out, kind) => {
+      out[kind] = []
+      return out
+    },
+    {} as Record<MaterialKind, string[]>,
+  )
+}
+
+export function normalizeLinkedMaterialIdsByKind(
+  raw: unknown,
+  legacyMaterialId?: unknown,
+): Partial<Record<MaterialKind, string[]>> {
+  const out = emptyLinkedMaterialIdsByKind()
+  if (raw && typeof raw === 'object') {
+    const obj = raw as Record<string, unknown>
+    for (const kind of MATERIAL_KIND_KEYS) {
+      const value = obj[kind]
+      const values = Array.isArray(value) ? value : value ? [value] : []
+      const seen = new Set<string>()
+      for (const item of values) {
+        const id = String(item ?? '').trim()
+        if (!id || seen.has(id)) continue
+        seen.add(id)
+        out[kind].push(id)
+      }
+    }
+    return out
+  }
+  const legacyId = String(legacyMaterialId ?? '').trim()
+  if (legacyId) {
+    for (const kind of MATERIAL_KIND_KEYS) out[kind] = [legacyId]
+  }
+  return out
+}
+
+function newLocalMaterialStageEntryId(): string {
+  return globalThis.crypto?.randomUUID?.() ?? Math.random().toString(36).slice(2)
+}
+
+const MATERIAL_STAGE_ENTRY_LABELS: Record<MaterialStageId, string> = {
+  gimmick: '梗',
+  character: '人设',
+  pacing: '剧情',
+  intro: '导语',
+  plot_refine: '剧情细化',
+  draft_excerpt: '正文',
+  other: '其他素材',
+}
+
+function materialEntryFallbackTitle(stageId: MaterialStageId, body: string, index: number): string {
+  const firstLine = body
+    .split(/\r?\n/)
+    .map((line) => line.trim().replace(/^#+\s*/, '').trim())
+    .find(Boolean)
+  if (firstLine) return firstLine.slice(0, 40)
+  const suffix = index > 0 ? ` ${index + 1}` : ''
+  return `未命名${MATERIAL_STAGE_ENTRY_LABELS[stageId]}${suffix}`
+}
+
+function normalizeMaterialStageEntry(
+  stageId: MaterialStageId,
+  raw: unknown,
+  index: number,
+): MaterialStageEntry[] {
+  if (typeof raw === 'string') {
+    return raw.trim()
+      ? [{
+          id: newLocalMaterialStageEntryId(),
+          title: materialEntryFallbackTitle(stageId, raw, index),
+          body: raw,
+        }]
+      : []
+  }
+  if (!raw || typeof raw !== 'object') return []
+  const item = raw as Partial<MaterialStageEntry>
+  const body = typeof item.body === 'string' ? item.body : ''
+  const title = typeof item.title === 'string' ? item.title.trim() : ''
+  if (!body.trim() && !title && !item.id) return []
+  return [{
+    id: typeof item.id === 'string' && item.id ? item.id : newLocalMaterialStageEntryId(),
+    title: title || materialEntryFallbackTitle(stageId, body, index),
+    body,
+    created_at: typeof item.created_at === 'string' ? item.created_at : undefined,
+    updated_at: typeof item.updated_at === 'string' ? item.updated_at : undefined,
+  }]
+}
+
+export function normalizeMaterialStageItems(
+  raw?: Partial<Record<MaterialStageId, unknown>> | null,
+  fallbackStages?: Partial<Record<MaterialStageId, string>> | null,
+): Record<MaterialStageId, MaterialStageEntry[]> {
+  const out = {} as Record<MaterialStageId, MaterialStageEntry[]>
+  for (const stageId of MATERIAL_STAGE_KEYS) {
+    const value = raw?.[stageId]
+    let entries: MaterialStageEntry[] = []
+    if (Array.isArray(value)) {
+      entries = value.flatMap((item, index) =>
+        normalizeMaterialStageEntry(stageId, item, index),
+      )
+    } else if (value != null) {
+      entries = normalizeMaterialStageEntry(stageId, value, 0)
+    }
+    const fallback = fallbackStages?.[stageId]
+    if (entries.length === 0 && raw == null && typeof fallback === 'string' && fallback.trim()) {
+      entries = normalizeMaterialStageEntry(stageId, fallback, 0)
+    }
+    out[stageId] = entries
+  }
+  return out
+}
+
+export function materialStageItemsToStages(
+  items: Partial<Record<MaterialStageId, MaterialStageEntry[]>>,
+): Record<MaterialStageId, string> {
+  const out = normalizeMaterialStages({})
+  for (const stageId of MATERIAL_STAGE_KEYS) {
+    out[stageId] = (items[stageId] ?? [])
+      .map((entry) => {
+        const title = entry.title?.trim()
+        const body = entry.body ?? ''
+        if (!title && !body.trim()) return ''
+        return title ? `# ${title}\n\n${body}`.trim() : body.trim()
+      })
+      .filter(Boolean)
+      .join('\n\n---\n\n')
+  }
+  return out
+}
+
+export function firstLinkedMaterialId(
+  linkedMaterialIdsByKind?: Partial<Record<MaterialKind, string[]>>,
+): string {
+  if (!linkedMaterialIdsByKind) return ''
+  for (const kind of MATERIAL_KIND_KEYS) {
+    const id = linkedMaterialIdsByKind[kind]?.[0]
+    if (id) return id
+  }
+  return ''
+}
+
+export function materialMatchesKind(
+  material: Pick<MaterialSummary, 'material_kind'> | null | undefined,
+  kind: MaterialKind,
+): boolean {
+  if (!material) return false
+  return material.material_kind === 'mixed' || material.material_kind === kind
+}
+
 export function normalizeSkillType(raw: unknown): SkillType {
   if (raw === 'short' || raw === 'long' || raw === 'script') return raw
   return 'short'
@@ -320,6 +580,10 @@ function normalizeBooleanFlag(raw: unknown, defaultValue = false): boolean {
 
 export function normalizeBookSummary(raw: Partial<BookSummary> & { id: string }): BookSummary {
   const book_type = normalizeBookType(raw.book_type)
+  const linked_material_ids_by_kind = normalizeLinkedMaterialIdsByKind(
+    raw.linked_material_ids_by_kind,
+    raw.linked_material_id,
+  )
   return {
     id: raw.id,
     title: typeof raw.title === 'string' ? raw.title : '未命名',
@@ -328,7 +592,9 @@ export function normalizeBookSummary(raw: Partial<BookSummary> & { id: string })
     status: normalizeBookStatus(raw.status),
     output_dir: typeof raw.output_dir === 'string' ? raw.output_dir : undefined,
     linked_material_id:
-      typeof raw.linked_material_id === 'string' ? raw.linked_material_id : undefined,
+      firstLinkedMaterialId(linked_material_ids_by_kind) ||
+      (typeof raw.linked_material_id === 'string' ? raw.linked_material_id : undefined),
+    linked_material_ids_by_kind,
     linked_skill_id:
       typeof raw.linked_skill_id === 'string' ? raw.linked_skill_id : undefined,
   }
@@ -358,6 +624,7 @@ export function normalizeMaterialSummary(
     id: raw.id,
     title: typeof raw.title === 'string' ? raw.title : '未命名素材',
     material_type: normalizeMaterialType(raw.material_type),
+    material_kind: normalizeMaterialKind(raw.material_kind),
     parent_genre: typeof raw.parent_genre === 'string' ? raw.parent_genre : '',
     sub_genre: typeof raw.sub_genre === 'string' ? raw.sub_genre : '',
     output_dir: typeof raw.output_dir === 'string' ? raw.output_dir : undefined,
@@ -366,9 +633,17 @@ export function normalizeMaterialSummary(
 
 export function normalizeMaterial(raw: Partial<Material> & { id: string }): Material {
   const summary = normalizeMaterialSummary(raw)
+  const fallbackStages = normalizeMaterialStages(raw.stages)
+  const rawStageItems = raw.stage_items as Partial<Record<MaterialStageId, unknown>> | undefined
+  const stage_items = normalizeMaterialStageItems(
+    rawStageItems ?? null,
+    rawStageItems == null ? fallbackStages : null,
+  )
   return {
     ...summary,
-    stages: normalizeMaterialStages(raw.stages),
+    overview: typeof raw.overview === 'string' ? raw.overview : '',
+    stages: materialStageItemsToStages(stage_items),
+    stage_items,
     created_at: typeof raw.created_at === 'string' ? raw.created_at : undefined,
     updated_at: typeof raw.updated_at === 'string' ? raw.updated_at : undefined,
   }

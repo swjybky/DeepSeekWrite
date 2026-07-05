@@ -9,12 +9,16 @@ import {
   getWorkspaceAgentReadAccess,
   isWorkspaceBook,
   listBooks,
+  MATERIAL_KIND_KEYS,
+  materialMatchesKind,
   mergeStagePatchIntoAll,
+  normalizeLinkedMaterialIdsByKind,
   resolveWorkspaceStagesForBook,
   saveBook,
   type Book,
   type BookSummary,
   type Material,
+  type MaterialKind,
   type Skill,
   type StageId,
   type WorkspaceAgentReadAccessConfig,
@@ -54,6 +58,44 @@ function resolveInitialStageForBook(
     return coerceLongStageId(requestedStageId ?? fallbackStageId) as StageId
   }
   return requestedStageId ?? fallbackStageId
+}
+
+async function loadLinkedMaterialsForBook(
+  book: Book,
+): Promise<{
+  linkedMaterial: Material | null
+  linkedMaterialsByKind: Partial<Record<MaterialKind, Material[]>>
+}> {
+  const linkedIdsByKind = normalizeLinkedMaterialIdsByKind(
+    book.linked_material_ids_by_kind,
+    book.linked_material_id,
+  )
+  const ids = [
+    ...new Set(
+      MATERIAL_KIND_KEYS.flatMap((kind) => linkedIdsByKind[kind] ?? []),
+    ),
+  ]
+  const materials = (
+    await Promise.all(ids.map((materialId) => getMaterial(materialId)))
+  ).filter((material): material is Material => Boolean(material))
+  const byId = new Map(materials.map((material) => [material.id, material]))
+  const linkedMaterialsByKind: Partial<Record<MaterialKind, Material[]>> = {}
+  for (const kind of MATERIAL_KIND_KEYS) {
+    linkedMaterialsByKind[kind] = (linkedIdsByKind[kind] ?? [])
+      .map((materialId) => byId.get(materialId) ?? null)
+        .filter(
+          (material): material is Material =>
+            material !== null &&
+            material.material_type === book.book_type &&
+            materialMatchesKind(material, kind),
+        )
+  }
+  return {
+    linkedMaterial: MATERIAL_KIND_KEYS.flatMap(
+      (kind) => linkedMaterialsByKind[kind] ?? [],
+    )[0] ?? null,
+    linkedMaterialsByKind,
+  }
 }
 
 type UseWorkspacePersistenceInput = {
@@ -281,10 +323,8 @@ export function useWorkspacePersistence({
       )
       const coverRes = await getBookCover(b.id)
       const nextCoverData = coverRes.cover_data
-      let material: Material | null = null
-      if (b.linked_material_id) {
-        material = await getMaterial(b.linked_material_id)
-      }
+      const { linkedMaterial, linkedMaterialsByKind } =
+        await loadLinkedMaterialsForBook(b)
       let skill: Skill | null = null
       if (b.linked_skill_id) {
         skill = await getSkill(b.linked_skill_id)
@@ -305,7 +345,8 @@ export function useWorkspacePersistence({
       const previous = workspaceSessionsRef.current[b.id]
       const session = createBookWorkspaceSession({
         book: b,
-        linkedMaterial: material,
+        linkedMaterial,
+        linkedMaterialsByKind,
         linkedSkill: skill,
         coverData: nextCoverData,
         activeStage: resolveInitialStageForBook(

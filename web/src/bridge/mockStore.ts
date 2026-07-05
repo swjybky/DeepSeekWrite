@@ -23,15 +23,24 @@ import {
   normalizeBook,
   normalizeBookStatus,
   normalizeBookType,
+  normalizeLinkedMaterialIdsByKind,
+  firstLinkedMaterialId,
+  MATERIAL_KIND_KEYS,
   normalizeMaterial,
+  normalizeMaterialKind,
+  normalizeMaterialStageItems,
   normalizeMaterialStages,
   normalizeMaterialType,
   normalizeSkill,
   normalizeSkillStages,
   normalizeSkillType,
+  materialStageItemsToStages,
   type CommonSkill,
   type LoadCommonSkillsResult,
   type Material,
+  type MaterialKind,
+  type MaterialKindWithMixed,
+  type MaterialStageEntry,
   type MaterialStageId,
   type MaterialSummary,
   type Skill,
@@ -71,7 +80,7 @@ export async function mockListBooks(): Promise<BookSummary[]> {
   const map = loadMock()
   return [...map.values()]
     .sort((a, b) => (b.updated_at || '').localeCompare(a.updated_at || ''))
-    .map(({ id, title, book_type, categories, status, output_dir, linked_material_id, linked_skill_id }) => ({
+    .map(({ id, title, book_type, categories, status, output_dir, linked_material_id, linked_material_ids_by_kind, linked_skill_id }) => ({
       id,
       title,
       book_type,
@@ -79,6 +88,7 @@ export async function mockListBooks(): Promise<BookSummary[]> {
       status: normalizeBookStatus(status),
       output_dir,
       linked_material_id,
+      linked_material_ids_by_kind,
       linked_skill_id,
     }))
 }
@@ -90,6 +100,7 @@ export async function mockCreateBook(
   workspace_root?: string | null,
   linked_skill_id?: string | null,
   linked_material_id?: string | null,
+  linked_material_ids_by_kind?: Partial<Record<MaterialKind, string[]>> | null,
 ): Promise<Book> {
   const map = loadMock()
   const now = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z')
@@ -101,6 +112,15 @@ export async function mockCreateBook(
       ? `${ws.replace(/[/\\]+$/, '')}${typeof window !== 'undefined' && window.navigator.userAgent.includes('Win') ? '\\' : '/'}${safeName}`
       : undefined
   const isWsBook = isWorkspaceBook({ book_type: bt, categories: [] })
+  const linkedByKind = normalizeLinkedMaterialIdsByKind(
+    linked_material_ids_by_kind,
+    linked_material_id,
+  )
+  for (const kind of MATERIAL_KIND_KEYS) {
+    linkedByKind[kind] = (linkedByKind[kind] ?? []).filter((id) =>
+      loadMockMaterials().has(id),
+    )
+  }
   const book: Book = {
     id: randomId(),
     title: title.trim() || '未命名',
@@ -109,10 +129,8 @@ export async function mockCreateBook(
     status: 'editing',
     content: '',
     output_dir,
-    linked_material_id:
-      isWsBook && linked_material_id && loadMockMaterials().has(linked_material_id)
-        ? linked_material_id
-        : '',
+    linked_material_id: isWsBook ? firstLinkedMaterialId(linkedByKind) : '',
+    linked_material_ids_by_kind: isWsBook ? linkedByKind : {},
     linked_skill_id:
       isWsBook && linked_skill_id && loadMockSkills().has(linked_skill_id)
         ? linked_skill_id
@@ -146,6 +164,7 @@ export async function mockSaveBook(
     content?: string | null
     stages?: Record<string, string> | null
     linked_material_id?: string | null
+    linked_material_ids_by_kind?: Partial<Record<MaterialKind, string[]>> | null
     linked_skill_id?: string | null
     expert_draft?: ExpertDraft | null
     title?: string | null
@@ -173,7 +192,33 @@ export async function mockSaveBook(
   }
   if (options.linked_material_id !== undefined) {
     const mid = options.linked_material_id?.trim() ?? ''
-    next = { ...next, linked_material_id: mid && loadMockMaterials().has(mid) ? mid : '' }
+    const linkedByKind = normalizeLinkedMaterialIdsByKind(null, mid)
+    for (const kind of MATERIAL_KIND_KEYS) {
+      linkedByKind[kind] = (linkedByKind[kind] ?? []).filter((id) =>
+        loadMockMaterials().has(id),
+      )
+    }
+    next = {
+      ...next,
+      linked_material_id: firstLinkedMaterialId(linkedByKind),
+      linked_material_ids_by_kind: linkedByKind,
+    }
+  }
+  if (options.linked_material_ids_by_kind !== undefined) {
+    const linkedByKind = normalizeLinkedMaterialIdsByKind(
+      options.linked_material_ids_by_kind,
+      null,
+    )
+    for (const kind of MATERIAL_KIND_KEYS) {
+      linkedByKind[kind] = (linkedByKind[kind] ?? []).filter((id) =>
+        loadMockMaterials().has(id),
+      )
+    }
+    next = {
+      ...next,
+      linked_material_id: firstLinkedMaterialId(linkedByKind),
+      linked_material_ids_by_kind: linkedByKind,
+    }
   }
   if (options.linked_skill_id !== undefined) {
     const sid = options.linked_skill_id?.trim() ?? ''
@@ -258,10 +303,11 @@ export async function mockListMaterials(): Promise<MaterialSummary[]> {
   const map = loadMockMaterials()
   return [...map.values()]
     .sort((a, b) => (b.updated_at || '').localeCompare(a.updated_at || ''))
-    .map(({ id, title, material_type, parent_genre, sub_genre, output_dir }) => ({
+    .map(({ id, title, material_type, material_kind, parent_genre, sub_genre, output_dir }) => ({
       id,
       title,
       material_type,
+      material_kind,
       parent_genre,
       sub_genre,
       output_dir,
@@ -277,6 +323,7 @@ export async function mockCreateMaterial(
   material_type: string,
   parent_genre?: string | null,
   sub_genre?: string | null,
+  material_kind?: MaterialKindWithMixed | null,
 ): Promise<Material> {
   void sub_genre
   const map = loadMockMaterials()
@@ -286,9 +333,12 @@ export async function mockCreateMaterial(
     id: randomId(),
     title: title.trim() || '未命名素材',
     material_type: mt,
+    material_kind: normalizeMaterialKind(material_kind, 'mixed'),
     parent_genre: mt === 'short' || mt === 'script' ? (parent_genre || '') : '',
     sub_genre: '',
+    overview: '',
     stages: normalizeMaterialStages({}),
+    stage_items: normalizeMaterialStageItems({}),
     created_at: now,
     updated_at: now,
   }
@@ -301,6 +351,8 @@ export async function mockSaveMaterial(
   material_id: string,
   stages?: Record<string, string> | null,
   title?: string,
+  stage_items?: Partial<Record<MaterialStageId, MaterialStageEntry[]>> | null,
+  overview?: string | null,
 ): Promise<Material | null> {
   const map = loadMockMaterials()
   const m = map.get(material_id)
@@ -310,9 +362,24 @@ export async function mockSaveMaterial(
   if (title != null) {
     next = { ...next, title: title.trim() }
   }
-  if (stages != null) {
+  if (overview != null) {
+    next = { ...next, overview }
+  }
+  if (stage_items != null) {
+    const normalizedItems = normalizeMaterialStageItems(stage_items)
+    next = {
+      ...next,
+      stage_items: normalizedItems,
+      stages: materialStageItemsToStages(normalizedItems),
+    }
+  } else if (stages != null) {
     const normalized = normalizeMaterialStages(stages as Partial<Record<MaterialStageId, string>>)
-    next = { ...next, stages: normalized }
+    const normalizedItems = normalizeMaterialStageItems(null, normalized)
+    next = {
+      ...next,
+      stages: normalized,
+      stage_items: normalizedItems,
+    }
   }
   map.set(material_id, next)
   saveMockMaterials(map)
@@ -327,8 +394,22 @@ export async function mockDeleteMaterial(material_id: string): Promise<boolean> 
     const books = loadMock()
     let changed = false
     for (const [bookId, book] of books) {
-      if (book.linked_material_id === material_id) {
-        books.set(bookId, { ...book, linked_material_id: '' })
+      const linkedByKind = normalizeLinkedMaterialIdsByKind(
+        book.linked_material_ids_by_kind,
+        book.linked_material_id,
+      )
+      let removed = book.linked_material_id === material_id
+      for (const kind of MATERIAL_KIND_KEYS) {
+        const previous = linkedByKind[kind] ?? []
+        linkedByKind[kind] = previous.filter((id) => id !== material_id)
+        if (linkedByKind[kind].length !== previous.length) removed = true
+      }
+      if (removed) {
+        books.set(bookId, {
+          ...book,
+          linked_material_id: firstLinkedMaterialId(linkedByKind),
+          linked_material_ids_by_kind: linkedByKind,
+        })
         changed = true
       }
     }

@@ -5,9 +5,13 @@ import {
   getSkill,
   listMaterials,
   listSkills,
+  MATERIAL_KIND_KEYS,
+  materialMatchesKind,
+  normalizeLinkedMaterialIdsByKind,
   saveBook,
   type Book,
   type Material,
+  type MaterialKind,
   type MaterialSummary,
   type Skill,
   type SkillSummary,
@@ -20,6 +24,9 @@ type UseLibrarySelectorsInput = {
   workspaceSessionsRef: MutableRefObject<Record<string, BookWorkspaceSessionState>>
   setBook: Dispatch<SetStateAction<Book | null>>
   setLinkedMaterial: Dispatch<SetStateAction<Material | null>>
+  setLinkedMaterialsByKind: Dispatch<
+    SetStateAction<Partial<Record<MaterialKind, Material[]>>>
+  >
   setLinkedSkill: Dispatch<SetStateAction<Skill | null>>
   setError: Dispatch<SetStateAction<string | null>>
   storeWorkspaceSession: (
@@ -35,6 +42,7 @@ export function useLibrarySelectors({
   workspaceSessionsRef,
   setBook,
   setLinkedMaterial,
+  setLinkedMaterialsByKind,
   setLinkedSkill,
   setError,
   storeWorkspaceSession,
@@ -49,6 +57,37 @@ export function useLibrarySelectors({
   const [skillSelectorLoading, setSkillSelectorLoading] = useState(false)
   const [skillSelectorSaving, setSkillSelectorSaving] = useState(false)
 
+  const resolveLinkedMaterials = useCallback(async (nextBook: Book) => {
+    const idsByKind = normalizeLinkedMaterialIdsByKind(
+      nextBook.linked_material_ids_by_kind,
+      nextBook.linked_material_id,
+    )
+    const ids = [
+      ...new Set(MATERIAL_KIND_KEYS.flatMap((kind) => idsByKind[kind] ?? [])),
+    ]
+    const materials = (
+      await Promise.all(ids.map((materialId) => getMaterial(materialId)))
+    ).filter((material): material is Material => Boolean(material))
+    const byId = new Map(materials.map((material) => [material.id, material]))
+    const linkedMaterialsByKind: Partial<Record<MaterialKind, Material[]>> = {}
+    for (const kind of MATERIAL_KIND_KEYS) {
+      linkedMaterialsByKind[kind] = (idsByKind[kind] ?? [])
+        .map((materialId) => byId.get(materialId) ?? null)
+        .filter(
+          (material): material is Material =>
+            material !== null &&
+            material.material_type === nextBook.book_type &&
+            materialMatchesKind(material, kind),
+        )
+    }
+    return {
+      linkedMaterial: MATERIAL_KIND_KEYS.flatMap(
+        (kind) => linkedMaterialsByKind[kind] ?? [],
+      )[0] ?? null,
+      linkedMaterialsByKind,
+    }
+  }, [])
+
   const openMaterialSelector = useCallback(async () => {
     setMaterialSelectorOpen(true)
     setMaterialSelectorLoading(true)
@@ -62,35 +101,39 @@ export function useLibrarySelectors({
     }
   }, [setError])
 
-  const saveLinkedMaterial = useCallback(async (materialId: string | null) => {
+  const saveLinkedMaterial = useCallback(async (
+    linkedMaterialIdsByKind: Partial<Record<MaterialKind, string[]>>,
+  ) => {
     if (!book) return
     setMaterialSelectorSaving(true)
     setError(null)
     try {
-      const next = await saveBook(book.id, { linked_material_id: materialId ?? '' })
+      const next = await saveBook(book.id, {
+        linked_material_ids_by_kind: linkedMaterialIdsByKind,
+      })
       if (!next) {
         setError('关联素材库失败：书籍不存在')
         return
       }
-      const material = next.linked_material_id
-        ? await getMaterial(next.linked_material_id)
-        : null
+      const { linkedMaterial, linkedMaterialsByKind } =
+        await resolveLinkedMaterials(next)
       const currentSession = workspaceSessionsRef.current[next.id]
       if (currentSession) {
         storeWorkspaceSession(
           {
             ...currentSession,
             book: next,
-            linkedMaterial: material,
+            linkedMaterial,
+            linkedMaterialsByKind,
           },
           bookRef.current?.id === next.id,
         )
       } else {
         setBook(next)
-        setLinkedMaterial(material)
+        setLinkedMaterial(linkedMaterial)
+        setLinkedMaterialsByKind(linkedMaterialsByKind)
       }
       syncWorkspaceBookSummary(next)
-      setMaterialSelectorOpen(false)
     } catch (e) {
       setError(e instanceof Error ? e.message : '关联素材库失败')
     } finally {
@@ -102,6 +145,8 @@ export function useLibrarySelectors({
     setBook,
     setError,
     setLinkedMaterial,
+    setLinkedMaterialsByKind,
+    resolveLinkedMaterials,
     storeWorkspaceSession,
     syncWorkspaceBookSummary,
     workspaceSessionsRef,

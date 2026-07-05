@@ -3,6 +3,7 @@ import type {
   Book,
   ExpertDraft,
   Material,
+  MaterialKind,
   Skill,
   StageId,
 } from '../domain/workspace'
@@ -21,6 +22,7 @@ export type WorkspaceSession = {
   stages: Record<StageId, string>
   expertDraft: ExpertDraft
   linkedMaterial: Material | null
+  linkedMaterialsByKind: Partial<Record<MaterialKind, Material[]>>
   linkedSkill: Skill | null
   coverData: string | null
   activeStage: StageId

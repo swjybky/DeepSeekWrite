@@ -8,6 +8,7 @@ import type {
   BookType,
 } from '../domain/workspaceCore'
 import type { SaveBookOptions } from './apiTypes'
+import type { MaterialKind } from './libraryDomain'
 import { deleteAiChatSessionsForOwner } from './aiChatHistoryClient'
 import { getBridgeApi, resetBridgeApiCache } from './runtime'
 import type { BridgeApi } from './runtime'
@@ -75,6 +76,7 @@ export async function createBook(
   workspace_root?: string | null,
   linked_skill_id?: string | null,
   linked_material_id?: string | null,
+  linked_material_ids_by_kind?: Partial<Record<MaterialKind, string[]>> | null,
 ): Promise<Book> {
   const raw = await callApiMethod('create_book', (api) =>
     api.create_book(
@@ -84,12 +86,21 @@ export async function createBook(
       workspace_root ?? null,
       linked_skill_id ?? null,
       linked_material_id ?? null,
+      linked_material_ids_by_kind ?? null,
     ),
   )
   if (raw) {
     return normalizeBook(raw)
   }
-  return mockCreateBook(title, book_type, categories, workspace_root, linked_skill_id, linked_material_id)
+  return mockCreateBook(
+    title,
+    book_type,
+    categories,
+    workspace_root,
+    linked_skill_id,
+    linked_material_id,
+    linked_material_ids_by_kind,
+  )
 }
 
 export async function getBook(book_id: string): Promise<Book | null> {
@@ -127,6 +138,7 @@ export async function saveBook(
       opts.status ?? undefined,
       opts.linked_skill_id ?? undefined,
       opts.memory_auto_capture_enabled ?? undefined,
+      opts.linked_material_ids_by_kind ?? undefined,
     ),
   )
   if (raw === undefined) {

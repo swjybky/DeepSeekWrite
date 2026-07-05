@@ -8,15 +8,15 @@ import {
   type ExpertDraft,
   type MemoryEntry,
   type Material,
-  type MaterialStageId,
+  type MaterialKind,
   type Skill,
   type StageId,
 } from '../../../bridge'
 import {
-  buildReadLinkedMaterialContentTool,
   buildReadWorkspaceContentTool,
   buildSearchWorkspaceTextTool,
 } from '../stageAgents'
+import { buildQueryLinkedMaterialEntriesTool } from '../../shared/linkedMaterialQueryTools'
 import { buildLoadSkillTool } from '../loadSkill'
 import {
   EXPERT_SECTION_WRITER_AGENT_ID,
@@ -66,6 +66,7 @@ export type RunExpertDraftSectionWriterOptions = {
   ) => void
   /** 书籍关联的素材库 */
   linkedMaterial?: Material | null
+  linkedMaterialsByKind?: Partial<Record<MaterialKind, Material[]>>
   /** 书籍绑定的技能库 */
   linkedSkill?: Skill | null
   bookMemories?: MemoryEntry[]
@@ -169,6 +170,7 @@ export function buildSectionWriterTools(input: {
   sectionTitle: string
   allStages: Partial<Record<StageId, string>>
   linkedMaterial?: Material | null
+  linkedMaterialsByKind?: Partial<Record<MaterialKind, Material[]>>
   linkedSkill?: Skill | null
   readAccess: WorkspaceAgentReadAccessEntry
   getDraft: () => ExpertDraft
@@ -189,6 +191,7 @@ export function buildSectionWriterTools(input: {
     sectionTitle,
     allStages,
     linkedMaterial,
+    linkedMaterialsByKind,
     readAccess,
     getDraft,
     getRenderedSectionContent,
@@ -209,6 +212,7 @@ export function buildSectionWriterTools(input: {
     stageBody: '',
     allStages,
     linkedMaterial: linkedMaterial ?? null,
+    linkedMaterialsByKind,
     getCurrentStageBody: readLiveStageBody,
   }
   const readTools: AgentTool[] = []
@@ -228,9 +232,9 @@ export function buildSectionWriterTools(input: {
   )
   if (readAccess.material.length > 0) {
     readTools.push(
-      buildReadLinkedMaterialContentTool(
+      buildQueryLinkedMaterialEntriesTool(
         toolCtx,
-        readAccess.material as readonly MaterialStageId[],
+        readAccess.material as readonly MaterialKind[],
       ),
     )
   }
@@ -312,6 +316,8 @@ export async function runExpertDraftSectionWriter(
         stageBody: section.body,
         workspaceStages: opts.getWorkspaceStages(),
         allowedWorkspaceStages: opts.readAccess.workspace as readonly StageId[],
+        allowedMaterialKinds: opts.readAccess.material as readonly MaterialKind[],
+        linkedMaterialsByKind: opts.linkedMaterialsByKind,
         template: systemPromptTemplate,
         linkedSkill: opts.linkedSkill,
       })
@@ -321,6 +327,7 @@ export async function runExpertDraftSectionWriter(
         sectionTitle: section.title,
         allStages: opts.getWorkspaceStages(),
         linkedMaterial: opts.linkedMaterial,
+        linkedMaterialsByKind: opts.linkedMaterialsByKind,
         linkedSkill: opts.linkedSkill,
         readAccess: opts.readAccess,
         getDraft: opts.getDraft,

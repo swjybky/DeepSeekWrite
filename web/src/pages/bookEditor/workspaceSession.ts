@@ -3,6 +3,7 @@ import type {
   BookSummary,
   ExpertDraft,
   Material,
+  MaterialKind,
   Skill,
   StageId,
 } from '../../domain/workspace'
@@ -146,6 +147,7 @@ export function mergeWorkspaceBooksStable(
 export function createBookWorkspaceSession(input: {
   book: Book
   linkedMaterial: Material | null
+  linkedMaterialsByKind?: Partial<Record<MaterialKind, Material[]>>
   linkedSkill: Skill | null
   coverData: string | null
   activeStage: StageId
@@ -197,6 +199,7 @@ export function createBookWorkspaceSession(input: {
     activeStage: input.activeStage,
     activePlotChildStage,
     linkedMaterial: input.linkedMaterial,
+    linkedMaterialsByKind: input.linkedMaterialsByKind ?? {},
     linkedSkill: input.linkedSkill,
     coverData: input.coverData,
     aiChatEpochByStage: input.previous?.aiChatEpochByStage ?? {},

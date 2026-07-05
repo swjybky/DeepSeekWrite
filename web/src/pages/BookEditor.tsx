@@ -19,6 +19,7 @@ import {
   saveBookMemories,
   saveUserMemories,
   type Material,
+  type MaterialKind,
   type Skill,
   type WorkspaceAgentReadAccessConfig,
 } from '../bridge'
@@ -103,6 +104,9 @@ export function BookEditor() {
   const [aiPanelWidth, setAiPanelWidth] = useAiPanelWidth()
   /** 当前阶段 AI 侧栏「对话轮次」：递增后重建 Pi 会话并清空该阶段对话历史 */
   const [linkedMaterial, setLinkedMaterial] = useState<Material | null>(null)
+  const [linkedMaterialsByKind, setLinkedMaterialsByKind] = useState<
+    Partial<Record<MaterialKind, Material[]>>
+  >({})
   const [linkedSkill, setLinkedSkill] = useState<Skill | null>(null)
   const [workspaceAgentReadAccess, setWorkspaceAgentReadAccess] =
     useState<WorkspaceAgentReadAccessConfig>(
@@ -193,6 +197,7 @@ export function BookEditor() {
     activePlotChildStageRef.current = session.activePlotChildStage
     setActivePlotChildStage(session.activePlotChildStage)
     setLinkedMaterial(session.linkedMaterial)
+    setLinkedMaterialsByKind(session.linkedMaterialsByKind)
     setLinkedSkill(session.linkedSkill)
     setCoverData(session.coverData)
     setAiChatEpochByStage(session.aiChatEpochByStage)
@@ -690,6 +695,7 @@ export function BookEditor() {
     workspaceSessionsRef,
     setBook,
     setLinkedMaterial,
+    setLinkedMaterialsByKind,
     setLinkedSkill,
     setError,
     storeWorkspaceSession,
@@ -1048,6 +1054,7 @@ export function BookEditor() {
         coverData={coverData}
         coverGenerating={coverGenerating}
         linkedMaterial={linkedMaterial}
+        linkedMaterialsByKind={linkedMaterialsByKind}
         linkedSkill={linkedSkill}
         saving={saving}
         autoSaveStatus={workspaceBookSaveStatus(book.id)}
@@ -1173,6 +1180,7 @@ export function BookEditor() {
           userMemories={workspaceUserMemories}
           workspaceAgentReadAccess={workspaceAgentReadAccess}
           linkedMaterialTitle={linkedMaterial?.title}
+          linkedMaterialsByKind={linkedMaterialsByKind}
           linkedSkillTitle={linkedSkill?.title}
           workspaceSessionsRef={workspaceSessionsRef}
           getRenderedWorkspaceStageBody={getRenderedWorkspaceStageBody}
@@ -1227,12 +1235,12 @@ export function BookEditor() {
           <MaterialSelectorDialog
             book={book}
             linkedMaterial={linkedMaterial}
+            linkedMaterialsByKind={linkedMaterialsByKind}
             summaries={materialSummaries}
             loading={materialSelectorLoading}
             saving={materialSelectorSaving}
             onClose={() => setMaterialSelectorOpen(false)}
-            onSelect={(materialId) => void saveLinkedMaterial(materialId)}
-            onClear={() => void saveLinkedMaterial(null)}
+            onChange={(next) => void saveLinkedMaterial(next)}
           />
         ) : null}
 

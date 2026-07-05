@@ -3,6 +3,8 @@ import type {
   Book,
   ExpertDraft,
   MemoryEntry,
+  Material,
+  MaterialKind,
   StageId,
   WorkspaceAgentReadAccessConfig,
 } from '../../domain/workspace'
@@ -132,6 +134,7 @@ type Props = {
   userMemories: MemoryEntry[]
   workspaceAgentReadAccess: WorkspaceAgentReadAccessConfig
   linkedMaterialTitle?: string
+  linkedMaterialsByKind: Partial<Record<MaterialKind, Material[]>>
   linkedSkillTitle?: string
   workspaceSessionsRef: MutableRefObject<Record<string, BookWorkspaceSessionState>>
   getRenderedWorkspaceStageBody: (stageId: StageId) => string | undefined
@@ -174,6 +177,7 @@ export function WorkspaceAiPanel({
   userMemories,
   workspaceAgentReadAccess,
   linkedMaterialTitle,
+  linkedMaterialsByKind,
   linkedSkillTitle,
   workspaceSessionsRef,
   getRenderedWorkspaceStageBody,
@@ -203,6 +207,10 @@ export function WorkspaceAiPanel({
     activeStage,
     activeExpertSectionForHeader,
     activePlotChildLabel,
+  )
+  const linkedMaterialCount = Object.values(linkedMaterialsByKind).reduce(
+    (sum, items) => sum + (items?.length ?? 0),
+    0,
   )
 
   return (
@@ -262,7 +270,11 @@ export function WorkspaceAiPanel({
           : ''}
         {' · '}
         {book.categories.join('、') || '未分类'}
-        {linkedMaterialTitle ? ` · 素材：${linkedMaterialTitle}` : ''}
+        {linkedMaterialCount > 0
+          ? ` · 素材：${linkedMaterialCount} 个`
+          : linkedMaterialTitle
+            ? ` · 素材：${linkedMaterialTitle}`
+            : ''}
         {linkedSkillTitle ? ` · 技能：${linkedSkillTitle}` : ''}
       </div>
       <div className="workspace-ai-chat-stack">
@@ -339,6 +351,7 @@ export function WorkspaceAiPanel({
                       Boolean(session.book.memory_auto_capture_enabled)
                     }
                     linkedMaterial={session.linkedMaterial}
+                    linkedMaterialsByKind={session.linkedMaterialsByKind}
                     linkedSkill={session.linkedSkill}
                     workspaceAgentReadAccess={workspaceAgentReadAccess}
                     includePiArtifacts={WORKSPACE_AI_INCLUDE_PI_ARTIFACTS}
@@ -389,6 +402,7 @@ export function WorkspaceAiPanel({
                   Boolean(session.book.memory_auto_capture_enabled)
                 }
                 linkedMaterial={session.linkedMaterial}
+                linkedMaterialsByKind={session.linkedMaterialsByKind}
                 linkedSkill={session.linkedSkill}
                 readAccess={resolveReadAccessForBook(
                   session.book,

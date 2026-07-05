@@ -64,7 +64,7 @@ _WORKSPACE_PLACEHOLDER_RE = re.compile(
     r"\{\{(BOOK_TITLE|BOOK_GENRE)\}\}"
 )
 _MATERIAL_PLACEHOLDER_RE = re.compile(
-    r"\{\{(BOOK_TITLE|BOOK_LINE|MATERIAL_TITLE|MATERIAL_LINE|MATERIAL_TYPE|MATERIAL_GENRE|STAGE_ID|STAGE_LABEL|STAGE_BODY|OTHER_STAGES_EXCERPT)\}\}"
+    r"\{\{(BOOK_TITLE|BOOK_LINE|MATERIAL_TITLE|MATERIAL_LINE|MATERIAL_TYPE|MATERIAL_GENRE|MATERIAL_KIND|MATERIAL_KIND_LABEL|MATERIAL_OVERVIEW|CURRENT_ENTRY_TITLE|STAGE_ID|STAGE_LABEL|STAGE_BODY|OTHER_STAGES_EXCERPT)\}\}"
 )
 _SKILL_PLACEHOLDER_RE = re.compile(
     r"\{\{(BOOK_TITLE|BOOK_LINE|SKILL_TITLE|SKILL_LINE|SKILL_TYPE|STAGE_ID|STAGE_LABEL|STAGE_BODY|OTHER_STAGES_EXCERPT)\}\}"
@@ -430,9 +430,17 @@ MATERIAL_PREFIX = Path("material")
 MATERIAL_MANAGER_AGENT_ID = "material_manager"
 MATERIAL_MANAGER_PROMPT_KIND = "material_manager"
 SHARED_MATERIAL_PROMPT_DIR = "shared"
+KIND_MATERIAL_PROMPT_DIR = "kind"
 LIBRARY_PROMPT_TYPES: frozenset[str] = frozenset({"short", "long", "script"})
+MATERIAL_PROMPT_KINDS: tuple[str, ...] = (
+    "character",
+    "gimmick",
+    "plot",
+    "draft",
+    "other",
+)
 
-# 素材阶段顺序（梗/人设/剧情设计/导语设计/剧情细化/优秀正文片段），对齐 app/models.py MATERIAL_STAGE_KEYS
+# 素材阶段顺序（梗/人设/剧情设计/导语设计/剧情细化/优秀正文片段/其他素材），对齐 app/models.py MATERIAL_STAGE_KEYS
 MATERIAL_STAGES_ORDER: tuple[str, ...] = (
     "gimmick",
     "character",
@@ -440,6 +448,7 @@ MATERIAL_STAGES_ORDER: tuple[str, ...] = (
     "intro",
     "plot_refine",
     "draft_excerpt",
+    "other",
 )
 
 MATERIAL_STAGE_LABELS: dict[str, str] = {
@@ -449,6 +458,25 @@ MATERIAL_STAGE_LABELS: dict[str, str] = {
     "intro": "导语设计",
     "plot_refine": "剧情细化",
     "draft_excerpt": "优秀正文片段",
+    "other": "其他素材",
+}
+
+MATERIAL_KIND_LABELS: dict[str, str] = {
+    "character": "人设素材",
+    "gimmick": "梗素材",
+    "plot": "剧情素材",
+    "draft": "正文素材",
+    "other": "其他素材",
+}
+
+MATERIAL_STAGE_TO_KIND: dict[str, str] = {
+    "character": "character",
+    "gimmick": "gimmick",
+    "pacing": "plot",
+    "intro": "plot",
+    "plot_refine": "plot",
+    "draft_excerpt": "draft",
+    "other": "other",
 }
 
 # 新版素材库只保留一个「素材库管理智能体」；旧 kind 仅作为桥接兼容入口。
@@ -482,6 +510,17 @@ def library_prompt_type_label(raw: str | None = None) -> str:
     if normalized == "long":
         return "长篇"
     return "短篇"
+
+
+def normalize_material_prompt_kind(raw: str | None = None) -> str:
+    value = str(raw or "").strip()
+    if value in MATERIAL_PROMPT_KINDS:
+        return value
+    return "other"
+
+
+def material_prompt_kind_label(raw: str | None = None) -> str:
+    return MATERIAL_KIND_LABELS.get(normalize_material_prompt_kind(raw), "其他素材")
 
 
 def _peek_material_other_stages(
@@ -588,6 +627,79 @@ def reset_material_agent_prompt_override(material_type: str | None = None) -> bo
     return False
 
 
+def material_kind_prompt_override_absolute_path(
+    material_type: str | None = None,
+    material_kind: str | None = None,
+) -> Path:
+    root = data_root() / "prompt_overrides" / MATERIAL_PREFIX
+    return (
+        root
+        / normalize_library_prompt_type(material_type)
+        / KIND_MATERIAL_PROMPT_DIR
+        / f"{normalize_material_prompt_kind(material_kind)}.txt"
+    ).resolve()
+
+
+def material_kind_prompt_builtin_default_path(
+    material_type: str | None = None,
+    material_kind: str | None = None,
+) -> Path:
+    return (
+        (bundle_root() / "app" / "prompt_defaults" / MATERIAL_PREFIX)
+        / normalize_library_prompt_type(material_type)
+        / KIND_MATERIAL_PROMPT_DIR
+        / f"{normalize_material_prompt_kind(material_kind)}.txt"
+    )
+
+
+def resolve_material_kind_prompt_read_path(
+    material_type: str | None = None,
+    material_kind: str | None = None,
+) -> Path:
+    over = material_kind_prompt_override_absolute_path(material_type, material_kind)
+    if over.is_file():
+        return over
+    return material_kind_prompt_builtin_default_path(material_type, material_kind)
+
+
+def read_material_kind_prompt_template(
+    material_type: str | None = None,
+    material_kind: str | None = None,
+) -> str:
+    path = resolve_material_kind_prompt_read_path(material_type, material_kind)
+    if not path.is_file():
+        kind = normalize_material_prompt_kind(material_kind)
+        return (
+            f"[缺少素材类型默认提示模板文件]\n路径: {path}\n\n"
+            f"请补齐 app/prompt_defaults/material/{normalize_library_prompt_type(material_type)}/kind/{kind}.txt。\n"
+        )
+    text = path.read_text(encoding="utf-8")
+    if text.endswith("\n"):
+        return text[:-1]
+    return text
+
+
+def save_material_kind_prompt_override(
+    body: str,
+    material_type: str | None = None,
+    material_kind: str | None = None,
+) -> None:
+    path = material_kind_prompt_override_absolute_path(material_type, material_kind)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(body if body.endswith("\n") else body + "\n", encoding="utf-8")
+
+
+def reset_material_kind_prompt_override(
+    material_type: str | None = None,
+    material_kind: str | None = None,
+) -> bool:
+    path = material_kind_prompt_override_absolute_path(material_type, material_kind)
+    if path.is_file():
+        path.unlink()
+        return True
+    return False
+
+
 def read_material_prompt_template(
     prompt_kind: str,
     stage_id: str,
@@ -624,15 +736,29 @@ def render_material_system_prompt(
     stage_id: str,
     *,
     material_prompt_type: str | None = None,
+    material_kind: str | None = None,
     book_title: str,
     material_type: str = "",
     material_genre: str = "",
+    material_overview: str = "",
+    current_entry_title: str = "",
     stage_body: str,
     other_stages_excerpt: str | None = None,
     all_stages_for_peek: dict[str, str] | None = None,
 ) -> str:
     validate_material_slot(prompt_kind, stage_id)
-    raw = read_material_agent_prompt_template(material_prompt_type)
+    normalized_kind = normalize_material_prompt_kind(
+        material_kind or MATERIAL_STAGE_TO_KIND.get(stage_id, "other")
+    )
+    raw = "\n\n".join(
+        [
+            read_material_agent_prompt_template(material_prompt_type).strip(),
+            read_material_kind_prompt_template(
+                material_prompt_type,
+                normalized_kind,
+            ).strip(),
+        ]
+    ).strip()
 
     staged_body = excerpt(stage_body, STAGE_BODY_EXCERPT_CAP)
     if other_stages_excerpt is None:
@@ -655,6 +781,10 @@ def render_material_system_prompt(
         "MATERIAL_LINE": f"素材：《{title}》",
         "MATERIAL_TYPE": type_text,
         "MATERIAL_GENRE": (material_genre or "").strip() or "未分类",
+        "MATERIAL_KIND": normalized_kind,
+        "MATERIAL_KIND_LABEL": material_prompt_kind_label(normalized_kind),
+        "MATERIAL_OVERVIEW": excerpt(material_overview, STAGE_BODY_EXCERPT_CAP),
+        "CURRENT_ENTRY_TITLE": (current_entry_title or "").strip() or "未选择条目",
         "STAGE_ID": stage_id,
         "STAGE_LABEL": stage_label,
         "STAGE_BODY": staged_body,
@@ -687,6 +817,9 @@ def render_material_from_api_context(
             str(ctx.get("sub_genre") or "").strip(),
         ]
         material_genre = " · ".join([part for part in parts if part])
+    material_kind = str(ctx.get("material_kind") or "")
+    material_overview = str(ctx.get("material_overview") or "")
+    current_entry_title = str(ctx.get("current_entry_title") or "")
     body = str(ctx.get("stage_body") or "")
     all_stages: dict[str, str] | None = None
     stages_val = ctx.get("all_stages")
@@ -699,9 +832,12 @@ def render_material_from_api_context(
             prompt_kind,
             stage_id,
             material_prompt_type=material_prompt_type or material_type,
+            material_kind=material_kind,
             book_title=title,
             material_type=material_type,
             material_genre=material_genre,
+            material_overview=material_overview,
+            current_entry_title=current_entry_title,
             stage_body=body,
             other_stages_excerpt=str(other_override),
         )
@@ -709,9 +845,12 @@ def render_material_from_api_context(
         prompt_kind,
         stage_id,
         material_prompt_type=material_prompt_type or material_type,
+        material_kind=material_kind,
         book_title=title,
         material_type=material_type,
         material_genre=material_genre,
+        material_overview=material_overview,
+        current_entry_title=current_entry_title,
         stage_body=body,
         all_stages_for_peek=all_stages if all_stages is not None else {},
     )
@@ -720,6 +859,20 @@ def render_material_from_api_context(
 def read_raw_material_agent_prompt_for_editor(material_type: str | None = None) -> str:
     """素材库智能体设置页读取当前生效来源（优先覆盖）的原始模板正文。"""
     path = resolve_material_agent_read_path(material_type)
+    if not path.is_file():
+        return ""
+    text = path.read_text(encoding="utf-8")
+    if text.endswith("\n"):
+        return text[:-1]
+    return text
+
+
+def read_raw_material_kind_prompt_for_editor(
+    material_type: str | None = None,
+    material_kind: str | None = None,
+) -> str:
+    """素材库智能体设置页读取当前类型提示词的原始模板正文。"""
+    path = resolve_material_kind_prompt_read_path(material_type, material_kind)
     if not path.is_file():
         return ""
     text = path.read_text(encoding="utf-8")

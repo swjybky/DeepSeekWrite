@@ -9,6 +9,7 @@ import {
   type BookSummary,
   type BookType,
   type MemoryEntry,
+  type MaterialKind,
   type MaterialSummary,
   type MaterialType,
   type SkillSummary,
@@ -39,6 +40,10 @@ import {
   checkForUpdate,
   getMaterialParentGenres,
   getUserMemories,
+  emptyLinkedMaterialIdsByKind,
+  MATERIAL_KIND_KEYS,
+  MATERIAL_KIND_LABELS,
+  materialMatchesKind,
   materialTypeLabel,
   saveUserMemories,
   skillTypeLabel,
@@ -1542,7 +1547,8 @@ export function Home() {
   const [bookType, setBookType] = useState<BookType>('short')
   const [shortGenre, setShortGenre] = useState<string>(SHORT_GENRE_OPTIONS[0])
   const [bookLinkedSkillId, setBookLinkedSkillId] = useState('')
-  const [bookLinkedMaterialId, setBookLinkedMaterialId] = useState('')
+  const [bookLinkedMaterialIdsByKind, setBookLinkedMaterialIdsByKind] =
+    useState<Record<MaterialKind, string[]>>(() => emptyLinkedMaterialIdsByKind())
   const [submittingBook, setSubmittingBook] = useState(false)
   const [deletingBookId, setDeletingBookId] = useState<string | null>(null)
   const [bookError, setBookError] = useState<string | null>(null)
@@ -1562,6 +1568,7 @@ export function Home() {
   const [showMaterialForm, setShowMaterialForm] = useState(false)
   const [materialTitle, setMaterialTitle] = useState('')
   const [materialType, setMaterialType] = useState<MaterialType>('short')
+  const [materialKind, setMaterialKind] = useState<MaterialKind>('character')
   const [materialParentGenre, setMaterialParentGenre] = useState<string>(getMaterialParentGenres('short')[0] ?? '')
   const [submittingMaterial, setSubmittingMaterial] = useState(false)
   const [deletingMaterialId, setDeletingMaterialId] = useState<string | null>(null)
@@ -1614,6 +1621,21 @@ export function Home() {
   const [updateCheckResult, setUpdateCheckResult] = useState<UpdateCheckResult | null>(null)
   const [updateError, setUpdateError] = useState<string | null>(null)
   const downloadingUpdate = backgroundUpdate.status === 'downloading'
+
+  const bookMaterialOptionsByKind = useMemo(
+    () =>
+      MATERIAL_KIND_KEYS.reduce(
+        (out, kind) => {
+          out[kind] = materials.filter(
+            (material) =>
+              material.material_type === bookType && materialMatchesKind(material, kind),
+          )
+          return out
+        },
+        {} as Record<MaterialKind, MaterialSummary[]>,
+      ),
+    [bookType, materials],
+  )
 
   useEffect(() => {
     if (!otherFunctionsOpen) return
@@ -1905,13 +1927,20 @@ export function Home() {
     try {
       const cats = bookType === 'short' || bookType === 'script' ? [shortGenre] : []
       const linkedSkillId = bookLinkedSkillId
-      const linkedMaterialId = bookLinkedMaterialId
-      await createBook(bookTitle, bookType, cats, ws, linkedSkillId || null, linkedMaterialId || null)
+      await createBook(
+        bookTitle,
+        bookType,
+        cats,
+        ws,
+        linkedSkillId || null,
+        null,
+        bookLinkedMaterialIdsByKind,
+      )
       setBookTitle('')
       setBookType('short')
       setShortGenre(SHORT_GENRE_OPTIONS[0])
       setBookLinkedSkillId('')
-      setBookLinkedMaterialId('')
+      setBookLinkedMaterialIdsByKind(emptyLinkedMaterialIdsByKind())
       setShowBookForm(false)
       await refreshBooks()
     } catch (err) {
@@ -1947,7 +1976,7 @@ export function Home() {
   const handleCreateMaterial = async (e: React.FormEvent) => {
     e.preventDefault()
     const ws = workspaceRoot?.trim()
-    if (!ws) {
+    if (!ws && isPywebviewDesktopBundle()) {
       setMaterialError('请先在上方选择工作文件夹')
       return
     }
@@ -1959,9 +1988,10 @@ export function Home() {
           ? materialParentGenre
           : undefined
       const subGenre = undefined
-      await createMaterial(materialTitle, materialType, parentGenre, subGenre, ws)
+      await createMaterial(materialTitle, materialType, parentGenre, subGenre, ws || null, materialKind)
       setMaterialTitle('')
       setMaterialType('short')
+      setMaterialKind('character')
       setMaterialParentGenre(getMaterialParentGenres('short')[0] ?? '')
       setShowMaterialForm(false)
       await refreshMaterials()
@@ -2205,6 +2235,17 @@ export function Home() {
     setMaterialType(type)
     setMaterialParentGenre(getMaterialParentGenres(type)[0] ?? '')
   }, [])
+
+  const handleBookLinkedMaterialChange = useCallback(
+    (kind: MaterialKind, materialId: string) => {
+      setBookLinkedMaterialIdsByKind((current) => ({
+        ...emptyLinkedMaterialIdsByKind(),
+        ...current,
+        [kind]: materialId ? [materialId] : [],
+      }))
+    },
+    [],
+  )
 
   // ==================== 渲染 ====================
   const loadUserMemoryList = useCallback(async (type: 'short' | 'long' | 'script') => {
@@ -2847,7 +2888,7 @@ export function Home() {
                   onChange={() => {
                     setBookType('short')
                     setBookLinkedSkillId('')
-                    setBookLinkedMaterialId('')
+                    setBookLinkedMaterialIdsByKind(emptyLinkedMaterialIdsByKind())
                   }}
                 />
                 短篇
@@ -2860,7 +2901,7 @@ export function Home() {
                   onChange={() => {
                     setBookType('script')
                     setBookLinkedSkillId('')
-                    setBookLinkedMaterialId('')
+                    setBookLinkedMaterialIdsByKind(emptyLinkedMaterialIdsByKind())
                   }}
                 />
                 剧本
@@ -2873,7 +2914,7 @@ export function Home() {
                   onChange={() => {
                     setBookType('long')
                     setBookLinkedSkillId('')
-                    setBookLinkedMaterialId('')
+                    setBookLinkedMaterialIdsByKind(emptyLinkedMaterialIdsByKind())
                   }}
                 />
                 长篇
@@ -2921,23 +2962,42 @@ export function Home() {
             </select>
           </label>
 
-          <label className="field">
-            <span className="field-label">绑定素材库</span>
-            <select
-              value={bookLinkedMaterialId}
-              onChange={(e) => setBookLinkedMaterialId(e.target.value)}
-              disabled={loadingMaterials}
-            >
-              <option value="">不绑定</option>
-              {materials
-                .filter((material) => material.material_type === bookType)
-                .map((material) => (
-                  <option key={material.id} value={material.id}>
-                    {material.title}
-                  </option>
-                ))}
-            </select>
-          </label>
+          <fieldset className="field">
+            <legend className="field-label">绑定素材库</legend>
+            <div className="material-bind-select-grid">
+              {MATERIAL_KIND_KEYS.map((kind) => {
+                const candidates = bookMaterialOptionsByKind[kind] ?? []
+                return (
+                  <label key={kind} className="material-bind-select-field">
+                    <span>{MATERIAL_KIND_LABELS[kind]}</span>
+                    <select
+                      value={bookLinkedMaterialIdsByKind[kind]?.[0] ?? ''}
+                      onChange={(e) => handleBookLinkedMaterialChange(kind, e.target.value)}
+                      disabled={loadingMaterials}
+                    >
+                      <option value="">不绑定</option>
+                      {candidates.map((material) => {
+                        const meta = [
+                          MATERIAL_KIND_LABELS[material.material_kind],
+                          material.parent_genre,
+                        ]
+                          .filter(Boolean)
+                          .join(' · ')
+                        return (
+                          <option key={`${kind}-${material.id}`} value={material.id}>
+                            {meta ? `${material.title}（${meta}）` : material.title}
+                          </option>
+                        )
+                      })}
+                    </select>
+                    {!loadingMaterials && candidates.length === 0 ? (
+                      <span className="field-hint">暂无可用素材库</span>
+                    ) : null}
+                  </label>
+                )
+              })}
+            </div>
+          </fieldset>
 
           {bookError && <p className="form-error">{bookError}</p>}
         </CreateDialog>
@@ -2993,6 +3053,23 @@ export function Home() {
                 />
                 剧本
               </label>
+            </div>
+          </fieldset>
+
+          <fieldset className="field">
+            <legend className="field-label">用途部门</legend>
+            <div className="genre-grid">
+              {MATERIAL_KIND_KEYS.map((kind) => (
+                <label key={kind} className="radio">
+                  <input
+                    type="radio"
+                    name="materialKind"
+                    checked={materialKind === kind}
+                    onChange={() => setMaterialKind(kind)}
+                  />
+                  {MATERIAL_KIND_LABELS[kind]}
+                </label>
+              ))}
             </div>
           </fieldset>
 
@@ -3246,7 +3323,11 @@ function materialToExportDialogItem(material: MaterialSummary): ExportDialogItem
   return {
     id: material.id,
     title: material.title || '未命名素材',
-    meta: [materialTypeLabel(material.material_type), material.parent_genre]
+    meta: [
+      materialTypeLabel(material.material_type),
+      MATERIAL_KIND_LABELS[material.material_kind],
+      material.parent_genre,
+    ]
       .filter(Boolean)
       .join(' · '),
   }

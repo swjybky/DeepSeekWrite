@@ -1,6 +1,7 @@
 import { getEmbeddedPromptTemplate } from '../prompt/embeddedDefaults'
 import { renderPromptFromTemplateRaw } from '../prompt/renderTemplate'
 import { appendLoadableSkillsToPrompt } from '../workspaces/short/loadSkill'
+import { appendReadableLinkedMaterialsToPrompt } from '../workspaces/shared/linkedMaterialPrompt'
 import {
   WORKSPACE_AGENT_IDS,
   resolveWorkspaceAgentIdForStage,
@@ -16,7 +17,7 @@ import type {
   BookType,
   StageId,
 } from '../domain/workspaceCore'
-import type { Skill } from './libraryDomain'
+import type { Material, MaterialKind, Skill } from './libraryDomain'
 import { getBridgeApi } from './runtime'
 import {
   getWorkspaceAgentReadAccessDefaults,
@@ -169,6 +170,8 @@ export async function getWorkspaceSystemPrompt(
     stageBody: string
     allStages: Partial<Record<StageId, string>>
     allowedWorkspaceStages: readonly StageId[]
+    allowedMaterialKinds?: readonly MaterialKind[]
+    linkedMaterialsByKind?: Partial<Record<MaterialKind, Material[]>>
     linkedSkill?: Skill | null
   },
 ): Promise<string> {
@@ -192,7 +195,15 @@ export async function getWorkspaceSystemPrompt(
       }),
       workspaceType,
     )
-    return appendLoadableSkillsToPrompt(prompt, input.linkedSkill, stageId)
+    return appendLoadableSkillsToPrompt(
+      appendReadableLinkedMaterialsToPrompt(
+        prompt,
+        input.linkedMaterialsByKind,
+        input.allowedMaterialKinds,
+      ),
+      input.linkedSkill,
+      stageId,
+    )
   }
 
   const allowed = new Set(input.allowedWorkspaceStages)
@@ -214,5 +225,13 @@ export async function getWorkspaceSystemPrompt(
     promptKind: 'workspace',
     stageId,
   })
-  return appendLoadableSkillsToPrompt(prompt, input.linkedSkill, stageId)
+  return appendLoadableSkillsToPrompt(
+    appendReadableLinkedMaterialsToPrompt(
+      prompt,
+      input.linkedMaterialsByKind,
+      input.allowedMaterialKinds,
+    ),
+    input.linkedSkill,
+    stageId,
+  )
 }

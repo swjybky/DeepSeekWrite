@@ -1,9 +1,13 @@
 import type { AgentTool } from '@earendil-works/pi-agent-core'
 import { Type } from 'typebox'
 
-import type { Material, MaterialStageId, Skill } from '../../bridge'
+import type { Material, MaterialKind, MaterialStageId, Skill } from '../../bridge'
 import {
+  MATERIAL_KIND_LABELS,
+  MATERIAL_KIND_STAGE_IDS,
   MATERIAL_STAGE_LABELS,
+  MATERIAL_STAGE_KIND,
+  materialMatchesKind,
   materialTypeLabel,
   normalizeMaterialStages,
 } from '../../bridge'
@@ -22,6 +26,7 @@ import {
   excerptFn as excerpt,
   textBlock,
 } from '../shared/piToolkit'
+import { buildQueryLinkedMaterialEntriesTool } from '../shared/linkedMaterialQueryTools'
 import {
   applyTextSpanReplacement,
   findFlexibleOccurrences,
@@ -40,11 +45,12 @@ export type ShortWorkspaceStageAgentContext = {
   getCurrentStageBody?: (stageId: ShortStageId) => string | undefined
   allStages: Partial<Record<ShortStageId, string>>
   linkedMaterial?: Material | null
+  linkedMaterialsByKind?: Partial<Record<MaterialKind, Material[]>>
   linkedSkill?: Skill | null
   /** 全局配置解析后：当前阶段允许读取的创作空间阶段 */
   allowedWorkspaceStages?: readonly ShortStageId[]
-  /** 全局配置解析后：当前阶段允许读取的素材库阶段 */
-  allowedMaterialStages?: readonly MaterialStageId[]
+  /** 全局配置解析后：当前阶段允许读取的素材库部门 */
+  allowedMaterialStages?: readonly MaterialKind[]
   workspaceAgentReadAccess?: WorkspaceAgentReadAccessConfig | null
   applyToStageEditor?: (payload: {
     mode: 'replace' | 'append' | 'append_token' | 'streaming_end'
@@ -423,7 +429,7 @@ function resolveAllowedStagesFromContext(
   ctx: ShortWorkspaceStageAgentContext,
 ): {
   workspace: readonly ShortStageId[]
-  material: readonly MaterialStageId[]
+  material: readonly MaterialKind[]
 } {
   if (ctx.allowedWorkspaceStages !== undefined || ctx.allowedMaterialStages !== undefined) {
     return {
@@ -438,7 +444,7 @@ function resolveAllowedStagesFromContext(
   )
   return {
     workspace: resolved.workspace as readonly ShortStageId[],
-    material: resolved.material as readonly MaterialStageId[],
+    material: resolved.material as readonly MaterialKind[],
   }
 }
 
@@ -456,6 +462,183 @@ function materialStageIdParameterSchema(
     schema: Type.Union(literals, { description: `允许读取的素材阶段：${description}` }),
     description,
   }
+}
+
+function materialKindParameterSchema(allowedKinds: readonly MaterialKind[]) {
+  const description = allowedKinds
+    .map((kind) => `${MATERIAL_KIND_LABELS[kind]}（${kind}）`)
+    .join('、')
+  const literals = allowedKinds.map((kind) => Type.Literal(kind))
+  if (literals.length === 1) return { schema: literals[0]!, description }
+  return {
+    schema: Type.Union(literals, { description: `允许查询的素材部门：${description}` }),
+    description,
+  }
+}
+
+function allowedMaterialKinds(
+  allowedStageIds: readonly MaterialStageId[],
+): MaterialKind[] {
+  return [
+    ...new Set(
+      allowedStageIds.map((stageId) => MATERIAL_STAGE_KIND[stageId]),
+    ),
+  ]
+}
+
+function linkedMaterialsForKind(
+  ctx: ShortWorkspaceStageAgentContext,
+  kind: MaterialKind,
+): Material[] {
+  const out: Material[] = []
+  const seen = new Set<string>()
+  for (const material of ctx.linkedMaterialsByKind?.[kind] ?? []) {
+    if (!material || seen.has(material.id) || !materialMatchesKind(material, kind)) continue
+    seen.add(material.id)
+    out.push(material)
+  }
+  const legacy = ctx.linkedMaterial
+  if (legacy && !seen.has(legacy.id) && materialMatchesKind(legacy, kind)) {
+    out.push(legacy)
+  }
+  return out
+}
+
+function searchTokens(query: string): string[] {
+  const normalized = query.trim().toLowerCase()
+  if (!normalized) return []
+  const split = normalized.split(/[\s,，。；;、]+/).filter(Boolean)
+  return split.length > 0 ? split : [normalized]
+}
+
+function scoreMaterialText(material: Material, text: string, tokens: string[]): number {
+  const haystack = `${material.title}\n${text}`.toLowerCase()
+  return tokens.reduce((score, token) => {
+    let index = haystack.indexOf(token)
+    let hits = 0
+    while (index >= 0) {
+      hits += 1
+      index = haystack.indexOf(token, index + token.length)
+    }
+    return score + hits * (material.title.toLowerCase().includes(token) ? 3 : 1)
+  }, 0)
+}
+
+function materialSearchSnippet(text: string, query: string): string {
+  const raw = text.trim()
+  if (!raw) return ''
+  const needle = query.trim().toLowerCase()
+  const lower = raw.toLowerCase()
+  const index = needle ? lower.indexOf(needle) : -1
+  if (index < 0) return excerpt(raw)
+  const start = Math.max(0, index - 120)
+  const end = Math.min(raw.length, index + needle.length + 180)
+  return `${start > 0 ? '…' : ''}${raw.slice(start, end)}${end < raw.length ? '…' : ''}`
+}
+
+function formatMaterialBlock(
+  material: Material,
+  stageId: MaterialStageId,
+  body: string,
+  detail: 'excerpt' | 'full',
+  query = '',
+): string {
+  const label = MATERIAL_STAGE_LABELS[stageId]
+  const genre = [
+    materialTypeLabel(material.material_type),
+    MATERIAL_KIND_LABELS[material.material_kind],
+    material.parent_genre,
+  ].filter(Boolean).join(' · ')
+  const location = material.output_dir?.trim()
+    ? `\n素材库地址：${material.output_dir}`
+    : ''
+  const content =
+    detail === 'full' ? body.trim() : materialSearchSnippet(body, query)
+  return [
+    `关联素材：《${material.title}》`,
+    genre ? `类型：${genre}` : '',
+    `【${label}】（${stageId}）${location}`,
+    '',
+    content || '该素材阶段暂无内容。',
+  ].filter((line) => line !== '').join('\n')
+}
+
+export function buildSearchLinkedMaterialsTool(
+  ctx: ShortWorkspaceStageAgentContext,
+  allowedStageIds: readonly MaterialStageId[],
+): AgentTool {
+  const allowedSet = new Set(allowedStageIds)
+  const kinds = allowedMaterialKinds(allowedStageIds)
+  const allowedKindSet = new Set(kinds)
+  const { schema: kindSchema, description: allowedKindDescription } =
+    materialKindParameterSchema(kinds)
+
+  return defineTool({
+    name: 'search_linked_materials',
+    label: '查询关联素材库',
+    description:
+      `按素材部门查询当前书籍已关联的多个素材库。当前允许查询：${allowedKindDescription}。`
+      + '\nscope=relevant 时按 query 做本地关键词检索；scope=all 时返回该部门全部已关联素材。',
+    parameters: Type.Object({
+      material_kind: kindSchema,
+      scope: Type.Union([Type.Literal('relevant'), Type.Literal('all')], {
+        description: 'relevant=检索相关片段；all=读取该部门全部素材',
+      }),
+      query: Type.Optional(Type.String({ description: 'scope=relevant 时用于检索的关键词' })),
+      detail: Type.Union([Type.Literal('excerpt'), Type.Literal('full')], {
+        description: 'excerpt=返回片段；full=返回全文',
+      }),
+      max_results: Type.Optional(Type.Number({ description: '最多返回多少条，默认 5，最大 20' })),
+    }),
+    execute: async (_toolCallId, params) => {
+      const kind = params.material_kind as MaterialKind
+      if (!allowedKindSet.has(kind)) {
+        return textBlock(`当前不允许查询「${MATERIAL_KIND_LABELS[kind]}」。`)
+      }
+      const scope = params.scope as 'relevant' | 'all'
+      const detail = params.detail as 'excerpt' | 'full'
+      const query = String(params.query ?? '').trim()
+      if (scope === 'relevant' && !query) {
+        return textBlock('请提供 query 后再检索相关素材。')
+      }
+      const materials = linkedMaterialsForKind(ctx, kind)
+      if (!materials.length) {
+        return textBlock(`当前书籍尚未关联${MATERIAL_KIND_LABELS[kind]}。`)
+      }
+      const stageIds = MATERIAL_KIND_STAGE_IDS[kind].filter((stageId) =>
+        allowedSet.has(stageId),
+      )
+      const tokens = searchTokens(query)
+      const rows = materials.flatMap((material) => {
+        const stages = normalizeMaterialStages(material.stages)
+        return stageIds.map((stageId) => {
+          const body = stages[stageId] ?? ''
+          return {
+            material,
+            stageId,
+            body,
+            score: scope === 'all' ? 1 : scoreMaterialText(material, body, tokens),
+          }
+        })
+      }).filter((row) => row.body.trim() && (scope === 'all' || row.score > 0))
+      if (!rows.length) {
+        return textBlock(
+          scope === 'all'
+            ? `${MATERIAL_KIND_LABELS[kind]}暂无可读取内容。`
+            : `未在${MATERIAL_KIND_LABELS[kind]}中检索到「${query}」。`,
+        )
+      }
+      const maxResults = Math.max(
+        1,
+        Math.min(20, Number(params.max_results ?? 5) || 5),
+      )
+      const blocks = rows
+        .sort((a, b) => b.score - a.score)
+        .slice(0, maxResults)
+        .map((row) => formatMaterialBlock(row.material, row.stageId, row.body, detail, query))
+      return textBlock(blocks.join('\n\n---\n\n'))
+    },
+  })
 }
 
 export function buildReadLinkedMaterialContentTool(
@@ -482,31 +665,17 @@ export function buildReadLinkedMaterialContentTool(
           `当前不允许读取「${MATERIAL_STAGE_LABELS[stageId]}」。仅可读取：${allowedDescription}。`,
         )
       }
-      const material = ctx.linkedMaterial
-      if (!material) {
+      const kind = MATERIAL_STAGE_KIND[stageId]
+      const materials = linkedMaterialsForKind(ctx, kind)
+      if (!materials.length) {
         return textBlock('当前书籍尚未关联素材库。请先在页面顶部点击「素材库选择」并选择素材。')
       }
 
-      const stages = normalizeMaterialStages(material.stages)
-      const raw = stages[stageId].trim()
-      const label = MATERIAL_STAGE_LABELS[stageId]
-      const genre = [
-        materialTypeLabel(material.material_type),
-        material.parent_genre,
-      ].filter(Boolean).join(' · ')
-      const location = material.output_dir?.trim()
-        ? `\n素材库地址：${material.output_dir}`
-        : ''
-      const header = [
-        `关联素材：《${material.title}》`,
-        genre ? `类型：${genre}` : '',
-        `【${label}】（${stageId}）`,
-      ].filter(Boolean).join('\n')
-
-      if (!raw) {
-        return textBlock(`${header}${location}\n\n该素材阶段暂无内容。`)
-      }
-      return textBlock(`${header}${location}\n\n${excerpt(raw)}`)
+      const blocks = materials.map((material) => {
+        const raw = normalizeMaterialStages(material.stages)[stageId] ?? ''
+        return formatMaterialBlock(material, stageId, raw, 'excerpt')
+      })
+      return textBlock(blocks.join('\n\n---\n\n'))
     },
   })
 }
@@ -797,10 +966,10 @@ function readWorkspaceTools(
 
 function readMaterialTools(
   ctx: ShortWorkspaceStageAgentContext,
-  allowedMaterial: readonly MaterialStageId[],
+  allowedMaterial: readonly MaterialKind[],
 ): AgentTool[] {
   if (!allowedMaterial.length) return []
-  return [buildReadLinkedMaterialContentTool(ctx, allowedMaterial)]
+  return [buildQueryLinkedMaterialEntriesTool(ctx, allowedMaterial)]
 }
 
 /**

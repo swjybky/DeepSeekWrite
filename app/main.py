@@ -192,6 +192,7 @@ from app.prompt_store import (
     read_raw_learning_imitation_prompt_for_editor,
     read_raw_material_prompt_for_editor,
     read_raw_material_agent_prompt_for_editor,
+    read_raw_material_kind_prompt_for_editor,
     read_raw_skill_agent_prompt_for_editor,
     read_raw_workspace_agent_prompt_for_editor,
     render_from_api_context,
@@ -200,11 +201,13 @@ from app.prompt_store import (
     render_skill_from_api_context,
     reset_learning_imitation_prompt_override as _reset_learning_imitation_prompt_override,
     reset_material_agent_prompt_override as _reset_material_agent_prompt_override,
+    reset_material_kind_prompt_override as _reset_material_kind_prompt_override,
     reset_material_prompt_override as _reset_material_prompt_override,
     reset_skill_agent_prompt_override as _reset_skill_agent_prompt_override,
     reset_workspace_agent_prompt_override as _reset_workspace_agent_prompt_override,
     save_learning_imitation_prompt_override as _save_learning_imitation_prompt_override,
     save_material_agent_prompt_override as _save_material_agent_prompt_override,
+    save_material_kind_prompt_override as _save_material_kind_prompt_override,
     save_material_prompt_override as _save_material_prompt_override,
     save_skill_agent_prompt_override as _save_skill_agent_prompt_override,
     save_workspace_agent_prompt_override as _save_workspace_agent_prompt_override,
@@ -1194,6 +1197,7 @@ class Api:
         workspace_root: str | None = None,
         linked_skill_id: str | None = None,
         linked_material_id: str | None = None,
+        linked_material_ids_by_kind: dict | None = None,
     ) -> dict:
         return self._store.create_book(
             title,
@@ -1202,6 +1206,7 @@ class Api:
             workspace_root,
             linked_skill_id,
             linked_material_id,
+            linked_material_ids_by_kind,
         )
 
     def get_book(self, book_id: str) -> dict | None:
@@ -1218,6 +1223,7 @@ class Api:
         status: str | None = None,
         linked_skill_id: str | None = None,
         memory_auto_capture_enabled: bool | None = None,
+        linked_material_ids_by_kind: dict | None = None,
     ) -> dict | None:
         return self._store.save_book(
             book_id,
@@ -1229,6 +1235,7 @@ class Api:
             status=status,
             linked_skill_id=linked_skill_id,
             memory_auto_capture_enabled=memory_auto_capture_enabled,
+            linked_material_ids_by_kind=linked_material_ids_by_kind,
         )
 
     def get_book_memories(self, book_id: str) -> list[dict]:
@@ -1289,6 +1296,7 @@ class Api:
         parent_genre: str | None = None,
         sub_genre: str | None = None,
         workspace_root: str | None = None,
+        material_kind: str | None = None,
     ) -> dict:
         """创建新素材
 
@@ -1298,9 +1306,10 @@ class Api:
             parent_genre: 父分类，短篇/剧本时为一级分类
             sub_genre: legacy 子分类字段；新建素材不再写入
             workspace_root: 工作区根目录
+            material_kind: 用途部门，character/gimmick/plot/draft/other
         """
         return self._store.create_material(
-            title, material_type, parent_genre, sub_genre, workspace_root
+            title, material_type, parent_genre, sub_genre, workspace_root, material_kind
         )
 
     def save_material(
@@ -1308,15 +1317,19 @@ class Api:
         material_id: str,
         stages: dict | None = None,
         title: str | None = None,
+        stage_items: dict | None = None,
+        overview: str | None = None,
     ) -> dict | None:
         """保存素材阶段内容
 
         Args:
             material_id: 素材ID
-            stages: 阶段内容字典，键为 'character'/'intro'/'gimmick'/'plot_refine'/'pacing'/'draft_excerpt'
+            stages: 阶段内容字典，键为 'character'/'intro'/'gimmick'/'plot_refine'/'pacing'/'draft_excerpt'/'other'
             title: 素材标题
+            stage_items: 新版素材条目列表，按阶段保存多条素材
+            overview: 素材库概述
         """
-        return self._store.save_material(material_id, stages, title)
+        return self._store.save_material(material_id, stages, title, stage_items, overview)
 
     def delete_material(self, material_id: str) -> bool:
         """删除素材"""
@@ -1562,6 +1575,28 @@ class Api:
 
     def reset_material_agent_prompt_override(self, material_type: str | None = None) -> bool:
         return _reset_material_agent_prompt_override(material_type)
+
+    def read_material_kind_prompt_template(
+        self,
+        material_type: str | None = None,
+        material_kind: str | None = None,
+    ) -> str:
+        return read_raw_material_kind_prompt_for_editor(material_type, material_kind)
+
+    def save_material_kind_prompt_override(
+        self,
+        body: str,
+        material_type: str | None = None,
+        material_kind: str | None = None,
+    ) -> None:
+        _save_material_kind_prompt_override(body, material_type, material_kind)
+
+    def reset_material_kind_prompt_override(
+        self,
+        material_type: str | None = None,
+        material_kind: str | None = None,
+    ) -> bool:
+        return _reset_material_kind_prompt_override(material_type, material_kind)
 
     # ==================== 技能库提示词 API ====================
 
@@ -1810,6 +1845,11 @@ class Api:
                     (workspace_root or "").strip() or None,
                     str(book_data.get("linked_skill_id") or "") or None,
                     str(book_data.get("linked_material_id") or "") or None,
+                    (
+                        book_data.get("linked_material_ids_by_kind")
+                        if isinstance(book_data.get("linked_material_ids_by_kind"), dict)
+                        else None
+                    ),
                 )
 
                 stages = book_data.get("stages")
@@ -1826,6 +1866,11 @@ class Api:
                     memory_auto_capture_enabled=(
                         bool(book_data.get("memory_auto_capture_enabled"))
                         if "memory_auto_capture_enabled" in book_data
+                        else None
+                    ),
+                    linked_material_ids_by_kind=(
+                        book_data.get("linked_material_ids_by_kind")
+                        if isinstance(book_data.get("linked_material_ids_by_kind"), dict)
                         else None
                     ),
                 )
@@ -1975,14 +2020,27 @@ class Api:
                 if actual_type == "material":
                     title = data.get("title", "导入素材")
                     material_type = data.get("material_type", "short")
+                    material_kind = data.get("material_kind")
                     parent_genre = data.get("parent_genre")
                     sub_genre = data.get("sub_genre")
                     created = self._store.create_material(
-                        title, material_type, parent_genre, sub_genre, ws or None
+                        title,
+                        material_type,
+                        parent_genre,
+                        sub_genre,
+                        ws or None,
+                        material_kind,
                     )
                     stages = data.get("stages")
-                    if stages:
-                        self._store.save_material(created["id"], stages=stages)
+                    stage_items = data.get("stage_items")
+                    overview = data.get("overview")
+                    if stages or stage_items or overview is not None:
+                        self._store.save_material(
+                            created["id"],
+                            stages=stages if isinstance(stages, dict) else None,
+                            stage_items=stage_items if isinstance(stage_items, dict) else None,
+                            overview=str(overview) if overview is not None else None,
+                        )
 
                     output_dir = created.get("output_dir", "")
                     if output_dir:

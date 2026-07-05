@@ -1,25 +1,32 @@
 import type {
   Book,
   Material,
+  MaterialKind,
   MaterialSummary,
   Skill,
   SkillSummary,
 } from '../../domain/workspace'
 import {
+  emptyLinkedMaterialIdsByKind,
+  MATERIAL_KIND_KEYS,
+  MATERIAL_KIND_LABELS,
+  MATERIAL_KIND_STAGE_IDS,
   MATERIAL_STAGE_LABELS,
+  materialMatchesKind,
   materialTypeLabel,
+  normalizeLinkedMaterialIdsByKind,
   skillTypeLabel,
 } from '../../domain/workspace'
 
 type MaterialSelectorDialogProps = {
   book: Book
   linkedMaterial: Material | null
+  linkedMaterialsByKind: Partial<Record<MaterialKind, Material[]>>
   summaries: MaterialSummary[]
   loading: boolean
   saving: boolean
   onClose: () => void
-  onSelect: (materialId: string) => void
-  onClear: () => void
+  onChange: (linkedMaterialIdsByKind: Partial<Record<MaterialKind, string[]>>) => void
 }
 
 type SkillSelectorDialogProps = {
@@ -42,13 +49,34 @@ function compactOutputPath(path: string): string {
 export function MaterialSelectorDialog({
   book,
   linkedMaterial,
+  linkedMaterialsByKind,
   summaries,
   loading,
   saving,
   onClose,
-  onSelect,
-  onClear,
+  onChange,
 }: MaterialSelectorDialogProps) {
+  const currentByKind = normalizeLinkedMaterialIdsByKind(
+    book.linked_material_ids_by_kind,
+    book.linked_material_id,
+  )
+  const linkedCount = MATERIAL_KIND_KEYS.reduce(
+    (sum, kind) => sum + (linkedMaterialsByKind[kind]?.length ?? 0),
+    0,
+  )
+
+  const toggleMaterial = (kind: MaterialKind, materialId: string) => {
+    const next = normalizeLinkedMaterialIdsByKind(currentByKind, null)
+    const ids = new Set(next[kind] ?? [])
+    if (ids.has(materialId)) {
+      ids.delete(materialId)
+    } else {
+      ids.add(materialId)
+    }
+    next[kind] = [...ids]
+    onChange(next)
+  }
+
   return (
     <div
       className="workspace-material-selector-backdrop"
@@ -73,7 +101,7 @@ export function MaterialSelectorDialog({
         </div>
         <div className="workspace-material-current">
           当前关联：
-          <strong>{linkedMaterial ? linkedMaterial.title : '未关联'}</strong>
+          <strong>{linkedCount > 0 ? `${linkedCount} 个素材库` : '未关联'}</strong>
           {linkedMaterial?.output_dir ? (
             <span title={linkedMaterial.output_dir}>
               {` · ${compactOutputPath(linkedMaterial.output_dir)}`}
@@ -81,7 +109,7 @@ export function MaterialSelectorDialog({
           ) : null}
         </div>
         <div className="workspace-material-stage-note">
-          可供 AI 读取的阶段：{Object.values(MATERIAL_STAGE_LABELS).join('、')}
+          可按部门多选素材库；旧综合素材库可出现在所有部门。
         </div>
         <div className="workspace-material-list">
           {loading ? (
@@ -89,32 +117,58 @@ export function MaterialSelectorDialog({
           ) : summaries.length === 0 ? (
             <p className="muted workspace-material-empty">暂无素材库</p>
           ) : (
-            summaries.map((material) => {
-              const selected = material.id === book.linked_material_id
-              const genre = [
-                materialTypeLabel(material.material_type),
-                material.parent_genre,
-              ].filter(Boolean).join(' · ')
+            MATERIAL_KIND_KEYS.map((kind) => {
+              const candidates = summaries.filter(
+                (material) =>
+                  material.material_type === book.book_type &&
+                  materialMatchesKind(material, kind),
+              )
               return (
-                <button
-                  key={material.id}
-                  type="button"
-                  className={
-                    selected
-                      ? 'workspace-material-item workspace-material-item--selected'
-                      : 'workspace-material-item'
-                  }
-                  disabled={saving}
-                  onClick={() => onSelect(material.id)}
-                >
-                  <span className="workspace-material-item-main">
-                    <span className="workspace-material-item-title">{material.title}</span>
-                    <span className="workspace-material-item-meta">{genre || '素材'}</span>
-                  </span>
-                  <span className="workspace-material-item-state">
-                    {selected ? '已关联' : '关联'}
-                  </span>
-                </button>
+                <section key={kind} className="workspace-material-kind-group">
+                  <div className="workspace-material-kind-head">
+                    <strong>{MATERIAL_KIND_LABELS[kind]}</strong>
+                    <span>
+                      {MATERIAL_KIND_STAGE_IDS[kind]
+                        .map((stageId) => MATERIAL_STAGE_LABELS[stageId])
+                        .join('、')}
+                    </span>
+                  </div>
+                  {candidates.length === 0 ? (
+                    <p className="muted workspace-material-empty">
+                      暂无可关联素材库
+                    </p>
+                  ) : (
+                    candidates.map((material) => {
+                      const selected = (currentByKind[kind] ?? []).includes(material.id)
+                      const genre = [
+                        materialTypeLabel(material.material_type),
+                        MATERIAL_KIND_LABELS[material.material_kind],
+                        material.parent_genre,
+                      ].filter(Boolean).join(' · ')
+                      return (
+                        <button
+                          key={`${kind}-${material.id}`}
+                          type="button"
+                          className={
+                            selected
+                              ? 'workspace-material-item workspace-material-item--selected'
+                              : 'workspace-material-item'
+                          }
+                          disabled={saving}
+                          onClick={() => toggleMaterial(kind, material.id)}
+                        >
+                          <span className="workspace-material-item-main">
+                            <span className="workspace-material-item-title">{material.title}</span>
+                            <span className="workspace-material-item-meta">{genre || '素材'}</span>
+                          </span>
+                          <span className="workspace-material-item-state">
+                            {selected ? '已关联' : '关联'}
+                          </span>
+                        </button>
+                      )
+                    })
+                  )}
+                </section>
               )
             })
           )}
@@ -123,8 +177,8 @@ export function MaterialSelectorDialog({
           <button
             type="button"
             className="btn-material-clear"
-            disabled={saving || !book.linked_material_id}
-            onClick={onClear}
+            disabled={saving || linkedCount === 0}
+            onClick={() => onChange(emptyLinkedMaterialIdsByKind())}
           >
             取消关联
           </button>

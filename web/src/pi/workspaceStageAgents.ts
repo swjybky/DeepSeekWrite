@@ -2,6 +2,9 @@ import type { AgentTool } from '@earendil-works/pi-agent-core'
 
 import type {
   Material,
+  MaterialKind,
+  MaterialKindWithMixed,
+  MaterialStageEntry,
   BookType,
   MaterialType,
   StageId,
@@ -77,6 +80,26 @@ export type WorkspaceStageAgentContext = {
   bookTitle: string
   bookType?: BookType
   materialTypeKey?: MaterialType
+  materialKind?: MaterialKindWithMixed
+  materialEntryKind?: MaterialKind
+  materialOverview?: string
+  currentEntryTitle?: string
+  materialStageItems?: Partial<Record<MaterialStageId, MaterialStageEntry[]>>
+  getMaterialStageItems?: () => Partial<Record<MaterialStageId, MaterialStageEntry[]>>
+  getMaterialOverview?: () => string
+  selectMaterialEntry?: (stageId: MaterialStageId, entryId: string) => void
+  createMaterialEntry?: (input: {
+    stageId: MaterialStageId
+    title: string
+    body: string
+  }) => MaterialStageEntry | null
+  editMaterialEntry?: (input: {
+    stageId: MaterialStageId
+    entryId: string
+    title?: string
+    body?: string
+  }) => boolean
+  writeMaterialOverview?: (text: string) => void
   skillType?: SkillType
   workspaceType?: 'book' | 'material' | 'skill'
   promptKind?: MaterialPromptKind
@@ -90,6 +113,7 @@ export type WorkspaceStageAgentContext = {
   getDefaultWriteStageId?: () => StageId
   allStages: Partial<Record<StageId | MaterialStageId | SkillStageId, string>>
   linkedMaterial?: Material | null
+  linkedMaterialsByKind?: Partial<Record<MaterialKind, Material[]>>
   linkedSkill?: Skill | null
   /** 全局创作空间智能体可读配置（短篇创作空间） */
   workspaceAgentReadAccess?: WorkspaceAgentReadAccessConfig | null
@@ -114,11 +138,22 @@ export function getWorkspaceStageAdditionalTools(
       | LongMaterialWorkspaceStageAgentContext
       | ScriptMaterialWorkspaceStageAgentContext = {
       materialTitle: ctx.bookTitle,
+      materialKind: ctx.materialKind,
       promptKind: ctx.promptKind,
       stageId: ctx.stageId as MaterialStageId,
       stageBody: ctx.stageBody,
       allStages: ctx.allStages as Partial<Record<MaterialStageId, string>>,
+      overview: ctx.materialOverview,
+      currentEntryTitle: ctx.currentEntryTitle,
+      stageItems: ctx.materialStageItems,
+      getMaterialStageItems: ctx.getMaterialStageItems,
+      getMaterialOverview: ctx.getMaterialOverview,
+      selectMaterialEntry: ctx.selectMaterialEntry,
+      createMaterialEntry: ctx.createMaterialEntry,
+      editMaterialEntry: ctx.editMaterialEntry,
+      writeMaterialOverview: ctx.writeMaterialOverview,
       applyToStageEditor: ctx.applyToStageEditor,
+      onRequestSave: ctx.onRequestSave,
       isToolCallStreamed: ctx.isToolCallStreamed,
     }
     if (ctx.materialTypeKey === 'script') {
@@ -169,10 +204,11 @@ export function getWorkspaceStageAdditionalTools(
       getCurrentStageBody: (stageId) => ctx.getCurrentStageBody?.(stageId),
       allStages: ctx.allStages as Partial<Record<ScriptStageId, string>>,
       linkedMaterial: ctx.linkedMaterial,
+      linkedMaterialsByKind: ctx.linkedMaterialsByKind,
       linkedSkill: ctx.linkedSkill,
       workspaceAgentReadAccess: ctx.workspaceAgentReadAccess,
       allowedWorkspaceStages: readAccess?.workspace as readonly ScriptStageId[] | undefined,
-      allowedMaterialStages: readAccess?.material as readonly MaterialStageId[] | undefined,
+      allowedMaterialStages: readAccess?.material as readonly MaterialKind[] | undefined,
       applyToStageEditor: ctx.applyToStageEditor,
       selectPlotChildStage: ctx.selectPlotChildStage
         ? (stageId) => ctx.selectPlotChildStage?.(stageId)
@@ -223,10 +259,11 @@ export function getWorkspaceStageAdditionalTools(
     getCurrentStageBody: (stageId) => ctx.getCurrentStageBody?.(stageId),
     allStages: ctx.allStages as Partial<Record<ShortWorkspaceStageAgentContext['stageId'], string>>,
     linkedMaterial: ctx.linkedMaterial,
+    linkedMaterialsByKind: ctx.linkedMaterialsByKind,
     linkedSkill: ctx.linkedSkill,
     workspaceAgentReadAccess: ctx.workspaceAgentReadAccess,
     allowedWorkspaceStages: readAccess?.workspace as readonly ShortStageId[] | undefined,
-    allowedMaterialStages: readAccess?.material as readonly MaterialStageId[] | undefined,
+    allowedMaterialStages: readAccess?.material as readonly MaterialKind[] | undefined,
     applyToStageEditor: ctx.applyToStageEditor,
     selectPlotChildStage: ctx.selectPlotChildStage
       ? (stageId) => ctx.selectPlotChildStage?.(stageId)

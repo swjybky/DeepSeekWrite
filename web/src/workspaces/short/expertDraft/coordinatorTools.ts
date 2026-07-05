@@ -1,16 +1,16 @@
 import type { AgentTool } from '@earendil-works/pi-agent-core'
 
-import type { Material, MaterialStageId, Skill, StageId } from '../../../bridge'
+import type { Material, MaterialKind, Skill, StageId } from '../../../bridge'
 import {
   buildExpertDraftCoordinatorCoreTools,
   type ExpertDraftCoordinatorCoreToolContext,
 } from '../../shared/expertDraftCoordinatorTools'
 import type { GetExpertDraftSectionContent } from '../../shared/expertDraftSectionTools'
 import {
-  buildReadLinkedMaterialContentTool,
   buildReadWorkspaceContentTool,
   buildSearchWorkspaceTextTool,
 } from '../stageAgents'
+import { buildQueryLinkedMaterialEntriesTool } from '../../shared/linkedMaterialQueryTools'
 import { buildLoadSkillTool } from '../loadSkill'
 import type { WorkspaceAgentReadAccessEntry } from '../stageReadAccess'
 import type { ShortStageId } from '../stages'
@@ -18,6 +18,7 @@ import type { ShortStageId } from '../stages'
 export type ExpertDraftCoordinatorToolContext = ExpertDraftCoordinatorCoreToolContext & {
   allStages: Partial<Record<StageId, string>>
   linkedMaterial?: Material | null
+  linkedMaterialsByKind?: Partial<Record<MaterialKind, Material[]>>
   linkedSkill?: Skill | null
   readAccess: WorkspaceAgentReadAccessEntry
   getRenderedExpertDraftSectionContent?: GetExpertDraftSectionContent
@@ -41,6 +42,7 @@ export function buildExpertDraftCoordinatorTools(
     stageBody: '',
     allStages: ctx.allStages,
     linkedMaterial: ctx.linkedMaterial ?? null,
+    linkedMaterialsByKind: ctx.linkedMaterialsByKind,
     getCurrentStageBody: readLiveStageBody,
   }
   if (ctx.readAccess.workspace.length > 0) {
@@ -59,9 +61,9 @@ export function buildExpertDraftCoordinatorTools(
   )
   if (ctx.readAccess.material.length > 0) {
     readTools.push(
-      buildReadLinkedMaterialContentTool(
+      buildQueryLinkedMaterialEntriesTool(
         toolCtx,
-        ctx.readAccess.material as readonly MaterialStageId[],
+        ctx.readAccess.material as readonly MaterialKind[],
       ),
     )
   }

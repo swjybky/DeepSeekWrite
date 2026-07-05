@@ -5,7 +5,9 @@
       "draft"
     ],
     "material": [
-      "draft_excerpt"
+      "draft",
+      "character",
+      "other"
     ]
   },
   "expert_draft_coordinator": {
@@ -13,7 +15,11 @@
       "outline",
       "draft"
     ],
-    "material": []
+    "material": [
+      "plot",
+      "draft",
+      "other"
+    ]
   },
   "outline": {
     "workspace": [
@@ -22,7 +28,11 @@
       "plot_design",
       "plot_refine"
     ],
-    "material": []
+    "material": [
+      "character",
+      "plot",
+      "other"
+    ]
   },
   "character_design": {
     "workspace": [
@@ -31,7 +41,8 @@
       "plot_refine"
     ],
     "material": [
-      "character"
+      "character",
+      "other"
     ]
   },
   "plot_design": {
@@ -42,10 +53,9 @@
     ],
     "material": [
       "character",
-      "intro",
       "gimmick",
-      "pacing",
-      "plot_refine"
+      "plot",
+      "other"
     ]
   }
 }

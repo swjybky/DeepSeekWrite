@@ -10,6 +10,9 @@ import {
 import { memo, useEffect, useRef, useState } from 'react'
 import type {
   Material,
+  MaterialKind,
+  MaterialKindWithMixed,
+  MaterialStageEntry,
   BookType,
   MemoryEntry,
   StageId,
@@ -104,6 +107,15 @@ function resolvePromptAllowedWorkspaceStages(
   return bookType === 'long'
     ? [...new Set([...workspace, currentStageId])]
     : workspace
+}
+
+function resolvePromptAllowedMaterialKinds(
+  bookType: BookType | undefined,
+  config: WorkspaceAgentReadAccessConfig | null | undefined,
+  agentId: WorkspaceAgentId | string,
+): readonly MaterialKind[] {
+  return resolvePromptReadAccess(bookType, config, agentId)
+    .material as readonly MaterialKind[]
 }
 const WORKSPACE_ATTACHMENT_MAX_FILE_SIZE = 20 * 1024 * 1024
 const WORKSPACE_SEND_VALIDATION_ERROR_NAME = 'DeepSeekWriteSendValidationError'
@@ -376,6 +388,43 @@ function mergeAgentToolsPreservingArtifacts(
   return art ? [art, ...additional] : additional
 }
 
+function linkedMaterialsFingerprint(
+  value: Partial<Record<MaterialKind, Material[]>> | undefined,
+): string {
+  if (!value) return ''
+  return Object.entries(value)
+    .flatMap(([kind, materials]) =>
+      (materials ?? []).map((material) => [
+        kind,
+        material.id,
+        material.updated_at ?? '',
+        material.overview ?? '',
+        material.stages,
+        material.stage_items,
+      ]),
+    )
+    .map((item) => JSON.stringify(item))
+    .join('|')
+}
+
+function materialStageItemsFingerprint(
+  value: Partial<Record<MaterialStageId, MaterialStageEntry[]>> | undefined,
+): string {
+  if (!value) return ''
+  return Object.entries(value)
+    .flatMap(([stageId, entries]) =>
+      (entries ?? []).map((entry) => [
+        stageId,
+        entry.id,
+        entry.title,
+        entry.body,
+        entry.updated_at ?? '',
+      ]),
+    )
+    .map((item) => JSON.stringify(item))
+    .join('|')
+}
+
 type Props = {
   /** 书籍/素材 id；与 workstation、stageId 一起构成会话 id */
   sessionBookId: string
@@ -393,8 +442,28 @@ type Props = {
   /** 素材库智能体可见的素材类型上下文。 */
   materialType?: string
   materialTypeKey?: MaterialType
+  materialKind?: MaterialKindWithMixed
+  materialEntryKind?: MaterialKind
   /** 素材库智能体可见的素材分类上下文。 */
   materialGenre?: string
+  materialOverview?: string
+  currentEntryTitle?: string
+  materialStageItems?: Partial<Record<MaterialStageId, MaterialStageEntry[]>>
+  getMaterialStageItems?: () => Partial<Record<MaterialStageId, MaterialStageEntry[]>>
+  getMaterialOverview?: () => string
+  selectMaterialEntry?: (stageId: MaterialStageId, entryId: string) => void
+  createMaterialEntry?: (input: {
+    stageId: MaterialStageId
+    title: string
+    body: string
+  }) => MaterialStageEntry | null
+  editMaterialEntry?: (input: {
+    stageId: MaterialStageId
+    entryId: string
+    title?: string
+    body?: string
+  }) => boolean
+  writeMaterialOverview?: (text: string) => void
   /** 创作空间共享模板可见的书籍分类上下文。 */
   bookGenre?: string
   stageId: StageId | MaterialStageId | SkillStageId
@@ -414,6 +483,7 @@ type Props = {
   ) => void | Promise<void>
   /** 当前书籍关联的素材库；前期设计阶段会将其暴露为 AI 工具可读取内容 */
   linkedMaterial?: Material | null
+  linkedMaterialsByKind?: Partial<Record<MaterialKind, Material[]>>
   /** 当前书籍绑定的技能库；书籍工作台智能体可按阶段加载技能 */
   linkedSkill?: Skill | null
   skillType?: SkillType
@@ -447,6 +517,11 @@ type Props = {
   workspaceType?: 'book' | 'material' | 'skill'
   chatHistoryScope?: AiChatHistoryScope
   historyPortalTargetId?: string
+  externalPromptRequest?: {
+    id: number
+    prompt: string
+  } | null
+  onExternalPromptRequestHandled?: (id: number) => void
 }
 
 type WritableStageId = StageId | MaterialStageId | SkillStageId
@@ -489,6 +564,7 @@ function WorkspaceAiChatInner({
   const activeHistorySessionIdRef = useRef('')
   const blankHistoryNonceRef = useRef(0)
   const historySaveSeqRef = useRef(0)
+  const handledExternalPromptRequestIdRef = useRef<number | null>(null)
 
   /** 已流式同步到编辑器的 tool call id 集合 */
   const streamedToolCallIdsRef = useRef<Set<string>>(new Set())
@@ -596,6 +672,8 @@ function WorkspaceAiChatInner({
   }, [props])
 
   const debouncedBody = useDebounced(props.stageBody, 600)
+  const externalPromptRequest = props.externalPromptRequest
+  const onExternalPromptRequestHandled = props.onExternalPromptRequestHandled
 
   const resolvePiSessionId = (historyKey?: string) => {
     const p = propsLatestRef.current
@@ -805,6 +883,17 @@ function WorkspaceAiChatInner({
           bookTitle: latest.bookTitle,
           bookType: latest.bookType,
           materialTypeKey: latest.materialTypeKey,
+          materialKind: latest.materialKind,
+          materialEntryKind: latest.materialEntryKind,
+          materialOverview: latest.getMaterialOverview?.() ?? latest.materialOverview,
+          currentEntryTitle: latest.currentEntryTitle,
+          materialStageItems: latest.getMaterialStageItems?.() ?? latest.materialStageItems,
+          getMaterialStageItems: latest.getMaterialStageItems,
+          getMaterialOverview: latest.getMaterialOverview,
+          selectMaterialEntry: latest.selectMaterialEntry,
+          createMaterialEntry: latest.createMaterialEntry,
+          editMaterialEntry: latest.editMaterialEntry,
+          writeMaterialOverview: latest.writeMaterialOverview,
           skillType: latest.skillType,
           workspaceType,
           promptKind: latest.promptKind,
@@ -835,6 +924,7 @@ function WorkspaceAiChatInner({
           },
           allStages: mergeLiveStagesFromProps(latest),
           linkedMaterial: latest.linkedMaterial,
+          linkedMaterialsByKind: latest.linkedMaterialsByKind,
           linkedSkill: latest.linkedSkill,
           workspaceAgentReadAccess: latest.workspaceAgentReadAccess,
           applyToStageEditor: latest.applyToStageEditor,
@@ -869,6 +959,9 @@ function WorkspaceAiChatInner({
                 materialTypeKey: props.materialTypeKey ?? 'short',
                 materialType: props.materialType,
                 materialGenre: props.materialGenre,
+                materialKind: props.materialEntryKind,
+                materialOverview: props.getMaterialOverview?.() ?? props.materialOverview,
+                currentEntryTitle: props.currentEntryTitle,
                 stageBody: resolveCurrentStageBody(props),
                 allStages: mergeCurrentStageIntoAllStages(props) as Partial<Record<MaterialStageId, string>>,
               },
@@ -889,6 +982,14 @@ function WorkspaceAiChatInner({
                     : props.stageId) as WorkspaceAgentId,
                   props.stageId as StageId,
                 ),
+                allowedMaterialKinds: resolvePromptAllowedMaterialKinds(
+                  props.bookType,
+                  props.workspaceAgentReadAccess,
+                  (props.bookType !== 'long' && props.stageId === 'draft'
+                    ? EXPERT_DRAFT_COORDINATOR_AGENT_ID
+                    : props.stageId) as WorkspaceAgentId,
+                ),
+                linkedMaterialsByKind: props.linkedMaterialsByKind,
                 linkedSkill: props.linkedSkill,
               },
             )
@@ -1266,6 +1367,9 @@ function WorkspaceAiChatInner({
                 materialTypeKey: p.materialTypeKey ?? 'short',
                materialType: p.materialType,
                 materialGenre: p.materialGenre,
+                materialKind: p.materialEntryKind,
+                materialOverview: p.getMaterialOverview?.() ?? p.materialOverview,
+                currentEntryTitle: p.currentEntryTitle,
                 stageBody: latestStageBody,
                 allStages: latestAllStages as Partial<Record<MaterialStageId, string>>,
               },
@@ -1286,6 +1390,14 @@ function WorkspaceAiChatInner({
                     : p.stageId) as WorkspaceAgentId,
                   p.stageId as StageId,
                 ),
+                allowedMaterialKinds: resolvePromptAllowedMaterialKinds(
+                  p.bookType,
+                  p.workspaceAgentReadAccess,
+                  (p.bookType !== 'long' && p.stageId === 'draft'
+                    ? EXPERT_DRAFT_COORDINATOR_AGENT_ID
+                    : p.stageId) as WorkspaceAgentId,
+                ),
+                linkedMaterialsByKind: p.linkedMaterialsByKind,
                 linkedSkill: p.linkedSkill,
               },
             )
@@ -1308,6 +1420,18 @@ function WorkspaceAiChatInner({
         bookTitle: toolProps.bookTitle,
         bookType: toolProps.bookType,
         materialTypeKey: toolProps.materialTypeKey,
+        materialKind: toolProps.materialKind,
+        materialEntryKind: toolProps.materialEntryKind,
+        materialOverview: toolProps.getMaterialOverview?.() ?? toolProps.materialOverview,
+        currentEntryTitle: toolProps.currentEntryTitle,
+        materialStageItems:
+          toolProps.getMaterialStageItems?.() ?? toolProps.materialStageItems,
+        getMaterialStageItems: toolProps.getMaterialStageItems,
+        getMaterialOverview: toolProps.getMaterialOverview,
+        selectMaterialEntry: toolProps.selectMaterialEntry,
+        createMaterialEntry: toolProps.createMaterialEntry,
+        editMaterialEntry: toolProps.editMaterialEntry,
+        writeMaterialOverview: toolProps.writeMaterialOverview,
         skillType: toolProps.skillType,
         workspaceType,
         promptKind: toolProps.promptKind,
@@ -1338,6 +1462,7 @@ function WorkspaceAiChatInner({
         },
         allStages: latestAllStages,
         linkedMaterial: toolProps.linkedMaterial,
+        linkedMaterialsByKind: toolProps.linkedMaterialsByKind,
         linkedSkill: toolProps.linkedSkill,
         workspaceAgentReadAccess: toolProps.workspaceAgentReadAccess,
         applyToStageEditor: toolProps.applyToStageEditor,
@@ -1360,7 +1485,12 @@ function WorkspaceAiChatInner({
     props.bookType,
     props.materialType,
     props.materialTypeKey,
+    props.materialKind,
+    props.materialEntryKind,
     props.materialGenre,
+    props.materialOverview,
+    props.currentEntryTitle,
+    props.materialStageItems,
     props.skillType,
     props.bookGenre,
     props.promptKind,
@@ -1369,6 +1499,7 @@ function WorkspaceAiChatInner({
     debouncedBody,
     props.allStages,
     props.linkedMaterial,
+    props.linkedMaterialsByKind,
     props.linkedSkill,
     props.workspaceAgentReadAccess,
     props.applyToStageEditor,
@@ -1377,6 +1508,44 @@ function WorkspaceAiChatInner({
     promptRevision,
     isPaused,
     workspaceType,
+  ])
+
+  useEffect(() => {
+    const request = externalPromptRequest
+    if (!request || !chatReady || isPaused) return
+    if (handledExternalPromptRequestIdRef.current === request.id) return
+    handledExternalPromptRequestIdRef.current = request.id
+    onExternalPromptRequestHandled?.(request.id)
+
+    const prompt = request.prompt.trim()
+    if (!prompt) return
+
+    void (async () => {
+      const agent = agentRef.current
+      const chatPanel = chatPanelRef.current
+      const iface = getAgentInterface(chatPanel)
+      if (!agent || !chatPanel || !iface?.sendMessage) return
+      if (agent.state.isStreaming) {
+        await showAlert({
+          title: '当前对话正在运行',
+          message: '请等本轮回复结束后再初始化概述。',
+        })
+        return
+      }
+      await iface.sendMessage(prompt, [])
+    })().catch((error: unknown) => {
+      console.warn('[DeepSeekWrite·AI面板] 外部消息发送失败:', error)
+      void showAlert({
+        title: '发送失败',
+        message: error instanceof Error ? error.message : '无法发送初始化概述指令。',
+      })
+    })
+  }, [
+    chatReady,
+    externalPromptRequest,
+    isPaused,
+    onExternalPromptRequestHandled,
+    showAlert,
   ])
 
   const historyMenu = props.chatHistoryScope && (!props.historyPortalTargetId || !isPaused) ? (
@@ -1428,6 +1597,8 @@ export const WorkspaceAiChat = memo(WorkspaceAiChatInner, (prev, next) => {
   if (prev.chatHistoryScope?.owner_id !== next.chatHistoryScope?.owner_id) return false
   if (prev.chatHistoryScope?.category_id !== next.chatHistoryScope?.category_id) return false
   if (prev.historyPortalTargetId !== next.historyPortalTargetId) return false
+  if (prev.externalPromptRequest?.id !== next.externalPromptRequest?.id) return false
+  if (prev.externalPromptRequest?.prompt !== next.externalPromptRequest?.prompt) return false
 
   // 暂停状态变化需要更新
   if (prev.isPaused !== next.isPaused) return false
@@ -1444,6 +1615,10 @@ export const WorkspaceAiChat = memo(WorkspaceAiChatInner, (prev, next) => {
   if (prev.linkedMaterial?.id !== next.linkedMaterial?.id) return false
   if (prev.linkedMaterial?.updated_at !== next.linkedMaterial?.updated_at) return false
   if (prev.linkedMaterial?.stages !== next.linkedMaterial?.stages) return false
+  if (
+    linkedMaterialsFingerprint(prev.linkedMaterialsByKind) !==
+    linkedMaterialsFingerprint(next.linkedMaterialsByKind)
+  ) return false
   if (prev.linkedSkill?.id !== next.linkedSkill?.id) return false
   if (prev.linkedSkill?.updated_at !== next.linkedSkill?.updated_at) return false
   if (prev.linkedSkill?.stages !== next.linkedSkill?.stages) return false
@@ -1466,7 +1641,15 @@ export const WorkspaceAiChat = memo(WorkspaceAiChatInner, (prev, next) => {
   if (prev.bookType !== next.bookType) return false
   if (prev.materialType !== next.materialType) return false
   if (prev.materialTypeKey !== next.materialTypeKey) return false
+  if (prev.materialKind !== next.materialKind) return false
+  if (prev.materialEntryKind !== next.materialEntryKind) return false
   if (prev.materialGenre !== next.materialGenre) return false
+  if (prev.materialOverview !== next.materialOverview) return false
+  if (prev.currentEntryTitle !== next.currentEntryTitle) return false
+  if (
+    materialStageItemsFingerprint(prev.materialStageItems) !==
+    materialStageItemsFingerprint(next.materialStageItems)
+  ) return false
   if (prev.skillType !== next.skillType) return false
   if (prev.bookGenre !== next.bookGenre) return false
   if (prev.bookMemories !== next.bookMemories) return false

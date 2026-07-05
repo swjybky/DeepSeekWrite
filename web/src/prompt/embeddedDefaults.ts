@@ -24,6 +24,12 @@ const RAW_MATERIAL_TYPED = import.meta.glob('../../../app/prompt_defaults/materi
   import: 'default',
 })
 
+const RAW_MATERIAL_KIND = import.meta.glob('../../../app/prompt_defaults/material/*/kind/*.txt', {
+  eager: true,
+  query: '?raw',
+  import: 'default',
+})
+
 const RAW_MATERIAL_LEGACY = import.meta.glob('../../../app/prompt_defaults/material/*/*.txt', {
   eager: true,
   query: '?raw',
@@ -66,6 +72,12 @@ function normalizeGlobKey(importPath: string): string | null {
     /prompt_defaults\/material\/([^/]+)\/shared\/material_manager\.txt$/i,
   )
   if (typedMaterialM) return `material_${typedMaterialM[1]}/material_manager`
+  const typedMaterialKindM = up.match(
+    /prompt_defaults\/material\/([^/]+)\/kind\/([^/]+)\.txt$/i,
+  )
+  if (typedMaterialKindM) {
+    return `material_${typedMaterialKindM[1]}_kind/${typedMaterialKindM[2]}`
+  }
   // material: prompt_defaults/material/shared/material_manager.txt → material_manager/material_manager
   const materialManagerM = up.match(
     /prompt_defaults\/material\/shared\/material_manager\.txt$/i,
@@ -97,6 +109,7 @@ for (const [k, v] of Object.entries({
   ...RAW_LONG,
   ...RAW_MATERIAL_LEGACY,
   ...RAW_MATERIAL_TYPED,
+  ...RAW_MATERIAL_KIND,
   ...RAW_SKILL_LEGACY,
   ...RAW_SKILL_TYPED,
   ...RAW_LEARNING_IMITATION,

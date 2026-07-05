@@ -10,6 +10,7 @@ import {
   LEARNING_STAGE_IDS,
   LEARNING_STAGE_LABELS,
   MATERIAL_STAGE_LABELS,
+  MATERIAL_KIND_LABELS,
   SHORT_GENRE_OPTIONS,
   cloneEmptyLearningResult,
   createMaterial,
@@ -18,7 +19,8 @@ import {
   getSkill,
   getMaterialParentGenres,
   materialTypeLabel,
-  normalizeMaterialStages,
+  materialMatchesKind,
+  normalizeMaterialStageItems,
   normalizeSkillStages,
   readLearningImitationPromptTemplate,
   resetLearningImitationPromptOverride,
@@ -27,10 +29,12 @@ import {
   saveSkill,
   skillTypeLabel,
   type LearningDocument,
+  type LearningMaterialStageId,
   type LearningResult,
   type LearningStageId,
   type Material,
-  type MaterialStageId,
+  type MaterialKind,
+  type MaterialStageEntry,
   type MaterialSummary,
   type MaterialType,
   type Skill,
@@ -62,6 +66,7 @@ const CHUNK_SIZE = 12000
 
 type LearningIconNode = typeof Library
 type LearningPersistMode = 'overwrite' | 'append'
+type LearningMaterialTargetKind = Extract<MaterialKind, 'character' | 'gimmick' | 'plot' | 'draft'>
 
 type PendingSaveChoice = {
   stageId: LearningStageId
@@ -115,6 +120,38 @@ const LEARNING_PRESET_ACTIONS: LearningPresetAction[] = [
     ].join('\n'),
   },
 ]
+
+const LEARNING_MATERIAL_TARGET_KINDS: LearningMaterialTargetKind[] = [
+  'character',
+  'gimmick',
+  'plot',
+  'draft',
+]
+
+const LEARNING_STAGE_MATERIAL_KIND: Record<LearningMaterialStageId, LearningMaterialTargetKind> = {
+  character: 'character',
+  gimmick: 'gimmick',
+  pacing: 'plot',
+  intro: 'plot',
+  plot_refine: 'plot',
+  draft_excerpt: 'draft',
+}
+
+const LEARNING_MATERIAL_KIND_SHORT_LABELS: Record<LearningMaterialTargetKind, string> = {
+  character: '人设库',
+  gimmick: '梗库',
+  plot: '剧情库',
+  draft: '正文库',
+}
+
+function emptyLearningMaterialTargetIds(): Record<LearningMaterialTargetKind, string> {
+  return {
+    character: '',
+    gimmick: '',
+    plot: '',
+    draft: '',
+  }
+}
 
 function LearningIcon({ icon }: { icon: LearningIconNode }) {
   return (
@@ -176,6 +213,31 @@ function newSkillEntry(title: string, body: string): SkillStageEntry {
     created_at: now,
     updated_at: now,
   }
+}
+
+function newMaterialEntry(stageId: LearningMaterialStageId, body: string): MaterialStageEntry {
+  const now = nowIso()
+  return {
+    id: newId('learned_material'),
+    title: `学习仿写-${MATERIAL_STAGE_LABELS[stageId]}-${new Date().toLocaleDateString()}`,
+    body,
+    created_at: now,
+    updated_at: now,
+  }
+}
+
+function mergeMaterialEntries(
+  current: MaterialStageEntry[],
+  stageId: LearningMaterialStageId,
+  entry: MaterialStageEntry,
+  mode: LearningPersistMode,
+): MaterialStageEntry[] {
+  if (mode === 'append') return [...current, entry]
+  const learnedPrefix = `学习仿写-${MATERIAL_STAGE_LABELS[stageId]}-`
+  return [
+    ...current.filter((item) => !item.title?.startsWith(learnedPrefix)),
+    entry,
+  ]
 }
 
 const PLOT_DESIGN_SKILL_PREFIX = `---
@@ -288,7 +350,9 @@ export function LearningImitationDialog({
   const [documents, setDocuments] = useState<LearningDocument[]>([])
   const [activeStage, setActiveStage] = useState<LearningStageId>('material_split')
   const [result, setResult] = useState<LearningResult>(() => cloneEmptyLearningResult())
-  const [selectedMaterialId, setSelectedMaterialId] = useState('')
+  const [selectedMaterialIdsByKind, setSelectedMaterialIdsByKind] = useState<
+    Record<LearningMaterialTargetKind, string>
+  >(() => emptyLearningMaterialTargetIds())
   const [selectedSkillId, setSelectedSkillId] = useState('')
   const [newLibraryType, setNewLibraryType] = useState<MaterialType>('short')
   const [newMaterialGenre, setNewMaterialGenre] = useState(
@@ -325,10 +389,34 @@ export function LearningImitationDialog({
   const validDocumentCount =
     documents.length >= MIN_DOCUMENTS && documents.length <= MAX_DOCUMENTS
 
-  const materialTarget = useMemo(
-    () => materials.find((item) => item.id === selectedMaterialId) ?? null,
-    [materials, selectedMaterialId],
+  const materialTargetsByKind = useMemo(
+    () =>
+      Object.fromEntries(
+        LEARNING_MATERIAL_TARGET_KINDS.map((kind) => [
+          kind,
+          materials.find((item) => item.id === selectedMaterialIdsByKind[kind]) ?? null,
+        ]),
+      ) as Record<LearningMaterialTargetKind, MaterialSummary | null>,
+    [materials, selectedMaterialIdsByKind],
   )
+  const selectedMaterialTargetCount = LEARNING_MATERIAL_TARGET_KINDS.reduce(
+    (sum, kind) => sum + (selectedMaterialIdsByKind[kind] ? 1 : 0),
+    0,
+  )
+  const selectedMaterialTargetNames = LEARNING_MATERIAL_TARGET_KINDS
+    .map((kind) => materialTargetsByKind[kind]?.title)
+    .filter(Boolean)
+  const materialTargetTitle =
+    selectedMaterialTargetNames.length > 0
+      ? selectedMaterialTargetNames.length === 1
+        ? selectedMaterialTargetNames[0] ?? '已选素材库'
+        : `${selectedMaterialTargetNames.length} 个部门素材库`
+      : selectedMaterialTargetCount > 0
+        ? `${selectedMaterialTargetCount} 个部门素材库`
+        : '新建部门素材库'
+  const materialTargetDisplay = selectedMaterialTargetNames.length === 1
+    ? `「${materialTargetTitle}」`
+    : materialTargetTitle
   const skillTarget = useMemo(
     () => skills.find((item) => item.id === selectedSkillId) ?? null,
     [skills, selectedSkillId],
@@ -355,7 +443,7 @@ export function LearningImitationDialog({
     setCloseChoiceOpen(false)
     setRunningPresetStage(null)
     setAgentRunning(false)
-    setSelectedMaterialId('')
+    setSelectedMaterialIdsByKind(emptyLearningMaterialTargetIds())
     setSelectedSkillId('')
     setNewLibraryType('short')
     setNewMaterialGenre(
@@ -485,6 +573,7 @@ export function LearningImitationDialog({
     setNewMaterialGenre(
       nextType === 'long' ? '' : getMaterialParentGenres(nextType)[0] ?? '',
     )
+    setSelectedMaterialIdsByKind(emptyLearningMaterialTargetIds())
   }
 
   const openPromptEditor = async (stageId: LearningStageId) => {
@@ -531,23 +620,29 @@ export function LearningImitationDialog({
     }
   }
 
-  const ensureMaterialTarget = async (): Promise<Material> => {
-    if (selectedMaterialId) {
-      const existing = await getMaterial(selectedMaterialId)
+  const ensureMaterialTarget = async (
+    kind: LearningMaterialTargetKind,
+  ): Promise<Material> => {
+    const selectedId = selectedMaterialIdsByKind[kind]
+    if (selectedId) {
+      const existing = await getMaterial(selectedId)
       if (existing) return existing
     }
     const ws = workspaceRoot?.trim()
     if (!ws) throw new Error('请先在首页选择工作文件夹，再新建目标素材库')
-    const title = `学习仿写素材 ${new Date().toLocaleDateString()}`
+    const title = `学习仿写-${MATERIAL_KIND_LABELS[kind]} ${new Date().toLocaleDateString()}`
     const created = await createMaterial(
       title,
       newLibraryType,
       newLibraryType === 'long' ? null : newMaterialGenre,
       null,
       ws,
+      kind,
     )
-    setSelectedMaterialId(created.id)
-    await onRefreshMaterials()
+    setSelectedMaterialIdsByKind((current) => ({
+      ...current,
+      [kind]: created.id,
+    }))
     return created
   }
 
@@ -569,17 +664,38 @@ export function LearningImitationDialog({
     mode: LearningPersistMode,
     source: LearningResult = resultRef.current,
   ) => {
-    const material = await ensureMaterialTarget()
-    const stages = normalizeMaterialStages(material.stages)
-    let changed = false
+    const draftsByKind = new Map<
+      LearningMaterialTargetKind,
+      Array<{ stage: LearningMaterialStageId; body: string }>
+    >()
     for (const stage of MATERIAL_STAGE_KEYS) {
       const body = source.material_split[stage].trim()
       if (!body) continue
-      stages[stage] = mergePersistedText(stages[stage], body, mode)
-      changed = true
+      const kind = LEARNING_STAGE_MATERIAL_KIND[stage]
+      draftsByKind.set(kind, [
+        ...(draftsByKind.get(kind) ?? []),
+        { stage, body },
+      ])
     }
-    if (!changed) throw new Error('素材拆分预览为空，无法落盘')
-    await saveMaterial(material.id, { stages })
+    if (draftsByKind.size === 0) throw new Error('素材拆分预览为空，无法落盘')
+
+    for (const [kind, drafts] of draftsByKind) {
+      const material = await ensureMaterialTarget(kind)
+      const stageItems = normalizeMaterialStageItems(
+        material.stage_items ?? null,
+        material.stages,
+      )
+      for (const draft of drafts) {
+        const entry = newMaterialEntry(draft.stage, draft.body)
+        stageItems[draft.stage] = mergeMaterialEntries(
+          stageItems[draft.stage] ?? [],
+          draft.stage,
+          entry,
+          mode,
+        )
+      }
+      await saveMaterial(material.id, { stage_items: stageItems })
+    }
     await onRefreshMaterials()
   }
 
@@ -685,7 +801,7 @@ export function LearningImitationDialog({
   const saveActiveStage = async () => {
     const target =
       activeStage === 'material_split'
-        ? materialTarget
+        ? selectedMaterialTargetCount > 0
         : skillTarget
 
     if (target) {
@@ -694,7 +810,9 @@ export function LearningImitationDialog({
       setPendingSaveChoice({
         stageId: activeStage,
         targetKind: activeStage === 'material_split' ? 'material' : 'skill',
-        targetTitle: target.title,
+        targetTitle: activeStage === 'material_split'
+          ? materialTargetTitle
+          : skillTarget?.title ?? '新建技能库',
       })
       return
     }
@@ -709,7 +827,7 @@ export function LearningImitationDialog({
     void saveStage(stageId, mode)
   }
 
-  const updateMaterialResult = (stage: MaterialStageId, value: string) => {
+  const updateMaterialResult = (stage: LearningMaterialStageId, value: string) => {
     setResult((current) => ({
       ...current,
       material_split: {
@@ -802,6 +920,12 @@ export function LearningImitationDialog({
   }
 
   const activeResultReady = stageHasResult(activeStage, result)
+  const materialOptionsForKind = (kind: LearningMaterialTargetKind) =>
+    materials.filter(
+      (item) =>
+        item.material_type === newLibraryType &&
+        materialMatchesKind(item, kind),
+    )
 
   return (
     <div
@@ -864,20 +988,27 @@ export function LearningImitationDialog({
           </section>
 
           <section className="learning-targets" aria-label="落盘目标">
-            <label>
-              <span>素材库</span>
-              <select
-                value={selectedMaterialId}
-                onChange={(event) => setSelectedMaterialId(event.target.value)}
-              >
-                <option value="">未选择，落盘时新建</option>
-                {materials.map((item) => (
-                  <option key={item.id} value={item.id}>
-                    {item.title} · {materialTypeLabel(item.material_type)}
-                  </option>
-                ))}
-              </select>
-            </label>
+            {LEARNING_MATERIAL_TARGET_KINDS.map((kind) => (
+              <label key={kind}>
+                <span>{LEARNING_MATERIAL_KIND_SHORT_LABELS[kind]}</span>
+                <select
+                  value={selectedMaterialIdsByKind[kind]}
+                  onChange={(event) =>
+                    setSelectedMaterialIdsByKind((current) => ({
+                      ...current,
+                      [kind]: event.target.value,
+                    }))
+                  }
+                >
+                  <option value="">未选择，落盘时新建</option>
+                  {materialOptionsForKind(kind).map((item) => (
+                    <option key={item.id} value={item.id}>
+                      {item.title} · {materialTypeLabel(item.material_type)} · {MATERIAL_KIND_LABELS[item.material_kind]}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            ))}
             <label>
               <span>技能库</span>
               <select
@@ -957,7 +1088,7 @@ export function LearningImitationDialog({
                 <h3>{LEARNING_STAGE_LABELS[activeStage]}</h3>
                 <p>
                   {activeStage === 'material_split'
-                    ? `落盘到${materialTarget ? `「${materialTarget.title}」` : '新建素材库'}`
+                    ? `落盘到${materialTargetDisplay}`
                     : `落盘到${skillTarget ? `「${skillTarget.title}」` : '新建技能库'}`}
                 </p>
               </div>
@@ -1179,7 +1310,7 @@ export function LearningImitationDialog({
                     const needsMaterial = stageId === 'material_split'
                     const needsSkill = stageId === 'plot_learning' || stageId === 'style_learning'
                     const canSave = needsMaterial
-                      ? Boolean(selectedMaterialId || workspaceRoot?.trim())
+                      ? Boolean(selectedMaterialTargetCount > 0 || workspaceRoot?.trim())
                       : needsSkill
                         ? Boolean(selectedSkillId || workspaceRoot?.trim())
                         : false
@@ -1227,7 +1358,7 @@ export function LearningImitationDialog({
                   「{pendingSaveChoice.targetTitle}」。
                 </p>
                 <p>
-                  选择覆盖会替换已有同位置内容；选择追加会接在已有内容后面。技能库会按同阶段、同技能名称匹配条目。
+                  选择覆盖会替换同栏目的旧学习仿写条目；选择追加会新增条目。技能库会按同阶段、同技能名称匹配条目。
                 </p>
               </div>
               <footer>

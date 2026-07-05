@@ -1,4 +1,4 @@
-import type { MaterialStageId } from '../../bridge'
+import type { MaterialKind, MaterialStageId } from '../../bridge'
 import {
   LONG_CHARACTER_STAGES,
   LONG_CONTINUITY_STAGES,
@@ -40,7 +40,26 @@ export const ALL_MATERIAL_STAGE_IDS: MaterialStageId[] = [
   'intro',
   'plot_refine',
   'draft_excerpt',
+  'other',
 ]
+
+export const ALL_MATERIAL_KIND_IDS: MaterialKind[] = [
+  'character',
+  'gimmick',
+  'plot',
+  'draft',
+  'other',
+]
+
+const MATERIAL_STAGE_TO_KIND: Record<MaterialStageId, MaterialKind> = {
+  gimmick: 'gimmick',
+  character: 'character',
+  pacing: 'plot',
+  intro: 'plot',
+  plot_refine: 'plot',
+  draft_excerpt: 'draft',
+  other: 'other',
+}
 
 const world = LONG_WORLDBUILDING_STAGES.map((stage) => stage.id)
 const characters = LONG_CHARACTER_STAGES.map((stage) => stage.id)
@@ -62,7 +81,7 @@ const FALLBACK_DEFAULTS: WorkspaceAgentReadAccessConfig = {
       'continuity_ledger.timeline',
       'continuity_ledger.continuity_notes',
     ],
-    material: ['gimmick', 'pacing'],
+    material: ['gimmick', 'plot', 'other'],
   },
   character_design: {
     workspace: [
@@ -74,7 +93,7 @@ const FALLBACK_DEFAULTS: WorkspaceAgentReadAccessConfig = {
       'continuity_ledger.timeline',
       'continuity_ledger.character_states',
     ],
-    material: ['character'],
+    material: ['character', 'other'],
   },
   plot_design: {
     workspace: [
@@ -87,7 +106,7 @@ const FALLBACK_DEFAULTS: WorkspaceAgentReadAccessConfig = {
       'continuity_ledger.timeline',
       'continuity_ledger.open_foreshadowing',
     ],
-    material: ['gimmick', 'character', 'pacing', 'plot_refine'],
+    material: ['gimmick', 'character', 'plot', 'other'],
   },
   draft: {
     workspace: [
@@ -100,7 +119,7 @@ const FALLBACK_DEFAULTS: WorkspaceAgentReadAccessConfig = {
       'worldbuilding.items',
       ...ledger,
     ],
-    material: ['draft_excerpt'],
+    material: ['draft', 'other'],
   },
   continuity_ledger: {
     workspace: [
@@ -131,6 +150,23 @@ function isMaterialStageId(id: string): id is MaterialStageId {
   return ALL_MATERIAL_STAGE_IDS.includes(id as MaterialStageId)
 }
 
+function isMaterialKindId(id: string): id is MaterialKind {
+  return ALL_MATERIAL_KIND_IDS.includes(id as MaterialKind)
+}
+
+function normalizeMaterialAccessIds(raw: readonly string[]): MaterialKind[] {
+  const out: MaterialKind[] = []
+  for (const id of raw) {
+    const kind = isMaterialKindId(id)
+      ? id
+      : isMaterialStageId(id)
+        ? MATERIAL_STAGE_TO_KIND[id]
+        : null
+    if (kind && !out.includes(kind)) out.push(kind)
+  }
+  return out
+}
+
 function dedupe<T>(items: T[]): T[] {
   return [...new Set(items)]
 }
@@ -159,7 +195,7 @@ function loadBuiltinDefaults(): WorkspaceAgentReadAccessConfig {
       ? entry.workspace.filter((id) => isLongStageId(String(id)))
       : FALLBACK_DEFAULTS[agentId].workspace
     const material = Array.isArray(entry.material)
-      ? entry.material.filter((id) => isMaterialStageId(String(id)))
+      ? normalizeMaterialAccessIds(entry.material.map(String))
       : FALLBACK_DEFAULTS[agentId].material
     result[agentId] = {
       workspace: ensureRequiredWorkspaceStages(agentId, workspace),
@@ -231,7 +267,7 @@ function normalizeEntry(
   const material =
     materialRaw === null
       ? fallback.material
-      : dedupe(materialRaw.map(String).filter(isMaterialStageId))
+      : normalizeMaterialAccessIds(materialRaw.map(String))
   return {
     workspace: ensureRequiredWorkspaceStages(agentId, workspace),
     material,

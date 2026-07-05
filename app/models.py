@@ -8,6 +8,7 @@ from uuid import uuid4
 BookType = Literal["short", "long", "script"]
 BookStatus = Literal["editing", "completed"]
 MaterialType = Literal["long", "short", "script"]
+MaterialKind = Literal["character", "gimmick", "plot", "draft", "other"]
 SkillType = Literal["long", "short", "script"]
 
 WORKSPACE_BOOK_TYPES: tuple[str, ...] = ("short", "long", "script")
@@ -35,7 +36,7 @@ SCRIPT_MATERIAL_GENRES: dict[str, list[str]] = {
     key: list(values) for key, values in SHORT_MATERIAL_GENRES.items()
 }
 
-# 素材阶段键（梗、人设、剧情设计、导语设计、剧情细化、优秀正文片段）
+# 素材阶段键（梗、人设、剧情设计、导语设计、剧情细化、优秀正文片段、其他素材）
 MATERIAL_STAGE_KEYS: tuple[str, ...] = (
     "gimmick",       # 梗
     "character",     # 人设
@@ -43,7 +44,34 @@ MATERIAL_STAGE_KEYS: tuple[str, ...] = (
     "intro",         # 导语设计
     "plot_refine",   # 剧情细化
     "draft_excerpt", # 优秀正文片段
+    "other",         # 其他素材
 )
+
+MATERIAL_KIND_KEYS: tuple[str, ...] = (
+    "character",
+    "gimmick",
+    "plot",
+    "draft",
+    "other",
+)
+
+MATERIAL_KIND_WITH_MIXED_KEYS: tuple[str, ...] = (*MATERIAL_KIND_KEYS, "mixed")
+
+MATERIAL_KIND_STAGE_KEYS: dict[str, tuple[str, ...]] = {
+    "character": ("character",),
+    "gimmick": ("gimmick",),
+    "plot": ("pacing", "intro", "plot_refine"),
+    "draft": ("draft_excerpt",),
+    "other": ("other",),
+    "mixed": MATERIAL_STAGE_KEYS,
+}
+
+MATERIAL_STAGE_TO_KIND: dict[str, str] = {
+    stage_id: kind
+    for kind, stage_ids in MATERIAL_KIND_STAGE_KEYS.items()
+    if kind != "mixed"
+    for stage_id in stage_ids
+}
 
 # 技能库阶段键：可见短篇技能栏目 + 分节写手技能。
 # 旧导语设计、剧情细化技能会在读取时合并进 plot_design；
@@ -513,6 +541,50 @@ def normalize_memories_from_storage(raw: Any | None) -> list[dict[str, str]]:
     return out
 
 
+def normalize_material_kind(raw: Any | None, default: str = "mixed") -> str:
+    kind = str(raw or "").strip()
+    if kind in MATERIAL_KIND_WITH_MIXED_KEYS:
+        return kind
+    return default if default in MATERIAL_KIND_WITH_MIXED_KEYS else "mixed"
+
+
+def normalize_linked_material_ids_by_kind(
+    raw: Any,
+    legacy_material_id: Any | None = None,
+) -> dict[str, list[str]]:
+    out: dict[str, list[str]] = {kind: [] for kind in MATERIAL_KIND_KEYS}
+    if isinstance(raw, dict):
+        for kind in MATERIAL_KIND_KEYS:
+            value = raw.get(kind)
+            values = value if isinstance(value, list) else [value] if value else []
+            seen: set[str] = set()
+            for item in values:
+                mid = str(item or "").strip()
+                if not mid or mid in seen:
+                    continue
+                seen.add(mid)
+                out[kind].append(mid)
+        return out
+
+    legacy_id = str(legacy_material_id or "").strip()
+    if legacy_id:
+        for kind in MATERIAL_KIND_KEYS:
+            out[kind] = [legacy_id]
+    return out
+
+
+def first_linked_material_id(
+    linked_material_ids_by_kind: dict[str, list[str]] | None,
+) -> str:
+    if not linked_material_ids_by_kind:
+        return ""
+    for kind in MATERIAL_KIND_KEYS:
+        ids = linked_material_ids_by_kind.get(kind) or []
+        if ids:
+            return ids[0]
+    return ""
+
+
 @dataclass
 class Book:
     id: str
@@ -522,6 +594,9 @@ class Book:
     content: str = ""
     output_dir: str = ""
     linked_material_id: str = ""
+    linked_material_ids_by_kind: dict[str, list[str]] = field(
+        default_factory=lambda: {kind: [] for kind in MATERIAL_KIND_KEYS},
+    )
     linked_skill_id: str = ""
     status: BookStatus = "editing"
     stages: dict[str, str] = field(default_factory=default_stages)
@@ -540,6 +615,13 @@ class Book:
         # 从存储加载时执行迁移
         raw_stages = data.get("stages")
         migrated_stages = normalize_stages_from_storage(raw_stages, bt)
+        linked_material_id = str(data.get("linked_material_id") or "")
+        linked_material_ids_by_kind = normalize_linked_material_ids_by_kind(
+            data.get("linked_material_ids_by_kind"),
+            linked_material_id,
+        )
+        if "linked_material_ids_by_kind" in data:
+            linked_material_id = first_linked_material_id(linked_material_ids_by_kind)
 
         return cls(
             id=str(data["id"]),
@@ -548,7 +630,8 @@ class Book:
             categories=list(data.get("categories") or []),
             content=str(data.get("content") or ""),
             output_dir=str(data.get("output_dir") or ""),
-            linked_material_id=str(data.get("linked_material_id") or ""),
+            linked_material_id=linked_material_id,
+            linked_material_ids_by_kind=linked_material_ids_by_kind,
             linked_skill_id=str(data.get("linked_skill_id") or ""),
             status=normalize_book_status(data.get("status")),
             stages=migrated_stages,
@@ -569,6 +652,10 @@ def new_book_id() -> str:
 
 
 def new_material_id() -> str:
+    return str(uuid4())
+
+
+def new_material_stage_item_id() -> str:
     return str(uuid4())
 
 
@@ -594,6 +681,159 @@ def normalize_material_stages_from_storage(raw: dict[str, Any] | None) -> dict[s
         if k in raw:
             out[k] = str(raw[k] or "")
     return out
+
+
+MATERIAL_STAGE_ITEM_LABELS: dict[str, str] = {
+    "gimmick": "梗",
+    "character": "人设",
+    "pacing": "剧情",
+    "intro": "导语",
+    "plot_refine": "剧情细化",
+    "draft_excerpt": "正文",
+    "other": "其他素材",
+}
+
+
+def default_material_stage_items() -> dict[str, list[dict[str, str]]]:
+    """创建默认的空素材条目列表。"""
+    return {k: [] for k in MATERIAL_STAGE_KEYS}
+
+
+def _title_from_material_body(stage_id: str, body: str, index: int) -> str:
+    fallback = MATERIAL_STAGE_ITEM_LABELS.get(stage_id, "素材")
+    for raw_line in body.splitlines():
+        line = raw_line.strip().lstrip("#").strip()
+        if line:
+            return line[:40]
+    suffix = "" if index <= 1 else f" {index}"
+    return f"未命名{fallback}{suffix}"
+
+
+def _material_stage_item(
+    *,
+    stage_id: str,
+    title: str,
+    body: str,
+    index: int = 1,
+    item_id: Any | None = None,
+    created_at: Any | None = None,
+    updated_at: Any | None = None,
+) -> dict[str, str]:
+    fallback_title = _title_from_material_body(stage_id, body, index)
+    return {
+        "id": str(item_id or new_material_stage_item_id()),
+        "title": str(title or fallback_title).strip() or fallback_title,
+        "body": str(body or ""),
+        "created_at": str(created_at or ""),
+        "updated_at": str(updated_at or ""),
+    }
+
+
+def normalize_material_stage_entries(
+    stage_id: str,
+    raw: Any,
+    fallback_body: str = "",
+) -> list[dict[str, str]]:
+    """从 JSON 载入单个素材阶段的条目列表，兼容旧版单文本阶段。"""
+    out: list[dict[str, str]] = []
+    if isinstance(raw, list):
+        for index, item in enumerate(raw, start=1):
+            if isinstance(item, dict):
+                body = str(item.get("body") or "")
+                title = str(item.get("title") or "").strip()
+                if not body.strip() and not title and not item.get("id"):
+                    continue
+                out.append(
+                    _material_stage_item(
+                        stage_id=stage_id,
+                        title=title,
+                        body=body,
+                        index=index,
+                        item_id=item.get("id"),
+                        created_at=item.get("created_at"),
+                        updated_at=item.get("updated_at"),
+                    ),
+                )
+            elif isinstance(item, str) and item.strip():
+                out.append(
+                    _material_stage_item(
+                        stage_id=stage_id,
+                        title="",
+                        body=item,
+                        index=index,
+                    ),
+                )
+    elif isinstance(raw, dict):
+        body = str(raw.get("body") or "")
+        title = str(raw.get("title") or "").strip()
+        if body.strip() or title or raw.get("id"):
+            out.append(
+                _material_stage_item(
+                    stage_id=stage_id,
+                    title=title,
+                    body=body,
+                    item_id=raw.get("id"),
+                    created_at=raw.get("created_at"),
+                    updated_at=raw.get("updated_at"),
+                ),
+            )
+    elif isinstance(raw, str) and raw.strip():
+        out.append(_material_stage_item(stage_id=stage_id, title="", body=raw))
+
+    if not out and fallback_body.strip():
+        out.append(
+            _material_stage_item(
+                stage_id=stage_id,
+                title="",
+                body=fallback_body,
+            ),
+        )
+    return out
+
+
+def normalize_material_stage_items_from_storage(
+    raw: dict[str, Any] | None,
+    fallback_stages: dict[str, str] | None = None,
+) -> dict[str, list[dict[str, str]]]:
+    out = default_material_stage_items()
+    fallback = fallback_stages or {}
+    for stage_id in MATERIAL_STAGE_KEYS:
+        if raw is not None:
+            out[stage_id] = normalize_material_stage_entries(
+                stage_id,
+                raw.get(stage_id),
+                "",
+            )
+        else:
+            out[stage_id] = normalize_material_stage_entries(
+                stage_id,
+                None,
+                str(fallback.get(stage_id, "") or ""),
+            )
+    return out
+
+
+def material_stage_items_to_stages(
+    stage_items: dict[str, list[dict[str, Any]]] | None,
+) -> dict[str, str]:
+    stages = default_material_stages()
+    if not stage_items:
+        return stages
+    for stage_id in MATERIAL_STAGE_KEYS:
+        blocks: list[str] = []
+        for item in stage_items.get(stage_id, []):
+            if not isinstance(item, dict):
+                continue
+            title = str(item.get("title") or "").strip()
+            body = str(item.get("body") or "")
+            if not title and not body.strip():
+                continue
+            if title:
+                blocks.append(f"# {title}\n\n{body}".strip())
+            else:
+                blocks.append(body.strip())
+        stages[stage_id] = "\n\n---\n\n".join(blocks)
+    return stages
 
 
 def default_skill_stages() -> dict[str, list[dict[str, str]]]:
@@ -700,9 +940,14 @@ class Material:
     id: str
     title: str
     material_type: MaterialType
+    material_kind: str = "mixed"
     parent_genre: str = ""  # 世情/情感（仅short时有效）
     sub_genre: str = ""     # legacy: 旧版子分类；新建素材不再填写
+    overview: str = ""
     stages: dict[str, str] = field(default_factory=default_material_stages)
+    stage_items: dict[str, list[dict[str, str]]] = field(
+        default_factory=default_material_stage_items
+    )
     output_dir: str = ""
     created_at: str = ""
     updated_at: str = ""
@@ -716,14 +961,24 @@ class Material:
         # 从存储加载时归一化阶段
         raw_stages = data.get("stages")
         normalized_stages = normalize_material_stages_from_storage(raw_stages)
+        raw_stage_items = data.get("stage_items")
+        normalized_stage_items = normalize_material_stage_items_from_storage(
+            raw_stage_items if isinstance(raw_stage_items, dict) else None,
+            normalized_stages,
+        )
+        if raw_stage_items is not None:
+            normalized_stages = material_stage_items_to_stages(normalized_stage_items)
 
         return cls(
             id=str(data["id"]),
             title=str(data["title"]),
             material_type=mt,  # type: ignore[arg-type]
+            material_kind=normalize_material_kind(data.get("material_kind")),
             parent_genre=str(data.get("parent_genre") or ""),
             sub_genre=str(data.get("sub_genre") or ""),
+            overview=str(data.get("overview") or ""),
             stages=normalized_stages,
+            stage_items=normalized_stage_items,
             output_dir=str(data.get("output_dir") or ""),
             created_at=str(data.get("created_at") or ""),
             updated_at=str(data.get("updated_at") or ""),

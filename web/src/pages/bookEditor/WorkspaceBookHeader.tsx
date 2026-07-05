@@ -1,5 +1,5 @@
-import type { Book, Material, Skill } from '../../domain/workspace'
-import { bookTypeLabel, isWorkspaceBook } from '../../domain/workspace'
+import type { Book, Material, MaterialKind, Skill } from '../../domain/workspace'
+import { bookTypeLabel, isWorkspaceBook, MATERIAL_KIND_KEYS } from '../../domain/workspace'
 import {
   autoSaveStatusLabel,
   type AutoSaveStatus,
@@ -10,6 +10,7 @@ type Props = {
   coverData: string | null
   coverGenerating: boolean
   linkedMaterial: Material | null
+  linkedMaterialsByKind: Partial<Record<MaterialKind, Material[]>>
   linkedSkill: Skill | null
   saving: boolean
   error: string | null
@@ -37,6 +38,7 @@ export function WorkspaceBookHeader({
   coverData,
   coverGenerating,
   linkedMaterial,
+  linkedMaterialsByKind,
   linkedSkill,
   saving,
   error,
@@ -52,6 +54,16 @@ export function WorkspaceBookHeader({
   onToggleStatus,
   memoryUnread = false,
 }: Props) {
+  const linkedMaterialCount = MATERIAL_KIND_KEYS.reduce(
+    (sum, kind) => sum + (linkedMaterialsByKind[kind]?.length ?? 0),
+    0,
+  )
+  const linkedMaterialTitle =
+    linkedMaterialCount > 0
+      ? `已关联 ${linkedMaterialCount} 个素材库`
+      : linkedMaterial
+        ? linkedMaterial.title
+        : '未关联素材库'
   return (
     <header className="editor-header editor-header--agent">
       <button type="button" className="back-link" onClick={onBack}>
@@ -114,19 +126,19 @@ export function WorkspaceBookHeader({
         </button>
         <span
           className="editor-header-material-name"
-          title={linkedMaterial ? `已关联：${linkedMaterial.title}` : '未关联素材库'}
+          title={linkedMaterialTitle}
         >
-          {linkedMaterial ? linkedMaterial.title : '未关联素材'}
+          {linkedMaterialCount > 0 ? `素材 ${linkedMaterialCount}` : '未关联素材'}
         </span>
         <button
           type="button"
           className={
-            linkedMaterial
+            linkedMaterialCount > 0
               ? 'editor-header-material-select editor-header-material-select--active'
               : 'editor-header-material-select'
           }
           aria-label="选择关联素材库"
-          title={linkedMaterial ? `已关联：${linkedMaterial.title}` : '选择关联素材库'}
+          title={linkedMaterialTitle}
           onClick={onOpenMaterialSelector}
         >
           素材库选择

@@ -57,7 +57,7 @@
 
 .learning-dialog-toolbar {
   display: grid;
-  grid-template-columns: minmax(240px, 0.8fr) minmax(520px, 1.2fr);
+  grid-template-columns: minmax(220px, 0.45fr) minmax(0, 1.55fr);
   gap: 1rem;
   padding: 0.85rem 1rem;
   border-bottom: 1px solid var(--border);
@@ -100,13 +100,17 @@
 }
 
 .learning-targets {
-  justify-content: flex-end;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(118px, 1fr));
+  justify-content: stretch;
+  align-items: end;
+  gap: 0.55rem;
 }
 
 .learning-targets label {
   display: grid;
   gap: 0.2rem;
-  min-width: 120px;
+  min-width: 0;
 }
 
 .learning-targets span {
@@ -115,6 +119,7 @@
 }
 
 .learning-targets select {
+  width: 100%;
   min-width: 0;
   height: 2rem;
   border: 1px solid var(--border);
@@ -969,8 +974,7 @@
   }
 
   .learning-targets {
-    justify-content: flex-start;
-    flex-wrap: wrap;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .learning-ai-pane {
@@ -985,6 +989,10 @@
 }
 
 @media (max-width: 640px) {
+  .learning-targets {
+    grid-template-columns: 1fr;
+  }
+
   .learning-quick-actions {
     grid-template-columns: 1fr;
   }

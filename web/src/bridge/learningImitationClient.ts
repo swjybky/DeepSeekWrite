@@ -3,7 +3,6 @@ import { getBridgeApi } from './runtime'
 import { localPromptLsKey } from './promptLocalStorage'
 import {
   MATERIAL_STAGE_LABELS,
-  type MaterialStageId,
 } from './libraryDomain'
 
 export type LearningStageId =
@@ -40,7 +39,9 @@ export type LearningMaterialSplitResult = {
   draft_excerpt: string
 }
 
-export const LEARNING_MATERIAL_STAGE_IDS: MaterialStageId[] = [
+export type LearningMaterialStageId = keyof LearningMaterialSplitResult
+
+export const LEARNING_MATERIAL_STAGE_IDS: LearningMaterialStageId[] = [
   'gimmick',
   'character',
   'pacing',

@@ -16,6 +16,7 @@ from app.common_skill_store import read_common_skills
 from app.models import (
     Book,
     LONG_STAGE_KEYS,
+    MATERIAL_KIND_KEYS,
     MATERIAL_STAGE_KEYS,
     SCRIPT_STAGE_KEYS,
     SHORT_STAGE_KEYS,
@@ -23,13 +24,16 @@ from app.models import (
     normalize_book_status,
     normalize_book_type,
     normalize_material_type,
+    normalize_material_kind,
     normalize_skill_type,
     WORKSPACE_BOOK_TYPES,
     Material,
     MEMORY_TAGS,
     Skill,
+    MATERIAL_STAGE_TO_KIND,
     apply_stage_patch,
     default_material_stages,
+    material_stage_items_to_stages,
     default_stages,
     new_memory_id,
     normalize_expert_draft_from_storage,
@@ -41,6 +45,9 @@ from app.models import (
     normalize_memories_from_storage,
     normalize_memory_entry,
     normalize_material_stages_from_storage,
+    normalize_material_stage_items_from_storage,
+    normalize_linked_material_ids_by_kind,
+    first_linked_material_id,
     normalize_skill_stages_from_storage,
     long_stage_keys_from_stages,
 )
@@ -581,9 +588,16 @@ def _validate_read_access_entry(
     if workspace:
         out["workspace"] = workspace
     if isinstance(material_raw, list):
-        out["material"] = [
-            str(x) for x in material_raw if str(x) in valid_material_stages
-        ]
+        material: list[str] = []
+        for raw_id in material_raw:
+            material_id = str(raw_id)
+            if material_id in valid_material_stages:
+                kind = material_id
+            else:
+                kind = MATERIAL_STAGE_TO_KIND.get(material_id, "")
+            if kind and kind in valid_material_stages and kind not in material:
+                material.append(kind)
+        out["material"] = material
     return out if out else None
 
 
@@ -600,7 +614,7 @@ def sync_workspace_agent_read_access_defaults(
     else:
         is_script = normalized == "script"
         valid_workspace = set(SCRIPT_STAGE_KEYS if is_script else SHORT_STAGE_KEYS)
-    valid_material = set(MATERIAL_STAGE_KEYS)
+    valid_material = set(MATERIAL_KIND_KEYS)
 
     user_config = read_workspace_agent_read_access_for_type(normalized)
 
@@ -651,7 +665,7 @@ def read_workspace_agent_read_access_defaults(
     else:
         is_script = normalized == "script"
         valid_workspace = set(SCRIPT_STAGE_KEYS if is_script else SHORT_STAGE_KEYS)
-    valid_material = set(MATERIAL_STAGE_KEYS)
+    valid_material = set(MATERIAL_KIND_KEYS)
 
     target_path = _builtin_read_access_default_path(normalized)
     if not target_path.is_file():
@@ -979,6 +993,11 @@ def _write_material_stages_to_disk(material: Material) -> None:
         except OSError:
             pass
 
+    try:
+        (root / "overview.txt").write_text(str(material.overview or ""), encoding="utf-8")
+    except OSError:
+        pass
+
 
 def _remove_output_dir(output_dir: str) -> None:
     """删除输出目录及其内容（忽略删除失败）。"""
@@ -1222,6 +1241,7 @@ class BookStore:
         self._reload_books_unlocked()
         self._reload_materials_unlocked()
         self._reload_skills_unlocked()
+        self._normalize_all_book_material_links_unlocked()
         if not self._skills and not self._skills_path.exists():
             self._skills = _seed_default_skill(self._skills_path)
             self._skills_signature = _file_signature(self._skills_path)
@@ -1256,13 +1276,86 @@ class BookStore:
     def _mark_skills_saved_unlocked(self) -> None:
         self._skills_signature = _file_signature(self._skills_path)
 
+    def _material_can_link_to_book_kind(
+        self,
+        material_id: str,
+        book_type: str,
+        material_kind: str,
+    ) -> bool:
+        material = self._materials.get(material_id)
+        if material is None:
+            return False
+        if material.material_type != book_type:
+            return False
+        return material.material_kind == "mixed" or material.material_kind == material_kind
+
+    def _legacy_material_links_by_kind(
+        self,
+        material_id: str,
+        book_type: str,
+    ) -> dict[str, list[str]]:
+        out: dict[str, list[str]] = {kind: [] for kind in MATERIAL_KIND_KEYS}
+        mid = (material_id or "").strip()
+        material = self._materials.get(mid)
+        if not mid or material is None or material.material_type != book_type:
+            return out
+        if material.material_kind == "mixed":
+            for kind in MATERIAL_KIND_KEYS:
+                out[kind] = [mid]
+            return out
+        if material.material_kind in out:
+            out[material.material_kind] = [mid]
+        return out
+
+    def _normalize_book_material_links_unlocked(self, book: Book) -> bool:
+        previous_legacy_id = book.linked_material_id
+        previous_by_kind = {
+            kind: list(book.linked_material_ids_by_kind.get(kind) or [])
+            for kind in MATERIAL_KIND_KEYS
+        }
+        if book.book_type not in WORKSPACE_BOOK_TYPES:
+            book.linked_material_ids_by_kind = {kind: [] for kind in MATERIAL_KIND_KEYS}
+            book.linked_material_id = ""
+            return previous_legacy_id != "" or any(previous_by_kind.values())
+
+        normalized: dict[str, list[str]] = {kind: [] for kind in MATERIAL_KIND_KEYS}
+        for kind in MATERIAL_KIND_KEYS:
+            seen: set[str] = set()
+            for raw_id in book.linked_material_ids_by_kind.get(kind) or []:
+                mid = str(raw_id or "").strip()
+                if not mid or mid in seen:
+                    continue
+                if not self._material_can_link_to_book_kind(mid, book.book_type, kind):
+                    continue
+                seen.add(mid)
+                normalized[kind].append(mid)
+
+        if not any(normalized.values()) and book.linked_material_id:
+            normalized = self._legacy_material_links_by_kind(
+                book.linked_material_id,
+                book.book_type,
+            )
+
+        book.linked_material_ids_by_kind = normalized
+        book.linked_material_id = first_linked_material_id(normalized)
+        return (
+            previous_legacy_id != book.linked_material_id
+            or previous_by_kind != normalized
+        )
+
+    def _normalize_all_book_material_links_unlocked(self) -> bool:
+        changed = False
+        for book in self._books.values():
+            changed = self._normalize_book_material_links_unlocked(book) or changed
+        return changed
+
     @property
     def path(self) -> Path:
         return self._path
 
     def list_books(self) -> list[dict[str, Any]]:
         with _data_file_lock():
-            self._reload_books_unlocked()
+            self._reload_all_unlocked()
             return [
                 {
                     "id": b.id,
@@ -1271,6 +1364,7 @@ class BookStore:
                     "categories": b.categories,
                     "output_dir": b.output_dir,
                     "linked_material_id": b.linked_material_id,
+                    "linked_material_ids_by_kind": b.linked_material_ids_by_kind,
                     "linked_skill_id": b.linked_skill_id,
                     "status": b.status,
                 }
@@ -1283,7 +1377,7 @@ class BookStore:
 
     def get_book(self, book_id: str) -> dict[str, Any] | None:
         with _data_file_lock():
-            self._reload_books_unlocked()
+            self._reload_all_unlocked()
             b = self._books.get(book_id)
             if b is None:
                 return None
@@ -1313,6 +1407,7 @@ class BookStore:
         workspace_root: str | None = None,
         linked_skill_id: str | None = None,
         linked_material_id: str | None = None,
+        linked_material_ids_by_kind: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         with _data_file_lock():
             self._reload_all_unlocked()
@@ -1321,8 +1416,10 @@ class BookStore:
             cats = list(categories or []) if bt in WORKSPACE_BOOK_TYPES else []
             sid = (linked_skill_id or "").strip()
             linked_sid = sid if bt in WORKSPACE_BOOK_TYPES and sid in self._skills else ""
-            mid = (linked_material_id or "").strip()
-            linked_mid = mid if bt in WORKSPACE_BOOK_TYPES and mid in self._materials else ""
+            linked_by_kind = normalize_linked_material_ids_by_kind(
+                linked_material_ids_by_kind,
+                linked_material_id,
+            )
             wr = (workspace_root or "").strip()
             od = ""
             if wr:
@@ -1348,13 +1445,15 @@ class BookStore:
                 categories=cats,
                 content="",
                 output_dir=od,
-                linked_material_id=linked_mid,
+                linked_material_id=(linked_material_id or "").strip(),
+                linked_material_ids_by_kind=linked_by_kind,
                 linked_skill_id=linked_sid,
                 stages=default_stages(bt),
                 expert_draft=normalize_expert_draft_from_storage(None, bt),
                 created_at=now,
                 updated_at=now,
             )
+            self._normalize_book_material_links_unlocked(b)
             self._books[bid] = b
             save_books_atomic(self._path, self._books)
             self._mark_books_saved_unlocked()
@@ -1372,6 +1471,7 @@ class BookStore:
         status: str | None = None,
         linked_skill_id: str | None = None,
         memory_auto_capture_enabled: bool | None = None,
+        linked_material_ids_by_kind: dict[str, Any] | None = None,
     ) -> dict[str, Any] | None:
         with _data_file_lock():
             self._reload_all_unlocked()
@@ -1383,6 +1483,19 @@ class BookStore:
             if linked_material_id is not None:
                 mid = linked_material_id.strip()
                 b.linked_material_id = mid if mid in self._materials else ""
+                b.linked_material_ids_by_kind = self._legacy_material_links_by_kind(
+                    b.linked_material_id,
+                    b.book_type,
+                )
+            if linked_material_ids_by_kind is not None:
+                b.linked_material_ids_by_kind = normalize_linked_material_ids_by_kind(
+                    linked_material_ids_by_kind,
+                    None,
+                )
+                b.linked_material_id = first_linked_material_id(
+                    b.linked_material_ids_by_kind,
+                )
+            self._normalize_book_material_links_unlocked(b)
             if linked_skill_id is not None:
                 sid = linked_skill_id.strip()
                 b.linked_skill_id = sid if b.book_type in WORKSPACE_BOOK_TYPES and sid in self._skills else ""
@@ -1453,6 +1566,7 @@ class BookStore:
                     "id": m.id,
                     "title": m.title,
                     "material_type": m.material_type,
+                    "material_kind": m.material_kind,
                     "parent_genre": m.parent_genre,
                     "sub_genre": m.sub_genre,
                     "output_dir": m.output_dir,
@@ -1480,12 +1594,14 @@ class BookStore:
         parent_genre: str | None = None,
         sub_genre: str | None = None,
         workspace_root: str | None = None,
+        material_kind: str | None = None,
     ) -> dict[str, Any]:
         """创建新素材"""
         with _data_file_lock():
             self._reload_materials_unlocked()
             now = _utc_now_iso()
             mt = normalize_material_type(material_type)
+            mk = normalize_material_kind(material_kind, "mixed")
             wr = (workspace_root or "").strip()
             od = ""
             if wr:
@@ -1510,9 +1626,12 @@ class BookStore:
                 id=mid,
                 title=title.strip() or "未命名素材",
                 material_type=mt,  # type: ignore[arg-type]
+                material_kind=mk,
                 parent_genre=str(parent_genre or "") if mt in ("short", "script") else "",
                 sub_genre="",
+                overview="",
                 stages=default_material_stages(),
+                stage_items=normalize_material_stage_items_from_storage({}),
                 output_dir=od,
                 created_at=now,
                 updated_at=now,
@@ -1528,6 +1647,8 @@ class BookStore:
         material_id: str,
         stages: dict[str, str] | None = None,
         title: str | None = None,
+        stage_items: dict[str, Any] | None = None,
+        overview: str | None = None,
     ) -> dict[str, Any] | None:
         """保存素材阶段内容"""
         with _data_file_lock():
@@ -1535,10 +1656,16 @@ class BookStore:
             m = self._materials.get(material_id)
             if m is None:
                 return None
-            if stages is not None:
+            if stage_items is not None:
+                m.stage_items = normalize_material_stage_items_from_storage(stage_items)
+                m.stages = material_stage_items_to_stages(m.stage_items)
+            elif stages is not None:
                 m.stages = normalize_material_stages_from_storage(stages)
+                m.stage_items = normalize_material_stage_items_from_storage(None, m.stages)
             if title is not None:
                 m.title = title.strip()
+            if overview is not None:
+                m.overview = str(overview)
             m.updated_at = _utc_now_iso()
             save_materials_atomic(self._materials_path, self._materials)
             self._mark_materials_saved_unlocked()
@@ -1559,8 +1686,26 @@ class BookStore:
             self._mark_materials_saved_unlocked()
             changed_books = False
             for book in self._books.values():
+                previous_legacy = book.linked_material_id
+                previous = {
+                    kind: list(book.linked_material_ids_by_kind.get(kind) or [])
+                    for kind in MATERIAL_KIND_KEYS
+                }
+                book.linked_material_ids_by_kind = {
+                    kind: [
+                        linked_id
+                        for linked_id in book.linked_material_ids_by_kind.get(kind, [])
+                        if linked_id != mid
+                    ]
+                    for kind in MATERIAL_KIND_KEYS
+                }
                 if book.linked_material_id == mid:
                     book.linked_material_id = ""
+                self._normalize_book_material_links_unlocked(book)
+                if (
+                    previous != book.linked_material_ids_by_kind
+                    or previous_legacy != book.linked_material_id
+                ):
                     book.updated_at = _utc_now_iso()
                     changed_books = True
             if changed_books:

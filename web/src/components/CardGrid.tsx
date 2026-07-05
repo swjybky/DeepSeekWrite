@@ -1,6 +1,7 @@
 import { Link } from 'react-router-dom'
 import {
   bookTypeLabel,
+  MATERIAL_KIND_LABELS,
   materialTypeLabel,
   skillTypeLabel,
   type BookSummary,
@@ -195,7 +196,7 @@ export function materialToCardItem(material: MaterialSummary): CardItem {
     title: material.title,
     type: 'material',
     subtype: material.material_type,
-    meta: materialTypeLabel(material.material_type),
+    meta: `${materialTypeLabel(material.material_type)} · ${MATERIAL_KIND_LABELS[material.material_kind]}`,
     genre: material.parent_genre,
     outputDir: material.output_dir,
     to: `/material/${material.id}`,

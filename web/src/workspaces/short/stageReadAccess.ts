@@ -1,4 +1,4 @@
-import type { MaterialStageId } from '../../bridge'
+import type { MaterialKind, MaterialStageId } from '../../bridge'
 import {
   SHORT_WORKSPACE_CONTENT_STAGES,
   SHORT_WORKSPACE_STAGES,
@@ -51,7 +51,26 @@ export const ALL_MATERIAL_STAGE_IDS: MaterialStageId[] = [
   'intro',
   'plot_refine',
   'draft_excerpt',
+  'other',
 ]
+
+export const ALL_MATERIAL_KIND_IDS: MaterialKind[] = [
+  'character',
+  'gimmick',
+  'plot',
+  'draft',
+  'other',
+]
+
+const MATERIAL_STAGE_TO_KIND: Record<MaterialStageId, MaterialKind> = {
+  gimmick: 'gimmick',
+  character: 'character',
+  pacing: 'plot',
+  intro: 'plot',
+  plot_refine: 'plot',
+  draft_excerpt: 'draft',
+  other: 'other',
+}
 
 const BUILTIN_READ_ACCESS_MODULES = import.meta.glob(
   '../../../../app/prompt_defaults/short/shared/read_access.json',
@@ -61,23 +80,23 @@ const BUILTIN_READ_ACCESS_MODULES = import.meta.glob(
 const FALLBACK_DEFAULTS: WorkspaceAgentReadAccessConfig = {
   character_design: {
     workspace: ['character_design', 'plot_design', 'plot_refine'],
-    material: ['character'],
+    material: ['character', 'other'],
   },
   plot_design: {
     workspace: ['character_design', 'intro_design', 'plot_design', 'plot_refine'],
-    material: ['gimmick', 'character', 'pacing', 'intro', 'plot_refine'],
+    material: ['gimmick', 'character', 'plot', 'other'],
   },
   outline: {
     workspace: ['intro_design', 'plot_design', 'plot_refine', 'outline', 'character_design'],
-    material: [],
+    material: ['character', 'plot', 'other'],
   },
   expert_draft_coordinator: {
     workspace: ['outline', 'draft'],
-    material: ['draft_excerpt'],
+    material: ['plot', 'draft', 'other'],
   },
   expert_section_writer: {
     workspace: ['outline', 'draft'],
-    material: ['draft_excerpt'],
+    material: ['draft', 'character', 'other'],
   },
 }
 
@@ -100,6 +119,23 @@ function isMaterialStageId(id: string): id is MaterialStageId {
   return ALL_MATERIAL_STAGE_IDS.includes(id as MaterialStageId)
 }
 
+function isMaterialKindId(id: string): id is MaterialKind {
+  return ALL_MATERIAL_KIND_IDS.includes(id as MaterialKind)
+}
+
+function normalizeMaterialAccessIds(raw: readonly string[]): MaterialKind[] {
+  const out: MaterialKind[] = []
+  for (const id of raw) {
+    const kind = isMaterialKindId(id)
+      ? id
+      : isMaterialStageId(id)
+        ? MATERIAL_STAGE_TO_KIND[id]
+        : null
+    if (kind && !out.includes(kind)) out.push(kind)
+  }
+  return out
+}
+
 function loadBuiltinDefaults(): WorkspaceAgentReadAccessConfig {
   const json = Object.values(BUILTIN_READ_ACCESS_MODULES)[0] as
     | WorkspaceAgentReadAccessConfig
@@ -116,7 +152,7 @@ function loadBuiltinDefaults(): WorkspaceAgentReadAccessConfig {
       ? entry.workspace.filter((id) => isShortStageId(id))
       : FALLBACK_DEFAULTS[agentId].workspace
     const material = Array.isArray(entry.material)
-      ? entry.material.filter((id) => isMaterialStageId(id))
+      ? normalizeMaterialAccessIds(entry.material.map(String))
       : FALLBACK_DEFAULTS[agentId].material
     result[agentId] = {
       workspace: ensureRequiredWorkspaceStages(agentId, workspace),
@@ -214,7 +250,7 @@ function normalizeEntry(
   const material =
     materialRaw === null
       ? fallback.material
-      : dedupe(materialRaw.map(String).filter(isMaterialStageId))
+      : normalizeMaterialAccessIds(materialRaw.map(String))
   return {
     workspace: ensureRequiredWorkspaceStages(agentId, workspace),
     material,

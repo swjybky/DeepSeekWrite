@@ -354,6 +354,10 @@ export interface BookSummary {
   output_dir?: string
   /** 写书工作台关联的素材库 id，空表示未关联 */
   linked_material_id?: string
+  /** 按素材部门关联的素材库 id 列表 */
+  linked_material_ids_by_kind?: Partial<
+    Record<'character' | 'gimmick' | 'plot' | 'draft', string[]>
+  >
   /** 写书工作台绑定的技能库 id，空表示未绑定 */
   linked_skill_id?: string
 }

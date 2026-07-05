@@ -14,6 +14,7 @@ import {
   type ExpertDraft,
   type MemoryEntry,
   type Material,
+  type MaterialKind,
   type Skill,
   type StageId,
 } from '../../../bridge'
@@ -93,6 +94,7 @@ type Props = {
   userMemories?: MemoryEntry[]
   bookMemoryAutoCaptureEnabled?: boolean
   linkedMaterial?: Material | null
+  linkedMaterialsByKind?: Partial<Record<MaterialKind, Material[]>>
   linkedSkill?: Skill | null
   readAccess: WorkspaceAgentReadAccessEntry
   writerReadAccess: WorkspaceAgentReadAccessEntry
@@ -149,6 +151,7 @@ function buildSectionWriterToolsInput(
     sectionTitle: section.title,
     allStages: p.stages,
     linkedMaterial: p.linkedMaterial,
+    linkedMaterialsByKind: p.linkedMaterialsByKind,
     linkedSkill: p.linkedSkill,
     readAccess: p.writerReadAccess,
     getDraft: () => getProps().expertDraft,
@@ -175,6 +178,7 @@ function buildCoordinatorToolsInput(
     bookTitle: props.bookTitle,
     allStages: props.stages,
     linkedMaterial: props.linkedMaterial,
+    linkedMaterialsByKind: props.linkedMaterialsByKind,
     linkedSkill: props.linkedSkill,
     readAccess: props.readAccess,
     getDraft: () => getProps().expertDraft,
@@ -554,6 +558,8 @@ export function ExpertDraftAiChat(props: Props) {
         draft,
         workspaceStages: p.stages,
         allowedWorkspaceStages: p.readAccess.workspace as readonly StageId[],
+        allowedMaterialKinds: p.readAccess.material as readonly MaterialKind[],
+        linkedMaterialsByKind: p.linkedMaterialsByKind,
         template: coordinatorPromptTemplateRef.current,
         linkedSkill: p.linkedSkill,
       })
@@ -571,6 +577,8 @@ export function ExpertDraftAiChat(props: Props) {
         stageBody: section.body,
         workspaceStages: p.stages,
         allowedWorkspaceStages: p.writerReadAccess.workspace as readonly StageId[],
+        allowedMaterialKinds: p.writerReadAccess.material as readonly MaterialKind[],
+        linkedMaterialsByKind: p.linkedMaterialsByKind,
         template: sectionWriterPromptTemplateRef.current,
         linkedSkill: p.linkedSkill,
       })
@@ -664,6 +672,8 @@ export function ExpertDraftAiChat(props: Props) {
             draft: props.expertDraft,
             workspaceStages: props.stages,
             allowedWorkspaceStages: props.readAccess.workspace as readonly StageId[],
+            allowedMaterialKinds: props.readAccess.material as readonly MaterialKind[],
+            linkedMaterialsByKind: props.linkedMaterialsByKind,
             template: coordinatorTemplate,
             linkedSkill: props.linkedSkill,
           }),
@@ -855,6 +865,8 @@ export function ExpertDraftAiChat(props: Props) {
         draft: debouncedDraft,
         workspaceStages: p.stages,
         allowedWorkspaceStages: p.readAccess.workspace as readonly StageId[],
+        allowedMaterialKinds: p.readAccess.material as readonly MaterialKind[],
+        linkedMaterialsByKind: p.linkedMaterialsByKind,
         template: coordinatorPromptTemplateRef.current,
         linkedSkill: p.linkedSkill,
       })
@@ -880,6 +892,8 @@ export function ExpertDraftAiChat(props: Props) {
       stageBody: section.body,
       workspaceStages: p.stages,
       allowedWorkspaceStages: p.writerReadAccess.workspace as readonly StageId[],
+      allowedMaterialKinds: p.writerReadAccess.material as readonly MaterialKind[],
+      linkedMaterialsByKind: p.linkedMaterialsByKind,
       template: sectionWriterPromptTemplateRef.current,
       linkedSkill: p.linkedSkill,
     })
@@ -892,6 +906,7 @@ export function ExpertDraftAiChat(props: Props) {
     props.bookGenre,
     props.stages,
     props.linkedMaterial,
+    props.linkedMaterialsByKind,
     props.linkedSkill,
     props.readAccess,
     props.writerReadAccess,

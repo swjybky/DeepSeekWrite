@@ -30,12 +30,20 @@ const DEEPSEEKWRITE_TOOL_NAMES = [
   'load_skill',
   'read_workspace_content',
   'search_workspace_text',
+  'query_linked_material_entries',
+  'search_linked_materials',
   'read_linked_material_content',
   'switch_storyline_stage',
   'copy_stage_to_format_conversion',
   'global_text_replace',
   'replace_current_stage_text',
   'write_workspace_editor',
+  'list_material_entries',
+  'read_material_entry',
+  'search_material_entries',
+  'create_material_entry',
+  'edit_material_entry',
+  'write_material_overview',
   'read_material_content',
   'write_material_editor',
   'read_skill_content',
@@ -131,12 +139,33 @@ function summarizeToolCall(
         ? verb('正在搜索', '已搜索') + `「${truncate(query)}」`
         : verb('正在搜索创作文本', '已搜索创作文本')
     }
+    case 'query_linked_material_entries': {
+      const mode = pickString(params, 'mode')
+      const query = pickString(params, 'query')
+      const entryId = pickString(params, 'entry_id')
+      if (mode === 'read') {
+        return entryId
+          ? verb('正在读取关联素材条目', '已读取关联素材条目') + `「${entryId}」`
+          : verb('正在读取关联素材条目', '已读取关联素材条目')
+      }
+      return query
+        ? verb('正在查询关联素材条目', '已查询关联素材条目') + `「${truncate(query)}」`
+        : verb('正在查询关联素材条目', '已查询关联素材条目')
+    }
     case 'read_linked_material_content': {
       const stageId = pickString(params, 'stage_id')
       const label = resolveStageLabel(stageId)
       return label
         ? verb('正在读取关联素材', '已读取关联素材') + `「${label}」`
         : verb('正在读取关联素材', '已读取关联素材')
+    }
+    case 'search_linked_materials': {
+      const query = pickString(params, 'query')
+      const kind = pickString(params, 'material_kind')
+      const label = kind || '素材'
+      return query
+        ? verb('正在查询关联素材', '已查询关联素材') + `「${label} · ${truncate(query)}」`
+        : verb('正在查询关联素材', '已查询关联素材') + `「${label}」`
     }
     case 'switch_storyline_stage': {
       const stageId = pickString(params, 'target_stage_id', 'stage_id')
@@ -161,6 +190,30 @@ function summarizeToolCall(
         ? verb('正在写入', '已写入') + `「${label}」编辑区${modeHint}`
         : verb('正在写入编辑区', '已写入编辑区') + modeHint
     }
+    case 'list_material_entries':
+      return verb('正在列出素材条目', '已列出素材条目')
+    case 'read_material_entry': {
+      const name = pickString(params, 'name')
+      return name
+        ? verb('正在读取素材条目', '已读取素材条目') + `「${name}」`
+        : verb('正在读取素材条目', '已读取素材条目')
+    }
+    case 'search_material_entries':
+      return verb('正在搜索素材内容', '已搜索素材内容')
+    case 'create_material_entry': {
+      const title = pickString(params, 'title')
+      return title
+        ? verb('正在创建素材条目', '已创建素材条目') + `「${title}」`
+        : verb('正在创建素材条目', '已创建素材条目')
+    }
+    case 'edit_material_entry': {
+      const name = pickString(params, 'name')
+      return name
+        ? verb('正在修改素材条目', '已修改素材条目') + `「${name}」`
+        : verb('正在修改素材条目', '已修改素材条目')
+    }
+    case 'write_material_overview':
+      return verb('正在写入素材概览', '已写入素材概览')
     case 'read_material_content': {
       const stageId = pickString(params, 'stage_id')
       const label = resolveStageLabel(stageId)

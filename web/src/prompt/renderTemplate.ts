@@ -29,6 +29,7 @@ const MATERIAL_ORDER: Record<string, readonly { id: string; label: string }[]> =
     { id: 'intro', label: '导语设计' },
     { id: 'plot_refine', label: '剧情细化' },
     { id: 'draft_excerpt', label: '优秀正文片段' },
+    { id: 'other', label: '其他素材' },
   ],
 }
 
@@ -48,6 +49,21 @@ function isMaterialPromptKind(kind: string): kind is MaterialPromptKind {
 
 function isSkillPromptKind(kind: string): kind is SkillPromptKind {
   return kind === 'skill_manager'
+}
+
+function materialKindLabel(kind: string | undefined): string {
+  switch ((kind ?? '').trim()) {
+    case 'character':
+      return '人设素材'
+    case 'gimmick':
+      return '梗素材'
+    case 'plot':
+      return '剧情素材'
+    case 'draft':
+      return '正文素材'
+    default:
+      return '其他素材'
+  }
 }
 
 function rowsForPromptKind(kind: PromptRenderKind) {
@@ -90,7 +106,7 @@ export function peekAllowedWorkspaceStagesExcerpt(
 const WORKSPACE_TAG =
   /\{\{(BOOK_TITLE|BOOK_GENRE)\}\}/g
 const MATERIAL_TAG =
-  /\{\{(BOOK_TITLE|BOOK_LINE|MATERIAL_TITLE|MATERIAL_LINE|MATERIAL_TYPE|MATERIAL_GENRE|STAGE_ID|STAGE_LABEL|STAGE_BODY|OTHER_STAGES_EXCERPT)\}\}/g
+  /\{\{(BOOK_TITLE|BOOK_LINE|MATERIAL_TITLE|MATERIAL_LINE|MATERIAL_TYPE|MATERIAL_GENRE|MATERIAL_KIND|MATERIAL_KIND_LABEL|MATERIAL_OVERVIEW|CURRENT_ENTRY_TITLE|STAGE_ID|STAGE_LABEL|STAGE_BODY|OTHER_STAGES_EXCERPT)\}\}/g
 const SKILL_TAG =
   /\{\{(BOOK_TITLE|BOOK_LINE|SKILL_TITLE|SKILL_LINE|SKILL_TYPE|STAGE_ID|STAGE_LABEL|STAGE_BODY|OTHER_STAGES_EXCERPT)\}\}/g
 
@@ -99,6 +115,9 @@ export type PromptSubstitutePayload = {
   bookGenre?: string
   materialType?: string
   materialGenre?: string
+  materialKind?: string
+  materialOverview?: string
+  currentEntryTitle?: string
   skillType?: string
   stageId?: StageId | MaterialStageId | SkillStageId
   stageLabel?: string
@@ -112,6 +131,9 @@ export type PromptRenderPayload = {
   bookGenre?: string
   materialType?: string
   materialGenre?: string
+  materialKind?: string
+  materialOverview?: string
+  currentEntryTitle?: string
   skillType?: string
   stageBody: string
   otherStagesExcerpt?: string | null
@@ -142,6 +164,10 @@ export function substitutePromptPlaceholders(
     MATERIAL_LINE: materialLine,
     MATERIAL_TYPE: input.materialType?.trim() || '未分类素材',
     MATERIAL_GENRE: input.materialGenre?.trim() || '未分类',
+    MATERIAL_KIND: input.materialKind?.trim() || 'other',
+    MATERIAL_KIND_LABEL: materialKindLabel(input.materialKind),
+    MATERIAL_OVERVIEW: excerptText(input.materialOverview ?? ''),
+    CURRENT_ENTRY_TITLE: input.currentEntryTitle?.trim() || '未选择条目',
     SKILL_TITLE: bt,
     SKILL_LINE: skillLine,
     SKILL_TYPE: input.skillType?.trim() || '短篇技能',
@@ -177,6 +203,9 @@ export function renderPromptFromTemplateRaw(
     bookGenre: payload.bookGenre,
     materialType: payload.materialType,
     materialGenre: payload.materialGenre,
+    materialKind: payload.materialKind,
+    materialOverview: payload.materialOverview,
+    currentEntryTitle: payload.currentEntryTitle,
     skillType: payload.skillType,
     stageId: payload.stageId,
     stageLabel: rowsForPromptKind(payload.promptKind)?.find(

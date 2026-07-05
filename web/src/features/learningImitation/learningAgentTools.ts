@@ -6,13 +6,13 @@ import {
   LEARNING_MATERIAL_STAGE_IDS,
   MATERIAL_STAGE_LABELS,
   type LearningDocument,
+  type LearningMaterialStageId,
   type LearningResult,
   type LearningStageId,
-  type MaterialStageId,
 } from '../../bridge'
 import { defineTool, textBlock } from '../../workspaces/shared/piToolkit'
 
-export const MATERIAL_STAGE_KEYS: MaterialStageId[] = LEARNING_MATERIAL_STAGE_IDS
+export const MATERIAL_STAGE_KEYS: LearningMaterialStageId[] = LEARNING_MATERIAL_STAGE_IDS
 
 export type LearningWritePayload = {
   mode?: 'replace' | 'append'
