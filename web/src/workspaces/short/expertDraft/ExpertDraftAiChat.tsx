@@ -52,37 +52,19 @@ import {
   type WorkspaceAgentReadAccessEntry,
 } from '../stageReadAccess'
 import { AiChatHistoryMenu } from '../../../components/AiChatHistoryMenu'
+import {
+  configureQuickSkillInput,
+  disposeQuickSkillInput,
+} from '../../../components/workspaceQuickSkillInput'
+import { getLoadableSkillsForStage } from '../loadSkill'
+import { useAppDialog } from '../../../components/useAppDialog'
+import {
+  configureWorkspaceAttachmentOptions,
+  installWorkspaceSendValidationGuard,
+  validateWorkspaceAttachmentsBeforeSend,
+} from '../../../components/workspaceAttachmentSupport'
 
 const ARTIFACTS_TOOL_NAME = 'artifacts'
-
-type MessageEditorElement = HTMLElement & {
-  attachments?: unknown[]
-  requestUpdate?: () => void
-}
-
-function disableExpertDraftAttachments(chatPanel: ChatPanel) {
-  const apply = () => {
-    const iface = chatPanel.agentInterface
-    if (!iface) return false
-    iface.enableAttachments = false
-    iface.requestUpdate?.()
-
-    const editor = iface.querySelector('message-editor') as
-      | MessageEditorElement
-      | null
-    if (editor) {
-      editor.attachments = []
-      editor.requestUpdate?.()
-    }
-    return true
-  }
-
-  if (apply()) return
-  requestAnimationFrame(() => {
-    if (apply()) return
-    requestAnimationFrame(apply)
-  })
-}
 
 type Props = {
   bookId: string
@@ -238,6 +220,7 @@ function hasUserMessage(messages: AgentMessage[]): boolean {
 }
 
 export function ExpertDraftAiChat(props: Props) {
+  const { alert: showAlert, dialog } = useAppDialog()
   const hostRef = useRef<HTMLDivElement>(null)
   const coordinatorAgentRef = useRef<Agent | null>(null)
   const sectionWriterAgentRef = useRef<Agent | null>(null)
@@ -559,6 +542,14 @@ export function ExpertDraftAiChat(props: Props) {
     const buildSectionWriterToolsFor = (sectionId: string) =>
       buildSectionWriterToolsInput(() => propsLatestRef.current, sectionId)
 
+    const resolveQuickSkills = () =>
+      getLoadableSkillsForStage(
+        propsLatestRef.current.linkedSkill,
+        activePanelKindRef.current === 'section-writer'
+          ? EXPERT_SECTION_WRITER_AGENT_ID
+          : EXPERT_DRAFT_COORDINATOR_AGENT_ID,
+      )
+
     const refreshCoordinatorAgentState = (draft: ExpertDraft) => {
       const agent = coordinatorAgentRef.current
       if (!agent) return
@@ -709,6 +700,13 @@ export function ExpertDraftAiChat(props: Props) {
           requestAnimationFrame(nudgePiLayout)
         })
         await chatPanel.setAgent(nextAgent, {
+          onBeforeSend: async () => {
+            await validateWorkspaceAttachmentsBeforeSend(
+              chatPanel,
+              nextAgent.state.model,
+              showAlert,
+            )
+          },
           onApiKeyRequired: async (provider: string) =>
             ApiKeyPromptDialog.prompt(provider),
           onModelSelect: async () => {
@@ -728,7 +726,12 @@ export function ExpertDraftAiChat(props: Props) {
           },
           toolsFactory,
         })
-        disableExpertDraftAttachments(chatPanel)
+        installWorkspaceSendValidationGuard(chatPanel)
+        configureWorkspaceAttachmentOptions(chatPanel, showAlert)
+        configureQuickSkillInput(chatPanel, {
+          getSkills: resolveQuickSkills,
+          isEnabled: () => !cancelled,
+        })
         nextAgent.state.tools = stripArtifacts(nextAgent.state.tools)
         if (!cancelled) {
           nudgePiLayout()
@@ -853,6 +856,7 @@ export function ExpertDraftAiChat(props: Props) {
       ;(sectionWriterAgentRef.current ?? sectionWriterAgent)?.abort()
       sectionWriterAgent = null
       sectionWriterAgentRef.current = null
+      disposeQuickSkillInput(chatPanelRef.current)
       chatPanelRef.current?.remove()
       chatPanelRef.current = null
     }
@@ -951,13 +955,16 @@ export function ExpertDraftAiChat(props: Props) {
   )
 
   return (
-    <div className="expert-draft-ai-shell">
-      {props.historyPortalTargetId ? (
-        props.isHistoryPortalActive ? historyMenu : null
-      ) : (
-        <div className="workspace-ai-chat-history-row">{historyMenu}</div>
-      )}
-      <div ref={hostRef} className="workspace-ai-chat-host" />
-    </div>
+    <>
+      {dialog}
+      <div className="expert-draft-ai-shell">
+        {props.historyPortalTargetId ? (
+          props.isHistoryPortalActive ? historyMenu : null
+        ) : (
+          <div className="workspace-ai-chat-history-row">{historyMenu}</div>
+        )}
+        <div ref={hostRef} className="workspace-ai-chat-host" />
+      </div>
+    </>
   )
 }

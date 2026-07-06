@@ -25,7 +25,7 @@ import {
 } from './preferencesClient'
 import {
   ensureLocalPlotPromptMerged,
-  ensureLocalScriptPromptSeeded,
+  ensureLocalScriptPromptPrepared,
   ensureLocalSharedPromptMigrated,
   localPromptLsKey,
   LONG_SHARED_WORKSPACE_PROMPT_KIND,
@@ -58,7 +58,7 @@ export async function readWorkspaceAgentPromptTemplate(
   }
   ensureLocalSharedPromptMigrated()
   ensureLocalPlotPromptMerged()
-  if (workspaceType === 'script') ensureLocalScriptPromptSeeded()
+  if (workspaceType === 'script') ensureLocalScriptPromptPrepared()
   try {
     const ls = localStorage.getItem(
       localPromptLsKey(promptKindForWorkspaceType(workspaceType), agentId),
@@ -85,7 +85,7 @@ export async function saveWorkspaceAgentPromptOverride(
   }
   ensureLocalSharedPromptMigrated()
   ensureLocalPlotPromptMerged()
-  if (workspaceType === 'script') ensureLocalScriptPromptSeeded()
+  if (workspaceType === 'script') ensureLocalScriptPromptPrepared()
   try {
     localStorage.setItem(
       localPromptLsKey(promptKindForWorkspaceType(workspaceType), agentId),
@@ -106,7 +106,7 @@ export async function resetWorkspaceAgentPromptOverride(
   }
   ensureLocalSharedPromptMigrated()
   ensureLocalPlotPromptMerged()
-  if (workspaceType === 'script') ensureLocalScriptPromptSeeded()
+  if (workspaceType === 'script') ensureLocalScriptPromptPrepared()
   try {
     const k = localPromptLsKey(promptKindForWorkspaceType(workspaceType), agentId)
     const had = localStorage.getItem(k) != null
@@ -133,7 +133,7 @@ export async function resetAllWorkspaceSettings(
   } else {
     ensureLocalSharedPromptMigrated()
     ensureLocalPlotPromptMerged()
-    if (workspaceType === 'script') ensureLocalScriptPromptSeeded()
+    if (workspaceType === 'script') ensureLocalScriptPromptPrepared()
     try {
       const prefix = promptKindForWorkspaceType(workspaceType)
       for (const agentId of agentIdsForWorkspaceType(workspaceType)) {

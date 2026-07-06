@@ -269,7 +269,8 @@ function ModelConfigDialog({
     setModelEditor(null)
     setModelTestResults((prev) => {
       if (!prev.editor) return prev
-      const { editor: _removed, ...rest } = prev
+      const rest = { ...prev }
+      delete rest.editor
       return rest
     })
   }, [])
@@ -337,7 +338,8 @@ function ModelConfigDialog({
       setModelTestResults((prev) => {
         const key = `model-${index}`
         if (!prev[key]) return prev
-        const { [key]: _removed, ...rest } = prev
+        const rest = { ...prev }
+        delete rest[key]
         return rest
       })
       setDraft((prev) => {
@@ -395,7 +397,8 @@ function ModelConfigDialog({
       })
       setModelTestResults((prev) => {
         if (!prev.editor) return prev
-        const { editor: _removed, ...rest } = prev
+        const rest = { ...prev }
+        delete rest.editor
         return rest
       })
       setModelPickerOpen(false)
@@ -417,7 +420,8 @@ function ModelConfigDialog({
     )
     setModelTestResults((prev) => {
       if (!prev.editor) return prev
-      const { editor: _removed, ...rest } = prev
+      const rest = { ...prev }
+      delete rest.editor
       return rest
     })
   }, [])

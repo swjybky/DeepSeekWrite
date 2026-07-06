@@ -20,7 +20,6 @@ SHARED_WORKSPACE_PROMPT_DIR = "shared"
 LEGACY_QINGGAN_PROMPT_DIR = "qinggan"
 SHARED_PROMPT_MIGRATION_MARKER = ".shared_prompt_migration_from_qinggan_v1"
 PLOT_PROMPT_MERGE_MARKER = ".plot_prompt_merge_v1"
-SCRIPT_PROMPT_SEED_MARKER = ".script_prompt_seed_from_short_v1"
 
 SHORT_STAGES_ORDER: tuple[str, ...] = (
     "character_design",
@@ -226,24 +225,9 @@ def _ensure_plot_prompt_override_merged() -> None:
         return
 
 
-def _ensure_script_prompt_overrides_seeded() -> None:
-    """剧本提示词首次使用时，从短篇当前生效提示词复制一份独立覆盖。"""
-    root = _workspace_override_root("script")
-    marker = root / SCRIPT_PROMPT_SEED_MARKER
-    if marker.is_file():
-        return
-    try:
-        shared_root = root / SHARED_WORKSPACE_PROMPT_DIR
-        shared_root.mkdir(parents=True, exist_ok=True)
-        for agent_id in WORKSPACE_AGENT_IDS:
-            target = shared_root / f"{agent_id}.txt"
-            if target.exists():
-                continue
-            body = read_workspace_agent_prompt_template(agent_id, "short")
-            target.write_text(body if body.endswith("\n") else body + "\n", encoding="utf-8")
-        marker.write_text("seeded\n", encoding="utf-8")
-    except OSError:
-        return
+def _ensure_script_prompt_prepared() -> None:
+    """Legacy no-op: script prompts fall back to script defaults."""
+    return
 
 
 def _ensure_workspace_prompt_prepared(workspace_type: str | None = None) -> None:
@@ -251,7 +235,7 @@ def _ensure_workspace_prompt_prepared(workspace_type: str | None = None) -> None
     if prompt_type == "long":
         return
     if prompt_type == "script":
-        _ensure_script_prompt_overrides_seeded()
+        _ensure_script_prompt_prepared()
         return
     _ensure_shared_prompt_override_migrated()
     _ensure_plot_prompt_override_merged()

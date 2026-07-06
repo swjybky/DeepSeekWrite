@@ -1645,6 +1645,57 @@ button.back-link:hover {
   color: var(--ink-faint);
 }
 
+.workspace-quick-skill-menu {
+  position: fixed;
+  z-index: 80;
+  max-height: min(18rem, 44vh);
+  overflow: auto;
+  padding: 0.35rem;
+  border: 1px solid color-mix(in oklab, var(--accent) 26%, var(--border));
+  border-radius: 8px;
+  background: color-mix(in oklab, var(--paper-elevated) 96%, white);
+  box-shadow:
+    0 14px 34px rgb(38 32 24 / 16%),
+    0 1px 0 rgb(255 255 255 / 46%) inset;
+}
+
+.workspace-quick-skill-option {
+  display: grid;
+  width: 100%;
+  gap: 0.16rem;
+  padding: 0.48rem 0.55rem;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--ink);
+  text-align: left;
+  cursor: pointer;
+}
+
+.workspace-quick-skill-option:hover,
+.workspace-quick-skill-option--active {
+  background: color-mix(in oklab, var(--accent) 12%, var(--paper-deep));
+}
+
+.workspace-quick-skill-option-name {
+  overflow: hidden;
+  font-size: 0.86rem;
+  font-weight: 650;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workspace-quick-skill-option-description {
+  display: -webkit-box;
+  overflow: hidden;
+  color: var(--ink-soft);
+  font-size: 0.76rem;
+  line-height: 1.35;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
 .workspace-ai message-editor button,
 .workspace-ai message-editor [role='button'] {
   border-radius: 6px;

@@ -5,7 +5,6 @@ import {
   ApiKeyPromptDialog,
   ChatPanel,
   ModelSelector,
-  type Attachment,
 } from '@earendil-works/pi-web-ui'
 import { memo, useEffect, useRef, useState } from 'react'
 import type {
@@ -57,6 +56,12 @@ import { refreshChatPanelTranscript } from '../pi/chatPanelTranscript'
 import { createMemoryAwareConvertToLlm } from '../pi/memoryMessageTransform'
 import { captureBookMemoryFromMessages } from '../pi/memoryCapture'
 import {
+  getLoadableSkillsForStage as getShortLoadableSkillsForStage,
+} from '../workspaces/short/loadSkill'
+import {
+  getLoadableSkillsForStage as getScriptLoadableSkillsForStage,
+} from '../workspaces/script/loadSkill'
+import {
   EXPERT_DRAFT_COORDINATOR_AGENT_ID,
   resolveWorkspaceAgentReadAccess,
   type WorkspaceAgentId,
@@ -71,17 +76,20 @@ import { SHORT_WORKSPACE_CONTENT_STAGES } from '../workspaces/short/stages'
 import { SCRIPT_WORKSPACE_CONTENT_STAGES } from '../workspaces/script/stages'
 import { isLongStageId } from '../workspaces/long/stages'
 import {
-  isWorkspaceSupportedAttachment,
-  loadWorkspaceAttachment,
-  WORKSPACE_ATTACHMENT_ACCEPTED_TYPES,
-  WORKSPACE_ATTACHMENT_SUPPORTED_LABEL,
-} from '../utils/documentText'
+  configureWorkspaceAttachmentOptions,
+  getWorkspaceAgentInterface as getAgentInterface,
+  installWorkspaceSendValidationGuard,
+  validateWorkspaceAttachmentsBeforeSend,
+} from './workspaceAttachmentSupport'
 import { useAppDialog } from './useAppDialog'
-import type { AppDialogOptions } from './AppDialog'
 import { AiChatHistoryMenu } from './AiChatHistoryMenu'
+import {
+  configureQuickSkillInput,
+  disposeQuickSkillInput,
+  type QuickLoadableSkill,
+} from './workspaceQuickSkillInput'
 
 const ARTIFACTS_TOOL_NAME = 'artifacts'
-const WORKSPACE_ATTACHMENT_MAX_FILES = 10
 const SHORT_BOOK_CONTENT_STAGE_IDS = new Set<string>(
   SHORT_WORKSPACE_CONTENT_STAGES.map((stage) => stage.id),
 )
@@ -135,45 +143,6 @@ function resolvePromptAllowedMaterialKinds(
   return resolvePromptReadAccess(bookType, config, agentId)
     .material as readonly MaterialKind[]
 }
-const WORKSPACE_ATTACHMENT_MAX_FILE_SIZE = 20 * 1024 * 1024
-const WORKSPACE_SEND_VALIDATION_ERROR_NAME = 'DeepSeekWriteSendValidationError'
-
-type ShowWorkspaceAlert = (
-  options: Omit<AppDialogOptions, 'cancelText' | 'hideCancel'>,
-) => Promise<boolean>
-
-type MessageEditorElement = HTMLElement & {
-  attachments?: Attachment[]
-  acceptedTypes?: string
-  maxFiles?: number
-  maxFileSize?: number
-  processingFiles?: boolean
-  isDragging?: boolean
-  onFilesChange?: (attachments: Attachment[]) => void
-  handleFilesSelected?: (event: Event) => void | Promise<void>
-  handleDrop?: (event: DragEvent) => void | Promise<void>
-  __deepSeekWriteWorkspaceAttachmentLoader?: boolean
-  requestUpdate?: () => void
-}
-
-type AgentInterfaceElement = HTMLElement & {
-  requestUpdate?: () => void
-  sendMessage?: (input: string, attachments?: Attachment[]) => void | Promise<void>
-  __deepSeekWriteSendValidationGuard?: boolean
-}
-
-class WorkspaceSendValidationError extends Error {
-  constructor(message: string) {
-    super(message)
-    this.name = WORKSPACE_SEND_VALIDATION_ERROR_NAME
-  }
-}
-
-function isWorkspaceSendValidationError(error: unknown): error is Error {
-  return (
-    error instanceof Error && error.name === WORKSPACE_SEND_VALIDATION_ERROR_NAME
-  )
-}
 
 function hasUserMessage(messages: AgentMessage[]): boolean {
   return messages.some(
@@ -182,167 +151,6 @@ function hasUserMessage(messages: AgentMessage[]): boolean {
       typeof message === 'object' &&
       (message as { role?: unknown }).role === 'user',
   )
-}
-
-async function addWorkspaceAttachmentFiles(
-  editor: MessageEditorElement,
-  files: File[],
-  showAlert: ShowWorkspaceAlert,
-) {
-  if (files.length === 0) return
-
-  const maxFiles = editor.maxFiles ?? WORKSPACE_ATTACHMENT_MAX_FILES
-  const maxFileSize = editor.maxFileSize ?? WORKSPACE_ATTACHMENT_MAX_FILE_SIZE
-  const currentAttachments = editor.attachments ?? []
-  if (files.length + currentAttachments.length > maxFiles) {
-    await showAlert({
-      title: '文件数量超限',
-      message: `最多可上传 ${maxFiles} 个文件。`,
-    })
-    return
-  }
-
-  editor.processingFiles = true
-  editor.requestUpdate?.()
-  const newAttachments: Attachment[] = []
-
-  for (const file of files) {
-    try {
-      if (file.size > maxFileSize) {
-        await showAlert({
-          title: '文件过大',
-          message: `${file.name} 超过 ${Math.round(maxFileSize / 1024 / 1024)}MB 限制。`,
-        })
-        continue
-      }
-
-      const attachment = await loadWorkspaceAttachment(file)
-      if (!isWorkspaceSupportedAttachment(attachment)) {
-        await showAlert({
-          title: '不支持的附件格式',
-          message: `当前仅支持上传${WORKSPACE_ATTACHMENT_SUPPORTED_LABEL}。`,
-          details: `不支持：${file.name}`,
-        })
-        continue
-      }
-      newAttachments.push(attachment)
-    } catch (error) {
-      console.error(`Error processing ${file.name}:`, error)
-      await showAlert({
-        title: '处理附件失败',
-        message: `处理 ${file.name} 失败。`,
-        details: error instanceof Error ? error.message : String(error),
-      })
-    }
-  }
-
-  if (newAttachments.length > 0) {
-    editor.attachments = [...(editor.attachments ?? []), ...newAttachments]
-    editor.onFilesChange?.(editor.attachments)
-  }
-  editor.processingFiles = false
-  editor.requestUpdate?.()
-}
-
-function installWorkspaceAttachmentLoader(
-  editor: MessageEditorElement,
-  showAlert: ShowWorkspaceAlert,
-) {
-  if (editor.__deepSeekWriteWorkspaceAttachmentLoader) return
-
-  editor.handleFilesSelected = async (event: Event) => {
-    event.stopImmediatePropagation()
-    const input = event.target as HTMLInputElement
-    await addWorkspaceAttachmentFiles(editor, Array.from(input.files ?? []), showAlert)
-    input.value = ''
-  }
-  editor.handleDrop = async (event: DragEvent) => {
-    event.preventDefault()
-    event.stopImmediatePropagation()
-    editor.isDragging = false
-    await addWorkspaceAttachmentFiles(
-      editor,
-      Array.from(event.dataTransfer?.files ?? []),
-      showAlert,
-    )
-  }
-  editor.__deepSeekWriteWorkspaceAttachmentLoader = true
-  editor.requestUpdate?.()
-}
-
-function getAgentInterface(chatPanel: ChatPanel | null): AgentInterfaceElement | null {
-  if (!chatPanel) return null
-  if (chatPanel.agentInterface) {
-    return chatPanel.agentInterface as AgentInterfaceElement
-  }
-  return chatPanel.querySelector('agent-interface') as AgentInterfaceElement | null
-}
-
-function getMessageEditor(chatPanel: ChatPanel | null): MessageEditorElement | null {
-  return getAgentInterface(chatPanel)?.querySelector(
-    'message-editor',
-  ) as MessageEditorElement | null
-}
-
-function applyWorkspaceAttachmentOptions(
-  chatPanel: ChatPanel | null,
-  showAlert: ShowWorkspaceAlert,
-): boolean {
-  const editor = getMessageEditor(chatPanel)
-  if (!editor) return false
-  installWorkspaceAttachmentLoader(editor, showAlert)
-  editor.acceptedTypes = WORKSPACE_ATTACHMENT_ACCEPTED_TYPES
-  editor.maxFiles = WORKSPACE_ATTACHMENT_MAX_FILES
-  editor.maxFileSize = WORKSPACE_ATTACHMENT_MAX_FILE_SIZE
-  editor.requestUpdate?.()
-  return true
-}
-
-function configureWorkspaceAttachmentOptions(
-  chatPanel: ChatPanel | null,
-  showAlert: ShowWorkspaceAlert,
-) {
-  if (applyWorkspaceAttachmentOptions(chatPanel, showAlert)) return
-  requestAnimationFrame(() => {
-    if (applyWorkspaceAttachmentOptions(chatPanel, showAlert)) return
-    requestAnimationFrame(() => applyWorkspaceAttachmentOptions(chatPanel, showAlert))
-  })
-}
-
-function getCurrentAttachments(chatPanel: ChatPanel | null): Attachment[] {
-  return getMessageEditor(chatPanel)?.attachments ?? []
-}
-
-function refreshWorkspaceChatInput(chatPanel: ChatPanel | null) {
-  getMessageEditor(chatPanel)?.requestUpdate?.()
-  getAgentInterface(chatPanel)?.requestUpdate?.()
-  chatPanel?.requestUpdate?.()
-}
-
-function installWorkspaceSendValidationGuard(chatPanel: ChatPanel) {
-  const iface = getAgentInterface(chatPanel)
-  if (
-    !iface ||
-    iface.__deepSeekWriteSendValidationGuard ||
-    typeof iface.sendMessage !== 'function'
-  ) {
-    return
-  }
-
-  const originalSendMessage = iface.sendMessage.bind(iface)
-  iface.sendMessage = async (input, attachments) => {
-    try {
-      await originalSendMessage(input, attachments)
-    } catch (error) {
-      if (isWorkspaceSendValidationError(error)) {
-        console.warn('[DeepSeekWrite·AI面板] 发送已取消:', error.message)
-        refreshWorkspaceChatInput(chatPanel)
-        return
-      }
-      throw error
-    }
-  }
-  iface.__deepSeekWriteSendValidationGuard = true
 }
 
 function useDebounced<T>(value: T, ms: number): T {
@@ -542,6 +350,18 @@ type Props = {
   onExternalPromptRequestHandled?: (id: number) => void
 }
 
+function resolveQuickLoadableSkills(
+  props: Props,
+  workspaceType: Props['workspaceType'],
+): QuickLoadableSkill[] {
+  if (workspaceType !== 'book') return []
+  if (props.bookType === 'script') {
+    return getScriptLoadableSkillsForStage(props.linkedSkill, props.stageId)
+  }
+  if (props.bookType === 'long') return []
+  return getShortLoadableSkillsForStage(props.linkedSkill, props.stageId)
+}
+
 type WritableStageId = StageId | MaterialStageId | SkillStageId
 type StreamingWriteState = {
   toolCallId: string
@@ -578,6 +398,7 @@ function WorkspaceAiChatInner({
   const [historyLoading, setHistoryLoading] = useState(false)
   const [historyDisabled, setHistoryDisabled] = useState(false)
   const propsLatestRef = useRef(props)
+  const isPausedRef = useRef(isPaused)
   const promptPullSeqRef = useRef(0)
   const activeHistorySessionIdRef = useRef('')
   const blankHistoryNonceRef = useRef(0)
@@ -682,6 +503,10 @@ function WorkspaceAiChatInner({
     propsLatestRef.current = props
     pendingPlotChildStageRef.current = null
   }, [props])
+
+  useEffect(() => {
+    isPausedRef.current = isPaused
+  }, [isPaused])
 
   const debouncedBody = useDebounced(props.stageBody, 600)
   const externalPromptRequest = props.externalPromptRequest
@@ -1249,37 +1074,11 @@ function WorkspaceAiChatInner({
 
       await chatPanel.setAgent(agent, {
         onBeforeSend: async () => {
-          const attachments = getCurrentAttachments(chatPanel)
-          const unsupported = attachments.filter(
-            (attachment) => !isWorkspaceSupportedAttachment(attachment),
+          await validateWorkspaceAttachmentsBeforeSend(
+            chatPanel,
+            agent.state.model,
+            showAlert,
           )
-          if (unsupported.length > 0) {
-            await showAlert({
-              title: '不支持的附件格式',
-              message: `当前仅支持上传${WORKSPACE_ATTACHMENT_SUPPORTED_LABEL}。`,
-              details: `不支持：${unsupported.map((a) => a.fileName).join('、')}`,
-            })
-            throw new WorkspaceSendValidationError(
-              'Unsupported workspace attachment type',
-            )
-          }
-
-          const hasImage = attachments.some(
-            (attachment) =>
-              attachment.type === 'image' ||
-              attachment.mimeType.startsWith('image/'),
-          )
-          if (hasImage && !agent.state.model?.input?.includes('image')) {
-            const modelName = agent.state.model?.id ?? '当前模型'
-            await showAlert({
-              title: '当前模型不支持图片',
-              message: `${modelName} 不支持图片输入。`,
-              details: '请先切换到支持视觉/图片输入的模型，再发送图片附件。',
-            })
-            throw new WorkspaceSendValidationError(
-              'Current model does not support image attachments',
-            )
-          }
         },
         onApiKeyRequired: async (provider: string) =>
           ApiKeyPromptDialog.prompt(provider),
@@ -1301,6 +1100,11 @@ function WorkspaceAiChatInner({
       })
       installWorkspaceSendValidationGuard(chatPanel)
       configureWorkspaceAttachmentOptions(chatPanel, showAlert)
+      configureQuickSkillInput(chatPanel, {
+        getSkills: () =>
+          resolveQuickLoadableSkills(propsLatestRef.current, workspaceType),
+        isEnabled: () => !isPausedRef.current,
+      })
 
       if (!includePiArtifacts) {
         agent.state.tools = (agent.state.tools ?? []).filter(
@@ -1332,6 +1136,7 @@ function WorkspaceAiChatInner({
       unsubscribeMessagesRefresh?.()
       unsubscribePreferences?.()
       agentRef.current = null
+      disposeQuickSkillInput(chatPanelRef.current)
       chatPanelRef.current?.remove()
       chatPanelRef.current = null
       if (streamingWriteRef.current) {

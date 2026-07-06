@@ -5,9 +5,16 @@ import { clampAiPanelWidth } from './aiPanelLayout'
 type Props = {
   aiPanelWidth: number
   setAiPanelWidth: Dispatch<SetStateAction<number>>
+  railWidth?: number
+  splitterCount?: number
 }
 
-export function WorkspaceSplitter({ aiPanelWidth, setAiPanelWidth }: Props) {
+export function WorkspaceSplitter({
+  aiPanelWidth,
+  setAiPanelWidth,
+  railWidth,
+  splitterCount,
+}: Props) {
   const splitDragRef = useRef<{ startX: number; startWidth: number } | null>(null)
 
   const releasePointer = (node: HTMLDivElement, pointerId: number) => {
@@ -39,7 +46,9 @@ export function WorkspaceSplitter({ aiPanelWidth, setAiPanelWidth }: Props) {
         if (!drag) return
         const delta = e.clientX - drag.startX
         const next = drag.startWidth + delta
-        setAiPanelWidth(clampAiPanelWidth(next, window.innerWidth))
+        setAiPanelWidth(
+          clampAiPanelWidth(next, window.innerWidth, railWidth, splitterCount),
+        )
       }}
       onPointerUp={(e) => {
         splitDragRef.current = null
@@ -54,12 +63,22 @@ export function WorkspaceSplitter({ aiPanelWidth, setAiPanelWidth }: Props) {
         if (e.key === 'ArrowLeft') {
           e.preventDefault()
           setAiPanelWidth((width) =>
-            clampAiPanelWidth(width - step, window.innerWidth),
+            clampAiPanelWidth(
+              width - step,
+              window.innerWidth,
+              railWidth,
+              splitterCount,
+            ),
           )
         } else if (e.key === 'ArrowRight') {
           e.preventDefault()
           setAiPanelWidth((width) =>
-            clampAiPanelWidth(width + step, window.innerWidth),
+            clampAiPanelWidth(
+              width + step,
+              window.innerWidth,
+              railWidth,
+              splitterCount,
+            ),
           )
         }
       }}

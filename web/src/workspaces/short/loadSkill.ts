@@ -130,7 +130,9 @@ export function appendLoadableSkillsToPrompt(
 已绑定技能库：《${linkedSkill.title || '未命名技能库'}》
 当前阶段：${stageLabel(stageId)}（${effectiveStageId ?? stageId}）
 
-如需使用下列技能，必须调用工具 load_skill，并传入当前阶段 stage_id 与精确的 skill_name。缺少 front matter 的技能不会出现在此列表中，也不能加载。同一阶段重名技能需重命名后才能加载。
+如需使用下列技能，且本轮上下文中尚未出现「【已加载技能：技能名】」或「【已加载技能内容】」，必须调用工具 load_skill，并传入当前阶段 stage_id 与精确的 skill_name。
+如果用户通过 / 技能快捷机制选择了技能，用户消息会包含上述标记并附带完整技能正文；这表示技能已经加载，本轮禁止再次调用 load_skill 加载同名技能，直接使用已加载正文回答或执行。
+缺少 front matter 的技能不会出现在此列表中，也不能加载。同一阶段重名技能需重命名后才能加载。
 
 | 技能名 | 描述 |
 |---|---|
@@ -146,7 +148,7 @@ export function buildLoadSkillTool(input: {
     name: 'load_skill',
     label: '加载技能',
     description:
-      '加载当前书籍绑定技能库中指定阶段、指定技能名的完整技能内容。只允许加载当前智能体阶段的技能。',
+      '加载当前书籍绑定技能库中指定阶段、指定技能名的完整技能内容。只允许加载当前智能体阶段的技能。仅当当前上下文尚未包含「【已加载技能：...】」或「【已加载技能内容】」时调用；如果用户已通过 / 技能快捷机制注入技能正文，禁止重复调用本工具，直接使用上下文中的技能内容。',
     parameters: Type.Object({
       stage_id: Type.String({
         description: `当前智能体阶段 ID，必须传 ${effectiveStageId ?? input.currentStageId}`,

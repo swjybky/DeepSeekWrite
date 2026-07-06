@@ -1,4 +1,3 @@
-import { getEmbeddedPromptTemplate } from '../prompt/embeddedDefaults'
 import { WORKSPACE_AGENT_IDS } from '../workspaces/short/stageReadAccess'
 
 const PROMPT_TEMPLATE_LS_PREFIX = 'deepseekwrite_prompt_template_override:'
@@ -9,7 +8,6 @@ const LEGACY_QINGGAN_PROMPT_KIND = 'qinggan'
 const SHARED_PROMPT_LS_MIGRATION_MARKER =
   'deepseekwrite_shared_prompt_migration_from_qinggan_v1'
 const PLOT_PROMPT_LS_MERGE_MARKER = 'deepseekwrite_plot_prompt_merge_v1'
-const SCRIPT_PROMPT_LS_SEED_MARKER = 'deepseekwrite_script_prompt_seed_from_short_v1'
 
 export function localPromptLsKey(promptKind: string, stage: string): string {
   return PROMPT_TEMPLATE_LS_PREFIX + `${promptKind}:${stage}`
@@ -62,24 +60,7 @@ export function ensureLocalPlotPromptMerged(): void {
   }
 }
 
-export function ensureLocalScriptPromptSeeded(): void {
-  try {
-    if (localStorage.getItem(SCRIPT_PROMPT_LS_SEED_MARKER)) return
-    ensureLocalSharedPromptMigrated()
-    ensureLocalPlotPromptMerged()
-    for (const agentId of WORKSPACE_AGENT_IDS) {
-      const target = localPromptLsKey(SCRIPT_SHARED_WORKSPACE_PROMPT_KIND, agentId)
-      if (localStorage.getItem(target) != null) continue
-      const shortOverride = localStorage.getItem(
-        localPromptLsKey(SHARED_WORKSPACE_PROMPT_KIND, agentId),
-      )
-      localStorage.setItem(
-        target,
-        shortOverride ?? getEmbeddedPromptTemplate(SHARED_WORKSPACE_PROMPT_KIND, agentId),
-      )
-    }
-    localStorage.setItem(SCRIPT_PROMPT_LS_SEED_MARKER, '1')
-  } catch {
-    /* ignore */
-  }
+export function ensureLocalScriptPromptPrepared(): void {
+  // Legacy entry point kept for callers; script prompts now fall back to
+  // script built-in defaults instead of copying short prompt overrides.
 }

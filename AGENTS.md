@@ -245,7 +245,7 @@ DeepSeekWrite/
   - 创作空间读取优先级：`.data/prompt_overrides/{short,script}/shared/` > `app/prompt_defaults/{short,script}/shared/`。
   - 首次加载会将旧 `.data/prompt_overrides/short/qinggan/` 覆盖复制到共享目录；旧分类目录之后不再参与运行时选择。
   - 旧剧情设计 / 导语设计 / 剧情细化覆盖会合并为新的「剧情」智能体提示词（`plot_design.txt`）。
-  - 剧本提示词首次使用时，会从短篇当前生效提示词复制一份独立覆盖到 `.data/prompt_overrides/script/shared/`。
+  - 剧本提示词与短篇提示词隔离；缺少用户覆盖时直接读取 `app/prompt_defaults/script/shared/` 内置默认模板。
   - 创作空间当前启用的 Agent ID：`character_design`、`plot_design`、`outline`、`expert_draft_coordinator`、`expert_section_writer`。
   - 创作空间提示词支持占位符：`{{BOOK_TITLE}}`、`{{BOOK_GENRE}}`；专家总控与分节写手内部还有其它上下文注入（由前端/工具层处理）。
   - 素材库提示词支持占位符：`{{MATERIAL_TITLE}}`、`{{MATERIAL_TYPE}}`、`{{MATERIAL_GENRE}}`、`{{STAGE_BODY}}`、`{{OTHER_STAGES_EXCERPT}}` 等。
