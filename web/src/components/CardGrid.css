@@ -519,3 +519,104 @@
   border-color: color-mix(in oklab, var(--danger) 35%, var(--border));
   color: var(--danger);
 }
+
+/* ==================== 黑夜风格覆盖：复用现代卡片结构，整体压到黑色系 ==================== */
+:root[data-appearance='night'] .card-grid-empty {
+  letter-spacing: 0;
+}
+
+:root[data-appearance='night'] .card-link {
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: #101116;
+  box-shadow:
+    0 1px 0 rgb(255 255 255 / 5%) inset,
+    0 16px 34px rgb(0 0 0 / 36%);
+}
+
+:root[data-appearance='night'] .card-link::before,
+:root[data-appearance='night'] .card-link::after {
+  display: none;
+}
+
+:root[data-appearance='night'] .card-cover {
+  border-radius: 10px;
+}
+
+:root[data-appearance='night'] .card-cover--classic {
+  display: none;
+}
+
+:root[data-appearance='night'] .card-cover--modern {
+  display: block;
+  filter: brightness(0.5) contrast(1.08) saturate(0.86);
+}
+
+:root[data-appearance='night'] .card-item[data-type='book'] .card-link,
+:root[data-appearance='night'] .card-item[data-type='material'] .card-link,
+:root[data-appearance='night'] .card-item[data-type='skill'] .card-link {
+  background: linear-gradient(180deg, #14161d 0%, #090a0e 100%);
+}
+
+:root[data-appearance='night'] .card-item:hover .card-link {
+  transform: translateY(-3px);
+  border-color: color-mix(in oklab, var(--accent) 42%, var(--border));
+  box-shadow:
+    0 1px 0 rgb(255 255 255 / 6%) inset,
+    0 20px 42px rgb(0 0 0 / 48%);
+}
+
+:root[data-appearance='night'] .card-content {
+  padding: 0.75rem;
+  background: linear-gradient(
+    0deg,
+    rgb(8 9 12 / 96%) 0%,
+    rgb(8 9 12 / 78%) 58%,
+    transparent 100%
+  );
+}
+
+:root[data-appearance='night'] .library-card .card-content {
+  padding: 0.55rem;
+}
+
+:root[data-appearance='night'] .card-item[data-has-cover='true'] .card-content,
+:root[data-appearance='night'] .card-item[data-default-cover='true'] .card-content {
+  background: linear-gradient(
+    0deg,
+    rgb(3 4 7 / 88%) 0%,
+    rgb(3 4 7 / 46%) 62%,
+    transparent 100%
+  );
+}
+
+:root[data-appearance='night'] .card-title {
+  color: var(--ink);
+  text-shadow: none;
+  letter-spacing: 0;
+}
+
+:root[data-appearance='night'] .card-type {
+  border-color: color-mix(in oklab, var(--accent) 24%, var(--border));
+  border-radius: 999px;
+  background: color-mix(in oklab, var(--accent) 12%, #0a0b0f);
+  color: var(--accent-hover);
+  letter-spacing: 0;
+}
+
+:root[data-appearance='night'] .card-path {
+  color: var(--ink-faint);
+}
+
+:root[data-appearance='night'] .card-delete-btn {
+  background: #12141a;
+  border-color: var(--border);
+  color: var(--ink-faint);
+  box-shadow: 0 12px 24px rgb(0 0 0 / 44%);
+}
+
+:root[data-appearance='night'] .card-delete-btn:hover {
+  background: color-mix(in oklab, var(--danger) 16%, #14161d);
+  border-color: color-mix(in oklab, var(--danger) 45%, var(--border));
+  color: var(--danger);
+}

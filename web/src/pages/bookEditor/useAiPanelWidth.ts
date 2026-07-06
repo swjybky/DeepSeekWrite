@@ -5,8 +5,18 @@ import {
   readStoredAiWidth,
 } from './aiPanelLayout'
 
-export function useAiPanelWidth() {
-  const [aiPanelWidth, setAiPanelWidth] = useState(readStoredAiWidth)
+type UseAiPanelWidthOptions = {
+  railWidth?: number
+  splitterCount?: number
+}
+
+export function useAiPanelWidth({
+  railWidth,
+  splitterCount,
+}: UseAiPanelWidthOptions = {}) {
+  const [aiPanelWidth, setAiPanelWidth] = useState(() =>
+    readStoredAiWidth(railWidth, splitterCount),
+  )
 
   useEffect(() => {
     persistAiPanelWidth(aiPanelWidth)
@@ -14,11 +24,14 @@ export function useAiPanelWidth() {
 
   useEffect(() => {
     const onResize = () => {
-      setAiPanelWidth((width) => clampAiPanelWidth(width, window.innerWidth))
+      setAiPanelWidth((width) =>
+        clampAiPanelWidth(width, window.innerWidth, railWidth, splitterCount),
+      )
     }
+    onResize()
     window.addEventListener('resize', onResize)
     return () => window.removeEventListener('resize', onResize)
-  }, [])
+  }, [railWidth, splitterCount])
 
   return [aiPanelWidth, setAiPanelWidth] as const
 }

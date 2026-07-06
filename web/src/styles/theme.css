@@ -73,6 +73,42 @@
   --app-shell-bg: linear-gradient(180deg, #f8fafc 0%, #eef2f7 100%);
 }
 
+:root[data-appearance='night'] {
+  --paper: #050507;
+  --paper-deep: #0a0b0f;
+  --paper-elevated: #111217;
+  --ink: #f4f7fb;
+  --ink-soft: #c7d0dd;
+  --ink-faint: #8490a3;
+  --border: #262b36;
+  --border-strong: #384153;
+  --accent: #60a5fa;
+  --accent-hover: #93c5fd;
+  --accent-soft: color-mix(in oklab, var(--accent) 16%, var(--paper-elevated));
+  --jade: #2dd4bf;
+  --gold: #fbbf24;
+  --danger: #fb7185;
+  --shadow-soft: 0 18px 42px rgb(0 0 0 / 42%);
+  --shadow-panel: 0 1px 0 rgb(255 255 255 / 5%) inset,
+    0 18px 48px rgb(0 0 0 / 38%);
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 10px;
+  --font-display: 'PingFang SC', 'Microsoft YaHei', 'Inter', sans-serif;
+  --font-body: 'PingFang SC', 'Microsoft YaHei', 'Inter', sans-serif;
+  --font-ui: var(--font-body);
+
+  --text: var(--ink-soft);
+  --text-h: var(--ink);
+  --bg: var(--paper);
+  --surface: var(--paper-elevated);
+  --bg-elevated: #111217;
+  --bg-hover: #171a22;
+  --text-primary: var(--ink);
+  --text-secondary: var(--ink-faint);
+  --app-shell-bg: linear-gradient(180deg, #030304 0%, #090a0d 100%);
+}
+
 *,
 *::before,
 *::after {
@@ -110,6 +146,14 @@ h3 {
 :root[data-appearance='modern'] h3,
 :root[data-appearance='modern'] .btn-primary,
 :root[data-appearance='modern'] .btn-secondary {
+  letter-spacing: 0;
+}
+
+:root[data-appearance='night'] h1,
+:root[data-appearance='night'] h2,
+:root[data-appearance='night'] h3,
+:root[data-appearance='night'] .btn-primary,
+:root[data-appearance='night'] .btn-secondary {
   letter-spacing: 0;
 }
 

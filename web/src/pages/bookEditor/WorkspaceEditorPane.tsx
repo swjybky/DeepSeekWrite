@@ -28,6 +28,7 @@ type ExpertDraftEditorProps = {
   textHistory: TextHistoryController
   historyPrefix: string
   onTextBlur: () => void
+  onCollapseEditor: () => void
 }
 
 type Props = {
@@ -59,6 +60,7 @@ type Props = {
   bookId: string
   textHistory: TextHistoryController
   onTextBlur: () => void
+  onCollapseEditor: () => void
 }
 
 function StageCharCount({ text }: { text: string }) {
@@ -77,6 +79,37 @@ function StageCharCount({ text }: { text: string }) {
         {counts.total.toLocaleString('zh-CN')} 字符
       </span>
     </span>
+  )
+}
+
+function WorkspaceEditorCollapseButton({ onClick }: { onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      className="workspace-editor-collapse-button"
+      aria-label="收起编辑区"
+      title="收起编辑区"
+      onClick={onClick}
+    >
+      <span className="workspace-editor-collapse-icon" aria-hidden />
+    </button>
+  )
+}
+
+function StageHeadingActions({
+  text,
+  onCollapseEditor,
+}: {
+  text: string
+  onCollapseEditor?: () => void
+}) {
+  return (
+    <div className="workspace-stage-heading-actions">
+      <StageCharCount text={text} />
+      {onCollapseEditor ? (
+        <WorkspaceEditorCollapseButton onClick={onCollapseEditor} />
+      ) : null}
+    </div>
   )
 }
 
@@ -103,6 +136,7 @@ export function WorkspaceEditorPane({
   bookId,
   textHistory,
   onTextBlur,
+  onCollapseEditor,
 }: Props) {
   const { mode: textDisplayMode } = useTextDisplay()
   const [mdEditingMap, setMdEditingMap] = useState<Record<string, boolean>>({})
@@ -142,6 +176,7 @@ export function WorkspaceEditorPane({
           textHistory={textHistory}
           historyPrefix={`workspace:${bookId}`}
           onTextBlur={onTextBlur}
+          onCollapseEditor={onCollapseEditor}
         />
       ) : activeStage === PLOT_STAGE_ID ? (
         <div
@@ -156,7 +191,7 @@ export function WorkspaceEditorPane({
                 (stage) => stage.id === activePlotChildStage,
               )
             : activePlotChildStages
-          ).map((plotStage) => {
+          ).map((plotStage, index) => {
             const body = stages[plotStage.id] ?? ''
             return (
               <section
@@ -178,7 +213,12 @@ export function WorkspaceEditorPane({
                     disabled={Boolean(streamingStages[plotStage.id])}
                   />
                   {renderMdToggle(getMdKey(plotStage.id))}
-                  <StageCharCount text={body} />
+                  <StageHeadingActions
+                    text={body}
+                    onCollapseEditor={
+                      index === 0 ? onCollapseEditor : undefined
+                    }
+                  />
                 </div>
                 <MarkdownTextEditor
                   key={`md-${plotStage.id}`}
@@ -236,7 +276,10 @@ export function WorkspaceEditorPane({
               disabled={Boolean(streamingStages[activeContentStage])}
             />
             {renderMdToggle(singleStageKey)}
-            <StageCharCount text={stageBody} />
+            <StageHeadingActions
+              text={stageBody}
+              onCollapseEditor={onCollapseEditor}
+            />
           </div>
           <MarkdownTextEditor
             key={`md-${activeContentStage}`}

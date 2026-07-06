@@ -114,7 +114,7 @@ function applyBuiltinDefaults(settings: AiModelSettings): AiModelSettings {
   return result
 }
 
-export type AppearanceStyle = 'classic' | 'modern'
+export type AppearanceStyle = 'classic' | 'modern' | 'night'
 
 function trimString(value: unknown): string {
   return typeof value === 'string' ? value.trim() : ''

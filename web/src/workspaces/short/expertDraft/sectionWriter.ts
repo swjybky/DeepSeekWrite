@@ -1,5 +1,9 @@
 import { Agent } from '@earendil-works/pi-agent-core'
-import type { AgentMessage, AgentTool } from '@earendil-works/pi-agent-core'
+import type {
+  AgentMessage,
+  AgentTool,
+  ThinkingLevel,
+} from '@earendil-works/pi-agent-core'
 import type { Api, Model } from '@earendil-works/pi-ai'
 import { ApiKeyPromptDialog } from '@earendil-works/pi-web-ui'
 
@@ -73,6 +77,8 @@ export type RunExpertDraftSectionWriterOptions = {
   userMemories?: MemoryEntry[]
   /** 用户在启动分节写作时补充的整体写作倾向 */
   userWritingPrompt?: string
+  model?: Model<Api>
+  thinkingLevel?: ThinkingLevel
   /** 分节写手智能体的全局可读配置 */
   readAccess: WorkspaceAgentReadAccessEntry
   getRenderedExpertDraftSectionContent?: GetExpertDraftSectionContent
@@ -280,7 +286,7 @@ export async function runExpertDraftSectionWriter(
 ): Promise<void> {
   try {
     await ensurePiAppStorage()
-    const model = await resolvePreferredWorkspaceChatModel()
+    const model = opts.model ?? await resolvePreferredWorkspaceChatModel()
     const hasKey = await ensureModelApiKey(model)
     if (!hasKey) {
       opts.onError?.('分节写作未启动：缺少当前模型 API Key。')
@@ -372,7 +378,8 @@ export async function runExpertDraftSectionWriter(
           initialState: {
             systemPrompt,
             model,
-            thinkingLevel: getPreferredWorkspaceThinkingLevel(),
+            thinkingLevel:
+              opts.thinkingLevel ?? getPreferredWorkspaceThinkingLevel(),
             messages: [],
             tools,
           },

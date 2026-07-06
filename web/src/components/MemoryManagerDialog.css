@@ -348,6 +348,15 @@
   letter-spacing: 0;
 }
 
+:root[data-appearance='night'] .memory-dialog-backdrop {
+  background: rgb(0 0 0 / 64%);
+}
+
+:root[data-appearance='night'] .memory-dialog-head h2,
+:root[data-appearance='night'] .memory-dialog-empty {
+  letter-spacing: 0;
+}
+
 @media (max-width: 640px) {
   .memory-dialog-backdrop {
     align-items: stretch;

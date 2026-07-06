@@ -61,6 +61,7 @@ import {
   startBackgroundUpdate,
   useBackgroundUpdate,
 } from '../features/update/backgroundUpdate'
+import { testAiTextModelConnection } from '../pi/testAiModelConnection'
 import { refreshPreferredWorkspaceChatModel } from '../pi/workspaceChatPreferences'
 import { useHomeStore } from '../stores/homeStore'
 import { TEXT_DISPLAY_MODE_LABELS, useTextDisplay } from '../textDisplay'
@@ -140,6 +141,34 @@ type ModelEditorState = {
   error: string | null
 }
 
+type ModelConnectionTestState = {
+  status: 'testing' | 'success' | 'error'
+  message: string
+}
+
+function ModelConnectionTestLabel({
+  result,
+}: {
+  result?: ModelConnectionTestState
+}) {
+  if (!result) return null
+  const text =
+    result.status === 'testing'
+      ? '测试中…'
+      : result.status === 'success'
+        ? '成功'
+        : result.message || '联通失败'
+  return (
+    <span
+      className={`model-test-result model-test-result--${result.status}`}
+      role="status"
+      title={text}
+    >
+      {text}
+    </span>
+  )
+}
+
 const OFFICIAL_TEXT_MODEL_PRESETS: OfficialTextModelPreset[] = [
   {
     id: 'deepseekflash',
@@ -203,6 +232,9 @@ function ModelConfigDialog({
   const [modelPickerOpen, setModelPickerOpen] = useState(false)
   const [modelEditor, setModelEditor] = useState<ModelEditorState | null>(null)
   const [refreshing, setRefreshing] = useState(false)
+  const [modelTestResults, setModelTestResults] = useState<
+    Record<string, ModelConnectionTestState>
+  >({})
   const draftDirtyRef = useRef(false)
   const modelPickerOpenRef = useRef(false)
   const modelEditorOpenRef = useRef(false)
@@ -235,6 +267,11 @@ function ModelConfigDialog({
   const closeModelEditor = useCallback(() => {
     modelEditorOpenRef.current = false
     setModelEditor(null)
+    setModelTestResults((prev) => {
+      if (!prev.editor) return prev
+      const { editor: _removed, ...rest } = prev
+      return rest
+    })
   }, [])
 
   const handleRefresh = useCallback(async (options?: ModelRefreshOptions) => {
@@ -256,6 +293,7 @@ function ModelConfigDialog({
         return
       }
       setDraft(cloneAiSettings(settings))
+      setModelTestResults({})
       draftDirtyRef.current = false
     } catch (e) {
       setError(e instanceof Error ? e.message : '刷新模型配置失败')
@@ -296,6 +334,12 @@ function ModelConfigDialog({
   const updateModel = useCallback(
     (index: number, patch: Partial<AiModelConfig>) => {
       markDraftDirty()
+      setModelTestResults((prev) => {
+        const key = `model-${index}`
+        if (!prev[key]) return prev
+        const { [key]: _removed, ...rest } = prev
+        return rest
+      })
       setDraft((prev) => {
         const previous = prev.text.models[index]
         const models = prev.text.models.map((model, i) =>
@@ -349,6 +393,11 @@ function ModelConfigDialog({
         preset,
         error: null,
       })
+      setModelTestResults((prev) => {
+        if (!prev.editor) return prev
+        const { editor: _removed, ...rest } = prev
+        return rest
+      })
       setModelPickerOpen(false)
       setError(null)
       setNotice(null)
@@ -366,7 +415,30 @@ function ModelConfigDialog({
           }
         : prev,
     )
+    setModelTestResults((prev) => {
+      if (!prev.editor) return prev
+      const { editor: _removed, ...rest } = prev
+      return rest
+    })
   }, [])
+
+  const testModelConnection = useCallback(
+    async (key: string, model: AiModelConfig) => {
+      setModelTestResults((prev) => ({
+        ...prev,
+        [key]: { status: 'testing', message: '测试中…' },
+      }))
+      const result = await testAiTextModelConnection(model)
+      setModelTestResults((prev) => ({
+        ...prev,
+        [key]: {
+          status: result.ok ? 'success' : 'error',
+          message: result.ok ? '成功' : result.message,
+        },
+      }))
+    },
+    [],
+  )
 
   const submitModelEditor = useCallback(
     (event: React.FormEvent<HTMLFormElement>) => {
@@ -439,6 +511,7 @@ function ModelConfigDialog({
 
   const removeModel = useCallback((index: number) => {
     markDraftDirty()
+    setModelTestResults({})
     setDraft((prev) => {
       const removed = prev.text.models[index]
       const models = prev.text.models.filter((_, i) => i !== index)
@@ -605,6 +678,9 @@ function ModelConfigDialog({
                   {draft.text.models.map((model, index) => {
                     const builtinFreeModel = isBuiltinFreeTextModel(model)
                     const officialPreset = getOfficialTextModelPreset(model)
+                    const testKey = `model-${index}`
+                    const testResult = modelTestResults[testKey]
+                    const testingConnection = testResult?.status === 'testing'
                     return (
                       <article
                         className={
@@ -630,18 +706,29 @@ function ModelConfigDialog({
                             />
                             默认
                           </label>
-                          {builtinFreeModel ? (
-                            <span className="model-config-lock-tag">内置</span>
-                          ) : (
+                          <div className="model-config-item-actions">
+                            <ModelConnectionTestLabel result={testResult} />
                             <button
                               type="button"
                               className="btn-secondary btn-small"
-                              disabled={saving}
-                              onClick={() => removeModel(index)}
+                              disabled={saving || testingConnection}
+                              onClick={() => void testModelConnection(testKey, model)}
                             >
-                              删除
+                              {testingConnection ? '测试中…' : '测试联通'}
                             </button>
-                          )}
+                            {builtinFreeModel ? (
+                              <span className="model-config-lock-tag">内置</span>
+                            ) : (
+                              <button
+                                type="button"
+                                className="btn-secondary btn-small"
+                                disabled={saving}
+                                onClick={() => removeModel(index)}
+                              >
+                                删除
+                              </button>
+                            )}
+                          </div>
                         </div>
 
                         {builtinFreeModel ? (
@@ -1072,7 +1159,18 @@ function ModelConfigDialog({
                   {modelEditor.error && <p className="form-error">{modelEditor.error}</p>}
                 </div>
 
-                <footer className="model-config-foot">
+                <footer className="model-config-foot model-editor-foot">
+                  <ModelConnectionTestLabel result={modelTestResults.editor} />
+                  <button
+                    type="button"
+                    className="btn-secondary"
+                    disabled={modelTestResults.editor?.status === 'testing'}
+                    onClick={() => void testModelConnection('editor', modelEditor.draft)}
+                  >
+                    {modelTestResults.editor?.status === 'testing'
+                      ? '测试中…'
+                      : '测试联通'}
+                  </button>
                   <button
                     type="button"
                     className="btn-secondary"
@@ -1108,6 +1206,7 @@ const APPEARANCE_OPTIONS: Array<{
 }> = [
   { id: 'classic', label: APPEARANCE_STYLE_LABELS.classic, tone: '宣纸暖色' },
   { id: 'modern', label: APPEARANCE_STYLE_LABELS.modern, tone: '白色清爽' },
+  { id: 'night', label: APPEARANCE_STYLE_LABELS.night, tone: '黑色沉浸' },
 ]
 
 const TEXT_DISPLAY_OPTIONS: Array<{ id: TextDisplayMode; description: string }> = [

@@ -1032,6 +1032,39 @@
   height: 1rem;
 }
 
+.model-config-item-actions {
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.5rem;
+}
+
+.model-test-result {
+  min-width: 0;
+  max-width: min(18rem, 42vw);
+  overflow: hidden;
+  color: var(--ink-faint);
+  font-size: 0.82rem;
+  line-height: 1.2;
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.model-test-result--success {
+  color: #167a3a;
+  font-weight: 700;
+}
+
+.model-test-result--error {
+  color: var(--danger);
+}
+
+.model-test-result--testing {
+  color: var(--ink-faint);
+}
+
 .model-config-list {
   display: flex;
   flex-direction: column;
@@ -1177,6 +1210,10 @@
   justify-content: flex-end;
   border-top: 1px solid var(--border);
   border-bottom: none;
+}
+
+.model-editor-foot {
+  flex-wrap: wrap;
 }
 
 .model-picker-backdrop {
@@ -1418,6 +1455,28 @@
   box-shadow: 0 1px 2px rgb(15 23 42 / 4%);
 }
 
+:root[data-appearance='night'] .home-title,
+:root[data-appearance='night'] .home-tagline,
+:root[data-appearance='night'] .home-config-trigger,
+:root[data-appearance='night'] .home-config-menu-item span,
+:root[data-appearance='night'] .card-header-title,
+:root[data-appearance='night'] .field-label,
+:root[data-appearance='night'] .model-config-head h2,
+:root[data-appearance='night'] .style-config-head h2 {
+  letter-spacing: 0;
+}
+
+:root[data-appearance='night'] .model-config-backdrop,
+:root[data-appearance='night'] .model-editor-backdrop,
+:root[data-appearance='night'] .style-config-backdrop,
+:root[data-appearance='night'] .update-dialog-backdrop {
+  background: rgb(0 0 0 / 58%);
+}
+
+:root[data-appearance='night'] .style-config-option {
+  box-shadow: 0 1px 0 rgb(255 255 255 / 4%) inset;
+}
+
 /* —— 文字显示配置弹窗 —— */
 .text-display-config-backdrop {
   position: fixed;
@@ -1540,6 +1599,14 @@
 
 :root[data-appearance='modern'] .text-display-config-option {
   box-shadow: 0 1px 2px rgb(15 23 42 / 4%);
+}
+
+:root[data-appearance='night'] .text-display-config-backdrop {
+  background: rgb(0 0 0 / 58%);
+}
+
+:root[data-appearance='night'] .text-display-config-option {
+  box-shadow: 0 1px 0 rgb(255 255 255 / 4%) inset;
 }
 
 /* 导出弹窗 */
@@ -1802,4 +1869,16 @@
   .model-config-official-fields {
     grid-template-columns: 1fr;
   }
+}
+
+:root[data-appearance='night'] :is(
+  .create-dialog-backdrop,
+  .model-config-backdrop,
+  .model-picker-backdrop,
+  .model-editor-backdrop,
+  .style-config-backdrop,
+  .text-display-config-backdrop,
+  .update-dialog-backdrop
+) {
+  background: rgb(0 0 0 / 64%);
 }

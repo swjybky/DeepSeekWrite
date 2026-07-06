@@ -210,6 +210,8 @@ export function useExpertDraftRuntime({
         userWritingPrompt?: string
         bookMemories?: MemoryEntry[]
         userMemories?: MemoryEntry[]
+        model?: RunExpertDraftSectionWriterOptions['model']
+        thinkingLevel?: RunExpertDraftSectionWriterOptions['thinkingLevel']
         callbacks?: Pick<
           RunExpertDraftSectionWriterOptions,
           'onSectionAgentStart' | 'onRunFinish'
@@ -260,6 +262,8 @@ export function useExpertDraftRuntime({
         bookMemories: options?.bookMemories ?? session.book.memories ?? [],
         userMemories: options?.userMemories ?? [],
         userWritingPrompt: options?.userWritingPrompt,
+        model: options?.model,
+        thinkingLevel: options?.thinkingLevel,
         readAccess: resolveReadAccessForBook(
           session.book,
           workspaceAgentReadAccess,

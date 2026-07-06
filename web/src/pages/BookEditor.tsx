@@ -53,6 +53,7 @@ import {
   type PlotChildStageId,
 } from './bookEditor/workspaceTypes'
 import { useAiPanelWidth } from './bookEditor/useAiPanelWidth'
+import { useWorkspaceRailWidth } from './bookEditor/useWorkspaceRailWidth'
 import { useLibrarySelectors } from './bookEditor/useLibrarySelectors'
 import { useBookCoverRuntime } from './bookEditor/useBookCoverRuntime'
 import { useWorkspaceChatEpochs } from './bookEditor/useWorkspaceChatEpochs'
@@ -70,6 +71,7 @@ import { WorkspaceAiPanel } from './bookEditor/WorkspaceAiPanel'
 import { WorkspaceCoverDialogs } from './bookEditor/WorkspaceCoverDialogs'
 import { WorkspaceEditorPane } from './bookEditor/WorkspaceEditorPane'
 import { WorkspaceRailPanel } from './bookEditor/WorkspaceRailPanel'
+import { WorkspaceRailSplitter } from './bookEditor/WorkspaceRailSplitter'
 import { WorkspaceSplitter } from './bookEditor/WorkspaceSplitter'
 import {
   combineExpertDraftSections,
@@ -101,7 +103,12 @@ export function BookEditor() {
   const [saving, setSaving] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const [aiPanelWidth, setAiPanelWidth] = useAiPanelWidth()
+  const [workspaceRailWidth, setWorkspaceRailWidth] = useWorkspaceRailWidth()
+  const [aiPanelWidth, setAiPanelWidth] = useAiPanelWidth({
+    railWidth: workspaceRailWidth,
+    splitterCount: 2,
+  })
+  const [editorCollapsed, setEditorCollapsed] = useState(false)
   /** 当前阶段 AI 侧栏「对话轮次」：递增后重建 Pi 会话并清空该阶段对话历史 */
   const [linkedMaterial, setLinkedMaterial] = useState<Material | null>(null)
   const [linkedMaterialsByKind, setLinkedMaterialsByKind] = useState<
@@ -948,6 +955,15 @@ export function BookEditor() {
     handleBackToShelf()
   }, [flushAllWorkspaceBooks, handleBackToShelf])
 
+  const handleCollapseEditor = useCallback(() => {
+    setEditorCollapsed(true)
+    void flushActiveWorkspaceBook()
+  }, [flushActiveWorkspaceBook])
+
+  const handleExpandEditor = useCallback(() => {
+    setEditorCollapsed(false)
+  }, [])
+
   const applyToStageEditorWithAutoSave = useCallback(
     (bookId: string, stageId: StageId, payload: Parameters<typeof applyToStageEditorForBook>[2]) => {
       applyToStageEditorForBook(bookId, stageId, payload)
@@ -1104,13 +1120,16 @@ export function BookEditor() {
       ) : null}
 
       <div
-        className={
-          bookTransitioning
-            ? 'workspace-grid workspace-grid--transitioning'
-            : 'workspace-grid'
-        }
+        className={[
+          'workspace-grid',
+          bookTransitioning ? 'workspace-grid--transitioning' : '',
+          editorCollapsed ? 'workspace-grid--editor-collapsed' : '',
+        ]
+          .filter(Boolean)
+          .join(' ')}
         style={
           {
+            '--workspace-rail-width': `${workspaceRailWidth}px`,
             '--workspace-ai-width': `${aiPanelWidth}px`,
           } as CSSProperties
         }
@@ -1168,6 +1187,11 @@ export function BookEditor() {
           onLongDraftChapterCreate={handleLongDraftChapterCreate}
         />
 
+        <WorkspaceRailSplitter
+          railWidth={workspaceRailWidth}
+          setRailWidth={setWorkspaceRailWidth}
+        />
+
         <WorkspaceAiPanel
           book={book}
           railStages={railStages}
@@ -1199,37 +1223,46 @@ export function BookEditor() {
           }
           bumpActiveExpertChatEpoch={bumpActiveExpertChatEpoch}
           bumpActiveStageChatEpoch={bumpActiveStageChatEpoch}
+          editorCollapsed={editorCollapsed}
+          onExpandEditor={handleExpandEditor}
         />
 
-        <WorkspaceSplitter
-          aiPanelWidth={aiPanelWidth}
-          setAiPanelWidth={setAiPanelWidth}
-        />
+        {!editorCollapsed ? (
+          <>
+            <WorkspaceSplitter
+              aiPanelWidth={aiPanelWidth}
+              setAiPanelWidth={setAiPanelWidth}
+              railWidth={workspaceRailWidth}
+              splitterCount={2}
+            />
 
-        <WorkspaceEditorPane
-          expertDraftActive={expertDraftActive}
-          ActiveExpertDraftEditor={ActiveExpertDraftEditor}
-          expertDraft={expertDraft}
-          stageBody={stageBody}
-          streamingStages={streamingStages}
-          onStageBodyChange={handleStageBodyChange}
-          updateExpertDraft={updateExpertDraft}
-          onSectionTextareaRef={handleExpertDraftSectionTextareaRef}
-          stopExpertWriting={stopExpertWriting}
-          resetExpertDraft={resetExpertDraft}
-          exportExpertDraft={handleExportExpertDraftDocx}
-          activeStage={activeStage}
-          activeContentStage={activeContentStage}
-          activePlotChildStage={activePlotChildStage}
-          activePlotChildStages={activePlotChildStages}
-          stages={stages}
-          railStages={railStages}
-          textareaRef={textareaRef}
-          textareaRefsRef={textareaRefsRef}
-          bookId={book.id}
-          textHistory={textHistory}
-          onTextBlur={() => void flushActiveWorkspaceBook()}
-        />
+            <WorkspaceEditorPane
+              expertDraftActive={expertDraftActive}
+              ActiveExpertDraftEditor={ActiveExpertDraftEditor}
+              expertDraft={expertDraft}
+              stageBody={stageBody}
+              streamingStages={streamingStages}
+              onStageBodyChange={handleStageBodyChange}
+              updateExpertDraft={updateExpertDraft}
+              onSectionTextareaRef={handleExpertDraftSectionTextareaRef}
+              stopExpertWriting={stopExpertWriting}
+              resetExpertDraft={resetExpertDraft}
+              exportExpertDraft={handleExportExpertDraftDocx}
+              activeStage={activeStage}
+              activeContentStage={activeContentStage}
+              activePlotChildStage={activePlotChildStage}
+              activePlotChildStages={activePlotChildStages}
+              stages={stages}
+              railStages={railStages}
+              textareaRef={textareaRef}
+              textareaRefsRef={textareaRefsRef}
+              bookId={book.id}
+              textHistory={textHistory}
+              onTextBlur={() => void flushActiveWorkspaceBook()}
+              onCollapseEditor={handleCollapseEditor}
+            />
+          </>
+        ) : null}
 
         {materialSelectorOpen ? (
           <MaterialSelectorDialog

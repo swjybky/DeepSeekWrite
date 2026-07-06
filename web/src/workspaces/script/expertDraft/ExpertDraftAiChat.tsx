@@ -104,6 +104,8 @@ type Props = {
     sectionIds: string[],
     options?: {
       userWritingPrompt?: string
+      model?: RunExpertDraftSectionWriterOptions['model']
+      thinkingLevel?: RunExpertDraftSectionWriterOptions['thinkingLevel']
       callbacks?: Pick<
         RunExpertDraftSectionWriterOptions,
         'onSectionAgentStart' | 'onRunFinish'
@@ -171,6 +173,10 @@ function buildCoordinatorToolsInput(
   callbacks: {
     watchWriterAgent: RunExpertDraftSectionWriterOptions['onSectionAgentStart']
     finishWriterPreview: RunExpertDraftSectionWriterOptions['onRunFinish']
+    resolveWriterRunState: () => Pick<
+      RunExpertDraftSectionWriterOptions,
+      'model' | 'thinkingLevel'
+    >
   },
 ) {
   const props = getProps()
@@ -200,6 +206,7 @@ function buildCoordinatorToolsInput(
     }) =>
       getProps().startWriting(sectionIds, {
         userWritingPrompt,
+        ...callbacks.resolveWriterRunState(),
         callbacks: {
           onSectionAgentStart: callbacks.watchWriterAgent,
           onRunFinish: callbacks.finishWriterPreview,
@@ -542,6 +549,10 @@ export function ExpertDraftAiChat(props: Props) {
         buildCoordinatorToolsInput(() => propsLatestRef.current, {
           watchWriterAgent,
           finishWriterPreview,
+          resolveWriterRunState: () => ({
+            model: coordinatorAgentRef.current?.state.model,
+            thinkingLevel: coordinatorAgentRef.current?.state.thinkingLevel,
+          }),
         }),
       )
 
@@ -875,6 +886,10 @@ export function ExpertDraftAiChat(props: Props) {
           buildCoordinatorToolsInput(() => propsLatestRef.current, {
             watchWriterAgent,
             finishWriterPreview,
+            resolveWriterRunState: () => ({
+              model: coordinatorAgentRef.current?.state.model,
+              thinkingLevel: coordinatorAgentRef.current?.state.thinkingLevel,
+            }),
           }),
         ),
       )

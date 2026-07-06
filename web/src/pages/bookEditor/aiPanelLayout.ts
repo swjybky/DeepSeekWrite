@@ -3,6 +3,7 @@ const AI_PANEL_MIN = 240
 /** 超宽屏下的绝对上限，避免 AI 栏占满整屏 */
 const AI_PANEL_HARD_MAX = 1000
 const WORKSPACE_SPLITTER_W = 6
+const WORKSPACE_DEFAULT_SPLITTER_COUNT = 1
 /** 三栏份额：左 : 中 : 右（AI）= 18 : 36 : 36，可分配宽 = 视口宽 - 分割条 */
 const WORKSPACE_COL_L = 18
 const WORKSPACE_COL_R = 36
@@ -28,32 +29,44 @@ function defaultAiPanelWidthPx(viewportWidth: number): number {
   )
 }
 
-function maxAiWidthForViewport(viewportWidth: number): number {
-  const rail = approxRailWidthPx(viewportWidth)
+function maxAiWidthForViewport(
+  viewportWidth: number,
+  railWidth = approxRailWidthPx(viewportWidth),
+  splitterCount = WORKSPACE_DEFAULT_SPLITTER_COUNT,
+): number {
+  const splitters = WORKSPACE_SPLITTER_W * Math.max(0, splitterCount)
   const raw =
-    viewportWidth - rail - WORKSPACE_SPLITTER_W - EDITOR_MIN_FOR_LAYOUT
+    viewportWidth - railWidth - splitters - EDITOR_MIN_FOR_LAYOUT
   return Math.min(
     AI_PANEL_HARD_MAX,
     Math.max(AI_PANEL_MIN, Math.floor(raw)),
   )
 }
 
-export function clampAiPanelWidth(width: number, viewportWidth: number): number {
-  const cap = maxAiWidthForViewport(viewportWidth)
+export function clampAiPanelWidth(
+  width: number,
+  viewportWidth: number,
+  railWidth?: number,
+  splitterCount = WORKSPACE_DEFAULT_SPLITTER_COUNT,
+): number {
+  const cap = maxAiWidthForViewport(viewportWidth, railWidth, splitterCount)
   return Math.min(cap, Math.max(AI_PANEL_MIN, width))
 }
 
-export function readStoredAiWidth(): number {
+export function readStoredAiWidth(
+  railWidth?: number,
+  splitterCount = WORKSPACE_DEFAULT_SPLITTER_COUNT,
+): number {
   const vw =
     typeof window !== 'undefined' ? window.innerWidth : 1280
   try {
     const raw = localStorage.getItem(AI_PANEL_WIDTH_KEY)
     const n = raw ? Number.parseInt(raw, 10) : NaN
     if (!Number.isFinite(n))
-      return clampAiPanelWidth(defaultAiPanelWidthPx(vw), vw)
-    return clampAiPanelWidth(n, vw)
+      return clampAiPanelWidth(defaultAiPanelWidthPx(vw), vw, railWidth, splitterCount)
+    return clampAiPanelWidth(n, vw, railWidth, splitterCount)
   } catch {
-    return clampAiPanelWidth(defaultAiPanelWidthPx(vw), vw)
+    return clampAiPanelWidth(defaultAiPanelWidthPx(vw), vw, railWidth, splitterCount)
   }
 }
 

@@ -45,7 +45,7 @@ export function setStoredWorkspaceRoot(path: string | null): void {
 }
 
 export function normalizeAppearanceStyle(raw: unknown): AppearanceStyle {
-  return raw === 'modern' ? 'modern' : 'classic'
+  return raw === 'modern' || raw === 'night' ? raw : 'classic'
 }
 
 export function getStoredAppearanceStyle(): AppearanceStyle {

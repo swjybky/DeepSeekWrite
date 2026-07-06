@@ -52,6 +52,8 @@ type StartExpertWriting = (
     userWritingPrompt?: string
     bookMemories?: MemoryEntry[]
     userMemories?: MemoryEntry[]
+    model?: RunExpertDraftSectionWriterOptions['model']
+    thinkingLevel?: RunExpertDraftSectionWriterOptions['thinkingLevel']
     callbacks?: Pick<
       RunExpertDraftSectionWriterOptions,
       'onSectionAgentStart' | 'onRunFinish'
@@ -163,6 +165,8 @@ type Props = {
   onExpertDraftStageBodyChange: (body: string) => void
   bumpActiveExpertChatEpoch: () => void
   bumpActiveStageChatEpoch: (stageId: StageId) => void
+  editorCollapsed?: boolean
+  onExpandEditor?: () => void
 }
 
 export function WorkspaceAiPanel({
@@ -192,6 +196,8 @@ export function WorkspaceAiPanel({
   onExpertDraftStageBodyChange,
   bumpActiveExpertChatEpoch,
   bumpActiveStageChatEpoch,
+  editorCollapsed = false,
+  onExpandEditor,
 }: Props) {
   const historyPortalTargetId = useId()
   const activeExpertSectionForHeader = expertDraftActive
@@ -257,6 +263,20 @@ export function WorkspaceAiPanel({
           >
             新建对话
           </button>
+          {editorCollapsed && onExpandEditor ? (
+            <button
+              type="button"
+              className="workspace-ai-editor-restore"
+              aria-label="展开编辑区"
+              title="展开编辑区"
+              onClick={onExpandEditor}
+            >
+              <span
+                className="workspace-editor-collapse-icon workspace-editor-collapse-icon--expand"
+                aria-hidden
+              />
+            </button>
+          ) : null}
         </div>
       </div>
       <div className="workspace-ai-hint muted">

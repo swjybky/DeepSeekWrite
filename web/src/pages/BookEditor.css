@@ -297,8 +297,8 @@ button.back-link:hover {
 }
 
 .workspace-rail {
-  flex: 0 0 13.5rem;
-  width: 13.5rem;
+  flex: 0 0 var(--workspace-rail-width, 13.5rem);
+  width: var(--workspace-rail-width, 13.5rem);
   min-width: 0;
   border-right: 1px solid var(--border);
   background: color-mix(in oklab, var(--paper-elevated) 88%, var(--paper-deep));
@@ -390,6 +390,66 @@ button.back-link:hover {
 
 .workspace-char-count-detail {
   font-weight: 400;
+}
+
+.workspace-stage-heading-actions {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.38rem;
+  min-width: 0;
+}
+
+.workspace-editor-collapse-button,
+.workspace-ai-editor-restore {
+  flex: 0 0 auto;
+  width: 1.2rem;
+  height: 1.2rem;
+  padding: 0;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--ink-faint);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.workspace-editor-collapse-button:hover,
+.workspace-ai-editor-restore:hover {
+  background: transparent;
+  color: var(--ink);
+}
+
+.workspace-editor-collapse-button:focus-visible,
+.workspace-ai-editor-restore:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.workspace-editor-collapse-icon {
+  position: relative;
+  width: 0.82rem;
+  height: 0.82rem;
+  border: 1.5px solid currentColor;
+  border-radius: 4px;
+}
+
+.workspace-editor-collapse-icon::after {
+  content: '';
+  position: absolute;
+  top: 0.16rem;
+  right: 0.16rem;
+  bottom: 0.16rem;
+  width: 1.5px;
+  border-radius: 999px;
+  background: currentColor;
+}
+
+.workspace-editor-collapse-icon--expand::after {
+  right: auto;
+  left: 0.16rem;
 }
 
 .btn-export-docx {
@@ -514,6 +574,16 @@ button.back-link:hover {
 
 .workspace-ai--center {
   box-shadow: inset -1px 0 0 rgb(255 255 255 / 35%);
+}
+
+.workspace-grid--editor-collapsed .workspace-ai {
+  flex: 1 1 auto;
+  width: auto;
+  border-right: none;
+}
+
+.workspace-grid--editor-collapsed .workspace-ai--center {
+  box-shadow: none;
 }
 
 .editor-header--agent {
@@ -1477,6 +1547,13 @@ button.back-link:hover {
   max-width: 100%;
 }
 
+.workspace-grid--editor-collapsed .workspace-ai agent-interface .max-w-3xl,
+.workspace-grid--editor-collapsed .workspace-ai message-editor > .bg-card {
+  max-width: min(100%, 58rem);
+  margin-left: auto;
+  margin-right: auto;
+}
+
 .workspace-ai message-list,
 .workspace-ai streaming-message-container,
 .workspace-ai assistant-message,
@@ -1608,6 +1685,14 @@ button.back-link:hover {
   display: inline-block;
 }
 
+:root[data-appearance='night'] .workspace-ai .deepseekwrite-tool-glyph--classic {
+  display: none;
+}
+
+:root[data-appearance='night'] .workspace-ai .deepseekwrite-tool-glyph--modern {
+  display: inline-block;
+}
+
 .workspace-ai .deepseekwrite-tool-header,
 .workspace-ai .deepseekwrite-tool-header-btn {
   color: var(--ink-faint);
@@ -1632,6 +1717,11 @@ button.back-link:hover {
 
 :root[data-appearance='modern'] .workspace-ai .deepseekwrite-tool-icon--complete,
 :root[data-appearance='modern'] .workspace-ai .deepseekwrite-tool-icon--progress {
+  color: var(--accent);
+}
+
+:root[data-appearance='night'] .workspace-ai .deepseekwrite-tool-icon--complete,
+:root[data-appearance='night'] .workspace-ai .deepseekwrite-tool-icon--progress {
   color: var(--accent);
 }
 
@@ -2188,6 +2278,12 @@ button.back-link:hover {
     overflow: auto;
     border-left: none;
     border-top: 1px solid var(--border);
+  }
+
+  .workspace-grid--editor-collapsed .workspace-ai {
+    flex: 1 1 auto;
+    max-height: none;
+    min-height: 50vh;
   }
 
   .workspace-rail-list {

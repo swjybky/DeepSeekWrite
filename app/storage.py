@@ -57,7 +57,7 @@ ISO_FMT = "%Y-%m-%dT%H:%M:%SZ"
 _WIN_INVALID = '<>:"/\\|?*\n\r\t'
 AI_MODEL_CONFIG_PREF_KEY = "ai_model_config"
 APPEARANCE_STYLE_PREF_KEY = "appearance_style"
-APPEARANCE_STYLES = {"classic", "modern"}
+APPEARANCE_STYLES = {"classic", "modern", "night"}
 TEXT_DISPLAY_MODE_PREF_KEY = "text_display_mode"
 TEXT_DISPLAY_MODES = {"text", "markdown"}
 

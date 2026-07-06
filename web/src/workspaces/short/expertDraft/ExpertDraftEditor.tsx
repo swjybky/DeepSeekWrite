@@ -28,6 +28,7 @@ type Props = {
   textHistory: TextHistoryController
   historyPrefix: string
   onTextBlur: () => void
+  onCollapseEditor?: () => void
 }
 
 function textCounts(text: string): { total: number; nonSpace: number } {
@@ -86,6 +87,7 @@ export function ExpertDraftEditor({
   textHistory,
   historyPrefix,
   onTextBlur,
+  onCollapseEditor,
 }: Props) {
   const { confirm, dialog } = useAppDialog()
   const [exportDialogOpen, setExportDialogOpen] = useState(false)
@@ -195,19 +197,32 @@ export function ExpertDraftEditor({
             </>
           )}
         </div>
-        <span
-          className="workspace-char-count muted"
-          aria-live="polite"
-          title={`不含空白字数 ${counts.nonSpace.toLocaleString('zh-CN')}；总字符（含空格与换行）${counts.total.toLocaleString('zh-CN')}`}
-        >
-          {counts.nonSpace.toLocaleString('zh-CN')} 字
-          <span className="workspace-char-count-sep" aria-hidden>
-            {' · '}
+        <div className="workspace-stage-heading-actions">
+          <span
+            className="workspace-char-count muted"
+            aria-live="polite"
+            title={`不含空白字数 ${counts.nonSpace.toLocaleString('zh-CN')}；总字符（含空格与换行）${counts.total.toLocaleString('zh-CN')}`}
+          >
+            {counts.nonSpace.toLocaleString('zh-CN')} 字
+            <span className="workspace-char-count-sep" aria-hidden>
+              {' · '}
+            </span>
+            <span className="workspace-char-count-detail">
+              {counts.total.toLocaleString('zh-CN')} 字符
+            </span>
           </span>
-          <span className="workspace-char-count-detail">
-            {counts.total.toLocaleString('zh-CN')} 字符
-          </span>
-        </span>
+          {onCollapseEditor ? (
+            <button
+              type="button"
+              className="workspace-editor-collapse-button"
+              aria-label="收起编辑区"
+              title="收起编辑区"
+              onClick={onCollapseEditor}
+            >
+              <span className="workspace-editor-collapse-icon" aria-hidden />
+            </button>
+          ) : null}
+        </div>
       </div>
       {dialog}
       {exportDialogOpen ? (

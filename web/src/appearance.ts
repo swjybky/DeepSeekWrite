@@ -17,13 +17,14 @@ export const AppearanceContext = createContext<AppearanceContextValue | null>(nu
 export const APPEARANCE_STYLE_LABELS: Record<AppearanceStyle, string> = {
   classic: '古风',
   modern: '现代',
+  night: '黑夜',
 }
 
 export function applyAppearanceStyle(style: AppearanceStyle): void {
   if (typeof document === 'undefined') return
   const normalized = normalizeAppearanceStyle(style)
   document.documentElement.dataset.appearance = normalized
-  document.documentElement.style.colorScheme = 'light'
+  document.documentElement.style.colorScheme = normalized === 'night' ? 'dark' : 'light'
 }
 
 applyAppearanceStyle(getStoredAppearanceStyle())
