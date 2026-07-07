@@ -9,6 +9,10 @@ import type {
   WorkspaceAgentReadAccessConfig,
 } from '../../domain/workspace'
 import { WorkspaceAiChat } from '../../components/WorkspaceAiChat'
+import {
+  WorkspaceLayoutControls,
+  type WorkspaceLayoutCollapsed,
+} from '../../components/WorkspaceLayoutControls'
 import type { ApplyToStageEditorPayload } from '../../pi/workspaceStageAgents'
 import {
   ExpertDraftAiChat as ShortExpertDraftAiChat,
@@ -166,7 +170,10 @@ type Props = {
   bumpActiveExpertChatEpoch: () => void
   bumpActiveStageChatEpoch: (stageId: StageId) => void
   editorCollapsed?: boolean
-  onExpandEditor?: () => void
+  layoutCollapsed: WorkspaceLayoutCollapsed
+  onToggleLeftPanel: () => void
+  onToggleTopPanel: () => void
+  onToggleRightPanel: () => void
 }
 
 export function WorkspaceAiPanel({
@@ -197,7 +204,10 @@ export function WorkspaceAiPanel({
   bumpActiveExpertChatEpoch,
   bumpActiveStageChatEpoch,
   editorCollapsed = false,
-  onExpandEditor,
+  layoutCollapsed,
+  onToggleLeftPanel,
+  onToggleTopPanel,
+  onToggleRightPanel,
 }: Props) {
   const historyPortalTargetId = useId()
   const activeExpertSectionForHeader = expertDraftActive
@@ -263,19 +273,14 @@ export function WorkspaceAiPanel({
           >
             新建对话
           </button>
-          {editorCollapsed && onExpandEditor ? (
-            <button
-              type="button"
-              className="workspace-ai-editor-restore"
-              aria-label="展开编辑区"
-              title="展开编辑区"
-              onClick={onExpandEditor}
-            >
-              <span
-                className="workspace-editor-collapse-icon workspace-editor-collapse-icon--expand"
-                aria-hidden
-              />
-            </button>
+          {editorCollapsed ? (
+            <WorkspaceLayoutControls
+              collapsed={layoutCollapsed}
+              onToggleLeft={onToggleLeftPanel}
+              onToggleTop={onToggleTopPanel}
+              onToggleRight={onToggleRightPanel}
+              compact
+            />
           ) : null}
         </div>
       </div>

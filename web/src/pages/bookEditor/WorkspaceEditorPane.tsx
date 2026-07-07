@@ -1,4 +1,9 @@
-import { useState, type ComponentType, type MutableRefObject } from 'react'
+import {
+  useState,
+  type ComponentType,
+  type MutableRefObject,
+  type ReactNode,
+} from 'react'
 import type { ExpertDraft, StageId } from '../../domain/workspace'
 import type { ManuscriptExportFormat } from '../../bridge'
 import type { PlotChildStageDefinition, PlotChildStageId } from './workspaceTypes'
@@ -9,6 +14,10 @@ import { TextHistoryControls } from '../../components/TextHistoryControls'
 import type { TextHistoryController } from '../../hooks/useTextHistory'
 import { MarkdownModeToggle, MarkdownTextEditor } from '../../components/MarkdownTextEditor'
 import { useTextDisplay } from '../../textDisplay'
+import {
+  WorkspaceLayoutControls,
+  type WorkspaceLayoutCollapsed,
+} from '../../components/WorkspaceLayoutControls'
 
 type ExpertDraftEditorProps = {
   draft: ExpertDraft
@@ -29,6 +38,7 @@ type ExpertDraftEditorProps = {
   historyPrefix: string
   onTextBlur: () => void
   onCollapseEditor: () => void
+  layoutControls?: ReactNode
 }
 
 type Props = {
@@ -61,6 +71,10 @@ type Props = {
   textHistory: TextHistoryController
   onTextBlur: () => void
   onCollapseEditor: () => void
+  layoutCollapsed: WorkspaceLayoutCollapsed
+  onToggleLeftPanel: () => void
+  onToggleTopPanel: () => void
+  onToggleRightPanel: () => void
 }
 
 function StageCharCount({ text }: { text: string }) {
@@ -82,33 +96,17 @@ function StageCharCount({ text }: { text: string }) {
   )
 }
 
-function WorkspaceEditorCollapseButton({ onClick }: { onClick: () => void }) {
-  return (
-    <button
-      type="button"
-      className="workspace-editor-collapse-button"
-      aria-label="收起编辑区"
-      title="收起编辑区"
-      onClick={onClick}
-    >
-      <span className="workspace-editor-collapse-icon" aria-hidden />
-    </button>
-  )
-}
-
 function StageHeadingActions({
   text,
-  onCollapseEditor,
+  layoutControls,
 }: {
   text: string
-  onCollapseEditor?: () => void
+  layoutControls?: ReactNode
 }) {
   return (
     <div className="workspace-stage-heading-actions">
       <StageCharCount text={text} />
-      {onCollapseEditor ? (
-        <WorkspaceEditorCollapseButton onClick={onCollapseEditor} />
-      ) : null}
+      {layoutControls}
     </div>
   )
 }
@@ -137,9 +135,21 @@ export function WorkspaceEditorPane({
   textHistory,
   onTextBlur,
   onCollapseEditor,
+  layoutCollapsed,
+  onToggleLeftPanel,
+  onToggleTopPanel,
+  onToggleRightPanel,
 }: Props) {
   const { mode: textDisplayMode } = useTextDisplay()
   const [mdEditingMap, setMdEditingMap] = useState<Record<string, boolean>>({})
+  const layoutControls = (
+    <WorkspaceLayoutControls
+      collapsed={layoutCollapsed}
+      onToggleLeft={onToggleLeftPanel}
+      onToggleTop={onToggleTopPanel}
+      onToggleRight={onToggleRightPanel}
+    />
+  )
 
   const getMdKey = (stageId: StageId) => `stage:${stageId}`
   const singleStageKey = getMdKey(activeContentStage)
@@ -177,6 +187,7 @@ export function WorkspaceEditorPane({
           historyPrefix={`workspace:${bookId}`}
           onTextBlur={onTextBlur}
           onCollapseEditor={onCollapseEditor}
+          layoutControls={layoutControls}
         />
       ) : activeStage === PLOT_STAGE_ID ? (
         <div
@@ -215,9 +226,7 @@ export function WorkspaceEditorPane({
                   {renderMdToggle(getMdKey(plotStage.id))}
                   <StageHeadingActions
                     text={body}
-                    onCollapseEditor={
-                      index === 0 ? onCollapseEditor : undefined
-                    }
+                    layoutControls={index === 0 ? layoutControls : undefined}
                   />
                 </div>
                 <MarkdownTextEditor
@@ -278,7 +287,7 @@ export function WorkspaceEditorPane({
             {renderMdToggle(singleStageKey)}
             <StageHeadingActions
               text={stageBody}
-              onCollapseEditor={onCollapseEditor}
+              layoutControls={layoutControls}
             />
           </div>
           <MarkdownTextEditor

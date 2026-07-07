@@ -73,6 +73,7 @@ import { WorkspaceEditorPane } from './bookEditor/WorkspaceEditorPane'
 import { WorkspaceRailPanel } from './bookEditor/WorkspaceRailPanel'
 import { WorkspaceRailSplitter } from './bookEditor/WorkspaceRailSplitter'
 import { WorkspaceSplitter } from './bookEditor/WorkspaceSplitter'
+import { useWorkspaceLayoutCollapsed } from './bookEditor/useWorkspaceLayoutCollapsed'
 import {
   combineExpertDraftSections,
   mapExpertDraftToDraftStage,
@@ -103,12 +104,16 @@ export function BookEditor() {
   const [saving, setSaving] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [layoutCollapsed, setLayoutCollapsed] = useWorkspaceLayoutCollapsed()
   const [workspaceRailWidth, setWorkspaceRailWidth] = useWorkspaceRailWidth()
+  const visibleRailWidth = layoutCollapsed.left ? 0 : workspaceRailWidth
+  const visibleSplitterCount =
+    (layoutCollapsed.left ? 0 : 1) + (layoutCollapsed.right ? 0 : 1)
   const [aiPanelWidth, setAiPanelWidth] = useAiPanelWidth({
-    railWidth: workspaceRailWidth,
-    splitterCount: 2,
+    railWidth: visibleRailWidth,
+    splitterCount: visibleSplitterCount,
   })
-  const [editorCollapsed, setEditorCollapsed] = useState(false)
+  const editorCollapsed = layoutCollapsed.right
   /** 当前阶段 AI 侧栏「对话轮次」：递增后重建 Pi 会话并清空该阶段对话历史 */
   const [linkedMaterial, setLinkedMaterial] = useState<Material | null>(null)
   const [linkedMaterialsByKind, setLinkedMaterialsByKind] = useState<
@@ -956,13 +961,29 @@ export function BookEditor() {
   }, [flushAllWorkspaceBooks, handleBackToShelf])
 
   const handleCollapseEditor = useCallback(() => {
-    setEditorCollapsed(true)
+    setLayoutCollapsed((current) => ({ ...current, right: true }))
     void flushActiveWorkspaceBook()
-  }, [flushActiveWorkspaceBook])
+  }, [flushActiveWorkspaceBook, setLayoutCollapsed])
 
   const handleExpandEditor = useCallback(() => {
-    setEditorCollapsed(false)
-  }, [])
+    setLayoutCollapsed((current) => ({ ...current, right: false }))
+  }, [setLayoutCollapsed])
+
+  const handleToggleRightPanel = useCallback(() => {
+    if (layoutCollapsed.right) {
+      handleExpandEditor()
+      return
+    }
+    handleCollapseEditor()
+  }, [handleCollapseEditor, handleExpandEditor, layoutCollapsed.right])
+
+  const handleToggleLeftPanel = useCallback(() => {
+    setLayoutCollapsed((current) => ({ ...current, left: !current.left }))
+  }, [setLayoutCollapsed])
+
+  const handleToggleTopPanel = useCallback(() => {
+    setLayoutCollapsed((current) => ({ ...current, top: !current.top }))
+  }, [setLayoutCollapsed])
 
   const applyToStageEditorWithAutoSave = useCallback(
     (bookId: string, stageId: StageId, payload: Parameters<typeof applyToStageEditorForBook>[2]) => {
@@ -1064,28 +1085,38 @@ export function BookEditor() {
   }
 
   return (
-    <div className="editor-page editor-page--workspace">
-      <WorkspaceBookHeader
-        book={book}
-        coverData={coverData}
-        coverGenerating={coverGenerating}
-        linkedMaterial={linkedMaterial}
-        linkedMaterialsByKind={linkedMaterialsByKind}
-        linkedSkill={linkedSkill}
-        saving={saving}
-        autoSaveStatus={workspaceBookSaveStatus(book.id)}
-        error={error}
-        message={message}
-        onBack={() => void handleAutoSaveBack()}
-        onViewCover={() => setCoverViewerOpen(true)}
-        onGenerateCover={openCoverGenerateDialog}
-        onCoverError={clearCoverDataForActiveBook}
-        onOpenMaterialSelector={() => void openMaterialSelector()}
-        onOpenSkillSelector={() => void openSkillSelector()}
-        onOpenMemoryManager={openBookMemoryManager}
-        onToggleStatus={() => void handleToggleBookStatus()}
-        memoryUnread={bookMemoryUnread}
-      />
+    <div
+      className={[
+        'editor-page',
+        'editor-page--workspace',
+        layoutCollapsed.top ? 'editor-page--top-collapsed' : '',
+      ]
+        .filter(Boolean)
+        .join(' ')}
+    >
+      {!layoutCollapsed.top ? (
+        <WorkspaceBookHeader
+          book={book}
+          coverData={coverData}
+          coverGenerating={coverGenerating}
+          linkedMaterial={linkedMaterial}
+          linkedMaterialsByKind={linkedMaterialsByKind}
+          linkedSkill={linkedSkill}
+          saving={saving}
+          autoSaveStatus={workspaceBookSaveStatus(book.id)}
+          error={error}
+          message={message}
+          onBack={() => void handleAutoSaveBack()}
+          onViewCover={() => setCoverViewerOpen(true)}
+          onGenerateCover={openCoverGenerateDialog}
+          onCoverError={clearCoverDataForActiveBook}
+          onOpenMaterialSelector={() => void openMaterialSelector()}
+          onOpenSkillSelector={() => void openSkillSelector()}
+          onOpenMemoryManager={openBookMemoryManager}
+          onToggleStatus={() => void handleToggleBookStatus()}
+          memoryUnread={bookMemoryUnread}
+        />
+      ) : null}
       {dialog}
       {bookMemoryOpen ? (
         <MemoryManagerDialog
@@ -1123,6 +1154,7 @@ export function BookEditor() {
         className={[
           'workspace-grid',
           bookTransitioning ? 'workspace-grid--transitioning' : '',
+          layoutCollapsed.left ? 'workspace-grid--left-collapsed' : '',
           editorCollapsed ? 'workspace-grid--editor-collapsed' : '',
         ]
           .filter(Boolean)
@@ -1139,58 +1171,62 @@ export function BookEditor() {
             正在切换书籍…
           </div>
         ) : null}
-        <WorkspaceRailPanel
-          book={book}
-          workspaceTreeStages={workspaceTreeStages}
-          workspaceTreeBooks={workspaceTreeBooks}
-          stages={stages}
-          activeStage={activeStage}
-          activePlotChildStage={activePlotChildStage}
-          activeExpertDraftSectionId={activeExpertDraftSectionId}
-          editingTitle={editingTitle}
-          titleDraft={titleDraft}
-          onTitleDraftChange={handleHistoryTitleDraftChange}
-          onTitleEditStart={handleHistoryTitleEditStart}
-          onTitleEditEnd={handleTitleEditEnd}
-          onTitleEditCancel={handleTitleEditCancel}
-          onTitleInputKeyDown={(event) =>
-            textHistory.handleKeyDown(
-              event,
-              titleHistoryKey,
-              titleDraft,
-              setTitleDraft,
-            )
-          }
-          onActiveStageSelect={(stageId) => {
-            void flushActiveWorkspaceBook()
-            setActiveBookStage(stageId)
-          }}
-          onPlotChildSelect={(childId) => {
-            void flushActiveWorkspaceBook()
-            selectPlotChildForBook(book.id, childId)
-          }}
-          onExpertDraftSectionSelect={(sectionId) => {
-            void flushActiveWorkspaceBook()
-            handleExpertDraftSectionSelect(sectionId)
-          }}
-          onExpertDraftSectionCreate={handleExpertDraftSectionCreate}
-          onTreeBookSelect={handleTreeBookSelect}
-          onTreeBookStageSelect={(bookId, stageId) =>
-            void handleTreeBookStageSelect(bookId, stageId)
-          }
-          onTreeBookStageChildSelect={(bookId, stageId, childId) =>
-            void handleTreeBookStageChildSelect(bookId, stageId, childId)
-          }
-          onTreeBookStageChildCreate={handleTreeBookStageChildCreate}
-          onLongDraftVolumeCreate={handleLongDraftVolumeCreate}
-          onLongDraftArcCreate={handleLongDraftArcCreate}
-          onLongDraftChapterCreate={handleLongDraftChapterCreate}
-        />
+        {!layoutCollapsed.left ? (
+          <>
+            <WorkspaceRailPanel
+              book={book}
+              workspaceTreeStages={workspaceTreeStages}
+              workspaceTreeBooks={workspaceTreeBooks}
+              stages={stages}
+              activeStage={activeStage}
+              activePlotChildStage={activePlotChildStage}
+              activeExpertDraftSectionId={activeExpertDraftSectionId}
+              editingTitle={editingTitle}
+              titleDraft={titleDraft}
+              onTitleDraftChange={handleHistoryTitleDraftChange}
+              onTitleEditStart={handleHistoryTitleEditStart}
+              onTitleEditEnd={handleTitleEditEnd}
+              onTitleEditCancel={handleTitleEditCancel}
+              onTitleInputKeyDown={(event) =>
+                textHistory.handleKeyDown(
+                  event,
+                  titleHistoryKey,
+                  titleDraft,
+                  setTitleDraft,
+                )
+              }
+              onActiveStageSelect={(stageId) => {
+                void flushActiveWorkspaceBook()
+                setActiveBookStage(stageId)
+              }}
+              onPlotChildSelect={(childId) => {
+                void flushActiveWorkspaceBook()
+                selectPlotChildForBook(book.id, childId)
+              }}
+              onExpertDraftSectionSelect={(sectionId) => {
+                void flushActiveWorkspaceBook()
+                handleExpertDraftSectionSelect(sectionId)
+              }}
+              onExpertDraftSectionCreate={handleExpertDraftSectionCreate}
+              onTreeBookSelect={handleTreeBookSelect}
+              onTreeBookStageSelect={(bookId, stageId) =>
+                void handleTreeBookStageSelect(bookId, stageId)
+              }
+              onTreeBookStageChildSelect={(bookId, stageId, childId) =>
+                void handleTreeBookStageChildSelect(bookId, stageId, childId)
+              }
+              onTreeBookStageChildCreate={handleTreeBookStageChildCreate}
+              onLongDraftVolumeCreate={handleLongDraftVolumeCreate}
+              onLongDraftArcCreate={handleLongDraftArcCreate}
+              onLongDraftChapterCreate={handleLongDraftChapterCreate}
+            />
 
-        <WorkspaceRailSplitter
-          railWidth={workspaceRailWidth}
-          setRailWidth={setWorkspaceRailWidth}
-        />
+            <WorkspaceRailSplitter
+              railWidth={workspaceRailWidth}
+              setRailWidth={setWorkspaceRailWidth}
+            />
+          </>
+        ) : null}
 
         <WorkspaceAiPanel
           book={book}
@@ -1224,7 +1260,10 @@ export function BookEditor() {
           bumpActiveExpertChatEpoch={bumpActiveExpertChatEpoch}
           bumpActiveStageChatEpoch={bumpActiveStageChatEpoch}
           editorCollapsed={editorCollapsed}
-          onExpandEditor={handleExpandEditor}
+          layoutCollapsed={layoutCollapsed}
+          onToggleLeftPanel={handleToggleLeftPanel}
+          onToggleTopPanel={handleToggleTopPanel}
+          onToggleRightPanel={handleToggleRightPanel}
         />
 
         {!editorCollapsed ? (
@@ -1232,8 +1271,8 @@ export function BookEditor() {
             <WorkspaceSplitter
               aiPanelWidth={aiPanelWidth}
               setAiPanelWidth={setAiPanelWidth}
-              railWidth={workspaceRailWidth}
-              splitterCount={2}
+              railWidth={visibleRailWidth}
+              splitterCount={visibleSplitterCount}
             />
 
             <WorkspaceEditorPane
@@ -1260,6 +1299,10 @@ export function BookEditor() {
               textHistory={textHistory}
               onTextBlur={() => void flushActiveWorkspaceBook()}
               onCollapseEditor={handleCollapseEditor}
+              layoutCollapsed={layoutCollapsed}
+              onToggleLeftPanel={handleToggleLeftPanel}
+              onToggleTopPanel={handleToggleTopPanel}
+              onToggleRightPanel={handleToggleRightPanel}
             />
           </>
         ) : null}

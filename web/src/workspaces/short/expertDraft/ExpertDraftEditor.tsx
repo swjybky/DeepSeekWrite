@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import type { ReactNode } from 'react'
 import type {
   ExpertDraft,
   ExpertDraftCharacterState,
@@ -29,6 +30,7 @@ type Props = {
   historyPrefix: string
   onTextBlur: () => void
   onCollapseEditor?: () => void
+  layoutControls?: ReactNode
 }
 
 function textCounts(text: string): { total: number; nonSpace: number } {
@@ -88,6 +90,7 @@ export function ExpertDraftEditor({
   historyPrefix,
   onTextBlur,
   onCollapseEditor,
+  layoutControls,
 }: Props) {
   const { confirm, dialog } = useAppDialog()
   const [exportDialogOpen, setExportDialogOpen] = useState(false)
@@ -211,7 +214,7 @@ export function ExpertDraftEditor({
               {counts.total.toLocaleString('zh-CN')} 字符
             </span>
           </span>
-          {onCollapseEditor ? (
+          {layoutControls ?? (onCollapseEditor ? (
             <button
               type="button"
               className="workspace-editor-collapse-button"
@@ -221,7 +224,7 @@ export function ExpertDraftEditor({
             >
               <span className="workspace-editor-collapse-icon" aria-hidden />
             </button>
-          ) : null}
+          ) : null)}
         </div>
       </div>
       {dialog}
