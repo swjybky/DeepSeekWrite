@@ -154,6 +154,12 @@ function positionMenu(state: QuickSkillInputState) {
   menu.style.top = `${Math.round(Math.max(8, top))}px`
 }
 
+function scrollHighlightedSkillIntoView(state: QuickSkillInputState) {
+  state.menuEl
+    ?.querySelector<HTMLElement>('.workspace-quick-skill-option--active')
+    ?.scrollIntoView({ block: 'nearest' })
+}
+
 function candidateSkills(state: QuickSkillInputState, query: string): QuickLoadableSkill[] {
   const skills = state.getSkills()
   const normalizedQuery = normalizeSearch(query)
@@ -221,11 +227,13 @@ function renderMenu(
     button.setAttribute('role', 'option')
     button.setAttribute('aria-selected', index === state.highlightedIndex ? 'true' : 'false')
     button.addEventListener('mouseenter', () => {
+      if (state.highlightedIndex === index) return
       state.highlightedIndex = index
       renderMenu(state, skills, slashQuery)
     })
-    button.addEventListener('mousedown', (event) => {
+    button.addEventListener('pointerdown', (event) => {
       event.preventDefault()
+      event.stopPropagation()
       selectSkill(state, skill, slashQuery)
     })
 
@@ -243,6 +251,7 @@ function renderMenu(
   }
 
   positionMenu(state)
+  scrollHighlightedSkillIntoView(state)
 }
 
 function refreshMenu(state: QuickSkillInputState) {
