@@ -400,6 +400,92 @@ button.back-link:hover {
   min-width: 0;
 }
 
+.workspace-layout-controls {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.18rem;
+  padding: 0.08rem;
+  border: 1px solid color-mix(in oklab, var(--border) 72%, transparent);
+  border-radius: 6px;
+  background: color-mix(in oklab, var(--surface) 72%, transparent);
+}
+
+.workspace-layout-controls--compact {
+  gap: 0.12rem;
+  padding: 0;
+  border-color: transparent;
+  background: transparent;
+}
+
+.workspace-layout-control {
+  flex: 0 0 auto;
+  width: 1.35rem;
+  height: 1.35rem;
+  padding: 0;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--ink-faint);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.workspace-layout-control:hover {
+  background: color-mix(in oklab, var(--accent) 9%, transparent);
+  color: var(--ink);
+}
+
+.workspace-layout-control:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.workspace-layout-control[aria-pressed='true'] {
+  background: color-mix(in oklab, var(--accent) 14%, transparent);
+  color: var(--accent);
+}
+
+.workspace-layout-control-icon {
+  position: relative;
+  width: 0.92rem;
+  height: 0.72rem;
+  border: 1.5px solid currentColor;
+  border-radius: 3px;
+  box-sizing: border-box;
+}
+
+.workspace-layout-control-icon::before {
+  content: '';
+  position: absolute;
+  border-radius: 1.5px;
+  background: currentColor;
+  opacity: 0.86;
+}
+
+.workspace-layout-control-icon--left::before {
+  top: 0.12rem;
+  bottom: 0.12rem;
+  left: 0.12rem;
+  width: 0.22rem;
+}
+
+.workspace-layout-control-icon--top::before {
+  top: 0.12rem;
+  right: 0.12rem;
+  left: 0.12rem;
+  height: 0.18rem;
+}
+
+.workspace-layout-control-icon--right::before {
+  top: 0.12rem;
+  right: 0.12rem;
+  bottom: 0.12rem;
+  width: 0.22rem;
+}
+
 .workspace-editor-collapse-button,
 .workspace-ai-editor-restore {
   flex: 0 0 auto;
@@ -1516,6 +1602,11 @@ button.back-link:hover {
   contain-intrinsic-size: auto 12rem;
 }
 
+.workspace-ai message-list > div > tool-message {
+  content-visibility: visible;
+  contain-intrinsic-size: auto;
+}
+
 .workspace-ai streaming-message-container {
   contain: layout paint style;
 }
@@ -1583,7 +1674,7 @@ button.back-link:hover {
 }
 
 .workspace-ai user-message .user-message-container {
-  max-width: min(100%, 34rem);
+  max-width: min(100%, 58rem);
   border: 1px solid color-mix(in oklab, var(--accent) 34%, var(--border));
   border-radius: 8px;
   background:
@@ -1654,17 +1745,22 @@ button.back-link:hover {
 
 .workspace-quick-skill-menu {
   position: fixed;
-  z-index: 2400;
+  z-index: 30000;
+  isolation: isolate;
+  transform: translateZ(0);
   max-height: min(18rem, 44vh);
   overflow: auto;
   overscroll-behavior: contain;
   padding: 0.35rem;
   border: 1px solid color-mix(in oklab, var(--accent) 26%, var(--border));
   border-radius: 8px;
-  background: color-mix(in oklab, var(--paper-elevated) 96%, white);
+  background: var(--paper-elevated);
   box-shadow:
     0 14px 34px rgb(38 32 24 / 16%),
     0 1px 0 rgb(255 255 255 / 46%) inset;
+  pointer-events: auto;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
 }
 
 .workspace-quick-skill-option {
@@ -1672,7 +1768,7 @@ button.back-link:hover {
   width: 100%;
   gap: 0.16rem;
   padding: 0.48rem 0.55rem;
-  border: 0;
+  border: 1px solid transparent;
   border-radius: 6px;
   background: transparent;
   color: var(--ink);
@@ -1682,7 +1778,20 @@ button.back-link:hover {
 
 .workspace-quick-skill-option:hover,
 .workspace-quick-skill-option--active {
-  background: color-mix(in oklab, var(--accent) 12%, var(--paper-deep));
+  border-color: color-mix(in oklab, var(--accent) 54%, var(--border));
+  background: color-mix(in oklab, var(--accent) 24%, var(--paper-deep));
+  box-shadow: inset 3px 0 0 0 var(--accent);
+}
+
+.workspace-quick-skill-option--active {
+  color: var(--ink);
+}
+
+:root[data-appearance='night'] .workspace-quick-skill-option:hover,
+:root[data-appearance='night'] .workspace-quick-skill-option--active {
+  border-color: color-mix(in oklab, var(--accent) 72%, var(--border));
+  background: color-mix(in oklab, var(--accent) 32%, var(--paper-deep));
+  box-shadow: inset 3px 0 0 0 var(--accent);
 }
 
 .workspace-quick-skill-option-name {
@@ -1725,6 +1834,12 @@ button.back-link:hover {
   border-radius: 8px;
   background: color-mix(in oklab, var(--paper-elevated) 82%, var(--paper));
   box-shadow: 0 1px 0 rgb(255 255 255 / 36%) inset;
+}
+
+.workspace-ai tool-message code-block {
+  display: block;
+  max-height: min(24rem, 48vh);
+  overflow: auto;
 }
 
 /* DeepSeekWrite 工具调用：古风/现代双图标 + 主题色（随 data-appearance 切换，无需重渲染） */

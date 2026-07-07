@@ -601,7 +601,7 @@
 }
 
 .learning-ai-pane user-message .user-message-container {
-  max-width: min(100%, 34rem);
+  max-width: min(100%, 58rem);
   border: 1px solid color-mix(in oklab, var(--accent) 34%, var(--border));
   border-radius: 8px;
   background:
