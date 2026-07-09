@@ -11,6 +11,9 @@ import {
   type MemoryEntry,
   type MaterialKind,
   type MaterialLibraryGroup,
+  type Material,
+  type MaterialStageEntry,
+  type MaterialStageId,
   type MaterialSummary,
   type SkillKind,
   type SkillLibraryGroup,
@@ -36,7 +39,9 @@ import {
   persistWorkspaceRoot,
   pickFolder,
   listMaterials,
+  getMaterial,
   createMaterial,
+  saveMaterial,
   deleteMaterial,
   listMaterialLibraryGroups,
   createMaterialLibraryGroup,
@@ -54,6 +59,7 @@ import {
   emptyLinkedSkillIdsByKind,
   MATERIAL_KIND_KEYS,
   MATERIAL_KIND_LABELS,
+  MATERIAL_KIND_STAGE_IDS,
   SKILL_KIND_KEYS,
   SKILL_KIND_LABELS,
   SKILL_KIND_STAGE_IDS,
@@ -112,6 +118,38 @@ function RefreshIcon({ spinning }: { spinning?: boolean }) {
       <path d="M23 4v6h-6" />
       <path d="M1 20v-6h6" />
       <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
+    </svg>
+  )
+}
+
+function ChevronLeftIcon() {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="m15 18-6-6 6-6" />
+    </svg>
+  )
+}
+
+function ChevronRightIcon() {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="m9 18 6-6-6-6" />
     </svg>
   )
 }
@@ -238,6 +276,44 @@ type RefreshOptions = {
 
 type ModelRefreshOptions = {
   silentIfBusy?: boolean
+}
+
+type MaterialSplitMode = 'group' | 'single'
+
+function materialKindShortLabel(kind: MaterialKind): string {
+  return MATERIAL_KIND_LABELS[kind].replace(/素材库$/, '')
+}
+
+function materialEntryHasContent(entry: MaterialStageEntry): boolean {
+  return Boolean(entry.title?.trim() || entry.body?.trim())
+}
+
+function materialKindHasContent(material: Material, kind: MaterialKind): boolean {
+  const stageItems = material.stage_items ?? {}
+  return MATERIAL_KIND_STAGE_IDS[kind].some((stageId) =>
+    (stageItems[stageId] ?? []).some(materialEntryHasContent),
+  )
+}
+
+function copyMaterialStageItemsForKind(
+  material: Material,
+  kind: MaterialKind,
+): Partial<Record<MaterialStageId, MaterialStageEntry[]>> {
+  const now = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z')
+  const out: Partial<Record<MaterialStageId, MaterialStageEntry[]>> = {}
+  const sourceItems = material.stage_items ?? {}
+  for (const stageId of MATERIAL_KIND_STAGE_IDS[kind]) {
+    const entries = (sourceItems[stageId] ?? []).filter(materialEntryHasContent)
+    if (!entries.length) continue
+    out[stageId] = entries.map((entry) => ({
+      id: globalThis.crypto?.randomUUID?.() ?? Math.random().toString(36).slice(2),
+      title: entry.title?.trim() || '未命名素材',
+      body: entry.body ?? '',
+      created_at: now,
+      updated_at: now,
+    }))
+  }
+  return out
 }
 
 function ModelConfigDialog({
@@ -1723,6 +1799,13 @@ export function Home() {
   const [submittingMaterial, setSubmittingMaterial] = useState(false)
   const [deletingMaterialId, setDeletingMaterialId] = useState<string | null>(null)
   const [materialError, setMaterialError] = useState<string | null>(null)
+  const [materialActionsExpanded, setMaterialActionsExpanded] = useState(false)
+  const [showMaterialSplitDialog, setShowMaterialSplitDialog] = useState(false)
+  const [materialSplitSourceId, setMaterialSplitSourceId] = useState('')
+  const [materialSplitMode, setMaterialSplitMode] = useState<MaterialSplitMode>('group')
+  const [materialSplitGroupTitle, setMaterialSplitGroupTitle] = useState('')
+  const [splittingMaterial, setSplittingMaterial] = useState(false)
+  const [materialSplitError, setMaterialSplitError] = useState<string | null>(null)
 
   // ==================== 技能库状态 ====================
   const [loadingSkills, setLoadingSkills] = useState(
@@ -2300,6 +2383,14 @@ export function Home() {
     [materials, occupiedMaterialIds],
   )
 
+  const materialSplitCandidates = useMemo(
+    () =>
+      materials
+        .filter((material) => material.material_kind === 'mixed')
+        .sort((a, b) => a.title.localeCompare(b.title, 'zh-Hans-CN')),
+    [materials],
+  )
+
   const skillGroupOptionsByKind = useMemo(
     () =>
       SKILL_KIND_KEYS.reduce(
@@ -2320,6 +2411,16 @@ export function Home() {
     setMaterialGroupTitle('')
     setMaterialGroupMembers({})
     setShowMaterialGroupForm(true)
+  }
+
+  const openMaterialSplitDialog = () => {
+    const source = materialSplitCandidates[0]
+    setMaterialError(null)
+    setMaterialSplitError(null)
+    setMaterialSplitMode('group')
+    setMaterialSplitSourceId(source?.id ?? '')
+    setMaterialSplitGroupTitle(source ? `${source.title}分组` : '')
+    setShowMaterialSplitDialog(true)
   }
 
   const openSkillGroupForm = () => {
@@ -2343,6 +2444,71 @@ export function Home() {
       setMaterialGroupError(err instanceof Error ? err.message : '创建素材分组失败')
     } finally {
       setSubmittingMaterialGroup(false)
+    }
+  }
+
+  const handleSplitMaterial = async (e: React.FormEvent) => {
+    e.preventDefault()
+    const ws = workspaceRoot?.trim()
+    if (!ws && isPywebviewDesktopBundle()) {
+      setMaterialSplitError('请先在上方选择工作文件夹')
+      return
+    }
+    const sourceSummary = materials.find((item) => item.id === materialSplitSourceId)
+    if (!sourceSummary) {
+      setMaterialSplitError('请选择要拆分的素材库')
+      return
+    }
+    setSplittingMaterial(true)
+    setMaterialSplitError(null)
+    try {
+      const source = await getMaterial(sourceSummary.id)
+      if (!source) throw new Error('素材库不存在或已被删除')
+
+      const createdMembers: Partial<Record<MaterialKind, string>> = {}
+      const sourceTitle = source.title.trim() || sourceSummary.title || '未命名素材'
+
+      for (const kind of MATERIAL_KIND_KEYS) {
+        if (!materialKindHasContent(source, kind)) continue
+        const stageItems = copyMaterialStageItemsForKind(source, kind)
+        const title =
+          source.material_kind === kind
+            ? sourceTitle
+            : `${sourceTitle}-${materialKindShortLabel(kind)}`
+        const created = await createMaterial(
+          title,
+          source.material_type,
+          source.parent_genre || null,
+          source.sub_genre || null,
+          ws || null,
+          kind,
+        )
+        await saveMaterial(created.id, {
+          overview: source.overview ?? '',
+          stage_items: stageItems,
+        })
+        createdMembers[kind] = created.id
+      }
+
+      if (Object.values(createdMembers).every((id) => !id)) {
+        throw new Error('这个素材库没有可拆分的条目内容')
+      }
+
+      if (materialSplitMode === 'group') {
+        await createMaterialLibraryGroup(
+          materialSplitGroupTitle.trim() || `${sourceTitle}分组`,
+          createdMembers,
+        )
+      }
+
+      setShowMaterialSplitDialog(false)
+      setMaterialSplitSourceId('')
+      setMaterialSplitGroupTitle('')
+      await refreshMaterials()
+    } catch (err) {
+      setMaterialSplitError(err instanceof Error ? err.message : '拆分素材库失败')
+    } finally {
+      setSplittingMaterial(false)
     }
   }
 
@@ -3010,47 +3176,70 @@ export function Home() {
                   : `${materials.length} 个素材`}
               </span>
             </div>
-            <div className="card-header-actions">
+            <div className="card-header-actions material-header-actions">
               <button
                 type="button"
-                className="btn-secondary btn-small btn-icon"
-                aria-label="刷新素材库"
-                title="刷新素材库"
-                disabled={loadingMaterials}
-                onClick={() => void refreshMaterials()}
+                className="btn-secondary btn-small btn-icon material-actions-toggle"
+                aria-label={materialActionsExpanded ? '收回素材库操作按钮' : '展开素材库操作按钮'}
+                aria-controls="material-extra-actions"
+                aria-expanded={materialActionsExpanded}
+                title={materialActionsExpanded ? '收回素材库操作按钮' : '展开素材库操作按钮'}
+                onClick={() => setMaterialActionsExpanded((value) => !value)}
               >
-                <RefreshIcon spinning={loadingMaterials} />
+                {materialActionsExpanded ? <ChevronRightIcon /> : <ChevronLeftIcon />}
               </button>
-              <button
-                type="button"
-                className="btn-secondary btn-small"
-                disabled={importingMaterial}
-                onClick={() => void handleImportMaterial()}
-              >
-                {importingMaterial ? '导入中…' : '导入'}
-              </button>
-              <button
-                type="button"
-                className="btn-secondary btn-small"
-                disabled={materials.length === 0}
-                onClick={openExportMaterialDialog}
-              >
-                导出
-              </button>
-              <Link
-                className="btn-secondary btn-small"
-                to="/material-settings"
-              >
-                设置
-              </Link>
-              <button
-                type="button"
-                className="btn-secondary btn-small"
-                disabled={materials.length === 0}
-                onClick={openMaterialGroupForm}
-              >
-                + 新建分组
-              </button>
+              {materialActionsExpanded ? (
+                <div className="material-extra-actions" id="material-extra-actions">
+                  <button
+                    type="button"
+                    className="btn-secondary btn-small btn-icon"
+                    aria-label="刷新素材库"
+                    title="刷新素材库"
+                    disabled={loadingMaterials}
+                    onClick={() => void refreshMaterials()}
+                  >
+                    <RefreshIcon spinning={loadingMaterials} />
+                  </button>
+                  <button
+                    type="button"
+                    className="btn-secondary btn-small"
+                    disabled={importingMaterial}
+                    onClick={() => void handleImportMaterial()}
+                  >
+                    {importingMaterial ? '导入中…' : '导入'}
+                  </button>
+                  <button
+                    type="button"
+                    className="btn-secondary btn-small"
+                    disabled={materials.length === 0}
+                    onClick={openExportMaterialDialog}
+                  >
+                    导出
+                  </button>
+                  <Link
+                    className="btn-secondary btn-small"
+                    to="/material-settings"
+                  >
+                    设置
+                  </Link>
+                  <button
+                    type="button"
+                    className="btn-secondary btn-small"
+                    disabled={materialSplitCandidates.length === 0}
+                    onClick={openMaterialSplitDialog}
+                  >
+                    一键拆分
+                  </button>
+                  <button
+                    type="button"
+                    className="btn-secondary btn-small"
+                    disabled={materials.length === 0}
+                    onClick={openMaterialGroupForm}
+                  >
+                    + 新建分组
+                  </button>
+                </div>
+              ) : null}
               <button
                 type="button"
                 className="btn-primary btn-small"
@@ -3498,6 +3687,95 @@ export function Home() {
           )}
 
           {materialError && <p className="form-error">{materialError}</p>}
+        </CreateDialog>
+      )}
+
+      {showMaterialSplitDialog && (
+        <CreateDialog
+          title="一键拆分素材库"
+          titleId="split-material-title"
+          submitting={splittingMaterial}
+          submitLabel="开始拆分"
+          submittingLabel="拆分中…"
+          submitDisabled={!materialSplitSourceId}
+          onClose={() => setShowMaterialSplitDialog(false)}
+          onSubmit={handleSplitMaterial}
+        >
+          <label className="field">
+            <span className="field-label">选择老素材库</span>
+            <select
+              value={materialSplitSourceId}
+              onChange={(event) => {
+                const value = event.target.value
+                const next = materials.find((item) => item.id === value)
+                setMaterialSplitSourceId(value)
+                if (next) setMaterialSplitGroupTitle(`${next.title}分组`)
+              }}
+              required
+              autoFocus
+            >
+              <option value="">请选择素材库</option>
+              {materialSplitCandidates.map((item) => (
+                <option key={item.id} value={item.id}>
+                  {item.title}（{MATERIAL_KIND_LABELS[item.material_kind]} · {materialTypeLabel(item.material_type)}）
+                </option>
+              ))}
+            </select>
+          </label>
+
+          {materialSplitCandidates.length === 0 && (
+            <p className="material-split-note">
+              当前没有可拆分的综合素材库。
+            </p>
+          )}
+
+          <fieldset className="field">
+            <legend className="field-label">拆分方式</legend>
+            <div className="material-split-mode-grid">
+              <label className="material-split-mode">
+                <input
+                  type="radio"
+                  name="materialSplitMode"
+                  checked={materialSplitMode === 'group'}
+                  onChange={() => setMaterialSplitMode('group')}
+                />
+                <span>
+                  拆成分组
+                  <small>生成多个部门素材库，并自动放入一个新分组</small>
+                </span>
+              </label>
+              <label className="material-split-mode">
+                <input
+                  type="radio"
+                  name="materialSplitMode"
+                  checked={materialSplitMode === 'single'}
+                  onChange={() => setMaterialSplitMode('single')}
+                />
+                <span>
+                  拆成单个的
+                  <small>只生成独立素材库，不创建分组</small>
+                </span>
+              </label>
+            </div>
+          </fieldset>
+
+          {materialSplitMode === 'group' && (
+            <label className="field">
+              <span className="field-label">分组名称</span>
+              <input
+                type="text"
+                value={materialSplitGroupTitle}
+                onChange={(event) => setMaterialSplitGroupTitle(event.target.value)}
+                placeholder="例如：短篇追妻素材组"
+              />
+            </label>
+          )}
+
+          <p className="material-split-note">
+            只会复制有内容的素材部门；原素材库会保留，不会被删除。
+          </p>
+
+          {materialSplitError && <p className="form-error">{materialSplitError}</p>}
         </CreateDialog>
       )}
 

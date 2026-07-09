@@ -2,10 +2,11 @@ import { useEffect, useMemo, useState } from 'react'
 import { Link, useParams, useSearchParams } from 'react-router-dom'
 import {
   SKILL_KIND_KEYS,
+  type SkillStageId,
   type SkillLibraryGroup,
   listSkillLibraryGroups,
 } from '../bridge'
-import { SkillEditor } from './SkillEditor'
+import { SkillEditor, type SkillTreeSection } from './SkillEditor'
 
 function orderedMemberIds(group: SkillLibraryGroup): string[] {
   const ids: string[] = []
@@ -18,6 +19,10 @@ function orderedMemberIds(group: SkillLibraryGroup): string[] {
 
 function firstMemberId(group: SkillLibraryGroup): string | null {
   return orderedMemberIds(group)[0] ?? null
+}
+
+function normalizeSkillTreeView(raw: string): SkillTreeSection | null {
+  return raw === 'overview' || raw === 'skill-list' ? raw : null
 }
 
 export function SkillGroupEditor() {
@@ -58,6 +63,9 @@ export function SkillGroupEditor() {
   )
 
   const libFromQuery = searchParams.get('lib')?.trim() || ''
+  const viewFromQuery = normalizeSkillTreeView(searchParams.get('view')?.trim() || '')
+  const stageFromQuery = searchParams.get('stage')?.trim() || ''
+  const entryFromQuery = searchParams.get('entry')?.trim() || ''
   const activeSkillId = useMemo(() => {
     if (!group) return null
     if (libFromQuery && memberIds.includes(libFromQuery)) return libFromQuery
@@ -113,11 +121,26 @@ export function SkillGroupEditor() {
         title: group.title,
         memberIdsOrdered: memberIds,
       }}
-      onGroupSkillChange={(skillId) => {
+      initialView={viewFromQuery}
+      initialStageId={(stageFromQuery as SkillStageId) || null}
+      initialEntryId={entryFromQuery || null}
+      onGroupSkillChange={(skillId, target) => {
         setSearchParams(
           (prev) => {
             const next = new URLSearchParams(prev)
             next.set('lib', skillId)
+            if (target?.view) {
+              next.set('view', target.view)
+            } else {
+              next.delete('view')
+            }
+            if (target?.stageId && target.entryId) {
+              next.set('stage', target.stageId)
+              next.set('entry', target.entryId)
+            } else {
+              next.delete('stage')
+              next.delete('entry')
+            }
             return next
           },
           { replace: true },

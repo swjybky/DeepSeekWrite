@@ -41,6 +41,8 @@ type WorkspaceTreeNavProps = {
   ) => void
   onBookStageChildCreate?: (bookId: string, stageId: string) => void
   defaultExpanded?: boolean
+  collapseInactiveBooks?: boolean
+  titleEditable?: boolean
   ariaLabel?: string
   editingTitle?: boolean
   titleDraft?: string
@@ -67,6 +69,8 @@ export function WorkspaceTreeNav({
   onBookStageChildSelect,
   onBookStageChildCreate,
   defaultExpanded = false,
+  collapseInactiveBooks = true,
+  titleEditable = true,
   ariaLabel = '项目结构',
   editingTitle = false,
   titleDraft = '',
@@ -100,14 +104,14 @@ export function WorkspaceTreeNav({
     }))
   }
   const isBookExpanded = (bookId: string) => {
-    if (activeBookId && bookId !== activeBookId) return false
+    if (collapseInactiveBooks && activeBookId && bookId !== activeBookId) return false
     if (activeBookId && bookId === activeBookId) {
       return expandedBookIds[bookId] ?? true
     }
     return expandedBookIds[bookId] ?? defaultExpanded
   }
   const toggleBook = (bookId: string) => {
-    if (activeBookId && bookId !== activeBookId) return
+    if (collapseInactiveBooks && activeBookId && bookId !== activeBookId) return
     setExpandedBookIds((prev) => ({
       ...prev,
       [bookId]: !(prev[bookId] ?? bookId === activeBookId),
@@ -309,7 +313,11 @@ export function WorkspaceTreeNav({
                             ? 'workspace-tree-book workspace-tree-book--active'
                             : 'workspace-tree-book'
                         }
-                        title={isActiveBook ? '双击编辑名称' : '点击打开书籍'}
+                        title={
+                          isActiveBook && titleEditable
+                            ? '双击编辑名称'
+                            : '点击打开书籍'
+                        }
                         onClick={() => {
                           if (!isActiveBook) {
                             if (onBookSelect) {
@@ -320,7 +328,7 @@ export function WorkspaceTreeNav({
                           }
                         }}
                         onDoubleClick={() => {
-                          if (isActiveBook) onTitleEditStart?.()
+                          if (isActiveBook && titleEditable) onTitleEditStart?.()
                         }}
                       >
                         <span className="workspace-tree-book-title">
@@ -404,8 +412,10 @@ export function WorkspaceTreeNav({
           <button
             type="button"
             className="workspace-tree-book"
-            title="双击编辑名称"
-            onDoubleClick={() => onTitleEditStart?.()}
+            title={titleEditable ? '双击编辑名称' : undefined}
+            onDoubleClick={() => {
+              if (titleEditable) onTitleEditStart?.()
+            }}
           >
             {rootLabel || '未命名'}
           </button>

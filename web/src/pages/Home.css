@@ -371,6 +371,22 @@
   height: 1rem;
 }
 
+.material-header-actions {
+  min-width: 0;
+  justify-content: flex-end;
+}
+
+.material-actions-toggle {
+  flex-shrink: 0;
+}
+
+.material-extra-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  min-width: 0;
+}
+
 .refresh-icon--spinning {
   animation: spin 0.8s linear infinite;
 }
@@ -576,6 +592,47 @@
 .create-form-checkbox small {
   color: var(--ink-faint);
   font-size: 0.75rem;
+}
+
+.material-split-mode-grid {
+  display: grid;
+  gap: 0.65rem;
+}
+
+.material-split-mode {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 0.65rem;
+  align-items: flex-start;
+  padding: 0.75rem 0.8rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--paper-elevated);
+  color: var(--ink-soft);
+  cursor: pointer;
+}
+
+.material-split-mode input {
+  margin-top: 0.15rem;
+  accent-color: var(--accent);
+}
+
+.material-split-mode span {
+  display: grid;
+  gap: 0.18rem;
+  font-size: 0.875rem;
+  line-height: 1.35;
+}
+
+.material-split-mode small,
+.material-split-note {
+  color: var(--ink-faint);
+  font-size: 0.75rem;
+  line-height: 1.45;
+}
+
+.material-split-note {
+  margin: -0.15rem 0 0.85rem;
 }
 
 .form-error {
