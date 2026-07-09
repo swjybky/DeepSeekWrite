@@ -40,16 +40,26 @@ import {
   normalizeSkillStages,
   normalizeSkillType,
   materialStageItemsToStages,
+  materialMatchesKind,
+  normalizeMaterialLibraryGroupMembers,
+  normalizeMaterialLibraryGroups,
+  normalizeSkillLibraryGroupMembers,
+  normalizeSkillLibraryGroups,
+  occupiedLibraryIdsFromGroups,
+  createLocalMaterialLibraryGroup,
+  createLocalSkillLibraryGroup,
   type CommonSkill,
   type LoadCommonSkillsResult,
   type Material,
   type MaterialKind,
   type MaterialKindWithMixed,
+  type MaterialLibraryGroup,
   type MaterialStageEntry,
   type MaterialStageId,
   type MaterialSummary,
   type Skill,
   type SkillKind,
+  type SkillLibraryGroup,
   type SkillStageEntry,
   type SkillStageId,
   type SkillSummary,
@@ -465,6 +475,7 @@ export async function mockDeleteMaterial(material_id: string): Promise<boolean> 
       }
     }
     if (changed) saveMock(books)
+    removeMaterialIdFromMockGroups(material_id)
   }
   return ok
 }
@@ -723,6 +734,236 @@ export async function mockDeleteSkill(skill_id: string): Promise<boolean> {
       }
     }
     if (changed) saveMock(books)
+    removeSkillIdFromMockGroups(skill_id)
   }
   return ok
+}
+
+// ==================== 素材/技能库分组 Mock ====================
+
+const MOCK_MATERIAL_GROUPS_KEY = 'deepseekwrite_dev_material_library_groups'
+const MOCK_SKILL_GROUPS_KEY = 'deepseekwrite_dev_skill_library_groups'
+
+function loadMockMaterialGroups(): MaterialLibraryGroup[] {
+  try {
+    const raw = localStorage.getItem(MOCK_MATERIAL_GROUPS_KEY)
+    if (!raw) return []
+    return normalizeMaterialLibraryGroups(JSON.parse(raw))
+  } catch {
+    return []
+  }
+}
+
+function saveMockMaterialGroups(groups: MaterialLibraryGroup[]) {
+  localStorage.setItem(MOCK_MATERIAL_GROUPS_KEY, JSON.stringify(groups))
+}
+
+function loadMockSkillGroups(): SkillLibraryGroup[] {
+  try {
+    const raw = localStorage.getItem(MOCK_SKILL_GROUPS_KEY)
+    if (!raw) return []
+    return normalizeSkillLibraryGroups(JSON.parse(raw))
+  } catch {
+    return []
+  }
+}
+
+function saveMockSkillGroups(groups: SkillLibraryGroup[]) {
+  localStorage.setItem(MOCK_SKILL_GROUPS_KEY, JSON.stringify(groups))
+}
+
+function removeMaterialIdFromMockGroups(materialId: string) {
+  const groups = loadMockMaterialGroups()
+  let changed = false
+  const now = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z')
+  const next = groups.map((group) => {
+    const members = { ...group.members }
+    let groupChanged = false
+    for (const kind of MATERIAL_KIND_KEYS) {
+      if (members[kind] === materialId) {
+        delete members[kind]
+        groupChanged = true
+      }
+    }
+    if (!groupChanged) return group
+    changed = true
+    return { ...group, members, updated_at: now }
+  })
+  if (changed) saveMockMaterialGroups(next)
+}
+
+function removeSkillIdFromMockGroups(skillId: string) {
+  const groups = loadMockSkillGroups()
+  let changed = false
+  const now = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z')
+  const next = groups.map((group) => {
+    const members = { ...group.members }
+    let groupChanged = false
+    for (const kind of SKILL_KIND_KEYS) {
+      if (members[kind] === skillId) {
+        delete members[kind]
+        groupChanged = true
+      }
+    }
+    if (!groupChanged) return group
+    changed = true
+    return { ...group, members, updated_at: now }
+  })
+  if (changed) saveMockSkillGroups(next)
+}
+
+export async function mockListMaterialLibraryGroups(): Promise<MaterialLibraryGroup[]> {
+  return loadMockMaterialGroups().sort((a, b) =>
+    (b.updated_at || '').localeCompare(a.updated_at || ''),
+  )
+}
+
+export async function mockCreateMaterialLibraryGroup(
+  title: string,
+  members?: Partial<Record<MaterialKind, string>> | null,
+): Promise<MaterialLibraryGroup> {
+  const name = title.trim()
+  if (!name) throw new Error('分组名称不能为空')
+  const normalized = normalizeMaterialLibraryGroupMembers(members)
+  if (Object.keys(normalized).length === 0) throw new Error('请至少选择一个素材库')
+  const materials = loadMockMaterials()
+  const groups = loadMockMaterialGroups()
+  const occupied = occupiedLibraryIdsFromGroups(groups)
+  for (const [kind, mid] of Object.entries(normalized) as Array<[MaterialKind, string]>) {
+    const material = materials.get(mid)
+    if (!material) throw new Error(`素材库不存在：${mid}`)
+    if (!materialMatchesKind(material, kind)) {
+      throw new Error(`素材库「${material.title}」不能放入${kind}部门`)
+    }
+    if (occupied.has(mid)) {
+      throw new Error(`素材库「${material.title}」已在其他分组中`)
+    }
+  }
+  const group = createLocalMaterialLibraryGroup(name, normalized)
+  groups.push(group)
+  saveMockMaterialGroups(groups)
+  return group
+}
+
+export async function mockUpdateMaterialLibraryGroup(
+  groupId: string,
+  title?: string | null,
+  members?: Partial<Record<MaterialKind, string>> | null,
+): Promise<MaterialLibraryGroup | null> {
+  const groups = loadMockMaterialGroups()
+  const index = groups.findIndex((g) => g.id === groupId)
+  if (index < 0) return null
+  const current = { ...groups[index] }
+  if (title != null) {
+    const name = title.trim()
+    if (!name) throw new Error('分组名称不能为空')
+    current.title = name
+  }
+  if (members != null) {
+    const normalized = normalizeMaterialLibraryGroupMembers(members)
+    if (Object.keys(normalized).length === 0) throw new Error('请至少选择一个素材库')
+    const materials = loadMockMaterials()
+    const occupied = occupiedLibraryIdsFromGroups(groups, groupId)
+    for (const [kind, mid] of Object.entries(normalized) as Array<[MaterialKind, string]>) {
+      const material = materials.get(mid)
+      if (!material) throw new Error(`素材库不存在：${mid}`)
+      if (!materialMatchesKind(material, kind)) {
+        throw new Error(`素材库「${material.title}」不能放入${kind}部门`)
+      }
+      if (occupied.has(mid)) {
+        throw new Error(`素材库「${material.title}」已在其他分组中`)
+      }
+    }
+    current.members = normalized
+  }
+  current.updated_at = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z')
+  groups[index] = current
+  saveMockMaterialGroups(groups)
+  return current
+}
+
+export async function mockDeleteMaterialLibraryGroup(groupId: string): Promise<boolean> {
+  const groups = loadMockMaterialGroups()
+  const next = groups.filter((g) => g.id !== groupId)
+  if (next.length === groups.length) return false
+  saveMockMaterialGroups(next)
+  return true
+}
+
+export async function mockListSkillLibraryGroups(): Promise<SkillLibraryGroup[]> {
+  return loadMockSkillGroups().sort((a, b) =>
+    (b.updated_at || '').localeCompare(a.updated_at || ''),
+  )
+}
+
+export async function mockCreateSkillLibraryGroup(
+  title: string,
+  members?: Partial<Record<SkillKind, string>> | null,
+): Promise<SkillLibraryGroup> {
+  const name = title.trim()
+  if (!name) throw new Error('分组名称不能为空')
+  const normalized = normalizeSkillLibraryGroupMembers(members)
+  if (Object.keys(normalized).length === 0) throw new Error('请至少选择一个技能库')
+  const skills = loadMockSkills()
+  const groups = loadMockSkillGroups()
+  const occupied = occupiedLibraryIdsFromGroups(groups)
+  for (const [kind, sid] of Object.entries(normalized) as Array<[SkillKind, string]>) {
+    const skill = skills.get(sid)
+    if (!skill) throw new Error(`技能库不存在：${sid}`)
+    if (skill.skill_kind !== kind) {
+      throw new Error(`技能库「${skill.title}」不能放入${kind}分类`)
+    }
+    if (occupied.has(sid)) {
+      throw new Error(`技能库「${skill.title}」已在其他分组中`)
+    }
+  }
+  const group = createLocalSkillLibraryGroup(name, normalized)
+  groups.push(group)
+  saveMockSkillGroups(groups)
+  return group
+}
+
+export async function mockUpdateSkillLibraryGroup(
+  groupId: string,
+  title?: string | null,
+  members?: Partial<Record<SkillKind, string>> | null,
+): Promise<SkillLibraryGroup | null> {
+  const groups = loadMockSkillGroups()
+  const index = groups.findIndex((g) => g.id === groupId)
+  if (index < 0) return null
+  const current = { ...groups[index] }
+  if (title != null) {
+    const name = title.trim()
+    if (!name) throw new Error('分组名称不能为空')
+    current.title = name
+  }
+  if (members != null) {
+    const normalized = normalizeSkillLibraryGroupMembers(members)
+    if (Object.keys(normalized).length === 0) throw new Error('请至少选择一个技能库')
+    const skills = loadMockSkills()
+    const occupied = occupiedLibraryIdsFromGroups(groups, groupId)
+    for (const [kind, sid] of Object.entries(normalized) as Array<[SkillKind, string]>) {
+      const skill = skills.get(sid)
+      if (!skill) throw new Error(`技能库不存在：${sid}`)
+      if (skill.skill_kind !== kind) {
+        throw new Error(`技能库「${skill.title}」不能放入${kind}分类`)
+      }
+      if (occupied.has(sid)) {
+        throw new Error(`技能库「${skill.title}」已在其他分组中`)
+      }
+    }
+    current.members = normalized
+  }
+  current.updated_at = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z')
+  groups[index] = current
+  saveMockSkillGroups(groups)
+  return current
+}
+
+export async function mockDeleteSkillLibraryGroup(groupId: string): Promise<boolean> {
+  const groups = loadMockSkillGroups()
+  const next = groups.filter((g) => g.id !== groupId)
+  if (next.length === groups.length) return false
+  saveMockSkillGroups(next)
+  return true
 }

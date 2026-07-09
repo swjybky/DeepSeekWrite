@@ -736,6 +736,118 @@ def new_skill_stage_item_id() -> str:
     return str(uuid4())
 
 
+def new_library_group_id() -> str:
+    return str(uuid4())
+
+
+def material_matches_kind(material_kind: str | None, kind: str) -> bool:
+    """素材库是否可用于指定用途部门（mixed 可匹配任意部门）。"""
+    normalized = normalize_material_kind(material_kind)
+    return normalized == "mixed" or normalized == kind
+
+
+def normalize_material_library_group_members(
+    raw: Any | None,
+) -> dict[str, str]:
+    """规范化素材分组成员：每个部门最多一个 material id。"""
+    out: dict[str, str] = {}
+    if not isinstance(raw, dict):
+        return out
+    seen_ids: set[str] = set()
+    for kind in MATERIAL_KIND_KEYS:
+        value = raw.get(kind)
+        if not isinstance(value, str):
+            continue
+        mid = value.strip()
+        if not mid or mid in seen_ids:
+            continue
+        seen_ids.add(mid)
+        out[kind] = mid
+    return out
+
+
+def normalize_skill_library_group_members(
+    raw: Any | None,
+) -> dict[str, str]:
+    """规范化技能分组成员：每个分类最多一个 skill id。"""
+    out: dict[str, str] = {}
+    if not isinstance(raw, dict):
+        return out
+    seen_ids: set[str] = set()
+    for kind in SKILL_KIND_KEYS:
+        value = raw.get(kind)
+        if not isinstance(value, str):
+            continue
+        sid = value.strip()
+        if not sid or sid in seen_ids:
+            continue
+        seen_ids.add(sid)
+        out[kind] = sid
+    return out
+
+
+def normalize_material_library_group(raw: Any | None) -> dict[str, Any] | None:
+    if not isinstance(raw, dict):
+        return None
+    gid = str(raw.get("id") or "").strip()
+    title = str(raw.get("title") or "").strip()
+    if not gid or not title:
+        return None
+    members = normalize_material_library_group_members(raw.get("members"))
+    return {
+        "id": gid,
+        "title": title,
+        "members": members,
+        "created_at": str(raw.get("created_at") or ""),
+        "updated_at": str(raw.get("updated_at") or ""),
+    }
+
+
+def normalize_skill_library_group(raw: Any | None) -> dict[str, Any] | None:
+    if not isinstance(raw, dict):
+        return None
+    gid = str(raw.get("id") or "").strip()
+    title = str(raw.get("title") or "").strip()
+    if not gid or not title:
+        return None
+    members = normalize_skill_library_group_members(raw.get("members"))
+    return {
+        "id": gid,
+        "title": title,
+        "members": members,
+        "created_at": str(raw.get("created_at") or ""),
+        "updated_at": str(raw.get("updated_at") or ""),
+    }
+
+
+def normalize_material_library_groups(raw: Any | None) -> list[dict[str, Any]]:
+    if not isinstance(raw, list):
+        return []
+    out: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for item in raw:
+        group = normalize_material_library_group(item)
+        if group is None or group["id"] in seen:
+            continue
+        seen.add(group["id"])
+        out.append(group)
+    return out
+
+
+def normalize_skill_library_groups(raw: Any | None) -> list[dict[str, Any]]:
+    if not isinstance(raw, list):
+        return []
+    out: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for item in raw:
+        group = normalize_skill_library_group(item)
+        if group is None or group["id"] in seen:
+            continue
+        seen.add(group["id"])
+        out.append(group)
+    return out
+
+
 def default_material_stages() -> dict[str, str]:
     """创建默认的空素材阶段字典"""
     return {k: "" for k in MATERIAL_STAGE_KEYS}

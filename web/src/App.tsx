@@ -11,8 +11,10 @@ import {
 import { BookEditor } from './pages/BookEditor'
 import { Home } from './pages/Home'
 import { MaterialEditor } from './pages/MaterialEditor'
+import { MaterialGroupEditor } from './pages/MaterialGroupEditor'
 import { MaterialSettings } from './pages/MaterialSettings'
 import { SkillEditor } from './pages/SkillEditor'
+import { SkillGroupEditor } from './pages/SkillGroupEditor'
 import { SkillSettings } from './pages/SkillSettings'
 import { WorkspaceSettings } from './pages/WorkspaceSettings'
 import { TextDisplaySettings } from './pages/TextDisplaySettings'
@@ -89,6 +91,8 @@ function App() {
                 <Route path="/skill-settings" element={<SkillSettings />} />
                 <Route path="/text-display-settings" element={<TextDisplaySettings />} />
                 <Route path="/book/:id" element={<BookEditor />} />
+                <Route path="/material-group/:groupId" element={<MaterialGroupEditor />} />
+                <Route path="/skill-group/:groupId" element={<SkillGroupEditor />} />
                 <Route path="/material/:id" element={<MaterialEditor />} />
                 <Route path="/skill/:id" element={<SkillEditor />} />
               </Routes>

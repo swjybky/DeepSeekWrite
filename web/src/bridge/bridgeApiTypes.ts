@@ -16,11 +16,13 @@ import type {
   Material,
   MaterialKind,
   MaterialKindWithMixed,
+  MaterialLibraryGroup,
   MaterialStageEntry,
   MaterialStageId,
   MaterialSummary,
   Skill,
   SkillKind,
+  SkillLibraryGroup,
   SkillSummary,
 } from './libraryDomain'
 
@@ -183,6 +185,30 @@ declare global {
         ): Promise<Material | null>
         delete_material(material_id: string): Promise<boolean>
         get_material_genres(): Promise<Record<string, string[]>>
+
+        // ==================== 素材/技能库分组 API ====================
+        list_material_library_groups(): Promise<MaterialLibraryGroup[]>
+        create_material_library_group(
+          title: string,
+          members?: Partial<Record<MaterialKind, string>> | null,
+        ): Promise<MaterialLibraryGroup>
+        update_material_library_group(
+          group_id: string,
+          title?: string | null,
+          members?: Partial<Record<MaterialKind, string>> | null,
+        ): Promise<MaterialLibraryGroup | null>
+        delete_material_library_group(group_id: string): Promise<boolean>
+        list_skill_library_groups(): Promise<SkillLibraryGroup[]>
+        create_skill_library_group(
+          title: string,
+          members?: Partial<Record<SkillKind, string>> | null,
+        ): Promise<SkillLibraryGroup>
+        update_skill_library_group(
+          group_id: string,
+          title?: string | null,
+          members?: Partial<Record<SkillKind, string>> | null,
+        ): Promise<SkillLibraryGroup | null>
+        delete_skill_library_group(group_id: string): Promise<boolean>
 
         // ==================== 技能库 API ====================
         list_skills(): Promise<SkillSummary[]>

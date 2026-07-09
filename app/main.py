@@ -1438,6 +1438,50 @@ class Api:
             delete_ai_chat_sessions_for_owner("skill", skill_id)
         return ok
 
+    # ==================== 素材/技能库分组 API ====================
+
+    def list_material_library_groups(self) -> list[dict]:
+        return self._store.list_material_library_groups()
+
+    def create_material_library_group(
+        self,
+        title: str,
+        members: dict | None = None,
+    ) -> dict:
+        return self._store.create_material_library_group(title, members)
+
+    def update_material_library_group(
+        self,
+        group_id: str,
+        title: str | None = None,
+        members: dict | None = None,
+    ) -> dict | None:
+        return self._store.update_material_library_group(group_id, title, members)
+
+    def delete_material_library_group(self, group_id: str) -> bool:
+        return self._store.delete_material_library_group(group_id)
+
+    def list_skill_library_groups(self) -> list[dict]:
+        return self._store.list_skill_library_groups()
+
+    def create_skill_library_group(
+        self,
+        title: str,
+        members: dict | None = None,
+    ) -> dict:
+        return self._store.create_skill_library_group(title, members)
+
+    def update_skill_library_group(
+        self,
+        group_id: str,
+        title: str | None = None,
+        members: dict | None = None,
+    ) -> dict | None:
+        return self._store.update_skill_library_group(group_id, title, members)
+
+    def delete_skill_library_group(self, group_id: str) -> bool:
+        return self._store.delete_skill_library_group(group_id)
+
     def get_workspace_root(self) -> str | None:
         return read_saved_workspace_root()
 

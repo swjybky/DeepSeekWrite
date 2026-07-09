@@ -10,8 +10,10 @@ import {
   type BookType,
   type MemoryEntry,
   type MaterialKind,
+  type MaterialLibraryGroup,
   type MaterialSummary,
   type SkillKind,
+  type SkillLibraryGroup,
   type MaterialType,
   type SkillSummary,
   type SkillType,
@@ -36,6 +38,13 @@ import {
   listMaterials,
   createMaterial,
   deleteMaterial,
+  listMaterialLibraryGroups,
+  createMaterialLibraryGroup,
+  deleteMaterialLibraryGroup,
+  listSkillLibraryGroups,
+  createSkillLibraryGroup,
+  deleteSkillLibraryGroup,
+  occupiedLibraryIdsFromGroups,
   normalizeAiModelSettings,
   saveAiModelConfig,
   checkForUpdate,
@@ -60,7 +69,14 @@ import {
   importLibrary,
 } from '../bridge'
 import { APPEARANCE_STYLE_LABELS, useAppearance } from '../appearance'
-import { CardGrid, bookToCardItem, materialToCardItem, skillToCardItem } from '../components/CardGrid'
+import {
+  CardGrid,
+  bookToCardItem,
+  materialGroupToCardItem,
+  materialToCardItem,
+  skillGroupToCardItem,
+  skillToCardItem,
+} from '../components/CardGrid'
 import { MemoryManagerDialog } from '../components/MemoryManagerDialog'
 import { useAppDialog } from '../components/useAppDialog'
 import { LearningImitationDialog } from '../features/learningImitation/LearningImitationDialog'
@@ -1721,6 +1737,26 @@ export function Home() {
   const [deletingSkillId, setDeletingSkillId] = useState<string | null>(null)
   const [skillError, setSkillError] = useState<string | null>(null)
 
+  // ==================== 素材/技能分组状态 ====================
+  const [materialGroups, setMaterialGroups] = useState<MaterialLibraryGroup[]>([])
+  const [skillGroups, setSkillGroups] = useState<SkillLibraryGroup[]>([])
+  const [showMaterialGroupForm, setShowMaterialGroupForm] = useState(false)
+  const [showSkillGroupForm, setShowSkillGroupForm] = useState(false)
+  const [materialGroupTitle, setMaterialGroupTitle] = useState('')
+  const [skillGroupTitle, setSkillGroupTitle] = useState('')
+  const [materialGroupMembers, setMaterialGroupMembers] = useState<
+    Partial<Record<MaterialKind, string>>
+  >({})
+  const [skillGroupMembers, setSkillGroupMembers] = useState<
+    Partial<Record<SkillKind, string>>
+  >({})
+  const [submittingMaterialGroup, setSubmittingMaterialGroup] = useState(false)
+  const [submittingSkillGroup, setSubmittingSkillGroup] = useState(false)
+  const [deletingMaterialGroupId, setDeletingMaterialGroupId] = useState<string | null>(null)
+  const [deletingSkillGroupId, setDeletingSkillGroupId] = useState<string | null>(null)
+  const [materialGroupError, setMaterialGroupError] = useState<string | null>(null)
+  const [skillGroupError, setSkillGroupError] = useState<string | null>(null)
+
   // ==================== 导入/导出状态 ====================
   const [exportBookOpen, setExportBookOpen] = useState(false)
   const [exportMaterialOpen, setExportMaterialOpen] = useState(false)
@@ -1905,8 +1941,12 @@ export function Home() {
     if (showLoading) setLoadingMaterials(true)
     setMaterialError(null)
     try {
-      const list = await listMaterials()
+      const [list, groups] = await Promise.all([
+        listMaterials(),
+        listMaterialLibraryGroups(),
+      ])
       setMaterials(list)
+      setMaterialGroups(groups)
     } catch (e) {
       setMaterialError(e instanceof Error ? e.message : '加载素材库失败')
     } finally {
@@ -1920,8 +1960,12 @@ export function Home() {
     if (showLoading) setLoadingSkills(true)
     setSkillError(null)
     try {
-      const list = await listSkills()
+      const [list, groups] = await Promise.all([
+        listSkills(),
+        listSkillLibraryGroups(),
+      ])
       setSkills(list)
+      setSkillGroups(groups)
     } catch (e) {
       setSkillError(e instanceof Error ? e.message : '加载技能库失败')
     } finally {
@@ -2221,6 +2265,156 @@ export function Home() {
     }
   }
 
+  // ==================== 分组操作 ====================
+  const occupiedMaterialIds = useMemo(
+    () => occupiedLibraryIdsFromGroups(materialGroups),
+    [materialGroups],
+  )
+  const occupiedSkillIds = useMemo(
+    () => occupiedLibraryIdsFromGroups(skillGroups),
+    [skillGroups],
+  )
+
+  const ungroupedMaterials = useMemo(
+    () => materials.filter((item) => !occupiedMaterialIds.has(item.id)),
+    [materials, occupiedMaterialIds],
+  )
+  const ungroupedSkills = useMemo(
+    () => skills.filter((item) => !occupiedSkillIds.has(item.id)),
+    [skills, occupiedSkillIds],
+  )
+
+  const materialGroupOptionsByKind = useMemo(
+    () =>
+      MATERIAL_KIND_KEYS.reduce(
+        (out, kind) => {
+          out[kind] = materials.filter(
+            (material) =>
+              materialMatchesKind(material, kind) &&
+              !occupiedMaterialIds.has(material.id),
+          )
+          return out
+        },
+        {} as Record<MaterialKind, MaterialSummary[]>,
+      ),
+    [materials, occupiedMaterialIds],
+  )
+
+  const skillGroupOptionsByKind = useMemo(
+    () =>
+      SKILL_KIND_KEYS.reduce(
+        (out, kind) => {
+          out[kind] = skills.filter(
+            (skill) =>
+              skillMatchesKind(skill, kind) && !occupiedSkillIds.has(skill.id),
+          )
+          return out
+        },
+        {} as Record<SkillKind, SkillSummary[]>,
+      ),
+    [skills, occupiedSkillIds],
+  )
+
+  const openMaterialGroupForm = () => {
+    setMaterialGroupError(null)
+    setMaterialGroupTitle('')
+    setMaterialGroupMembers({})
+    setShowMaterialGroupForm(true)
+  }
+
+  const openSkillGroupForm = () => {
+    setSkillGroupError(null)
+    setSkillGroupTitle('')
+    setSkillGroupMembers({})
+    setShowSkillGroupForm(true)
+  }
+
+  const handleCreateMaterialGroup = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setSubmittingMaterialGroup(true)
+    setMaterialGroupError(null)
+    try {
+      await createMaterialLibraryGroup(materialGroupTitle, materialGroupMembers)
+      setShowMaterialGroupForm(false)
+      setMaterialGroupTitle('')
+      setMaterialGroupMembers({})
+      await refreshMaterials()
+    } catch (err) {
+      setMaterialGroupError(err instanceof Error ? err.message : '创建素材分组失败')
+    } finally {
+      setSubmittingMaterialGroup(false)
+    }
+  }
+
+  const handleCreateSkillGroup = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setSubmittingSkillGroup(true)
+    setSkillGroupError(null)
+    try {
+      await createSkillLibraryGroup(skillGroupTitle, skillGroupMembers)
+      setShowSkillGroupForm(false)
+      setSkillGroupTitle('')
+      setSkillGroupMembers({})
+      await refreshSkills()
+    } catch (err) {
+      setSkillGroupError(err instanceof Error ? err.message : '创建技能分组失败')
+    } finally {
+      setSubmittingSkillGroup(false)
+    }
+  }
+
+  const handleDeleteMaterialCard = async (id: string) => {
+    if (materialGroups.some((group) => group.id === id)) {
+      const group = materialGroups.find((item) => item.id === id)
+      if (!group) return
+      const ok = await confirm({
+        title: '删除素材分组',
+        message: `确定删除分组「${group.title}」？`,
+        details: '仅解除分组，不会删除组内素材库。',
+        confirmText: '删除分组',
+        variant: 'danger',
+      })
+      if (!ok) return
+      setDeletingMaterialGroupId(id)
+      try {
+        await deleteMaterialLibraryGroup(id)
+        await refreshMaterials()
+      } catch (err) {
+        setMaterialError(err instanceof Error ? err.message : '删除素材分组失败')
+      } finally {
+        setDeletingMaterialGroupId(null)
+      }
+      return
+    }
+    await handleDeleteMaterial(id)
+  }
+
+  const handleDeleteSkillCard = async (id: string) => {
+    if (skillGroups.some((group) => group.id === id)) {
+      const group = skillGroups.find((item) => item.id === id)
+      if (!group) return
+      const ok = await confirm({
+        title: '删除技能分组',
+        message: `确定删除分组「${group.title}」？`,
+        details: '仅解除分组，不会删除组内技能库。',
+        confirmText: '删除分组',
+        variant: 'danger',
+      })
+      if (!ok) return
+      setDeletingSkillGroupId(id)
+      try {
+        await deleteSkillLibraryGroup(id)
+        await refreshSkills()
+      } catch (err) {
+        setSkillError(err instanceof Error ? err.message : '删除技能分组失败')
+      } finally {
+        setDeletingSkillGroupId(null)
+      }
+      return
+    }
+    await handleDeleteSkill(id)
+  }
+
   // ==================== 导入/导出操作 ====================
   const openExportBookDialog = () => {
     if (books.length === 0) return
@@ -2474,8 +2668,20 @@ export function Home() {
     () => completedBooks.map((b) => bookToCardItem(b, bookCovers[b.id])),
     [completedBooks, bookCovers],
   )
-  const materialCardItems = useMemo(() => materials.map(materialToCardItem), [materials])
-  const skillCardItems = useMemo(() => skills.map(skillToCardItem), [skills])
+  const materialCardItems = useMemo(
+    () => [
+      ...materialGroups.map(materialGroupToCardItem),
+      ...ungroupedMaterials.map(materialToCardItem),
+    ],
+    [materialGroups, ungroupedMaterials],
+  )
+  const skillCardItems = useMemo(
+    () => [
+      ...skillGroups.map(skillGroupToCardItem),
+      ...ungroupedSkills.map(skillToCardItem),
+    ],
+    [skillGroups, ungroupedSkills],
+  )
   const bookExportItems = useMemo(
     () => books.map(bookToExportDialogItem),
     [books],
@@ -2798,7 +3004,11 @@ export function Home() {
             </div>
             <div className="card-header-content">
               <h2 className="card-header-title">素材库</h2>
-              <span className="card-header-count">{materials.length} 个素材</span>
+              <span className="card-header-count">
+                {materialGroups.length > 0
+                  ? `${materialGroups.length} 个分组 · ${ungroupedMaterials.length} 个未分组`
+                  : `${materials.length} 个素材`}
+              </span>
             </div>
             <div className="card-header-actions">
               <button
@@ -2835,6 +3045,14 @@ export function Home() {
               </Link>
               <button
                 type="button"
+                className="btn-secondary btn-small"
+                disabled={materials.length === 0}
+                onClick={openMaterialGroupForm}
+              >
+                + 新建分组
+              </button>
+              <button
+                type="button"
                 className="btn-primary btn-small"
                 onClick={() => {
                   setMaterialError(null)
@@ -2851,7 +3069,7 @@ export function Home() {
                 <div className="spinner" />
                 <span>加载中…</span>
               </div>
-            ) : materials.length === 0 ? (
+            ) : materials.length === 0 && materialGroups.length === 0 ? (
               <div className="empty-state">
                 <div className="empty-icon">
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
@@ -2865,8 +3083,8 @@ export function Home() {
               <CardGrid
                 items={materialCardItems}
                 emptyText="暂无素材"
-                onDelete={handleDeleteMaterial}
-                deletingId={deletingMaterialId}
+                onDelete={(id) => void handleDeleteMaterialCard(id)}
+                deletingId={deletingMaterialId ?? deletingMaterialGroupId}
               />
             )}
           </div>
@@ -2890,7 +3108,11 @@ export function Home() {
             </div>
             <div className="card-header-content">
               <h2 className="card-header-title">技能库</h2>
-              <span className="card-header-count">{skills.length} 个技能</span>
+              <span className="card-header-count">
+                {skillGroups.length > 0
+                  ? `${skillGroups.length} 个分组 · ${ungroupedSkills.length} 个未分组`
+                  : `${skills.length} 个技能`}
+              </span>
             </div>
             <div className="card-header-actions">
               <button
@@ -2927,6 +3149,14 @@ export function Home() {
               </Link>
               <button
                 type="button"
+                className="btn-secondary btn-small"
+                disabled={skills.length === 0}
+                onClick={openSkillGroupForm}
+              >
+                + 新建分组
+              </button>
+              <button
+                type="button"
                 className="btn-primary btn-small"
                 onClick={() => {
                   setSkillError(null)
@@ -2943,7 +3173,7 @@ export function Home() {
                 <div className="spinner" />
                 <span>加载中…</span>
               </div>
-            ) : skills.length === 0 ? (
+            ) : skills.length === 0 && skillGroups.length === 0 ? (
               <div className="empty-state">
                 <div className="empty-icon">
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
@@ -2965,8 +3195,8 @@ export function Home() {
               <CardGrid
                 items={skillCardItems}
                 emptyText="暂无技能"
-                onDelete={handleDeleteSkill}
-                deletingId={deletingSkillId}
+                onDelete={(id) => void handleDeleteSkillCard(id)}
+                deletingId={deletingSkillId ?? deletingSkillGroupId}
               />
             )}
           </div>
@@ -3338,6 +3568,118 @@ export function Home() {
           </label>
 
           {skillError && <p className="form-error">{skillError}</p>}
+        </CreateDialog>
+      )}
+
+      {showMaterialGroupForm && (
+        <CreateDialog
+          title="新建素材分组"
+          titleId="create-material-group-title"
+          submitting={submittingMaterialGroup}
+          submitDisabled={
+            !materialGroupTitle.trim() ||
+            Object.values(materialGroupMembers).every((id) => !id)
+          }
+          onClose={() => setShowMaterialGroupForm(false)}
+          onSubmit={handleCreateMaterialGroup}
+        >
+          <label className="field">
+            <span className="field-label">分组名称</span>
+            <input
+              type="text"
+              value={materialGroupTitle}
+              onChange={(e) => setMaterialGroupTitle(e.target.value)}
+              placeholder="例如：短篇追妻素材组"
+              required
+              autoFocus
+            />
+          </label>
+          <fieldset className="field">
+            <legend className="field-label">按部门各选一个素材库</legend>
+            <div className="genre-grid" style={{ gridTemplateColumns: '1fr' }}>
+              {MATERIAL_KIND_KEYS.map((kind) => (
+                <label key={kind} className="field">
+                  <span className="field-label">{MATERIAL_KIND_LABELS[kind]}</span>
+                  <select
+                    value={materialGroupMembers[kind] ?? ''}
+                    onChange={(e) => {
+                      const value = e.target.value
+                      setMaterialGroupMembers((prev) => {
+                        const next = { ...prev }
+                        if (!value) delete next[kind]
+                        else next[kind] = value
+                        return next
+                      })
+                    }}
+                  >
+                    <option value="">不选</option>
+                    {materialGroupOptionsByKind[kind].map((material) => (
+                      <option key={material.id} value={material.id}>
+                        {material.title}（{materialTypeLabel(material.material_type)}）
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              ))}
+            </div>
+          </fieldset>
+          {materialGroupError && <p className="form-error">{materialGroupError}</p>}
+        </CreateDialog>
+      )}
+
+      {showSkillGroupForm && (
+        <CreateDialog
+          title="新建技能分组"
+          titleId="create-skill-group-title"
+          submitting={submittingSkillGroup}
+          submitDisabled={
+            !skillGroupTitle.trim() ||
+            Object.values(skillGroupMembers).every((id) => !id)
+          }
+          onClose={() => setShowSkillGroupForm(false)}
+          onSubmit={handleCreateSkillGroup}
+        >
+          <label className="field">
+            <span className="field-label">分组名称</span>
+            <input
+              type="text"
+              value={skillGroupTitle}
+              onChange={(e) => setSkillGroupTitle(e.target.value)}
+              placeholder="例如：短篇写作技能组"
+              required
+              autoFocus
+            />
+          </label>
+          <fieldset className="field">
+            <legend className="field-label">按分类各选一个技能库</legend>
+            <div className="genre-grid" style={{ gridTemplateColumns: '1fr' }}>
+              {SKILL_KIND_KEYS.map((kind) => (
+                <label key={kind} className="field">
+                  <span className="field-label">{SKILL_KIND_LABELS[kind]}</span>
+                  <select
+                    value={skillGroupMembers[kind] ?? ''}
+                    onChange={(e) => {
+                      const value = e.target.value
+                      setSkillGroupMembers((prev) => {
+                        const next = { ...prev }
+                        if (!value) delete next[kind]
+                        else next[kind] = value
+                        return next
+                      })
+                    }}
+                  >
+                    <option value="">不选</option>
+                    {skillGroupOptionsByKind[kind].map((skill) => (
+                      <option key={skill.id} value={skill.id}>
+                        {skill.title}（{skillTypeLabel(skill.skill_type)}）
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              ))}
+            </div>
+          </fieldset>
+          {skillGroupError && <p className="form-error">{skillGroupError}</p>}
         </CreateDialog>
       )}
 

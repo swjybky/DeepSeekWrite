@@ -1,12 +1,17 @@
 import { Link } from 'react-router-dom'
 import {
   bookTypeLabel,
+  countLibraryGroupMembers,
+  MATERIAL_KIND_KEYS,
   MATERIAL_KIND_LABELS,
+  SKILL_KIND_KEYS,
   SKILL_KIND_LABELS,
   materialTypeLabel,
   skillTypeLabel,
   type BookSummary,
+  type MaterialLibraryGroup,
   type MaterialSummary,
+  type SkillLibraryGroup,
   type SkillSummary,
 } from '../bridge'
 import defaultMaterialCover from '../assets/default-material-cover.png'
@@ -18,7 +23,7 @@ import './CardGrid.css'
 export interface CardItem {
   id: string
   title: string
-  type: 'book' | 'material' | 'skill'
+  type: 'book' | 'material' | 'skill' | 'material_group' | 'skill_group'
   subtype?: string
   genre?: string
   subGenre?: string
@@ -90,12 +95,20 @@ export function CardGrid({ items, emptyText = '暂无项目', onDelete, deleting
                       {item.meta}
                       {item.genre && ` · ${item.genre}`}
                     </span>
-                  ) : item.type === 'skill' ? (
+                  ) : item.type === 'skill' || item.type === 'skill_group' ? (
                     <span className="card-type" title={[
-                      '技能库',
+                      item.type === 'skill_group' ? '技能分组' : '技能库',
                       item.meta,
                     ].filter(Boolean).join(' · ')}>
-                      技能库
+                      {item.type === 'skill_group' ? '技能分组' : '技能库'}
+                      {item.meta && ` · ${item.meta}`}
+                    </span>
+                  ) : item.type === 'material_group' ? (
+                    <span className="card-type" title={[
+                      '素材分组',
+                      item.meta,
+                    ].filter(Boolean).join(' · ')}>
+                      素材分组
                       {item.meta && ` · ${item.meta}`}
                     </span>
                   ) : (
@@ -144,7 +157,7 @@ function getCardCover(item: CardItem): CardCover {
       : `data:image/png;base64,${item.coverData}`
     return { sources: [{ src }], isDefault: false }
   }
-  if (item.type === 'material') {
+  if (item.type === 'material' || item.type === 'material_group') {
     return {
       sources: [
         { src: defaultMaterialCover, appearance: 'classic' },
@@ -153,7 +166,7 @@ function getCardCover(item: CardItem): CardCover {
       isDefault: true,
     }
   }
-  if (item.type === 'skill') {
+  if (item.type === 'skill' || item.type === 'skill_group') {
     return {
       sources: [
         { src: defaultSkillCover, appearance: 'classic' },
@@ -216,5 +229,29 @@ export function skillToCardItem(skill: SkillSummary): CardItem {
     meta: `${skillTypeLabel(skill.skill_type)} · ${SKILL_KIND_LABELS[skill.skill_kind]} · ${count > 0 ? `${count} 个阶段技能` : '暂无阶段技能'}`,
     outputDir: skill.output_dir,
     to: `/skill/${skill.id}`,
+  }
+}
+
+// eslint-disable-next-line react-refresh/only-export-components
+export function materialGroupToCardItem(group: MaterialLibraryGroup): CardItem {
+  const count = countLibraryGroupMembers(group.members)
+  return {
+    id: group.id,
+    title: group.title,
+    type: 'material_group',
+    meta: `已选 ${count}/${MATERIAL_KIND_KEYS.length} 个部门`,
+    to: `/material-group/${group.id}`,
+  }
+}
+
+// eslint-disable-next-line react-refresh/only-export-components
+export function skillGroupToCardItem(group: SkillLibraryGroup): CardItem {
+  const count = countLibraryGroupMembers(group.members)
+  return {
+    id: group.id,
+    title: group.title,
+    type: 'skill_group',
+    meta: `已选 ${count}/${SKILL_KIND_KEYS.length} 个分类`,
+    to: `/skill-group/${group.id}`,
   }
 }

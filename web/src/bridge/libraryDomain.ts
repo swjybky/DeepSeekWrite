@@ -327,6 +327,175 @@ export interface LoadCommonSkillsResult {
   already_loaded: boolean
 }
 
+export interface MaterialLibraryGroup {
+  id: string
+  title: string
+  members: Partial<Record<MaterialKind, string>>
+  created_at: string
+  updated_at: string
+}
+
+export interface SkillLibraryGroup {
+  id: string
+  title: string
+  members: Partial<Record<SkillKind, string>>
+  created_at: string
+  updated_at: string
+}
+
+function newLocalLibraryGroupId(): string {
+  return globalThis.crypto?.randomUUID?.() ?? Math.random().toString(36).slice(2)
+}
+
+export function normalizeMaterialLibraryGroupMembers(
+  raw: unknown,
+): Partial<Record<MaterialKind, string>> {
+  const out: Partial<Record<MaterialKind, string>> = {}
+  if (!raw || typeof raw !== 'object') return out
+  const record = raw as Record<string, unknown>
+  const seen = new Set<string>()
+  for (const kind of MATERIAL_KIND_KEYS) {
+    const value = record[kind]
+    if (typeof value !== 'string') continue
+    const id = value.trim()
+    if (!id || seen.has(id)) continue
+    seen.add(id)
+    out[kind] = id
+  }
+  return out
+}
+
+export function normalizeSkillLibraryGroupMembers(
+  raw: unknown,
+): Partial<Record<SkillKind, string>> {
+  const out: Partial<Record<SkillKind, string>> = {}
+  if (!raw || typeof raw !== 'object') return out
+  const record = raw as Record<string, unknown>
+  const seen = new Set<string>()
+  for (const kind of SKILL_KIND_KEYS) {
+    const value = record[kind]
+    if (typeof value !== 'string') continue
+    const id = value.trim()
+    if (!id || seen.has(id)) continue
+    seen.add(id)
+    out[kind] = id
+  }
+  return out
+}
+
+export function normalizeMaterialLibraryGroup(raw: unknown): MaterialLibraryGroup | null {
+  if (!raw || typeof raw !== 'object') return null
+  const record = raw as Record<string, unknown>
+  const id = typeof record.id === 'string' ? record.id.trim() : ''
+  const title = typeof record.title === 'string' ? record.title.trim() : ''
+  if (!id || !title) return null
+  return {
+    id,
+    title,
+    members: normalizeMaterialLibraryGroupMembers(record.members),
+    created_at: typeof record.created_at === 'string' ? record.created_at : '',
+    updated_at: typeof record.updated_at === 'string' ? record.updated_at : '',
+  }
+}
+
+export function normalizeSkillLibraryGroup(raw: unknown): SkillLibraryGroup | null {
+  if (!raw || typeof raw !== 'object') return null
+  const record = raw as Record<string, unknown>
+  const id = typeof record.id === 'string' ? record.id.trim() : ''
+  const title = typeof record.title === 'string' ? record.title.trim() : ''
+  if (!id || !title) return null
+  return {
+    id,
+    title,
+    members: normalizeSkillLibraryGroupMembers(record.members),
+    created_at: typeof record.created_at === 'string' ? record.created_at : '',
+    updated_at: typeof record.updated_at === 'string' ? record.updated_at : '',
+  }
+}
+
+export function normalizeMaterialLibraryGroups(raw: unknown): MaterialLibraryGroup[] {
+  if (!Array.isArray(raw)) return []
+  const out: MaterialLibraryGroup[] = []
+  const seen = new Set<string>()
+  for (const item of raw) {
+    const group = normalizeMaterialLibraryGroup(item)
+    if (!group || seen.has(group.id)) continue
+    seen.add(group.id)
+    out.push(group)
+  }
+  return out
+}
+
+export function normalizeSkillLibraryGroups(raw: unknown): SkillLibraryGroup[] {
+  if (!Array.isArray(raw)) return []
+  const out: SkillLibraryGroup[] = []
+  const seen = new Set<string>()
+  for (const item of raw) {
+    const group = normalizeSkillLibraryGroup(item)
+    if (!group || seen.has(group.id)) continue
+    seen.add(group.id)
+    out.push(group)
+  }
+  return out
+}
+
+export function libraryGroupMemberIds(
+  members: Partial<Record<string, string>> | null | undefined,
+): string[] {
+  if (!members) return []
+  return Object.values(members).filter((id): id is string => typeof id === 'string' && id.trim().length > 0)
+}
+
+export function occupiedLibraryIdsFromGroups(
+  groups: Array<{ members: Partial<Record<string, string>> }>,
+  excludeGroupId?: string | null,
+): Set<string> {
+  const occupied = new Set<string>()
+  for (const group of groups) {
+    if (excludeGroupId && 'id' in group && (group as { id?: string }).id === excludeGroupId) {
+      continue
+    }
+    for (const id of libraryGroupMemberIds(group.members)) {
+      occupied.add(id)
+    }
+  }
+  return occupied
+}
+
+export function countLibraryGroupMembers(
+  members: Partial<Record<string, string>> | null | undefined,
+): number {
+  return libraryGroupMemberIds(members).length
+}
+
+export function createLocalMaterialLibraryGroup(
+  title: string,
+  members: Partial<Record<MaterialKind, string>>,
+): MaterialLibraryGroup {
+  const now = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z')
+  return {
+    id: newLocalLibraryGroupId(),
+    title: title.trim(),
+    members: normalizeMaterialLibraryGroupMembers(members),
+    created_at: now,
+    updated_at: now,
+  }
+}
+
+export function createLocalSkillLibraryGroup(
+  title: string,
+  members: Partial<Record<SkillKind, string>>,
+): SkillLibraryGroup {
+  const now = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z')
+  return {
+    id: newLocalLibraryGroupId(),
+    title: title.trim(),
+    members: normalizeSkillLibraryGroupMembers(members),
+    created_at: now,
+    updated_at: now,
+  }
+}
+
 function newLocalSkillStageEntryId(): string {
   return globalThis.crypto?.randomUUID?.() ?? Math.random().toString(36).slice(2)
 }

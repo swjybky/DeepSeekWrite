@@ -267,9 +267,26 @@ function materialTreeMeta(material: MaterialSummary): string {
   ].filter(Boolean).join(' · ')
 }
 
-export function MaterialEditor() {
+export type MaterialEditorGroupContext = {
+  groupId: string
+  title: string
+  memberIdsOrdered: string[]
+}
+
+type MaterialEditorProps = {
+  materialId?: string
+  groupContext?: MaterialEditorGroupContext | null
+  onGroupMaterialChange?: (materialId: string) => void
+}
+
+export function MaterialEditor({
+  materialId: materialIdProp,
+  groupContext = null,
+  onGroupMaterialChange,
+}: MaterialEditorProps = {}) {
   const historyPortalTargetId = useId()
-  const { id } = useParams<{ id: string }>()
+  const { id: routeId } = useParams<{ id: string }>()
+  const id = materialIdProp ?? routeId
   const navigate = useNavigate()
   const [material, setMaterial] = useState<Material | null>(null)
   const [stageItems, setStageItems] = useState<MaterialStageItems>(() =>
@@ -741,12 +758,24 @@ export function MaterialEditor() {
   const materialTreeBooks = useMemo(() => {
     if (!material) return []
     const activeSummary = materialSummaryFromMaterial(material)
-    const groupedSummaries = materialSummaries.filter(
-      (summary) => summary.material_kind === material.material_kind,
-    )
-    const summaries = groupedSummaries.some((summary) => summary.id === material.id)
-      ? groupedSummaries
-      : [activeSummary, ...groupedSummaries]
+    let summaries: MaterialSummary[]
+    if (groupContext) {
+      const byId = new Map(materialSummaries.map((item) => [item.id, item]))
+      byId.set(activeSummary.id, activeSummary)
+      summaries = groupContext.memberIdsOrdered
+        .map((memberId) => byId.get(memberId))
+        .filter((item): item is MaterialSummary => Boolean(item))
+      if (!summaries.some((item) => item.id === material.id)) {
+        summaries = [activeSummary, ...summaries]
+      }
+    } else {
+      const groupedSummaries = materialSummaries.filter(
+        (summary) => summary.material_kind === material.material_kind,
+      )
+      summaries = groupedSummaries.some((summary) => summary.id === material.id)
+        ? groupedSummaries
+        : [activeSummary, ...groupedSummaries]
+    }
 
     return summaries.map((summary) => {
       const isActive = summary.id === material.id
@@ -779,7 +808,7 @@ export function MaterialEditor() {
         }),
       }
     })
-  }, [material, materialSummaries, stageItems])
+  }, [groupContext, material, materialSummaries, stageItems])
 
   const handleStageSelect = (stageId: MaterialStageId) => {
     void flushAutoSave()
@@ -864,6 +893,10 @@ export function MaterialEditor() {
     }
     await flushAutoSave()
     pendingStageOnLoadRef.current = stageId ?? null
+    if (groupContext && onGroupMaterialChange) {
+      onGroupMaterialChange(materialId)
+      return
+    }
     navigate(`/material/${materialId}`)
   }
 
@@ -1109,7 +1142,11 @@ export function MaterialEditor() {
             activeBookId={material.id}
             activeStageId={treeActiveStage}
             activeStageChildId={activeTreeChildId}
-            ariaLabel={`${MATERIAL_KIND_LABELS[material.material_kind]}树形结构`}
+            ariaLabel={
+              groupContext
+                ? `${groupContext.title}树形结构`
+                : `${MATERIAL_KIND_LABELS[material.material_kind]}树形结构`
+            }
             onStageSelect={(stageId) => handleStageSelect(stageId as MaterialStageId)}
             onBookSelect={(materialId) => void handleTreeMaterialSelect(materialId)}
             onBookStageSelect={(materialId, stageId) =>

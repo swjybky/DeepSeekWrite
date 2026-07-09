@@ -38,12 +38,18 @@ from app.models import (
     default_material_stages,
     material_stage_items_to_stages,
     default_stages,
+    material_matches_kind,
     new_memory_id,
+    new_library_group_id,
     normalize_expert_draft_from_storage,
     new_book_id,
     new_material_id,
     new_skill_id,
     new_skill_stage_item_id,
+    normalize_material_library_group_members,
+    normalize_material_library_groups,
+    normalize_skill_library_group_members,
+    normalize_skill_library_groups,
     primary_draft_stage_key,
     normalize_memories_from_storage,
     normalize_memory_entry,
@@ -65,6 +71,8 @@ APPEARANCE_STYLE_PREF_KEY = "appearance_style"
 APPEARANCE_STYLES = {"classic", "modern", "night"}
 TEXT_DISPLAY_MODE_PREF_KEY = "text_display_mode"
 TEXT_DISPLAY_MODES = {"text", "markdown"}
+MATERIAL_LIBRARY_GROUPS_PREF_KEY = "material_library_groups"
+SKILL_LIBRARY_GROUPS_PREF_KEY = "skill_library_groups"
 
 
 @contextmanager
@@ -447,6 +455,112 @@ def write_text_display_mode(mode: str) -> str:
         prefs[TEXT_DISPLAY_MODE_PREF_KEY] = normalized
         _save_preferences_atomic_unlocked(prefs)
     return normalized
+
+
+def _read_material_library_groups_unlocked() -> list[dict[str, Any]]:
+    return normalize_material_library_groups(
+        _load_preferences_unlocked().get(MATERIAL_LIBRARY_GROUPS_PREF_KEY)
+    )
+
+
+def _write_material_library_groups_unlocked(groups: list[dict[str, Any]]) -> None:
+    prefs = _load_preferences_unlocked()
+    prefs[MATERIAL_LIBRARY_GROUPS_PREF_KEY] = normalize_material_library_groups(groups)
+    _save_preferences_atomic_unlocked(prefs)
+
+
+def _read_skill_library_groups_unlocked() -> list[dict[str, Any]]:
+    return normalize_skill_library_groups(
+        _load_preferences_unlocked().get(SKILL_LIBRARY_GROUPS_PREF_KEY)
+    )
+
+
+def _write_skill_library_groups_unlocked(groups: list[dict[str, Any]]) -> None:
+    prefs = _load_preferences_unlocked()
+    prefs[SKILL_LIBRARY_GROUPS_PREF_KEY] = normalize_skill_library_groups(groups)
+    _save_preferences_atomic_unlocked(prefs)
+
+
+def _occupied_material_ids_unlocked(
+    groups: list[dict[str, Any]],
+    *,
+    exclude_group_id: str | None = None,
+) -> set[str]:
+    occupied: set[str] = set()
+    for group in groups:
+        if exclude_group_id and group.get("id") == exclude_group_id:
+            continue
+        members = group.get("members") or {}
+        if not isinstance(members, dict):
+            continue
+        for mid in members.values():
+            if isinstance(mid, str) and mid.strip():
+                occupied.add(mid.strip())
+    return occupied
+
+
+def _occupied_skill_ids_unlocked(
+    groups: list[dict[str, Any]],
+    *,
+    exclude_group_id: str | None = None,
+) -> set[str]:
+    occupied: set[str] = set()
+    for group in groups:
+        if exclude_group_id and group.get("id") == exclude_group_id:
+            continue
+        members = group.get("members") or {}
+        if not isinstance(members, dict):
+            continue
+        for sid in members.values():
+            if isinstance(sid, str) and sid.strip():
+                occupied.add(sid.strip())
+    return occupied
+
+
+def _remove_material_id_from_library_groups_unlocked(material_id: str) -> bool:
+    mid = (material_id or "").strip()
+    if not mid:
+        return False
+    groups = _read_material_library_groups_unlocked()
+    changed = False
+    next_groups: list[dict[str, Any]] = []
+    for group in groups:
+        members = dict(group.get("members") or {})
+        cleaned = {
+            kind: value
+            for kind, value in members.items()
+            if value != mid
+        }
+        if cleaned != members:
+            changed = True
+            group = {**group, "members": cleaned, "updated_at": _utc_now_iso()}
+        next_groups.append(group)
+    if changed:
+        _write_material_library_groups_unlocked(next_groups)
+    return changed
+
+
+def _remove_skill_id_from_library_groups_unlocked(skill_id: str) -> bool:
+    sid = (skill_id or "").strip()
+    if not sid:
+        return False
+    groups = _read_skill_library_groups_unlocked()
+    changed = False
+    next_groups: list[dict[str, Any]] = []
+    for group in groups:
+        members = dict(group.get("members") or {})
+        cleaned = {
+            kind: value
+            for kind, value in members.items()
+            if value != sid
+        }
+        if cleaned != members:
+            changed = True
+            group = {**group, "members": cleaned, "updated_at": _utc_now_iso()}
+        next_groups.append(group)
+    if changed:
+        _write_skill_library_groups_unlocked(next_groups)
+    return changed
 
 
 def read_workspace_agent_read_access() -> dict[str, Any]:
@@ -1818,6 +1932,7 @@ class BookStore:
             if changed_books:
                 save_books_atomic(self._path, self._books)
                 self._mark_books_saved_unlocked()
+            _remove_material_id_from_library_groups_unlocked(mid)
             _remove_output_dir(output_dir)
             return True
 
@@ -2015,5 +2130,198 @@ class BookStore:
             if changed_books:
                 save_books_atomic(self._path, self._books)
                 self._mark_books_saved_unlocked()
+            _remove_skill_id_from_library_groups_unlocked(sid)
             _remove_output_dir(output_dir)
+            return True
+
+    # ==================== 素材/技能库分组 ====================
+
+    def list_material_library_groups(self) -> list[dict[str, Any]]:
+        with _data_file_lock():
+            groups = _read_material_library_groups_unlocked()
+            return sorted(
+                groups,
+                key=lambda g: (g.get("updated_at") or "", g.get("title") or ""),
+                reverse=True,
+            )
+
+    def create_material_library_group(
+        self,
+        title: str,
+        members: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        with _data_file_lock():
+            self._reload_materials_unlocked()
+            name = (title or "").strip()
+            if not name:
+                raise ValueError("分组名称不能为空")
+            normalized_members = normalize_material_library_group_members(members)
+            if not normalized_members:
+                raise ValueError("请至少选择一个素材库")
+            groups = _read_material_library_groups_unlocked()
+            occupied = _occupied_material_ids_unlocked(groups)
+            for kind, mid in normalized_members.items():
+                material = self._materials.get(mid)
+                if material is None:
+                    raise ValueError(f"素材库不存在：{mid}")
+                if not material_matches_kind(material.material_kind, kind):
+                    raise ValueError(
+                        f"素材库「{material.title}」不能放入{kind}部门"
+                    )
+                if mid in occupied:
+                    raise ValueError(f"素材库「{material.title}」已在其他分组中")
+            now = _utc_now_iso()
+            group = {
+                "id": new_library_group_id(),
+                "title": name,
+                "members": normalized_members,
+                "created_at": now,
+                "updated_at": now,
+            }
+            groups.append(group)
+            _write_material_library_groups_unlocked(groups)
+            return group
+
+    def update_material_library_group(
+        self,
+        group_id: str,
+        title: str | None = None,
+        members: dict[str, Any] | None = None,
+    ) -> dict[str, Any] | None:
+        with _data_file_lock():
+            self._reload_materials_unlocked()
+            gid = (group_id or "").strip()
+            groups = _read_material_library_groups_unlocked()
+            index = next((i for i, g in enumerate(groups) if g.get("id") == gid), -1)
+            if index < 0:
+                return None
+            current = dict(groups[index])
+            if title is not None:
+                name = title.strip()
+                if not name:
+                    raise ValueError("分组名称不能为空")
+                current["title"] = name
+            if members is not None:
+                normalized_members = normalize_material_library_group_members(members)
+                if not normalized_members:
+                    raise ValueError("请至少选择一个素材库")
+                occupied = _occupied_material_ids_unlocked(groups, exclude_group_id=gid)
+                for kind, mid in normalized_members.items():
+                    material = self._materials.get(mid)
+                    if material is None:
+                        raise ValueError(f"素材库不存在：{mid}")
+                    if not material_matches_kind(material.material_kind, kind):
+                        raise ValueError(
+                            f"素材库「{material.title}」不能放入{kind}部门"
+                        )
+                    if mid in occupied:
+                        raise ValueError(f"素材库「{material.title}」已在其他分组中")
+                current["members"] = normalized_members
+            current["updated_at"] = _utc_now_iso()
+            groups[index] = current
+            _write_material_library_groups_unlocked(groups)
+            return current
+
+    def delete_material_library_group(self, group_id: str) -> bool:
+        with _data_file_lock():
+            gid = (group_id or "").strip()
+            groups = _read_material_library_groups_unlocked()
+            next_groups = [g for g in groups if g.get("id") != gid]
+            if len(next_groups) == len(groups):
+                return False
+            _write_material_library_groups_unlocked(next_groups)
+            return True
+
+    def list_skill_library_groups(self) -> list[dict[str, Any]]:
+        with _data_file_lock():
+            groups = _read_skill_library_groups_unlocked()
+            return sorted(
+                groups,
+                key=lambda g: (g.get("updated_at") or "", g.get("title") or ""),
+                reverse=True,
+            )
+
+    def create_skill_library_group(
+        self,
+        title: str,
+        members: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        with _data_file_lock():
+            self._reload_skills_unlocked()
+            name = (title or "").strip()
+            if not name:
+                raise ValueError("分组名称不能为空")
+            normalized_members = normalize_skill_library_group_members(members)
+            if not normalized_members:
+                raise ValueError("请至少选择一个技能库")
+            groups = _read_skill_library_groups_unlocked()
+            occupied = _occupied_skill_ids_unlocked(groups)
+            for kind, sid in normalized_members.items():
+                skill = self._skills.get(sid)
+                if skill is None:
+                    raise ValueError(f"技能库不存在：{sid}")
+                if normalize_skill_kind(skill.skill_kind) != kind:
+                    raise ValueError(f"技能库「{skill.title}」不能放入{kind}分类")
+                if sid in occupied:
+                    raise ValueError(f"技能库「{skill.title}」已在其他分组中")
+            now = _utc_now_iso()
+            group = {
+                "id": new_library_group_id(),
+                "title": name,
+                "members": normalized_members,
+                "created_at": now,
+                "updated_at": now,
+            }
+            groups.append(group)
+            _write_skill_library_groups_unlocked(groups)
+            return group
+
+    def update_skill_library_group(
+        self,
+        group_id: str,
+        title: str | None = None,
+        members: dict[str, Any] | None = None,
+    ) -> dict[str, Any] | None:
+        with _data_file_lock():
+            self._reload_skills_unlocked()
+            gid = (group_id or "").strip()
+            groups = _read_skill_library_groups_unlocked()
+            index = next((i for i, g in enumerate(groups) if g.get("id") == gid), -1)
+            if index < 0:
+                return None
+            current = dict(groups[index])
+            if title is not None:
+                name = title.strip()
+                if not name:
+                    raise ValueError("分组名称不能为空")
+                current["title"] = name
+            if members is not None:
+                normalized_members = normalize_skill_library_group_members(members)
+                if not normalized_members:
+                    raise ValueError("请至少选择一个技能库")
+                occupied = _occupied_skill_ids_unlocked(groups, exclude_group_id=gid)
+                for kind, sid in normalized_members.items():
+                    skill = self._skills.get(sid)
+                    if skill is None:
+                        raise ValueError(f"技能库不存在：{sid}")
+                    if normalize_skill_kind(skill.skill_kind) != kind:
+                        raise ValueError(
+                            f"技能库「{skill.title}」不能放入{kind}分类"
+                        )
+                    if sid in occupied:
+                        raise ValueError(f"技能库「{skill.title}」已在其他分组中")
+                current["members"] = normalized_members
+            current["updated_at"] = _utc_now_iso()
+            groups[index] = current
+            _write_skill_library_groups_unlocked(groups)
+            return current
+
+    def delete_skill_library_group(self, group_id: str) -> bool:
+        with _data_file_lock():
+            gid = (group_id or "").strip()
+            groups = _read_skill_library_groups_unlocked()
+            next_groups = [g for g in groups if g.get("id") != gid]
+            if len(next_groups) == len(groups):
+                return False
+            _write_skill_library_groups_unlocked(next_groups)
             return True

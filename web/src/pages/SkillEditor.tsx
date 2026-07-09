@@ -10,7 +10,9 @@ import {
   type SkillKind,
   type SkillStageEntry,
   type SkillStageId,
+  type SkillSummary,
   getSkill,
+  listSkills,
   loadCommonSkillsToSkill,
   normalizeSkillStages,
   saveSkill,
@@ -120,13 +122,31 @@ function stagesToPromptText(stages: SkillStages): Record<SkillStageId, string> {
   return out
 }
 
-export function SkillEditor() {
+export type SkillEditorGroupContext = {
+  groupId: string
+  title: string
+  memberIdsOrdered: string[]
+}
+
+type SkillEditorProps = {
+  skillId?: string
+  groupContext?: SkillEditorGroupContext | null
+  onGroupSkillChange?: (skillId: string) => void
+}
+
+export function SkillEditor({
+  skillId: skillIdProp,
+  groupContext = null,
+  onGroupSkillChange,
+}: SkillEditorProps = {}) {
   const historyPortalTargetId = useId()
-  const { id } = useParams<{ id: string }>()
+  const { id: routeId } = useParams<{ id: string }>()
+  const id = skillIdProp ?? routeId
   const navigate = useNavigate()
   const { alert: showAlert, confirm, dialog } = useAppDialog()
   const [skill, setSkill] = useState<Skill | null>(null)
   const [stages, setStages] = useState<SkillStages>(() => normalizeSkillStages({}))
+  const [skillSummaries, setSkillSummaries] = useState<SkillSummary[]>([])
   const [activeStage, setActiveStage] = useState<SkillStageId>('character_design')
   const [selectedEntryIds, setSelectedEntryIds] = useState<
     Partial<Record<SkillStageId, string>>
@@ -451,7 +471,10 @@ export function SkillEditor() {
     setLoading(true)
     setError(null)
     try {
-      const s = await getSkill(id)
+      const [s, summaries] = await Promise.all([
+        getSkill(id),
+        groupContext ? listSkills() : Promise.resolve([] as SkillSummary[]),
+      ])
       if (!s) {
         setSkill(null)
         setError('未找到该技能')
@@ -460,18 +483,23 @@ export function SkillEditor() {
       syncSkillState(s, { resetNavigation: true })
       markSkillSaved(s.id)
       markOverviewSaved(s.id)
+      if (groupContext) {
+        setSkillSummaries(summaries)
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : '加载失败')
     } finally {
       setLoading(false)
     }
-  }, [id, markOverviewSaved, markSkillSaved, syncSkillState])
+  }, [groupContext, id, markOverviewSaved, markSkillSaved, syncSkillState])
 
-  const hasLoadedRef = useRef(false)
   useEffect(() => {
-    if (!hasLoadedRef.current) {
-      hasLoadedRef.current = true
-      void load()
+    let cancelled = false
+    queueMicrotask(() => {
+      if (!cancelled) void load()
+    })
+    return () => {
+      cancelled = true
     }
   }, [load])
 
@@ -504,6 +532,53 @@ export function SkillEditor() {
     if (!selectedEntryIdsRef.current[stageId] && entries[0]) {
       setSelectedIdsAndRef((prev) => ({ ...prev, [stageId]: entries[0].id }))
     }
+  }
+
+  const skillTreeBooks = useMemo(() => {
+    if (!groupContext || !skill) return null
+    const byId = new Map(skillSummaries.map((item) => [item.id, item]))
+    byId.set(skill.id, {
+      id: skill.id,
+      title: skill.title,
+      skill_type: skill.skill_type,
+      skill_kind: skill.skill_kind,
+      stage_skill_count: skill.stage_skill_count,
+      output_dir: skill.output_dir,
+    })
+    return groupContext.memberIdsOrdered
+      .map((memberId) => byId.get(memberId))
+      .filter((item): item is SkillSummary => Boolean(item))
+      .map((summary) => {
+        const isActive = summary.id === skill.id
+        const stageKeys = SKILL_KIND_STAGE_IDS[summary.skill_kind] ?? SKILL_STAGE_KEYS
+        return {
+          id: summary.id,
+          title: summary.title,
+          meta: `${skillTypeLabel(summary.skill_type)} · ${SKILL_KIND_LABELS[summary.skill_kind]}`,
+          stages: stageKeys.map((stageId) => ({
+            id: stageId,
+            label: isActive
+              ? `${SKILL_STAGE_LABELS[stageId]}（${stages[stageId]?.length ?? 0}）`
+              : SKILL_STAGE_LABELS[stageId],
+          })),
+        }
+      })
+  }, [groupContext, skill, skillSummaries, stages])
+
+  const handleTreeSkillSelect = async (
+    skillId: string,
+    stageId?: SkillStageId,
+  ) => {
+    if (skillId === skill?.id) {
+      if (stageId) handleStageSelect(stageId)
+      return
+    }
+    await flushAutoSave()
+    if (groupContext && onGroupSkillChange) {
+      onGroupSkillChange(skillId)
+      return
+    }
+    navigate(`/skill/${skillId}`)
   }
 
   const handleBack = useCallback(async () => {
@@ -770,6 +845,80 @@ export function SkillEditor() {
         style={{ '--workspace-ai-width': `${aiPanelWidth}px` } as CSSProperties}
       >
         <aside className="workspace-rail workspace-rail--tree">
+          {skillTreeBooks ? (
+            <WorkspaceTreeNav
+              books={skillTreeBooks}
+              defaultExpanded
+              activeBookId={skill.id}
+              activeStageId={activeStage}
+              ariaLabel={`${groupContext?.title ?? skill.title}树形结构`}
+              onStageSelect={(stageId) => handleStageSelect(stageId as SkillStageId)}
+              onBookSelect={(skillId) => void handleTreeSkillSelect(skillId)}
+              onBookStageSelect={(skillId, stageId) =>
+                void handleTreeSkillSelect(skillId, stageId as SkillStageId)
+              }
+              editingTitle={editingTitle}
+              titleDraft={titleDraft}
+              onTitleDraftChange={(value) =>
+                textHistory.change(
+                  `skill:${skill.id}:title`,
+                  titleDraft,
+                  value,
+                  setTitleDraft,
+                )
+              }
+              onTitleEditStart={() => {
+                textHistory.clear(`skill:${skill.id}:title`, skill.title)
+                setTitleDraft(skill.title)
+                setEditingTitle(true)
+              }}
+              onTitleEditEnd={() => {
+                const trimmed = titleDraft.trim()
+                if (trimmed && trimmed !== skill.title) {
+                  void (async () => {
+                    try {
+                      const next = await saveSkill(skill.id, { title: trimmed })
+                      if (next) {
+                        setSkill((current) => ({
+                          ...next,
+                          stages: stagesRef.current,
+                          title: next.title || current?.title || trimmed,
+                        }))
+                        setSkillSummaries((prev) =>
+                          prev.map((item) =>
+                            item.id === skill.id
+                              ? { ...item, title: next.title || trimmed }
+                              : item,
+                          ),
+                        )
+                        setMessage('技能库名已修改')
+                        window.setTimeout(() => setMessage(null), 2000)
+                      } else {
+                        setError('保存技能库名失败')
+                      }
+                    } catch (e) {
+                      setError(e instanceof Error ? e.message : '保存技能库名失败')
+                    }
+                  })()
+                }
+                setEditingTitle(false)
+                setTitleDraft('')
+              }}
+              onTitleEditCancel={() => {
+                setEditingTitle(false)
+                setTitleDraft('')
+              }}
+              onTitleInputKeyDown={(event) =>
+                textHistory.handleKeyDown(
+                  event,
+                  `skill:${skill.id}:title`,
+                  titleDraft,
+                  setTitleDraft,
+                  { redoKey: 'm', standardRedo: false },
+                )
+              }
+            />
+          ) : (
           <WorkspaceTreeNav
             rootLabel={skill.title || '未命名技能库'}
             stages={visibleSkillStageKeys.map((stageId) => ({
@@ -833,6 +982,7 @@ export function SkillEditor() {
               )
             }
           />
+          )}
         </aside>
 
         <aside className="workspace-ai workspace-ai--center" aria-label="AI 对话">
