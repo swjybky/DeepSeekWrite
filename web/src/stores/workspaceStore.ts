@@ -5,6 +5,7 @@ import type {
   Material,
   MaterialKind,
   Skill,
+  SkillKind,
   StageId,
 } from '../domain/workspace'
 import type { PlotChildStageId as ScriptPlotChildStageId } from '../workspaces/script/stages'
@@ -24,6 +25,7 @@ export type WorkspaceSession = {
   linkedMaterial: Material | null
   linkedMaterialsByKind: Partial<Record<MaterialKind, Material[]>>
   linkedSkill: Skill | null
+  linkedSkillsByKind: Partial<Record<SkillKind, Skill[]>>
   coverData: string | null
   activeStage: StageId
   activePlotChildStage: WorkspacePlotChildStageId | ''

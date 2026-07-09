@@ -21,6 +21,7 @@ import {
   type Material,
   type MaterialKind,
   type Skill,
+  type SkillKind,
   type WorkspaceAgentReadAccessConfig,
 } from '../bridge'
 import {
@@ -120,6 +121,9 @@ export function BookEditor() {
     Partial<Record<MaterialKind, Material[]>>
   >({})
   const [linkedSkill, setLinkedSkill] = useState<Skill | null>(null)
+  const [linkedSkillsByKind, setLinkedSkillsByKind] = useState<
+    Partial<Record<SkillKind, Skill[]>>
+  >({})
   const [workspaceAgentReadAccess, setWorkspaceAgentReadAccess] =
     useState<WorkspaceAgentReadAccessConfig>(
       () => getDefaultWorkspaceAgentReadAccess(),
@@ -211,6 +215,7 @@ export function BookEditor() {
     setLinkedMaterial(session.linkedMaterial)
     setLinkedMaterialsByKind(session.linkedMaterialsByKind)
     setLinkedSkill(session.linkedSkill)
+    setLinkedSkillsByKind(session.linkedSkillsByKind)
     setCoverData(session.coverData)
     setAiChatEpochByStage(session.aiChatEpochByStage)
     setExpertAiChatEpoch(session.expertAiChatEpoch)
@@ -709,6 +714,7 @@ export function BookEditor() {
     setLinkedMaterial,
     setLinkedMaterialsByKind,
     setLinkedSkill,
+    setLinkedSkillsByKind,
     setError,
     storeWorkspaceSession,
     syncWorkspaceBookSummary,
@@ -1102,6 +1108,7 @@ export function BookEditor() {
           linkedMaterial={linkedMaterial}
           linkedMaterialsByKind={linkedMaterialsByKind}
           linkedSkill={linkedSkill}
+          linkedSkillsByKind={linkedSkillsByKind}
           saving={saving}
           autoSaveStatus={workspaceBookSaveStatus(book.id)}
           error={error}
@@ -1242,6 +1249,7 @@ export function BookEditor() {
           linkedMaterialTitle={linkedMaterial?.title}
           linkedMaterialsByKind={linkedMaterialsByKind}
           linkedSkillTitle={linkedSkill?.title}
+          linkedSkillsByKind={linkedSkillsByKind}
           workspaceSessionsRef={workspaceSessionsRef}
           getRenderedWorkspaceStageBody={getRenderedWorkspaceStageBody}
           applyToStageEditorForBook={applyToStageEditorWithAutoSave}
@@ -1324,12 +1332,12 @@ export function BookEditor() {
           <SkillSelectorDialog
             book={book}
             linkedSkill={linkedSkill}
+            linkedSkillsByKind={linkedSkillsByKind}
             summaries={skillSummaries}
             loading={skillSelectorLoading}
             saving={skillSelectorSaving}
             onClose={() => setSkillSelectorOpen(false)}
-            onSelect={(skillId) => void saveLinkedSkill(skillId)}
-            onClear={() => void saveLinkedSkill(null)}
+            onChange={(next) => void saveLinkedSkill(next)}
           />
         ) : null}
 

@@ -5,6 +5,7 @@ import type {
   Material,
   MaterialKind,
   Skill,
+  SkillKind,
   StageId,
 } from '../../domain/workspace'
 import {
@@ -149,6 +150,7 @@ export function createBookWorkspaceSession(input: {
   linkedMaterial: Material | null
   linkedMaterialsByKind?: Partial<Record<MaterialKind, Material[]>>
   linkedSkill: Skill | null
+  linkedSkillsByKind?: Partial<Record<SkillKind, Skill[]>>
   coverData: string | null
   activeStage: StageId
   activePlotChildStage?: PlotChildStageId | ''
@@ -201,6 +203,7 @@ export function createBookWorkspaceSession(input: {
     linkedMaterial: input.linkedMaterial,
     linkedMaterialsByKind: input.linkedMaterialsByKind ?? {},
     linkedSkill: input.linkedSkill,
+    linkedSkillsByKind: input.linkedSkillsByKind ?? {},
     coverData: input.coverData,
     aiChatEpochByStage: input.previous?.aiChatEpochByStage ?? {},
     expertAiChatEpoch: input.previous?.expertAiChatEpoch ?? 0,

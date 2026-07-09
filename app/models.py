@@ -10,6 +10,7 @@ BookStatus = Literal["editing", "completed"]
 MaterialType = Literal["long", "short", "script"]
 MaterialKind = Literal["character", "gimmick", "plot", "draft", "other"]
 SkillType = Literal["long", "short", "script"]
+SkillKind = Literal["general", "plot", "style", "other"]
 
 WORKSPACE_BOOK_TYPES: tuple[str, ...] = ("short", "long", "script")
 LIBRARY_TYPES: tuple[str, ...] = ("short", "long", "script")
@@ -83,6 +84,20 @@ SKILL_STAGE_KEYS: tuple[str, ...] = (
     "draft",                     # 正文专家编写技能
     "expert_section_writer",     # 分节写手技能
 )
+
+SKILL_KIND_KEYS: tuple[str, ...] = (
+    "general",
+    "plot",
+    "style",
+    "other",
+)
+
+SKILL_KIND_STAGE_KEYS: dict[str, tuple[str, ...]] = {
+    "general": SKILL_STAGE_KEYS,
+    "plot": ("plot_design", "outline"),
+    "style": ("draft", "expert_section_writer"),
+    "other": SKILL_STAGE_KEYS,
+}
 
 LEGACY_SKILL_STAGES_TO_PLOT: tuple[str, ...] = (
     "intro_design",
@@ -488,6 +503,13 @@ def normalize_skill_type(raw: Any | None) -> SkillType:
     return st if st in LIBRARY_TYPES else "short"  # type: ignore[return-value]
 
 
+def normalize_skill_kind(raw: Any | None, default: str = "general") -> str:
+    kind = str(raw or "").strip()
+    if kind in SKILL_KIND_KEYS:
+        return kind
+    return default if default in SKILL_KIND_KEYS else "general"
+
+
 def new_memory_id() -> str:
     return str(uuid4())
 
@@ -585,6 +607,42 @@ def first_linked_material_id(
     return ""
 
 
+def normalize_linked_skill_ids_by_kind(
+    raw: Any,
+    legacy_skill_id: Any | None = None,
+) -> dict[str, list[str]]:
+    out: dict[str, list[str]] = {kind: [] for kind in SKILL_KIND_KEYS}
+    if isinstance(raw, dict):
+        for kind in SKILL_KIND_KEYS:
+            value = raw.get(kind)
+            values = value if isinstance(value, list) else [value] if value else []
+            seen: set[str] = set()
+            for item in values:
+                sid = str(item or "").strip()
+                if not sid or sid in seen:
+                    continue
+                seen.add(sid)
+                out[kind].append(sid)
+        return out
+
+    legacy_id = str(legacy_skill_id or "").strip()
+    if legacy_id:
+        out["general"] = [legacy_id]
+    return out
+
+
+def first_linked_skill_id(
+    linked_skill_ids_by_kind: dict[str, list[str]] | None,
+) -> str:
+    if not linked_skill_ids_by_kind:
+        return ""
+    for kind in SKILL_KIND_KEYS:
+        ids = linked_skill_ids_by_kind.get(kind) or []
+        if ids:
+            return ids[0]
+    return ""
+
+
 @dataclass
 class Book:
     id: str
@@ -598,6 +656,9 @@ class Book:
         default_factory=lambda: {kind: [] for kind in MATERIAL_KIND_KEYS},
     )
     linked_skill_id: str = ""
+    linked_skill_ids_by_kind: dict[str, list[str]] = field(
+        default_factory=lambda: {kind: [] for kind in SKILL_KIND_KEYS},
+    )
     status: BookStatus = "editing"
     stages: dict[str, str] = field(default_factory=default_stages)
     expert_draft: dict[str, Any] = field(default_factory=default_expert_draft)
@@ -622,6 +683,13 @@ class Book:
         )
         if "linked_material_ids_by_kind" in data:
             linked_material_id = first_linked_material_id(linked_material_ids_by_kind)
+        linked_skill_id = str(data.get("linked_skill_id") or "")
+        linked_skill_ids_by_kind = normalize_linked_skill_ids_by_kind(
+            data.get("linked_skill_ids_by_kind"),
+            linked_skill_id,
+        )
+        if "linked_skill_ids_by_kind" in data:
+            linked_skill_id = first_linked_skill_id(linked_skill_ids_by_kind)
 
         return cls(
             id=str(data["id"]),
@@ -632,7 +700,8 @@ class Book:
             output_dir=str(data.get("output_dir") or ""),
             linked_material_id=linked_material_id,
             linked_material_ids_by_kind=linked_material_ids_by_kind,
-            linked_skill_id=str(data.get("linked_skill_id") or ""),
+            linked_skill_id=linked_skill_id,
+            linked_skill_ids_by_kind=linked_skill_ids_by_kind,
             status=normalize_book_status(data.get("status")),
             stages=migrated_stages,
             expert_draft=normalize_expert_draft_from_storage(
@@ -992,6 +1061,8 @@ class Skill:
     id: str
     title: str
     skill_type: SkillType = "short"
+    skill_kind: str = "general"
+    overview: str = ""
     stages: dict[str, list[dict[str, str]]] = field(default_factory=default_skill_stages)
     output_dir: str = ""
     created_at: str = ""
@@ -1019,6 +1090,8 @@ class Skill:
             id=str(data["id"]),
             title=str(data["title"]),
             skill_type=normalize_skill_type(data.get("skill_type")),
+            skill_kind=normalize_skill_kind(data.get("skill_kind")),
+            overview=str(data.get("overview") or ""),
             stages=stages,
             output_dir=str(data.get("output_dir") or ""),
             created_at=str(data.get("created_at") or ""),

@@ -21,7 +21,15 @@ export type MaterialPromptKind =
   | MaterialKindPromptKind
 export const SKILL_MANAGER_AGENT_ID = 'skill_manager' as const
 export const SKILL_MANAGER_PROMPT_KIND = 'skill_manager' as const
-export type SkillPromptKind = typeof SKILL_MANAGER_PROMPT_KIND
+export const SKILL_KIND_PROMPT_PREFIX = 'skill_kind_' as const
+export type SkillKindPromptKind =
+  | 'skill_kind_general'
+  | 'skill_kind_plot'
+  | 'skill_kind_style'
+  | 'skill_kind_other'
+export type SkillPromptKind =
+  | typeof SKILL_MANAGER_PROMPT_KIND
+  | SkillKindPromptKind
 
 // ==================== 素材类型定义 ====================
 
@@ -243,6 +251,32 @@ export const SKILL_STAGE_LABELS: Record<SkillStageId, string> = {
 }
 
 export const SKILL_STAGE_KEYS = Object.keys(SKILL_STAGE_LABELS) as SkillStageId[]
+export type SkillKind = 'general' | 'plot' | 'style' | 'other'
+
+export const SKILL_KIND_KEYS: SkillKind[] = [
+  'general',
+  'plot',
+  'style',
+  'other',
+]
+
+export const SKILL_KIND_LABELS: Record<SkillKind, string> = {
+  general: '通用技能库',
+  plot: '剧情设计技能库',
+  style: '文风写作技能库',
+  other: '其他技能库',
+}
+
+export const SKILL_KIND_STAGE_IDS: Record<SkillKind, SkillStageId[]> = {
+  general: [...SKILL_STAGE_KEYS],
+  plot: ['plot_design', 'outline'],
+  style: ['draft', 'expert_section_writer'],
+  other: [...SKILL_STAGE_KEYS],
+}
+
+export function skillKindPromptKind(kind: SkillKind): SkillKindPromptKind {
+  return `${SKILL_KIND_PROMPT_PREFIX}${kind}` as SkillKindPromptKind
+}
 const LEGACY_SKILL_STAGES_TO_PLOT: LegacySkillStageId[] = [
   'intro_design',
   'plot_refine',
@@ -257,12 +291,14 @@ export interface SkillSummary {
   id: string
   title: string
   skill_type: SkillType
+  skill_kind: SkillKind
   stage_counts?: Partial<Record<SkillStageId, number>>
   stage_skill_count?: number
   output_dir?: string
 }
 
 export interface Skill extends SkillSummary {
+  overview?: string
   stages: Record<SkillStageId, SkillStageEntry[]>
   created_at?: string
   updated_at?: string
@@ -568,6 +604,66 @@ export function normalizeSkillType(raw: unknown): SkillType {
   return 'short'
 }
 
+export function normalizeSkillKind(raw: unknown): SkillKind {
+  if (raw === 'general' || raw === 'plot' || raw === 'style' || raw === 'other') {
+    return raw
+  }
+  return 'general'
+}
+
+export function emptyLinkedSkillIdsByKind(): Record<SkillKind, string[]> {
+  return SKILL_KIND_KEYS.reduce(
+    (out, kind) => {
+      out[kind] = []
+      return out
+    },
+    {} as Record<SkillKind, string[]>,
+  )
+}
+
+export function normalizeLinkedSkillIdsByKind(
+  raw: unknown,
+  legacySkillId?: unknown,
+): Partial<Record<SkillKind, string[]>> {
+  const out = emptyLinkedSkillIdsByKind()
+  if (raw && typeof raw === 'object') {
+    const obj = raw as Record<string, unknown>
+    for (const kind of SKILL_KIND_KEYS) {
+      const value = obj[kind]
+      const values = Array.isArray(value) ? value : value ? [value] : []
+      const seen = new Set<string>()
+      for (const item of values) {
+        const id = String(item ?? '').trim()
+        if (!id || seen.has(id)) continue
+        seen.add(id)
+        out[kind].push(id)
+      }
+    }
+    return out
+  }
+  const legacyId = String(legacySkillId ?? '').trim()
+  if (legacyId) out.general = [legacyId]
+  return out
+}
+
+export function firstLinkedSkillId(
+  linkedSkillIdsByKind?: Partial<Record<SkillKind, string[]>>,
+): string {
+  if (!linkedSkillIdsByKind) return ''
+  for (const kind of SKILL_KIND_KEYS) {
+    const id = linkedSkillIdsByKind[kind]?.[0]
+    if (id) return id
+  }
+  return ''
+}
+
+export function skillMatchesKind(
+  skill: Pick<SkillSummary, 'skill_kind'> | null | undefined,
+  kind: SkillKind,
+): boolean {
+  return Boolean(skill) && skill!.skill_kind === kind
+}
+
 function normalizeBooleanFlag(raw: unknown, defaultValue = false): boolean {
   if (raw == null) return defaultValue
   if (raw === true) return true
@@ -584,6 +680,10 @@ export function normalizeBookSummary(raw: Partial<BookSummary> & { id: string })
     raw.linked_material_ids_by_kind,
     raw.linked_material_id,
   )
+  const linked_skill_ids_by_kind = normalizeLinkedSkillIdsByKind(
+    raw.linked_skill_ids_by_kind,
+    raw.linked_skill_id,
+  )
   return {
     id: raw.id,
     title: typeof raw.title === 'string' ? raw.title : '未命名',
@@ -596,7 +696,9 @@ export function normalizeBookSummary(raw: Partial<BookSummary> & { id: string })
       (typeof raw.linked_material_id === 'string' ? raw.linked_material_id : undefined),
     linked_material_ids_by_kind,
     linked_skill_id:
-      typeof raw.linked_skill_id === 'string' ? raw.linked_skill_id : undefined,
+      firstLinkedSkillId(linked_skill_ids_by_kind) ||
+      (typeof raw.linked_skill_id === 'string' ? raw.linked_skill_id : undefined),
+    linked_skill_ids_by_kind,
   }
 }
 
@@ -665,6 +767,7 @@ export function normalizeSkillSummary(raw: Partial<SkillSummary> & { id: string 
     id: raw.id,
     title: typeof raw.title === 'string' ? raw.title : '未命名技能',
     skill_type: normalizeSkillType(raw.skill_type),
+    skill_kind: normalizeSkillKind(raw.skill_kind),
     stage_counts,
     stage_skill_count,
     output_dir: typeof raw.output_dir === 'string' ? raw.output_dir : undefined,
@@ -702,6 +805,7 @@ export function normalizeSkill(
   })
   return {
     ...summary,
+    overview: typeof raw.overview === 'string' ? raw.overview : '',
     stages,
     created_at: typeof raw.created_at === 'string' ? raw.created_at : undefined,
     updated_at: typeof raw.updated_at === 'string' ? raw.updated_at : undefined,

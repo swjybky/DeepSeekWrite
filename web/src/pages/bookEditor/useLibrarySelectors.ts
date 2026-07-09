@@ -6,14 +6,18 @@ import {
   listMaterials,
   listSkills,
   MATERIAL_KIND_KEYS,
+  SKILL_KIND_KEYS,
   materialMatchesKind,
   normalizeLinkedMaterialIdsByKind,
+  normalizeLinkedSkillIdsByKind,
   saveBook,
+  skillMatchesKind,
   type Book,
   type Material,
   type MaterialKind,
   type MaterialSummary,
   type Skill,
+  type SkillKind,
   type SkillSummary,
 } from '../../bridge'
 import type { BookWorkspaceSessionState } from '../../stores/workspaceStore'
@@ -28,6 +32,9 @@ type UseLibrarySelectorsInput = {
     SetStateAction<Partial<Record<MaterialKind, Material[]>>>
   >
   setLinkedSkill: Dispatch<SetStateAction<Skill | null>>
+  setLinkedSkillsByKind: Dispatch<
+    SetStateAction<Partial<Record<SkillKind, Skill[]>>>
+  >
   setError: Dispatch<SetStateAction<string | null>>
   storeWorkspaceSession: (
     session: BookWorkspaceSessionState,
@@ -44,6 +51,7 @@ export function useLibrarySelectors({
   setLinkedMaterial,
   setLinkedMaterialsByKind,
   setLinkedSkill,
+  setLinkedSkillsByKind,
   setError,
   storeWorkspaceSession,
   syncWorkspaceBookSummary,
@@ -165,33 +173,69 @@ export function useLibrarySelectors({
     }
   }, [setError])
 
-  const saveLinkedSkill = useCallback(async (skillId: string | null) => {
+  const resolveLinkedSkills = useCallback(async (nextBook: Book) => {
+    const idsByKind = normalizeLinkedSkillIdsByKind(
+      nextBook.linked_skill_ids_by_kind,
+      nextBook.linked_skill_id,
+    )
+    const ids = [
+      ...new Set(SKILL_KIND_KEYS.flatMap((kind) => idsByKind[kind] ?? [])),
+    ]
+    const skills = (
+      await Promise.all(ids.map((skillId) => getSkill(skillId)))
+    ).filter((skill): skill is Skill => Boolean(skill))
+    const byId = new Map(skills.map((skill) => [skill.id, skill]))
+    const linkedSkillsByKind: Partial<Record<SkillKind, Skill[]>> = {}
+    for (const kind of SKILL_KIND_KEYS) {
+      linkedSkillsByKind[kind] = (idsByKind[kind] ?? [])
+        .map((skillId) => byId.get(skillId) ?? null)
+        .filter(
+          (skill): skill is Skill =>
+            skill !== null &&
+            skill.skill_type === nextBook.book_type &&
+            skillMatchesKind(skill, kind),
+        )
+    }
+    return {
+      linkedSkill: SKILL_KIND_KEYS.flatMap(
+        (kind) => linkedSkillsByKind[kind] ?? [],
+      )[0] ?? null,
+      linkedSkillsByKind,
+    }
+  }, [])
+
+  const saveLinkedSkill = useCallback(async (
+    linkedSkillIdsByKind: Partial<Record<SkillKind, string[]>>,
+  ) => {
     if (!book) return
     setSkillSelectorSaving(true)
     setError(null)
     try {
-      const next = await saveBook(book.id, { linked_skill_id: skillId ?? '' })
+      const next = await saveBook(book.id, {
+        linked_skill_ids_by_kind: linkedSkillIdsByKind,
+      })
       if (!next) {
         setError('绑定技能库失败：书籍不存在')
         return
       }
-      const skill = next.linked_skill_id ? await getSkill(next.linked_skill_id) : null
+      const { linkedSkill, linkedSkillsByKind } = await resolveLinkedSkills(next)
       const currentSession = workspaceSessionsRef.current[next.id]
       if (currentSession) {
         storeWorkspaceSession(
           {
             ...currentSession,
             book: next,
-            linkedSkill: skill,
+            linkedSkill,
+            linkedSkillsByKind,
           },
           bookRef.current?.id === next.id,
         )
       } else {
         setBook(next)
-        setLinkedSkill(skill)
+        setLinkedSkill(linkedSkill)
+        setLinkedSkillsByKind(linkedSkillsByKind)
       }
       syncWorkspaceBookSummary(next)
-      setSkillSelectorOpen(false)
     } catch (e) {
       setError(e instanceof Error ? e.message : '绑定技能库失败')
     } finally {
@@ -203,6 +247,8 @@ export function useLibrarySelectors({
     setBook,
     setError,
     setLinkedSkill,
+    setLinkedSkillsByKind,
+    resolveLinkedSkills,
     storeWorkspaceSession,
     syncWorkspaceBookSummary,
     workspaceSessionsRef,

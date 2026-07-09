@@ -20,11 +20,14 @@ from app.models import (
     MATERIAL_STAGE_KEYS,
     SCRIPT_STAGE_KEYS,
     SHORT_STAGE_KEYS,
+    SKILL_KIND_KEYS,
+    SKILL_KIND_STAGE_KEYS,
     SKILL_STAGE_KEYS,
     normalize_book_status,
     normalize_book_type,
     normalize_material_type,
     normalize_material_kind,
+    normalize_skill_kind,
     normalize_skill_type,
     WORKSPACE_BOOK_TYPES,
     Material,
@@ -48,6 +51,8 @@ from app.models import (
     normalize_material_stage_items_from_storage,
     normalize_linked_material_ids_by_kind,
     first_linked_material_id,
+    normalize_linked_skill_ids_by_kind,
+    first_linked_skill_id,
     normalize_skill_stages_from_storage,
     long_stage_keys_from_stages,
 )
@@ -1014,7 +1019,7 @@ def _remove_output_dir(output_dir: str) -> None:
 
 
 def _write_skill_stages_to_disk(skill: Skill) -> None:
-    """将单阶段技能内容写入输出目录。"""
+    """将技能内容写入输出目录。"""
     od = (skill.output_dir or "").strip()
     if not od:
         return
@@ -1038,6 +1043,10 @@ def _write_skill_stages_to_disk(skill: Skill) -> None:
             )
         except OSError:
             pass
+    try:
+        (root / "overview.txt").write_text(str(skill.overview or ""), encoding="utf-8")
+    except OSError:
+        pass
     for legacy_stage_id in ("intro_design", "plot_refine"):
         try:
             legacy_path = root / f"{legacy_stage_id}.txt"
@@ -1124,6 +1133,8 @@ def _seed_default_skill(skills_path: Path) -> dict[str, Skill]:
         id=sid,
         title=title,
         skill_type="short",
+        skill_kind="general",
+        overview=str(template.get("overview") or ""),
         stages=stages,
         output_dir="",
         created_at=now,
@@ -1196,15 +1207,17 @@ def _same_loaded_common_skill(entry: dict[str, Any], common_skill: dict[str, Any
 def _append_missing_common_skills(
     stages: dict[str, list[dict[str, Any]]],
     now: str,
+    allowed_stage_ids: tuple[str, ...] | list[str] | None = None,
 ) -> tuple[int, int]:
     added_count = 0
     available_count = 0
+    allowed = set(allowed_stage_ids or SKILL_STAGE_KEYS)
     for common_skill in read_common_skills():
         source_id = str(common_skill.get("id") or "").strip()
         title = str(common_skill.get("title") or "").strip() or "未命名通用技能"
         body = str(common_skill.get("body") or "")
         for stage_id in common_skill.get("effective_stages") or []:
-            if stage_id not in SKILL_STAGE_KEYS:
+            if stage_id not in SKILL_STAGE_KEYS or stage_id not in allowed:
                 continue
             available_count += 1
             entries = stages.setdefault(stage_id, [])
@@ -1242,6 +1255,7 @@ class BookStore:
         self._reload_materials_unlocked()
         self._reload_skills_unlocked()
         self._normalize_all_book_material_links_unlocked()
+        self._normalize_all_book_skill_links_unlocked()
         if not self._skills and not self._skills_path.exists():
             self._skills = _seed_default_skill(self._skills_path)
             self._skills_signature = _file_signature(self._skills_path)
@@ -1343,10 +1357,81 @@ class BookStore:
             or previous_by_kind != normalized
         )
 
+    def _skill_can_link_to_book_kind(
+        self,
+        skill_id: str,
+        book_type: str,
+        skill_kind: str,
+    ) -> bool:
+        skill = self._skills.get(skill_id)
+        if skill is None:
+            return False
+        if skill.skill_type != book_type:
+            return False
+        return skill.skill_kind == skill_kind
+
+    def _legacy_skill_links_by_kind(
+        self,
+        skill_id: str,
+        book_type: str,
+    ) -> dict[str, list[str]]:
+        out: dict[str, list[str]] = {kind: [] for kind in SKILL_KIND_KEYS}
+        sid = (skill_id or "").strip()
+        skill = self._skills.get(sid)
+        if not sid or skill is None or skill.skill_type != book_type:
+            return out
+        if skill.skill_kind in out:
+            out[skill.skill_kind] = [sid]
+        else:
+            out["general"] = [sid]
+        return out
+
+    def _normalize_book_skill_links_unlocked(self, book: Book) -> bool:
+        previous_legacy_id = book.linked_skill_id
+        previous_by_kind = {
+            kind: list(book.linked_skill_ids_by_kind.get(kind) or [])
+            for kind in SKILL_KIND_KEYS
+        }
+        if book.book_type not in WORKSPACE_BOOK_TYPES:
+            book.linked_skill_ids_by_kind = {kind: [] for kind in SKILL_KIND_KEYS}
+            book.linked_skill_id = ""
+            return previous_legacy_id != "" or any(previous_by_kind.values())
+
+        normalized: dict[str, list[str]] = {kind: [] for kind in SKILL_KIND_KEYS}
+        for kind in SKILL_KIND_KEYS:
+            seen: set[str] = set()
+            for raw_id in book.linked_skill_ids_by_kind.get(kind) or []:
+                sid = str(raw_id or "").strip()
+                if not sid or sid in seen:
+                    continue
+                if not self._skill_can_link_to_book_kind(sid, book.book_type, kind):
+                    continue
+                seen.add(sid)
+                normalized[kind].append(sid)
+
+        if not any(normalized.values()) and book.linked_skill_id:
+            normalized = self._legacy_skill_links_by_kind(
+                book.linked_skill_id,
+                book.book_type,
+            )
+
+        book.linked_skill_ids_by_kind = normalized
+        book.linked_skill_id = first_linked_skill_id(normalized)
+        return (
+            previous_legacy_id != book.linked_skill_id
+            or previous_by_kind != normalized
+        )
+
     def _normalize_all_book_material_links_unlocked(self) -> bool:
         changed = False
         for book in self._books.values():
             changed = self._normalize_book_material_links_unlocked(book) or changed
+        return changed
+
+    def _normalize_all_book_skill_links_unlocked(self) -> bool:
+        changed = False
+        for book in self._books.values():
+            changed = self._normalize_book_skill_links_unlocked(book) or changed
         return changed
 
     @property
@@ -1366,6 +1451,7 @@ class BookStore:
                     "linked_material_id": b.linked_material_id,
                     "linked_material_ids_by_kind": b.linked_material_ids_by_kind,
                     "linked_skill_id": b.linked_skill_id,
+                    "linked_skill_ids_by_kind": b.linked_skill_ids_by_kind,
                     "status": b.status,
                 }
                 for b in sorted(
@@ -1408,6 +1494,7 @@ class BookStore:
         linked_skill_id: str | None = None,
         linked_material_id: str | None = None,
         linked_material_ids_by_kind: dict[str, Any] | None = None,
+        linked_skill_ids_by_kind: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         with _data_file_lock():
             self._reload_all_unlocked()
@@ -1416,6 +1503,10 @@ class BookStore:
             cats = list(categories or []) if bt in WORKSPACE_BOOK_TYPES else []
             sid = (linked_skill_id or "").strip()
             linked_sid = sid if bt in WORKSPACE_BOOK_TYPES and sid in self._skills else ""
+            linked_skill_by_kind = normalize_linked_skill_ids_by_kind(
+                linked_skill_ids_by_kind,
+                linked_sid,
+            )
             linked_by_kind = normalize_linked_material_ids_by_kind(
                 linked_material_ids_by_kind,
                 linked_material_id,
@@ -1448,12 +1539,14 @@ class BookStore:
                 linked_material_id=(linked_material_id or "").strip(),
                 linked_material_ids_by_kind=linked_by_kind,
                 linked_skill_id=linked_sid,
+                linked_skill_ids_by_kind=linked_skill_by_kind,
                 stages=default_stages(bt),
                 expert_draft=normalize_expert_draft_from_storage(None, bt),
                 created_at=now,
                 updated_at=now,
             )
             self._normalize_book_material_links_unlocked(b)
+            self._normalize_book_skill_links_unlocked(b)
             self._books[bid] = b
             save_books_atomic(self._path, self._books)
             self._mark_books_saved_unlocked()
@@ -1470,6 +1563,7 @@ class BookStore:
         title: str | None = None,
         status: str | None = None,
         linked_skill_id: str | None = None,
+        linked_skill_ids_by_kind: dict[str, Any] | None = None,
         memory_auto_capture_enabled: bool | None = None,
         linked_material_ids_by_kind: dict[str, Any] | None = None,
     ) -> dict[str, Any] | None:
@@ -1499,6 +1593,19 @@ class BookStore:
             if linked_skill_id is not None:
                 sid = linked_skill_id.strip()
                 b.linked_skill_id = sid if b.book_type in WORKSPACE_BOOK_TYPES and sid in self._skills else ""
+                b.linked_skill_ids_by_kind = self._legacy_skill_links_by_kind(
+                    b.linked_skill_id,
+                    b.book_type,
+                )
+            if linked_skill_ids_by_kind is not None:
+                b.linked_skill_ids_by_kind = normalize_linked_skill_ids_by_kind(
+                    linked_skill_ids_by_kind,
+                    None,
+                )
+                b.linked_skill_id = first_linked_skill_id(
+                    b.linked_skill_ids_by_kind,
+                )
+            self._normalize_book_skill_links_unlocked(b)
             if stages is not None:
                 b.stages = apply_stage_patch(b.stages, stages, b.book_type)
                 dk = primary_draft_stage_key(b)
@@ -1725,6 +1832,7 @@ class BookStore:
                     "id": s.id,
                     "title": s.title,
                     "skill_type": s.skill_type,
+                    "skill_kind": s.skill_kind,
                     "stage_counts": {
                         stage_id: len(s.stages.get(stage_id, []))
                         for stage_id in SKILL_STAGE_KEYS
@@ -1756,6 +1864,7 @@ class BookStore:
         skill_type: str = "short",
         workspace_root: str | None = None,
         load_common_skills: bool = False,
+        skill_kind: str | None = None,
     ) -> dict[str, Any]:
         """创建新技能集合"""
         if workspace_root is None and str(skill_type or "").strip() not in LIBRARY_TYPES:
@@ -1765,6 +1874,7 @@ class BookStore:
             self._reload_skills_unlocked()
             now = _utc_now_iso()
             st = normalize_skill_type(skill_type)
+            sk = normalize_skill_kind(skill_kind)
             wr = (workspace_root or "").strip()
             od = ""
             if wr:
@@ -1787,11 +1897,17 @@ class BookStore:
             sid = new_skill_id()
             stages = normalize_skill_stages_from_storage(None)
             if load_common_skills:
-                _append_missing_common_skills(stages, now)
+                _append_missing_common_skills(
+                    stages,
+                    now,
+                    SKILL_KIND_STAGE_KEYS.get(sk, SKILL_STAGE_KEYS),
+                )
             s = Skill(
                 id=sid,
                 title=title.strip() or "未命名技能",
                 skill_type=st,
+                skill_kind=sk,
+                overview="",
                 stages=stages,
                 output_dir=od,
                 created_at=now,
@@ -1812,7 +1928,11 @@ class BookStore:
             if s is None:
                 return None
             now = _utc_now_iso()
-            added_count, available_count = _append_missing_common_skills(s.stages, now)
+            added_count, available_count = _append_missing_common_skills(
+                s.stages,
+                now,
+                SKILL_KIND_STAGE_KEYS.get(s.skill_kind, SKILL_STAGE_KEYS),
+            )
             if added_count > 0:
                 s.updated_at = now
                 save_skills_atomic(self._skills_path, self._skills)
@@ -1830,6 +1950,8 @@ class BookStore:
         skill_id: str,
         title: str | None = None,
         skill_type: str | None = None,
+        skill_kind: str | None = None,
+        overview: str | None = None,
         stages: dict[str, Any] | None = None,
     ) -> dict[str, Any] | None:
         """保存技能集合及各阶段技能条目"""
@@ -1842,6 +1964,10 @@ class BookStore:
                 s.title = title.strip()
             if skill_type is not None:
                 s.skill_type = normalize_skill_type(skill_type)
+            if skill_kind is not None:
+                s.skill_kind = normalize_skill_kind(skill_kind)
+            if overview is not None:
+                s.overview = str(overview)
             if stages is not None:
                 s.stages = normalize_skill_stages_from_storage(stages)
             s.updated_at = _utc_now_iso()
@@ -1864,8 +1990,26 @@ class BookStore:
             self._mark_skills_saved_unlocked()
             changed_books = False
             for book in self._books.values():
+                previous_legacy = book.linked_skill_id
+                previous = {
+                    kind: list(book.linked_skill_ids_by_kind.get(kind) or [])
+                    for kind in SKILL_KIND_KEYS
+                }
+                book.linked_skill_ids_by_kind = {
+                    kind: [
+                        linked_id
+                        for linked_id in book.linked_skill_ids_by_kind.get(kind, [])
+                        if linked_id != sid
+                    ]
+                    for kind in SKILL_KIND_KEYS
+                }
                 if book.linked_skill_id == sid:
                     book.linked_skill_id = ""
+                self._normalize_book_skill_links_unlocked(book)
+                if (
+                    previous != book.linked_skill_ids_by_kind
+                    or previous_legacy != book.linked_skill_id
+                ):
                     book.updated_at = _utc_now_iso()
                     changed_books = True
             if changed_books:

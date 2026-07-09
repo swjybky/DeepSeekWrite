@@ -5,6 +5,7 @@ import type {
 import type {
   SkillStageEntry,
   SkillStageId,
+  SkillKind,
   SkillType,
   MaterialKind,
   MaterialStageEntry,
@@ -17,6 +18,7 @@ export type SaveBookOptions = {
   linked_material_id?: string | null
   linked_material_ids_by_kind?: Partial<Record<MaterialKind, string[]>> | null
   linked_skill_id?: string | null
+  linked_skill_ids_by_kind?: Partial<Record<SkillKind, string[]>> | null
   expert_draft?: ExpertDraft | null
   title?: string | null
   status?: BookStatus | null
@@ -33,5 +35,7 @@ export type SaveMaterialOptions = {
 export type SaveSkillOptions = {
   title?: string
   skill_type?: SkillType | string | null
+  skill_kind?: SkillKind | string | null
+  overview?: string | null
   stages?: Partial<Record<SkillStageId, SkillStageEntry[]>> | null
 }

@@ -41,6 +41,28 @@ const SKILL_ORDER: Record<string, readonly { id: string; label: string }[]> = {
     { id: 'draft', label: '正文专家编写技能' },
     { id: 'expert_section_writer', label: '分节写手技能' },
   ],
+  skill_kind_general: [
+    { id: 'character_design', label: '人物技能' },
+    { id: 'plot_design', label: '剧情技能' },
+    { id: 'outline', label: '大纲技能' },
+    { id: 'draft', label: '正文专家编写技能' },
+    { id: 'expert_section_writer', label: '分节写手技能' },
+  ],
+  skill_kind_plot: [
+    { id: 'plot_design', label: '剧情技能' },
+    { id: 'outline', label: '大纲技能' },
+  ],
+  skill_kind_style: [
+    { id: 'draft', label: '正文专家编写技能' },
+    { id: 'expert_section_writer', label: '分节写手技能' },
+  ],
+  skill_kind_other: [
+    { id: 'character_design', label: '人物技能' },
+    { id: 'plot_design', label: '剧情技能' },
+    { id: 'outline', label: '大纲技能' },
+    { id: 'draft', label: '正文专家编写技能' },
+    { id: 'expert_section_writer', label: '分节写手技能' },
+  ],
 }
 
 function isMaterialPromptKind(kind: string): kind is MaterialPromptKind {
@@ -48,7 +70,7 @@ function isMaterialPromptKind(kind: string): kind is MaterialPromptKind {
 }
 
 function isSkillPromptKind(kind: string): kind is SkillPromptKind {
-  return kind === 'skill_manager'
+  return kind === 'skill_manager' || kind.startsWith('skill_kind_')
 }
 
 function materialKindLabel(kind: string | undefined): string {
@@ -108,7 +130,7 @@ const WORKSPACE_TAG =
 const MATERIAL_TAG =
   /\{\{(BOOK_TITLE|BOOK_LINE|MATERIAL_TITLE|MATERIAL_LINE|MATERIAL_TYPE|MATERIAL_GENRE|MATERIAL_KIND|MATERIAL_KIND_LABEL|MATERIAL_OVERVIEW|CURRENT_ENTRY_TITLE|STAGE_ID|STAGE_LABEL|STAGE_BODY|OTHER_STAGES_EXCERPT)\}\}/g
 const SKILL_TAG =
-  /\{\{(BOOK_TITLE|BOOK_LINE|SKILL_TITLE|SKILL_LINE|SKILL_TYPE|STAGE_ID|STAGE_LABEL|STAGE_BODY|OTHER_STAGES_EXCERPT)\}\}/g
+  /\{\{(BOOK_TITLE|BOOK_LINE|SKILL_TITLE|SKILL_LINE|SKILL_TYPE|SKILL_KIND|SKILL_KIND_LABEL|SKILL_OVERVIEW|CURRENT_ENTRY_TITLE|STAGE_ID|STAGE_LABEL|STAGE_BODY|OTHER_STAGES_EXCERPT)\}\}/g
 
 export type PromptSubstitutePayload = {
   bookTitle: string
@@ -119,6 +141,9 @@ export type PromptSubstitutePayload = {
   materialOverview?: string
   currentEntryTitle?: string
   skillType?: string
+  skillKind?: string
+  skillKindLabel?: string
+  skillOverview?: string
   stageId?: StageId | MaterialStageId | SkillStageId
   stageLabel?: string
   stageBody: string
@@ -135,6 +160,9 @@ export type PromptRenderPayload = {
   materialOverview?: string
   currentEntryTitle?: string
   skillType?: string
+  skillKind?: string
+  skillKindLabel?: string
+  skillOverview?: string
   stageBody: string
   otherStagesExcerpt?: string | null
   promptKind: PromptRenderKind
@@ -171,6 +199,9 @@ export function substitutePromptPlaceholders(
     SKILL_TITLE: bt,
     SKILL_LINE: skillLine,
     SKILL_TYPE: input.skillType?.trim() || '短篇技能',
+    SKILL_KIND: input.skillKind?.trim() || 'general',
+    SKILL_KIND_LABEL: input.skillKindLabel?.trim() || input.skillKind?.trim() || '通用技能库',
+    SKILL_OVERVIEW: excerptText(input.skillOverview ?? ''),
     STAGE_ID: input.stageId ? String(input.stageId) : '',
     STAGE_LABEL: input.stageLabel ?? '',
     STAGE_BODY: excerptText(input.stageBody),
@@ -207,6 +238,9 @@ export function renderPromptFromTemplateRaw(
     materialOverview: payload.materialOverview,
     currentEntryTitle: payload.currentEntryTitle,
     skillType: payload.skillType,
+    skillKind: payload.skillKind,
+    skillKindLabel: payload.skillKindLabel,
+    skillOverview: payload.skillOverview,
     stageId: payload.stageId,
     stageLabel: rowsForPromptKind(payload.promptKind)?.find(
       (row) => row.id === payload.stageId,

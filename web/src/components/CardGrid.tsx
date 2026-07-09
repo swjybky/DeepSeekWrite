@@ -2,6 +2,7 @@ import { Link } from 'react-router-dom'
 import {
   bookTypeLabel,
   MATERIAL_KIND_LABELS,
+  SKILL_KIND_LABELS,
   materialTypeLabel,
   skillTypeLabel,
   type BookSummary,
@@ -212,7 +213,7 @@ export function skillToCardItem(skill: SkillSummary): CardItem {
     title: skill.title,
     type: 'skill',
     subtype: skill.skill_type,
-    meta: `${skillTypeLabel(skill.skill_type)} · ${count > 0 ? `${count} 个阶段技能` : '暂无阶段技能'}`,
+    meta: `${skillTypeLabel(skill.skill_type)} · ${SKILL_KIND_LABELS[skill.skill_kind]} · ${count > 0 ? `${count} 个阶段技能` : '暂无阶段技能'}`,
     outputDir: skill.output_dir,
     to: `/skill/${skill.id}`,
   }

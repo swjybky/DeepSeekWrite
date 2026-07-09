@@ -1,7 +1,13 @@
 import type { AgentTool } from '@earendil-works/pi-agent-core'
 import { Type } from 'typebox'
 
-import type { Material, MaterialKind, MaterialStageId, Skill } from '../../bridge'
+import type {
+  Material,
+  MaterialKind,
+  MaterialStageId,
+  Skill,
+  SkillKind,
+} from '../../bridge'
 import {
   MATERIAL_KIND_LABELS,
   MATERIAL_KIND_STAGE_IDS,
@@ -47,6 +53,7 @@ export type ScriptWorkspaceStageAgentContext = {
   linkedMaterial?: Material | null
   linkedMaterialsByKind?: Partial<Record<MaterialKind, Material[]>>
   linkedSkill?: Skill | null
+  linkedSkillsByKind?: Partial<Record<SkillKind, Skill[]>>
   /** 全局配置解析后：当前阶段允许读取的创作空间阶段 */
   allowedWorkspaceStages?: readonly ScriptStageId[]
   /** 全局配置解析后：当前阶段允许读取的素材库部门 */
@@ -1014,6 +1021,7 @@ export function buildScriptWorkspaceAdditionalTools(
   const searchWorkspaceText = buildSearchWorkspaceTextTool(ctx, allowedWorkspace)
   const loadSkill = buildLoadSkillTool({
     linkedSkill: ctx.linkedSkill,
+    linkedSkillsByKind: ctx.linkedSkillsByKind,
     currentStageId: ctx.stageId,
   })
 

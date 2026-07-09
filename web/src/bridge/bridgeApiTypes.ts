@@ -20,6 +20,7 @@ import type {
   MaterialStageId,
   MaterialSummary,
   Skill,
+  SkillKind,
   SkillSummary,
 } from './libraryDomain'
 
@@ -38,6 +39,7 @@ declare global {
           linked_skill_id?: string | null,
           linked_material_id?: string | null,
           linked_material_ids_by_kind?: Partial<Record<MaterialKind, string[]>> | null,
+          linked_skill_ids_by_kind?: Partial<Record<SkillKind, string[]>> | null,
         ): Promise<Book>
         get_book(book_id: string): Promise<Book | null>
         save_book(
@@ -49,6 +51,7 @@ declare global {
           title?: string | null,
           status?: BookStatus | null,
           linked_skill_id?: string | null,
+          linked_skill_ids_by_kind?: Partial<Record<SkillKind, string[]>> | null,
           memory_auto_capture_enabled?: boolean | null,
           linked_material_ids_by_kind?: Partial<Record<MaterialKind, string[]>> | null,
         ): Promise<Book | null>
@@ -189,6 +192,7 @@ declare global {
           skill_type?: string | null,
           workspace_root?: string | null,
           load_common_skills?: boolean,
+          skill_kind?: SkillKind | string | null,
         ): Promise<Skill>
         save_skill(
           skill_id: string,
@@ -247,12 +251,19 @@ declare global {
           context_json: string,
           skill_type?: string | null,
         ): Promise<string>
-        read_skill_agent_prompt_template(skill_type?: string | null): Promise<string>
+        read_skill_agent_prompt_template(
+          skill_type?: string | null,
+          prompt_kind?: string | null,
+        ): Promise<string>
         save_skill_agent_prompt_override(
           body: string,
           skill_type?: string | null,
+          prompt_kind?: string | null,
         ): Promise<void>
-        reset_skill_agent_prompt_override(skill_type?: string | null): Promise<boolean>
+        reset_skill_agent_prompt_override(
+          skill_type?: string | null,
+          prompt_kind?: string | null,
+        ): Promise<boolean>
 
         // ==================== 学习仿写提示词 API ====================
         get_learning_imitation_system_prompt(

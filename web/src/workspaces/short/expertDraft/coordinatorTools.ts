@@ -1,6 +1,6 @@
 import type { AgentTool } from '@earendil-works/pi-agent-core'
 
-import type { Material, MaterialKind, Skill, StageId } from '../../../bridge'
+import type { Material, MaterialKind, Skill, SkillKind, StageId } from '../../../bridge'
 import {
   buildExpertDraftCoordinatorCoreTools,
   type ExpertDraftCoordinatorCoreToolContext,
@@ -20,6 +20,7 @@ export type ExpertDraftCoordinatorToolContext = ExpertDraftCoordinatorCoreToolCo
   linkedMaterial?: Material | null
   linkedMaterialsByKind?: Partial<Record<MaterialKind, Material[]>>
   linkedSkill?: Skill | null
+  linkedSkillsByKind?: Partial<Record<SkillKind, Skill[]>>
   readAccess: WorkspaceAgentReadAccessEntry
   getRenderedExpertDraftSectionContent?: GetExpertDraftSectionContent
   /** 优先读取编辑框/会话最新内容；draft 阶段与 edit_expert_draft_section 写入的目标同源 */
@@ -70,6 +71,7 @@ export function buildExpertDraftCoordinatorTools(
   readTools.push(
     buildLoadSkillTool({
       linkedSkill: ctx.linkedSkill,
+      linkedSkillsByKind: ctx.linkedSkillsByKind,
       currentStageId: 'expert_draft_coordinator',
     }),
   )

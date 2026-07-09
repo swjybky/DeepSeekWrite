@@ -10,16 +10,20 @@ import {
   isWorkspaceBook,
   listBooks,
   MATERIAL_KIND_KEYS,
+  SKILL_KIND_KEYS,
   materialMatchesKind,
   mergeStagePatchIntoAll,
   normalizeLinkedMaterialIdsByKind,
+  normalizeLinkedSkillIdsByKind,
   resolveWorkspaceStagesForBook,
   saveBook,
+  skillMatchesKind,
   type Book,
   type BookSummary,
   type Material,
   type MaterialKind,
   type Skill,
+  type SkillKind,
   type StageId,
   type WorkspaceAgentReadAccessConfig,
 } from '../../bridge'
@@ -58,6 +62,44 @@ function resolveInitialStageForBook(
     return coerceLongStageId(requestedStageId ?? fallbackStageId) as StageId
   }
   return requestedStageId ?? fallbackStageId
+}
+
+async function loadLinkedSkillsForBook(
+  book: Book,
+): Promise<{
+  linkedSkill: Skill | null
+  linkedSkillsByKind: Partial<Record<SkillKind, Skill[]>>
+}> {
+  const linkedIdsByKind = normalizeLinkedSkillIdsByKind(
+    book.linked_skill_ids_by_kind,
+    book.linked_skill_id,
+  )
+  const ids = [
+    ...new Set(
+      SKILL_KIND_KEYS.flatMap((kind) => linkedIdsByKind[kind] ?? []),
+    ),
+  ]
+  const skills = (
+    await Promise.all(ids.map((skillId) => getSkill(skillId)))
+  ).filter((skill): skill is Skill => Boolean(skill))
+  const byId = new Map(skills.map((skill) => [skill.id, skill]))
+  const linkedSkillsByKind: Partial<Record<SkillKind, Skill[]>> = {}
+  for (const kind of SKILL_KIND_KEYS) {
+    linkedSkillsByKind[kind] = (linkedIdsByKind[kind] ?? [])
+      .map((skillId) => byId.get(skillId) ?? null)
+      .filter(
+        (skill): skill is Skill =>
+          skill !== null &&
+          skill.skill_type === book.book_type &&
+          skillMatchesKind(skill, kind),
+      )
+  }
+  return {
+    linkedSkill: SKILL_KIND_KEYS.flatMap(
+      (kind) => linkedSkillsByKind[kind] ?? [],
+    )[0] ?? null,
+    linkedSkillsByKind,
+  }
 }
 
 async function loadLinkedMaterialsForBook(
@@ -325,10 +367,7 @@ export function useWorkspacePersistence({
       const nextCoverData = coverRes.cover_data
       const { linkedMaterial, linkedMaterialsByKind } =
         await loadLinkedMaterialsForBook(b)
-      let skill: Skill | null = null
-      if (b.linked_skill_id) {
-        skill = await getSkill(b.linked_skill_id)
-      }
+      const { linkedSkill, linkedSkillsByKind } = await loadLinkedSkillsForBook(b)
       const rows = resolveWorkspaceStagesForBook(b)
       const pending = pendingInitialStageRef.current
       const pendingForBook = pending?.bookId === b.id ? pending : null
@@ -347,7 +386,8 @@ export function useWorkspacePersistence({
         book: b,
         linkedMaterial,
         linkedMaterialsByKind,
-        linkedSkill: skill,
+        linkedSkill,
+        linkedSkillsByKind,
         coverData: nextCoverData,
         activeStage: resolveInitialStageForBook(
           b,

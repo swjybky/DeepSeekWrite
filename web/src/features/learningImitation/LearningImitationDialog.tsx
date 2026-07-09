@@ -12,6 +12,7 @@ import {
   MATERIAL_STAGE_LABELS,
   MATERIAL_KIND_LABELS,
   SKILL_STAGE_LABELS,
+  SKILL_KIND_LABELS,
   SHORT_GENRE_OPTIONS,
   cloneEmptyLearningResult,
   createMaterial,
@@ -21,6 +22,7 @@ import {
   getMaterialParentGenres,
   materialTypeLabel,
   materialMatchesKind,
+  skillMatchesKind,
   normalizeMaterialStageItems,
   normalizeSkillStages,
   readLearningImitationPromptTemplate,
@@ -39,6 +41,7 @@ import {
   type MaterialSummary,
   type MaterialType,
   type Skill,
+  type SkillKind,
   type SkillStageEntry,
   type SkillStageId,
   type SkillSummary,
@@ -69,6 +72,12 @@ type LearningIconNode = typeof Library
 type LearningPersistMode = 'overwrite' | 'append'
 type LearningMaterialTargetKind = Extract<MaterialKind, 'character' | 'gimmick' | 'plot' | 'draft'>
 type LearningSaveAction = 'create' | 'update'
+
+function learningSkillKind(stageId: LearningStageId): SkillKind {
+  if (stageId === 'plot_learning') return 'plot'
+  if (stageId === 'style_learning') return 'style'
+  return 'general'
+}
 
 type PendingSaveChoice = {
   stageId: LearningStageId
@@ -510,9 +519,22 @@ export function LearningImitationDialog({
   const materialTargetDisplay = selectedMaterialTargetNames.length === 1
     ? `「${materialTargetTitle}」`
     : materialTargetTitle
+  const activeSkillKind = learningSkillKind(activeStage)
+  const skillOptions = useMemo(
+    () =>
+      skills.filter(
+        (item) =>
+          item.skill_type === newLibraryType &&
+          skillMatchesKind(item, activeSkillKind),
+      ),
+    [activeSkillKind, newLibraryType, skills],
+  )
+  const activeSelectedSkillId = skillOptions.some((item) => item.id === selectedSkillId)
+    ? selectedSkillId
+    : ''
   const skillTarget = useMemo(
-    () => skills.find((item) => item.id === selectedSkillId) ?? null,
-    [skills, selectedSkillId],
+    () => skillOptions.find((item) => item.id === activeSelectedSkillId) ?? null,
+    [activeSelectedSkillId, skillOptions],
   )
 
   useEffect(() => {
@@ -740,15 +762,29 @@ export function LearningImitationDialog({
     return created
   }
 
-  const ensureSkillTarget = async (titleOverride?: string): Promise<Skill> => {
-    if (selectedSkillId) {
-      const existing = await getSkill(selectedSkillId)
-      if (existing) return existing
+  const ensureSkillTarget = async (
+    stageId: LearningStageId,
+    titleOverride?: string,
+  ): Promise<Skill> => {
+    const targetSkillKind = learningSkillKind(stageId)
+    if (activeSelectedSkillId) {
+      const existing = await getSkill(activeSelectedSkillId)
+      if (
+        existing &&
+        existing.skill_type === newLibraryType &&
+        skillMatchesKind(existing, targetSkillKind)
+      ) return existing
     }
     const ws = workspaceRoot?.trim()
     if (!ws) throw new Error('请先在首页选择工作文件夹，再新建目标技能库')
     const title = titleOverride?.trim() || defaultLearningSkillTitle()
-    const created = await createSkill(title, newLibraryType as SkillType, ws, false)
+    const created = await createSkill(
+      title,
+      newLibraryType as SkillType,
+      ws,
+      false,
+      targetSkillKind,
+    )
     setSelectedSkillId(created.id)
     await onRefreshSkills()
     return created
@@ -787,7 +823,7 @@ export function LearningImitationDialog({
     source: LearningResult = resultRef.current,
     options: SaveStageOptions = {},
   ) => {
-    const skill = await ensureSkillTarget(options.skillTitle)
+    const skill = await ensureSkillTarget('plot_learning', options.skillTitle)
     const stages = normalizeSkillStages(skill.stages)
     const { stages: nextStages, changed } = applySkillDraftsByTitle(
       stages,
@@ -808,7 +844,7 @@ export function LearningImitationDialog({
     source: LearningResult = resultRef.current,
     options: SaveStageOptions = {},
   ) => {
-    const skill = await ensureSkillTarget(options.skillTitle)
+    const skill = await ensureSkillTarget('style_learning', options.skillTitle)
     const stages = normalizeSkillStages(skill.stages)
     const body = source.style_learning.body.trim()
     if (!body) throw new Error('文风学习预览为空，无法落盘')
@@ -909,18 +945,18 @@ export function LearningImitationDialog({
           : '剧情设计学习预览为空，无法落盘',
       )
     }
-    const action: LearningSaveAction = selectedSkillId ? 'update' : 'create'
+    const action: LearningSaveAction = activeSelectedSkillId ? 'update' : 'create'
     if (action === 'create' && !workspaceRoot?.trim()) {
       throw new Error('请先在首页选择工作文件夹，再新建目标技能库')
     }
-    const title = skillTarget?.title ?? (selectedSkillId ? '已选技能库' : defaultLearningSkillTitle())
+    const title = skillTarget?.title ?? (activeSelectedSkillId ? '已选技能库' : defaultLearningSkillTitle())
     return {
       stageId,
       targetKind: 'skill',
       materialTargets: [],
       skillTarget: {
         action,
-        targetId: selectedSkillId || undefined,
+        targetId: activeSelectedSkillId || undefined,
         title,
         newTitle: action === 'create' ? title : '',
         entries: skillEntries.map((entry) => ({
@@ -1195,15 +1231,15 @@ export function LearningImitationDialog({
               </label>
             ))}
             <label>
-              <span>技能库</span>
+              <span>技能库（{SKILL_KIND_LABELS[activeSkillKind]}）</span>
               <select
-                value={selectedSkillId}
+                value={activeSelectedSkillId}
                 onChange={(event) => setSelectedSkillId(event.target.value)}
               >
                 <option value="">未选择，落盘时新建</option>
-                {skills.map((item) => (
+                {skillOptions.map((item) => (
                   <option key={item.id} value={item.id}>
-                    {item.title} · {skillTypeLabel(item.skill_type)}
+                    {item.title} · {skillTypeLabel(item.skill_type)} · {SKILL_KIND_LABELS[item.skill_kind]}
                   </option>
                 ))}
               </select>
@@ -1497,7 +1533,7 @@ export function LearningImitationDialog({
                     const canSave = needsMaterial
                       ? Boolean(selectedMaterialTargetCount > 0 || workspaceRoot?.trim())
                       : needsSkill
-                        ? Boolean(selectedSkillId || workspaceRoot?.trim())
+                        ? Boolean(activeSelectedSkillId || workspaceRoot?.trim())
                         : false
                     if (!canSave) {
                       setCloseChoiceOpen(false)

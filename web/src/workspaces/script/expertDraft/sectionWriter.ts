@@ -14,6 +14,7 @@ import {
   type Material,
   type MaterialKind,
   type Skill,
+  type SkillKind,
   type StageId,
 } from '../../../bridge'
 import {
@@ -73,6 +74,7 @@ export type RunExpertDraftSectionWriterOptions = {
   linkedMaterialsByKind?: Partial<Record<MaterialKind, Material[]>>
   /** 书籍绑定的技能库 */
   linkedSkill?: Skill | null
+  linkedSkillsByKind?: Partial<Record<SkillKind, Skill[]>>
   bookMemories?: MemoryEntry[]
   userMemories?: MemoryEntry[]
   /** 用户在启动分节写作时补充的整体写作倾向 */
@@ -178,6 +180,7 @@ export function buildSectionWriterTools(input: {
   linkedMaterial?: Material | null
   linkedMaterialsByKind?: Partial<Record<MaterialKind, Material[]>>
   linkedSkill?: Skill | null
+  linkedSkillsByKind?: Partial<Record<SkillKind, Skill[]>>
   readAccess: WorkspaceAgentReadAccessEntry
   getDraft: () => ExpertDraft
   getRenderedSectionContent?: GetExpertDraftSectionContent
@@ -247,6 +250,7 @@ export function buildSectionWriterTools(input: {
   readTools.push(
     buildLoadSkillTool({
       linkedSkill: input.linkedSkill,
+      linkedSkillsByKind: input.linkedSkillsByKind,
       currentStageId: EXPERT_SECTION_WRITER_AGENT_ID,
     }),
   )
@@ -327,6 +331,7 @@ export async function runExpertDraftSectionWriter(
         linkedMaterialsByKind: opts.linkedMaterialsByKind,
         template: systemPromptTemplate,
         linkedSkill: opts.linkedSkill,
+        linkedSkillsByKind: opts.linkedSkillsByKind,
       })
       const tools = buildSectionWriterTools({
         bookTitle: opts.bookTitle,
@@ -336,6 +341,7 @@ export async function runExpertDraftSectionWriter(
         linkedMaterial: opts.linkedMaterial,
         linkedMaterialsByKind: opts.linkedMaterialsByKind,
         linkedSkill: opts.linkedSkill,
+        linkedSkillsByKind: opts.linkedSkillsByKind,
         readAccess: opts.readAccess,
         getDraft: opts.getDraft,
         getRenderedSectionContent: opts.getRenderedExpertDraftSectionContent,

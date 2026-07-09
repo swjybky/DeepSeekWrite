@@ -19,6 +19,8 @@ import type {
   MaterialType,
   MaterialPromptKind,
   Skill,
+  SkillKind,
+  SkillStageEntry,
   SkillType,
   SkillStageId,
   WorkspaceAgentReadAccessConfig,
@@ -233,8 +235,45 @@ function linkedMaterialsFingerprint(
     .join('|')
 }
 
+function linkedSkillsFingerprint(
+  value: Partial<Record<SkillKind, Skill[]>> | undefined,
+): string {
+  if (!value) return ''
+  return Object.entries(value)
+    .flatMap(([kind, skills]) =>
+      (skills ?? []).map((skill) => [
+        kind,
+        skill.id,
+        skill.updated_at ?? '',
+        skill.skill_kind ?? '',
+        skill.overview ?? '',
+        skill.stages,
+      ]),
+    )
+    .map((item) => JSON.stringify(item))
+    .join('|')
+}
+
 function materialStageItemsFingerprint(
   value: Partial<Record<MaterialStageId, MaterialStageEntry[]>> | undefined,
+): string {
+  if (!value) return ''
+  return Object.entries(value)
+    .flatMap(([stageId, entries]) =>
+      (entries ?? []).map((entry) => [
+        stageId,
+        entry.id,
+        entry.title,
+        entry.body,
+        entry.updated_at ?? '',
+      ]),
+    )
+    .map((item) => JSON.stringify(item))
+    .join('|')
+}
+
+function skillStageItemsFingerprint(
+  value: Partial<Record<SkillStageId, SkillStageEntry[]>> | undefined,
 ): string {
   if (!value) return ''
   return Object.entries(value)
@@ -290,6 +329,24 @@ type Props = {
     body?: string
   }) => boolean
   writeMaterialOverview?: (text: string) => void
+  skillKind?: SkillKind
+  skillOverview?: string
+  skillStageItems?: Partial<Record<SkillStageId, SkillStageEntry[]>>
+  getSkillStages?: () => Partial<Record<SkillStageId, SkillStageEntry[]>>
+  getSkillOverview?: () => string
+  selectSkillEntry?: (stageId: SkillStageId, entryId: string) => void
+  createSkillEntry?: (input: {
+    stageId: SkillStageId
+    title: string
+    body: string
+  }) => SkillStageEntry | null
+  editSkillEntry?: (input: {
+    stageId: SkillStageId
+    entryId: string
+    title?: string
+    body?: string
+  }) => boolean
+  writeSkillOverview?: (text: string) => void
   /** 创作空间共享模板可见的书籍分类上下文。 */
   bookGenre?: string
   stageId: StageId | MaterialStageId | SkillStageId
@@ -312,6 +369,7 @@ type Props = {
   linkedMaterialsByKind?: Partial<Record<MaterialKind, Material[]>>
   /** 当前书籍绑定的技能库；书籍工作台智能体可按阶段加载技能 */
   linkedSkill?: Skill | null
+  linkedSkillsByKind?: Partial<Record<SkillKind, Skill[]>>
   skillType?: SkillType
   /** 全局创作空间智能体可读配置（仅书籍短篇工作台） */
   workspaceAgentReadAccess?: WorkspaceAgentReadAccessConfig | null
@@ -356,10 +414,18 @@ function resolveQuickLoadableSkills(
 ): QuickLoadableSkill[] {
   if (workspaceType !== 'book') return []
   if (props.bookType === 'script') {
-    return getScriptLoadableSkillsForStage(props.linkedSkill, props.stageId)
+    return getScriptLoadableSkillsForStage(
+      props.linkedSkill,
+      props.stageId,
+      props.linkedSkillsByKind,
+    )
   }
   if (props.bookType === 'long') return []
-  return getShortLoadableSkillsForStage(props.linkedSkill, props.stageId)
+  return getShortLoadableSkillsForStage(
+    props.linkedSkill,
+    props.stageId,
+    props.linkedSkillsByKind,
+  )
 }
 
 type WritableStageId = StageId | MaterialStageId | SkillStageId
@@ -732,6 +798,15 @@ function WorkspaceAiChatInner({
           editMaterialEntry: latest.editMaterialEntry,
           writeMaterialOverview: latest.writeMaterialOverview,
           skillType: latest.skillType,
+          skillKind: latest.skillKind,
+          skillOverview: latest.getSkillOverview?.() ?? latest.skillOverview,
+          skillStageItems: latest.getSkillStages?.() ?? latest.skillStageItems,
+          getSkillStages: latest.getSkillStages,
+          getSkillOverview: latest.getSkillOverview,
+          selectSkillEntry: latest.selectSkillEntry,
+          createSkillEntry: latest.createSkillEntry,
+          editSkillEntry: latest.editSkillEntry,
+          writeSkillOverview: latest.writeSkillOverview,
           workspaceType,
           promptKind: latest.promptKind,
           stageId: latest.stageId,
@@ -763,6 +838,7 @@ function WorkspaceAiChatInner({
           linkedMaterial: latest.linkedMaterial,
           linkedMaterialsByKind: latest.linkedMaterialsByKind,
           linkedSkill: latest.linkedSkill,
+          linkedSkillsByKind: latest.linkedSkillsByKind,
           workspaceAgentReadAccess: latest.workspaceAgentReadAccess,
           applyToStageEditor: latest.applyToStageEditor,
           selectPlotChildStage: latest.selectPlotChildStage
@@ -781,8 +857,11 @@ function WorkspaceAiChatInner({
           ? await getSkillSystemPrompt(
               props.stageId as SkillStageId,
               {
-                skillTitle: props.bookTitle,
+               skillTitle: props.bookTitle,
                 skillType: props.skillType ?? 'short',
+                skillKind: props.skillKind ?? 'general',
+                skillOverview: props.getSkillOverview?.() ?? props.skillOverview,
+                currentEntryTitle: props.currentEntryTitle,
                 stageBody: resolveCurrentStageBody(props),
                 allStages: mergeCurrentStageIntoAllStages(props) as Partial<Record<SkillStageId, string>>,
               },
@@ -828,6 +907,7 @@ function WorkspaceAiChatInner({
                 ),
                 linkedMaterialsByKind: props.linkedMaterialsByKind,
                 linkedSkill: props.linkedSkill,
+                linkedSkillsByKind: props.linkedSkillsByKind,
               },
             )
       if (cancelled || !hostRef.current) return
@@ -1171,6 +1251,9 @@ function WorkspaceAiChatInner({
               {
                skillTitle: p.bookTitle,
                 skillType: p.skillType ?? 'short',
+                skillKind: p.skillKind ?? 'general',
+                skillOverview: p.getSkillOverview?.() ?? p.skillOverview,
+                currentEntryTitle: p.currentEntryTitle,
                stageBody: latestStageBody,
                 allStages: latestAllStages as Partial<Record<SkillStageId, string>>,
               },
@@ -1216,6 +1299,7 @@ function WorkspaceAiChatInner({
                 ),
                 linkedMaterialsByKind: p.linkedMaterialsByKind,
                 linkedSkill: p.linkedSkill,
+                linkedSkillsByKind: p.linkedSkillsByKind,
               },
             )
       if (!agentRef.current || seq !== promptPullSeqRef.current) return
@@ -1281,6 +1365,16 @@ function WorkspaceAiChatInner({
         linkedMaterial: toolProps.linkedMaterial,
         linkedMaterialsByKind: toolProps.linkedMaterialsByKind,
         linkedSkill: toolProps.linkedSkill,
+        linkedSkillsByKind: toolProps.linkedSkillsByKind,
+        skillKind: toolProps.skillKind,
+        skillOverview: toolProps.getSkillOverview?.() ?? toolProps.skillOverview,
+        skillStageItems: toolProps.getSkillStages?.() ?? toolProps.skillStageItems,
+        getSkillStages: toolProps.getSkillStages,
+        getSkillOverview: toolProps.getSkillOverview,
+        selectSkillEntry: toolProps.selectSkillEntry,
+        createSkillEntry: toolProps.createSkillEntry,
+        editSkillEntry: toolProps.editSkillEntry,
+        writeSkillOverview: toolProps.writeSkillOverview,
         workspaceAgentReadAccess: toolProps.workspaceAgentReadAccess,
         applyToStageEditor: toolProps.applyToStageEditor,
         selectPlotChildStage: toolProps.selectPlotChildStage
@@ -1309,6 +1403,9 @@ function WorkspaceAiChatInner({
     props.currentEntryTitle,
     props.materialStageItems,
     props.skillType,
+    props.skillKind,
+    props.skillOverview,
+    props.skillStageItems,
     props.bookGenre,
     props.promptKind,
     props.stageId,
@@ -1318,6 +1415,7 @@ function WorkspaceAiChatInner({
     props.linkedMaterial,
     props.linkedMaterialsByKind,
     props.linkedSkill,
+    props.linkedSkillsByKind,
     props.workspaceAgentReadAccess,
     props.applyToStageEditor,
     props.selectPlotChildStage,
@@ -1439,6 +1537,16 @@ export const WorkspaceAiChat = memo(WorkspaceAiChatInner, (prev, next) => {
   if (prev.linkedSkill?.id !== next.linkedSkill?.id) return false
   if (prev.linkedSkill?.updated_at !== next.linkedSkill?.updated_at) return false
   if (prev.linkedSkill?.stages !== next.linkedSkill?.stages) return false
+  if (
+    linkedSkillsFingerprint(prev.linkedSkillsByKind) !==
+    linkedSkillsFingerprint(next.linkedSkillsByKind)
+  ) return false
+  if (prev.skillKind !== next.skillKind) return false
+  if (prev.skillOverview !== next.skillOverview) return false
+  if (
+    skillStageItemsFingerprint(prev.skillStageItems) !==
+    skillStageItemsFingerprint(next.skillStageItems)
+  ) return false
 
   // stageBody 内容变化需要更新（比较字符串值而非引用）
   if (prev.stageBody !== next.stageBody) return false

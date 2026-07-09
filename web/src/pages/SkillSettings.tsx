@@ -3,13 +3,19 @@ import { useNavigate } from 'react-router-dom'
 import {
   SKILL_STAGE_KEYS,
   SKILL_STAGE_LABELS,
+  SKILL_KIND_KEYS,
+  SKILL_KIND_LABELS,
+  SKILL_MANAGER_PROMPT_KIND,
   readSkillAgentPromptTemplateForType,
+  readSkillPromptTemplateForType,
   readCommonSkills,
   resetSkillAgentPromptOverride,
   saveCommonSkills,
   saveSkillAgentPromptOverride,
+  skillKindPromptKind,
   skillTypeLabel,
   type CommonSkill,
+  type SkillPromptKind,
   type SkillStageId,
   type SkillType,
 } from '../bridge'
@@ -22,15 +28,42 @@ import { useAppDialog } from '../components/useAppDialog'
 import './WorkspaceSettings.css'
 
 const SKILL_SETTING_TYPES: SkillType[] = ['short', 'long', 'script']
+const SKILL_PROMPT_SLOTS: Array<{
+  kind: SkillPromptKind
+  label: string
+}> = [
+  { kind: SKILL_MANAGER_PROMPT_KIND, label: '整体管理' },
+  ...SKILL_KIND_KEYS.map((kind) => ({
+    kind: skillKindPromptKind(kind),
+    label: SKILL_KIND_LABELS[kind],
+  })),
+]
 
 const PLACEHOLDER_HINT =
-  '{{SKILL_TITLE}}  {{SKILL_LINE}}  {{SKILL_TYPE}}  {{STAGE_ID}}  {{STAGE_LABEL}}  {{STAGE_BODY}}  {{OTHER_STAGES_EXCERPT}}'
+  '{{SKILL_TITLE}}  {{SKILL_LINE}}  {{SKILL_TYPE}}  {{SKILL_KIND}}  {{SKILL_KIND_LABEL}}  {{SKILL_OVERVIEW}}  {{CURRENT_ENTRY_TITLE}}  {{STAGE_ID}}  {{STAGE_LABEL}}  {{STAGE_BODY}}  {{OTHER_STAGES_EXCERPT}}'
+
+function promptCacheKey(skillType: SkillType, promptKind: SkillPromptKind): string {
+  return `${skillType}:${promptKind}`
+}
+
+function parsePromptCacheKey(key: string): {
+  skillType: SkillType
+  promptKind: SkillPromptKind
+} {
+  const [type, ...kindParts] = key.split(':')
+  return {
+    skillType: (type || 'short') as SkillType,
+    promptKind: (kindParts.join(':') || SKILL_MANAGER_PROMPT_KIND) as SkillPromptKind,
+  }
+}
 
 export function SkillSettings() {
   const navigate = useNavigate()
   const { confirm, dialog } = useAppDialog()
   const [settingsMode, setSettingsMode] = useState<'prompt' | 'common'>('prompt')
   const [skillType, setSkillType] = useState<SkillType>('short')
+  const [promptKind, setPromptKind] =
+    useState<SkillPromptKind>(SKILL_MANAGER_PROMPT_KIND)
   const [promptDraft, setPromptDraft] = useState('')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -41,13 +74,18 @@ export function SkillSettings() {
 
   const promptDraftRef = useRef(promptDraft)
   const savedPromptRef = useRef('')
-  const promptValuesByTypeRef = useRef<Partial<Record<SkillType, string>>>({})
+  const promptValuesByKeyRef = useRef<Record<string, string>>({})
   const textHistory = useTextHistory()
   const autoSave = useKeyedAutoSave<string>({
-    getSnapshot: (key) => promptValuesByTypeRef.current[key as SkillType] ?? null,
+    getSnapshot: (key) => promptValuesByKeyRef.current[key] ?? null,
     saveSnapshot: async (key, value) => {
       try {
-        await saveSkillAgentPromptOverride(value, key as SkillType)
+        const parsed = parsePromptCacheKey(key)
+        await saveSkillAgentPromptOverride(
+          value,
+          parsed.skillType,
+          parsed.promptKind,
+        )
         savedPromptRef.current = value
         setError(null)
       } catch (cause) {
@@ -67,9 +105,11 @@ export function SkillSettings() {
     promptDraftRef.current = promptDraft
   }, [promptDraft])
 
+  const activePromptKey = promptCacheKey(skillType, promptKind)
+
   const flushPrompt = useCallback((): Promise<void> => {
-    return flushSkillPrompt(skillType).then(() => undefined)
-  }, [flushSkillPrompt, skillType])
+    return flushSkillPrompt(activePromptKey).then(() => undefined)
+  }, [activePromptKey, flushSkillPrompt])
 
   useEffect(() => {
     let cancelled = false
@@ -77,14 +117,17 @@ export function SkillSettings() {
       setLoading(true)
       setError(null)
       try {
-        const prompt = await readSkillAgentPromptTemplateForType(skillType)
+        const prompt =
+          promptKind === SKILL_MANAGER_PROMPT_KIND
+            ? await readSkillAgentPromptTemplateForType(skillType)
+            : await readSkillPromptTemplateForType(promptKind, skillType)
         if (cancelled) return
         promptDraftRef.current = prompt
-        promptValuesByTypeRef.current[skillType] = prompt
+        promptValuesByKeyRef.current[activePromptKey] = prompt
         savedPromptRef.current = prompt
         setPromptDraft(prompt)
-        textHistory.clear(`skill-settings:${skillType}`, prompt)
-        markSkillPromptSaved(skillType)
+        textHistory.clear(`skill-settings:${activePromptKey}`, prompt)
+        markSkillPromptSaved(activePromptKey)
       } catch (cause) {
         if (!cancelled) {
           setError(cause instanceof Error ? cause.message : '加载技能库智能体设置失败')
@@ -95,9 +138,18 @@ export function SkillSettings() {
     })()
     return () => {
       cancelled = true
-      if (promptDraftRef.current !== savedPromptRef.current) void flushSkillPrompt(skillType)
+      if (promptDraftRef.current !== savedPromptRef.current) {
+        void flushSkillPrompt(activePromptKey)
+      }
     }
-  }, [flushSkillPrompt, markSkillPromptSaved, skillType, textHistory])
+  }, [
+    activePromptKey,
+    flushSkillPrompt,
+    markSkillPromptSaved,
+    promptKind,
+    skillType,
+    textHistory,
+  ])
 
   useEffect(() => {
     let cancelled = false
@@ -128,6 +180,16 @@ export function SkillSettings() {
     [flushPrompt, skillType],
   )
 
+  const switchPromptKind = useCallback(
+    async (next: SkillPromptKind) => {
+      if (next === promptKind) return
+      await flushPrompt().catch(() => undefined)
+      setPromptKind(next)
+      setPromptDraft('')
+    },
+    [flushPrompt, promptKind],
+  )
+
   const handleBack = useCallback(async () => {
     try {
       await flushPrompt()
@@ -149,23 +211,35 @@ export function SkillSettings() {
     }
     await flushPrompt().catch(() => undefined)
     try {
-      await resetSkillAgentPromptOverride(skillType)
-      const value = await readSkillAgentPromptTemplateForType(skillType)
+      await resetSkillAgentPromptOverride(skillType, promptKind)
+      const value =
+        promptKind === SKILL_MANAGER_PROMPT_KIND
+          ? await readSkillAgentPromptTemplateForType(skillType)
+          : await readSkillPromptTemplateForType(promptKind, skillType)
       savedPromptRef.current = value
       promptDraftRef.current = value
-      promptValuesByTypeRef.current[skillType] = value
+      promptValuesByKeyRef.current[activePromptKey] = value
       setPromptDraft(value)
       textHistory.record(
-        `skill-settings:${skillType}`,
+        `skill-settings:${activePromptKey}`,
         promptDraft,
         value,
         'atomic',
       )
-      markSkillPromptSaved(skillType)
+      markSkillPromptSaved(activePromptKey)
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : '恢复默认提示词失败')
     }
-  }, [confirm, flushPrompt, markSkillPromptSaved, promptDraft, skillType, textHistory])
+  }, [
+    activePromptKey,
+    confirm,
+    flushPrompt,
+    markSkillPromptSaved,
+    promptDraft,
+    promptKind,
+    skillType,
+    textHistory,
+  ])
 
   const addCommonSkill = useCallback(() => {
     setCommonSkillsSaved(false)
@@ -242,12 +316,12 @@ export function SkillSettings() {
           <h1>技能库设置</h1>
           <p>配置管理智能体提示词，以及随应用打包发布的通用技能。</p>
           <span
-            className={`workspace-settings-save-state workspace-settings-save-state--${settingsMode === 'common' ? (commonSkillsSaving ? 'saving' : commonSkillsSaved ? 'saved' : 'idle') : skillPromptStatus(skillType)}`}
+            className={`workspace-settings-save-state workspace-settings-save-state--${settingsMode === 'common' ? (commonSkillsSaving ? 'saving' : commonSkillsSaved ? 'saved' : 'idle') : skillPromptStatus(activePromptKey)}`}
             aria-live="polite"
           >
             {settingsMode === 'common'
               ? commonSkillsSaving ? '保存中…' : commonSkillsSaved ? '已保存' : ''
-              : autoSaveStatusLabel(skillPromptStatus(skillType))}
+              : autoSaveStatusLabel(skillPromptStatus(activePromptKey))}
           </span>
         </div>
       </header>
@@ -269,7 +343,7 @@ export function SkillSettings() {
           className={settingsMode === 'common' ? 'workspace-settings-type-btn workspace-settings-type-btn--active' : 'workspace-settings-type-btn'}
           onClick={() => setSettingsMode('common')}
         >
-          通用技能
+          内置通用技能
         </button>
         {settingsMode === 'prompt' ? SKILL_SETTING_TYPES.map((type) => (
           <button
@@ -287,18 +361,34 @@ export function SkillSettings() {
             {skillTypeLabel(type)}
           </button>
         )) : null}
+        {settingsMode === 'prompt' ? SKILL_PROMPT_SLOTS.map((slot) => (
+          <button
+            key={slot.kind}
+            type="button"
+            role="tab"
+            aria-selected={promptKind === slot.kind}
+            className={
+              promptKind === slot.kind
+                ? 'workspace-settings-type-btn workspace-settings-type-btn--active'
+                : 'workspace-settings-type-btn'
+            }
+            onClick={() => void switchPromptKind(slot.kind)}
+          >
+            {slot.label}
+          </button>
+        )) : null}
       </div>
 
       <main className="workspace-settings-content">
         {settingsMode === 'common' ? (
           commonSkillsLoading ? (
-            <div className="workspace-settings-loading">加载通用技能中…</div>
+            <div className="workspace-settings-loading">加载内置通用技能中…</div>
           ) : (
             <section className="common-skills-panel">
               <div className="workspace-settings-content-head">
                 <div>
-                  <span>项目本地配置</span>
-                  <h2>通用技能</h2>
+                <span>项目本地配置</span>
+                  <h2>内置通用技能</h2>
                   <p>配置保存在 app/prompt_defaults/skill/common_skills.json，打包时随应用发布，不进入用户数据目录。</p>
                 </div>
                 <div className="workspace-settings-head-actions">
@@ -310,13 +400,13 @@ export function SkillSettings() {
               </div>
 
               {commonSkills.length === 0 ? (
-                <div className="common-skills-empty">暂无通用技能，点击“添加技能”开始配置。</div>
+                <div className="common-skills-empty">暂无内置通用技能，点击“添加技能”开始配置。</div>
               ) : (
                 <div className="common-skills-list">
                   {commonSkills.map((skill, index) => (
                     <article className="common-skill-card" key={skill.id}>
                       <div className="common-skill-card-head">
-                        <strong>通用技能 {index + 1}</strong>
+                        <strong>内置通用技能 {index + 1}</strong>
                         <button type="button" onClick={() => void removeCommonSkill(skill)}>删除</button>
                       </div>
                       <label>
@@ -362,7 +452,11 @@ export function SkillSettings() {
             <div className="workspace-settings-content-head">
               <div>
                 <span>技能库</span>
-                <h2>{skillTypeLabel(skillType)}管理智能体</h2>
+                <h2>
+                  {skillTypeLabel(skillType)}
+                  {' · '}
+                  {SKILL_PROMPT_SLOTS.find((slot) => slot.kind === promptKind)?.label ?? '整体管理'}
+                </h2>
               </div>
               <div className="workspace-settings-head-actions">
                 <button type="button" onClick={() => void resetPrompt()}>
@@ -386,27 +480,27 @@ export function SkillSettings() {
                   onBlur={() => void flushPrompt().catch(() => undefined)}
                   onChange={(event) => {
                     textHistory.change(
-                      `skill-settings:${skillType}`,
+                      `skill-settings:${activePromptKey}`,
                       promptDraft,
                       event.target.value,
                       (value) => {
                         promptDraftRef.current = value
-                        promptValuesByTypeRef.current[skillType] = value
+                        promptValuesByKeyRef.current[activePromptKey] = value
                         setPromptDraft(value)
-                        scheduleSkillPromptSave(skillType)
+                        scheduleSkillPromptSave(activePromptKey)
                       },
                     )
                   }}
                   onKeyDown={(event) =>
                     textHistory.handleKeyDown(
                       event,
-                      `skill-settings:${skillType}`,
+                      `skill-settings:${activePromptKey}`,
                       promptDraft,
                       (value) => {
                         promptDraftRef.current = value
-                        promptValuesByTypeRef.current[skillType] = value
+                        promptValuesByKeyRef.current[activePromptKey] = value
                         setPromptDraft(value)
-                        scheduleSkillPromptSave(skillType)
+                        scheduleSkillPromptSave(activePromptKey)
                       },
                       { redoKey: 'm', standardRedo: false },
                     )

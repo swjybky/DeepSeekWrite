@@ -16,10 +16,12 @@ type ResolvedModelConfig = AiModelConfig & {
 
 const WORKSPACE_MODEL_REAL_ID_KEY = '__deepSeekWriteRealModelId'
 const WORKSPACE_MODEL_CONFIG_ID_KEY = '__deepSeekWriteConfigId'
+export const WORKSPACE_MODEL_PROVIDER_KEY = '__deepSeekWriteProvider'
 
 type LegacyWorkspaceDisplayModel = Model<Api> & {
   [WORKSPACE_MODEL_REAL_ID_KEY]?: string
   [WORKSPACE_MODEL_CONFIG_ID_KEY]?: string
+  [WORKSPACE_MODEL_PROVIDER_KEY]?: string
 }
 
 const workspaceModelButtonLabels = new WeakMap<ParentNode, string>()
@@ -157,6 +159,8 @@ function createOwnerModel(config: AiModelConfig): Model<Api> {
     contextWindow: builtin?.contextWindow ?? 128000,
     maxTokens: builtin?.maxTokens ?? 8192,
   }
+  const workspaceModel = model as LegacyWorkspaceDisplayModel
+  workspaceModel[WORKSPACE_MODEL_PROVIDER_KEY] = config.provider
   if (builtin?.thinkingLevelMap) {
     model.thinkingLevelMap = builtin.thinkingLevelMap
   }

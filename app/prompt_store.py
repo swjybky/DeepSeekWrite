@@ -66,7 +66,7 @@ _MATERIAL_PLACEHOLDER_RE = re.compile(
     r"\{\{(BOOK_TITLE|BOOK_LINE|MATERIAL_TITLE|MATERIAL_LINE|MATERIAL_TYPE|MATERIAL_GENRE|MATERIAL_KIND|MATERIAL_KIND_LABEL|MATERIAL_OVERVIEW|CURRENT_ENTRY_TITLE|STAGE_ID|STAGE_LABEL|STAGE_BODY|OTHER_STAGES_EXCERPT)\}\}"
 )
 _SKILL_PLACEHOLDER_RE = re.compile(
-    r"\{\{(BOOK_TITLE|BOOK_LINE|SKILL_TITLE|SKILL_LINE|SKILL_TYPE|STAGE_ID|STAGE_LABEL|STAGE_BODY|OTHER_STAGES_EXCERPT)\}\}"
+    r"\{\{(BOOK_TITLE|BOOK_LINE|SKILL_TITLE|SKILL_LINE|SKILL_TYPE|SKILL_KIND|SKILL_KIND_LABEL|SKILL_OVERVIEW|CURRENT_ENTRY_TITLE|STAGE_ID|STAGE_LABEL|STAGE_BODY|OTHER_STAGES_EXCERPT)\}\}"
 )
 _LEARNING_IMITATION_PLACEHOLDER_RE = re.compile(
     r"\{\{(STAGE_ID|STAGE_LABEL|DOCUMENT_COUNT|DOCUMENTS_SUMMARY|CURRENT_RESULT)\}\}"
@@ -880,7 +880,9 @@ def read_raw_material_prompt_for_editor(
 SKILL_PREFIX = Path("skill")
 SKILL_MANAGER_AGENT_ID = "skill_manager"
 SKILL_MANAGER_PROMPT_KIND = "skill_manager"
+SKILL_KIND_PROMPT_PREFIX = "skill_kind_"
 SHARED_SKILL_PROMPT_DIR = "shared"
+KIND_SKILL_PROMPT_DIR = "kind"
 
 SKILL_STAGES_ORDER: tuple[str, ...] = (
     "character_design",
@@ -898,16 +900,46 @@ SKILL_STAGE_LABELS: dict[str, str] = {
     "expert_section_writer": "分节写手技能",
 }
 
+SKILL_KIND_KEYS: tuple[str, ...] = ("general", "plot", "style", "other")
+SKILL_KIND_LABELS: dict[str, str] = {
+    "general": "通用技能库",
+    "plot": "剧情设计技能库",
+    "style": "文风写作技能库",
+    "other": "其他技能库",
+}
+SKILL_KIND_STAGE_ORDER: dict[str, tuple[str, ...]] = {
+    "general": SKILL_STAGES_ORDER,
+    "plot": ("plot_design", "outline"),
+    "style": ("draft", "expert_section_writer"),
+    "other": SKILL_STAGES_ORDER,
+}
+
+
+def normalize_skill_kind(raw: str | None = None) -> str:
+    kind = str(raw or "").strip()
+    return kind if kind in SKILL_KIND_KEYS else "general"
+
+
+def normalize_skill_prompt_kind(raw: str | None = None) -> str:
+    value = str(raw or "").strip()
+    if value == SKILL_MANAGER_PROMPT_KIND:
+        return value
+    if value.startswith(SKILL_KIND_PROMPT_PREFIX):
+        kind = value[len(SKILL_KIND_PROMPT_PREFIX):]
+        return f"{SKILL_KIND_PROMPT_PREFIX}{normalize_skill_kind(kind)}"
+    return SKILL_MANAGER_PROMPT_KIND
+
 
 def _peek_skill_other_stages(
     exclude_stage_id: str,
     all_stages: dict[str, str],
     *,
     peer_max: int | None,
+    skill_kind: str = "general",
 ) -> str:
     cap = peer_max if peer_max is not None else OTHER_STAGES_PEER_MAX
     lines: list[str] = []
-    for sid in SKILL_STAGES_ORDER:
+    for sid in SKILL_KIND_STAGE_ORDER.get(normalize_skill_kind(skill_kind), SKILL_STAGES_ORDER):
         if sid == exclude_stage_id:
             continue
         raw = str(all_stages.get(sid) or "").strip()
@@ -924,8 +956,20 @@ def validate_skill_stage_id(stage_id: str) -> None:
         raise ValueError(f"未知的 skill stage_id: {stage_id!r}")
 
 
-def skill_agent_override_absolute_path(skill_type: str | None = None) -> Path:
+def skill_agent_override_absolute_path(
+    skill_type: str | None = None,
+    prompt_kind: str | None = None,
+) -> Path:
     root = data_root() / "prompt_overrides" / SKILL_PREFIX
+    normalized_prompt_kind = normalize_skill_prompt_kind(prompt_kind)
+    if normalized_prompt_kind.startswith(SKILL_KIND_PROMPT_PREFIX):
+        kind = normalized_prompt_kind[len(SKILL_KIND_PROMPT_PREFIX):]
+        return (
+            root
+            / normalize_library_prompt_type(skill_type)
+            / KIND_SKILL_PROMPT_DIR
+            / f"{kind}.txt"
+        ).resolve()
     return (
         root
         / normalize_library_prompt_type(skill_type)
@@ -934,7 +978,19 @@ def skill_agent_override_absolute_path(skill_type: str | None = None) -> Path:
     ).resolve()
 
 
-def skill_agent_builtin_default_path(skill_type: str | None = None) -> Path:
+def skill_agent_builtin_default_path(
+    skill_type: str | None = None,
+    prompt_kind: str | None = None,
+) -> Path:
+    normalized_prompt_kind = normalize_skill_prompt_kind(prompt_kind)
+    if normalized_prompt_kind.startswith(SKILL_KIND_PROMPT_PREFIX):
+        kind = normalized_prompt_kind[len(SKILL_KIND_PROMPT_PREFIX):]
+        return (
+            (bundle_root() / "app" / "prompt_defaults" / SKILL_PREFIX)
+            / normalize_library_prompt_type(skill_type)
+            / KIND_SKILL_PROMPT_DIR
+            / f"{kind}.txt"
+        )
     return (
         (bundle_root() / "app" / "prompt_defaults" / SKILL_PREFIX)
         / normalize_library_prompt_type(skill_type)
@@ -951,23 +1007,32 @@ def skill_agent_legacy_builtin_default_path() -> Path:
     )
 
 
-def resolve_skill_agent_read_path(skill_type: str | None = None) -> Path:
+def resolve_skill_agent_read_path(
+    skill_type: str | None = None,
+    prompt_kind: str | None = None,
+) -> Path:
     """覆盖优先。"""
-    over = skill_agent_override_absolute_path(skill_type)
+    normalized_prompt_kind = normalize_skill_prompt_kind(prompt_kind)
+    over = skill_agent_override_absolute_path(skill_type, normalized_prompt_kind)
     if over.is_file():
         return over
-    default = skill_agent_builtin_default_path(skill_type)
+    default = skill_agent_builtin_default_path(skill_type, normalized_prompt_kind)
     if default.is_file():
         return default
+    if normalized_prompt_kind.startswith(SKILL_KIND_PROMPT_PREFIX):
+        return skill_agent_builtin_default_path("short", normalized_prompt_kind)
     return skill_agent_legacy_builtin_default_path()
 
 
-def read_skill_agent_prompt_template(skill_type: str | None = None) -> str:
-    path = resolve_skill_agent_read_path(skill_type)
+def read_skill_agent_prompt_template(
+    skill_type: str | None = None,
+    prompt_kind: str | None = None,
+) -> str:
+    path = resolve_skill_agent_read_path(skill_type, prompt_kind)
     if not path.is_file():
         return (
             f"[缺少技能默认提示模板文件]\n路径: {path}\n\n"
-            "请补齐 app/prompt_defaults/skill/shared/skill_manager.txt。\n"
+            "请补齐 app/prompt_defaults/skill 下对应的提示词模板。\n"
         )
     text = path.read_text(encoding="utf-8")
     if text.endswith("\n"):
@@ -975,14 +1040,21 @@ def read_skill_agent_prompt_template(skill_type: str | None = None) -> str:
     return text
 
 
-def save_skill_agent_prompt_override(body: str, skill_type: str | None = None) -> None:
-    path = skill_agent_override_absolute_path(skill_type)
+def save_skill_agent_prompt_override(
+    body: str,
+    skill_type: str | None = None,
+    prompt_kind: str | None = None,
+) -> None:
+    path = skill_agent_override_absolute_path(skill_type, prompt_kind)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(body if body.endswith("\n") else body + "\n", encoding="utf-8")
 
 
-def reset_skill_agent_prompt_override(skill_type: str | None = None) -> bool:
-    path = skill_agent_override_absolute_path(skill_type)
+def reset_skill_agent_prompt_override(
+    skill_type: str | None = None,
+    prompt_kind: str | None = None,
+) -> bool:
+    path = skill_agent_override_absolute_path(skill_type, prompt_kind)
     if path.is_file():
         path.unlink()
         return True
@@ -993,6 +1065,9 @@ def render_skill_system_prompt(
     stage_id: str,
     *,
     skill_type: str | None = None,
+    skill_kind: str | None = None,
+    skill_overview: str = "",
+    current_entry_title: str = "",
     skill_title: str,
     stage_body: str,
     all_stages_for_peek: dict[str, str] | None = None,
@@ -1000,7 +1075,16 @@ def render_skill_system_prompt(
     if stage_id in {"intro_design", "plot_refine"}:
         stage_id = "plot_design"
     validate_skill_stage_id(stage_id)
-    raw = read_skill_agent_prompt_template(skill_type)
+    normalized_skill_kind = normalize_skill_kind(skill_kind)
+    manager_raw = read_skill_agent_prompt_template(
+        skill_type,
+        SKILL_MANAGER_PROMPT_KIND,
+    )
+    kind_raw = read_skill_agent_prompt_template(
+        skill_type,
+        f"{SKILL_KIND_PROMPT_PREFIX}{normalized_skill_kind}",
+    )
+    raw = f"{manager_raw.rstrip()}\n\n---\n\n{kind_raw.strip()}"
 
     staged_body = excerpt(stage_body, STAGE_BODY_EXCERPT_CAP)
     other = (
@@ -1010,6 +1094,7 @@ def render_skill_system_prompt(
             stage_id,
             all_stages_for_peek,
             peer_max=OTHER_STAGES_PEER_MAX,
+            skill_kind=normalized_skill_kind,
         )
     )
 
@@ -1021,6 +1106,13 @@ def render_skill_system_prompt(
         "SKILL_TITLE": title,
         "SKILL_LINE": f"技能：《{title}》",
         "SKILL_TYPE": f"{library_prompt_type_label(skill_type)}技能",
+        "SKILL_KIND": normalized_skill_kind,
+        "SKILL_KIND_LABEL": SKILL_KIND_LABELS.get(
+            normalized_skill_kind,
+            SKILL_KIND_LABELS["general"],
+        ),
+        "SKILL_OVERVIEW": excerpt(skill_overview, STAGE_BODY_EXCERPT_CAP),
+        "CURRENT_ENTRY_TITLE": current_entry_title.strip() or "未选择条目",
         "STAGE_ID": stage_id,
         "STAGE_LABEL": stage_label,
         "STAGE_BODY": staged_body,
@@ -1037,6 +1129,9 @@ def render_skill_from_api_context(stage_id: str, context_raw: object) -> str:
     ctx = parse_context_payload(context_raw)
     title = str(ctx.get("skill_title") or ctx.get("book_title") or "")
     skill_type = str(ctx.get("skill_type") or "")
+    skill_kind = str(ctx.get("skill_kind") or "")
+    skill_overview = str(ctx.get("skill_overview") or "")
+    current_entry_title = str(ctx.get("current_entry_title") or "")
     body = str(ctx.get("stage_body") or "")
     all_stages: dict[str, str] | None = None
     stages_val = ctx.get("all_stages")
@@ -1046,15 +1141,21 @@ def render_skill_from_api_context(stage_id: str, context_raw: object) -> str:
     return render_skill_system_prompt(
         stage_id,
         skill_type=skill_type,
+        skill_kind=skill_kind,
+        skill_overview=skill_overview,
+        current_entry_title=current_entry_title,
         skill_title=title,
         stage_body=body,
         all_stages_for_peek=all_stages if all_stages is not None else {},
     )
 
 
-def read_raw_skill_agent_prompt_for_editor(skill_type: str | None = None) -> str:
+def read_raw_skill_agent_prompt_for_editor(
+    skill_type: str | None = None,
+    prompt_kind: str | None = None,
+) -> str:
     """技能库智能体设置页读取当前生效来源（优先覆盖）的原始模板正文。"""
-    path = resolve_skill_agent_read_path(skill_type)
+    path = resolve_skill_agent_read_path(skill_type, prompt_kind)
     if not path.is_file():
         return ""
     text = path.read_text(encoding="utf-8")

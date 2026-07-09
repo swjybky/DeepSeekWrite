@@ -24,14 +24,19 @@ import {
   normalizeBookStatus,
   normalizeBookType,
   normalizeLinkedMaterialIdsByKind,
+  normalizeLinkedSkillIdsByKind,
   firstLinkedMaterialId,
+  firstLinkedSkillId,
   MATERIAL_KIND_KEYS,
+  SKILL_KIND_KEYS,
+  SKILL_KIND_STAGE_IDS,
   normalizeMaterial,
   normalizeMaterialKind,
   normalizeMaterialStageItems,
   normalizeMaterialStages,
   normalizeMaterialType,
   normalizeSkill,
+  normalizeSkillKind,
   normalizeSkillStages,
   normalizeSkillType,
   materialStageItemsToStages,
@@ -44,6 +49,7 @@ import {
   type MaterialStageId,
   type MaterialSummary,
   type Skill,
+  type SkillKind,
   type SkillStageEntry,
   type SkillStageId,
   type SkillSummary,
@@ -76,11 +82,31 @@ function randomId() {
   return crypto.randomUUID()
 }
 
+function normalizeMockLinkedSkillIdsByKind(
+  raw: Partial<Record<SkillKind, string[]>> | null | undefined,
+  legacySkillId: string | null | undefined,
+  bookType: Book['book_type'],
+): Partial<Record<SkillKind, string[]>> {
+  const out = normalizeLinkedSkillIdsByKind(raw, legacySkillId)
+  const skills = loadMockSkills()
+  for (const kind of SKILL_KIND_KEYS) {
+    out[kind] = (out[kind] ?? []).filter((id) => {
+      const skill = skills.get(id)
+      return Boolean(
+        skill &&
+          skill.skill_type === bookType &&
+          normalizeSkillKind(skill.skill_kind) === kind,
+      )
+    })
+  }
+  return out
+}
+
 export async function mockListBooks(): Promise<BookSummary[]> {
   const map = loadMock()
   return [...map.values()]
     .sort((a, b) => (b.updated_at || '').localeCompare(a.updated_at || ''))
-    .map(({ id, title, book_type, categories, status, output_dir, linked_material_id, linked_material_ids_by_kind, linked_skill_id }) => ({
+    .map(({ id, title, book_type, categories, status, output_dir, linked_material_id, linked_material_ids_by_kind, linked_skill_id, linked_skill_ids_by_kind }) => ({
       id,
       title,
       book_type,
@@ -90,6 +116,7 @@ export async function mockListBooks(): Promise<BookSummary[]> {
       linked_material_id,
       linked_material_ids_by_kind,
       linked_skill_id,
+      linked_skill_ids_by_kind,
     }))
 }
 
@@ -101,6 +128,7 @@ export async function mockCreateBook(
   linked_skill_id?: string | null,
   linked_material_id?: string | null,
   linked_material_ids_by_kind?: Partial<Record<MaterialKind, string[]>> | null,
+  linked_skill_ids_by_kind?: Partial<Record<SkillKind, string[]>> | null,
 ): Promise<Book> {
   const map = loadMock()
   const now = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z')
@@ -121,6 +149,13 @@ export async function mockCreateBook(
       loadMockMaterials().has(id),
     )
   }
+  const linkedSkillsByKind = isWsBook
+    ? normalizeMockLinkedSkillIdsByKind(
+        linked_skill_ids_by_kind,
+        linked_skill_id,
+        bt,
+      )
+    : {}
   const book: Book = {
     id: randomId(),
     title: title.trim() || '未命名',
@@ -131,10 +166,8 @@ export async function mockCreateBook(
     output_dir,
     linked_material_id: isWsBook ? firstLinkedMaterialId(linkedByKind) : '',
     linked_material_ids_by_kind: isWsBook ? linkedByKind : {},
-    linked_skill_id:
-      isWsBook && linked_skill_id && loadMockSkills().has(linked_skill_id)
-        ? linked_skill_id
-        : '',
+    linked_skill_id: isWsBook ? firstLinkedSkillId(linkedSkillsByKind) : '',
+    linked_skill_ids_by_kind: linkedSkillsByKind,
     stages: normalizeStagesForWorkspaceBook({ book_type: bt }, {}),
     expert_draft: defaultExpertDraft(bt),
     memories: [],
@@ -166,6 +199,7 @@ export async function mockSaveBook(
     linked_material_id?: string | null
     linked_material_ids_by_kind?: Partial<Record<MaterialKind, string[]>> | null
     linked_skill_id?: string | null
+    linked_skill_ids_by_kind?: Partial<Record<SkillKind, string[]>> | null
     expert_draft?: ExpertDraft | null
     title?: string | null
     status?: BookStatus | null
@@ -222,10 +256,27 @@ export async function mockSaveBook(
   }
   if (options.linked_skill_id !== undefined) {
     const sid = options.linked_skill_id?.trim() ?? ''
+    const linkedSkillsByKind = isWorkspaceBook(next)
+      ? normalizeMockLinkedSkillIdsByKind(null, sid, next.book_type)
+      : {}
     next = {
       ...next,
-      linked_skill_id:
-        isWorkspaceBook(next) && sid && loadMockSkills().has(sid) ? sid : '',
+      linked_skill_id: firstLinkedSkillId(linkedSkillsByKind),
+      linked_skill_ids_by_kind: linkedSkillsByKind,
+    }
+  }
+  if (options.linked_skill_ids_by_kind !== undefined) {
+    const linkedSkillsByKind = isWorkspaceBook(next)
+      ? normalizeMockLinkedSkillIdsByKind(
+          options.linked_skill_ids_by_kind,
+          null,
+          next.book_type,
+        )
+      : {}
+    next = {
+      ...next,
+      linked_skill_id: firstLinkedSkillId(linkedSkillsByKind),
+      linked_skill_ids_by_kind: linkedSkillsByKind,
     }
   }
   if (options.expert_draft != null) {
@@ -456,6 +507,8 @@ function seedDefaultMockSkill(): Map<string, Skill> {
       id: randomId(),
       title: tpl.title || '参考技能',
       skill_type: 'short',
+      skill_kind: 'general',
+      overview: '',
       stages: tpl.stages,
       created_at: now,
       updated_at: now,
@@ -487,11 +540,13 @@ function sameLoadedCommonSkill(entry: SkillStageEntry, commonSkill: CommonSkill)
 async function appendMissingCommonSkills(
   stages: Skill['stages'],
   now: string,
+  allowedStageIds: readonly SkillStageId[] = SKILL_STAGE_KEYS,
 ): Promise<{ added_count: number; available_count: number }> {
   let added_count = 0
   let available_count = 0
   for (const commonSkill of await readCommonSkills()) {
     for (const stageId of commonSkill.effective_stages) {
+      if (!allowedStageIds.includes(stageId)) continue
       available_count += 1
       const entries = stages[stageId] ?? []
       if (entries.some((entry) => sameLoadedCommonSkill(entry, commonSkill))) {
@@ -516,10 +571,11 @@ export async function mockListSkills(): Promise<SkillSummary[]> {
   const map = loadMockSkills()
   return [...map.values()]
     .sort((a, b) => (b.updated_at || '').localeCompare(a.updated_at || ''))
-    .map(({ id, title, skill_type, stages, output_dir }) => ({
+    .map(({ id, title, skill_type, skill_kind, stages, output_dir }) => ({
       id,
       title,
       skill_type,
+      skill_kind,
       stage_counts: Object.fromEntries(
         SKILL_STAGE_KEYS.map((stageId) => [stageId, stages[stageId]?.length ?? 0]),
       ) as Partial<Record<SkillStageId, number>>,
@@ -539,17 +595,21 @@ export async function mockCreateSkill(
   title: string,
   skill_type = 'short',
   load_common_skills = false,
+  skill_kind: SkillKind = 'general',
 ): Promise<Skill> {
   const map = loadMockSkills()
   const now = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z')
+  const kind = normalizeSkillKind(skill_kind)
   const stages = normalizeSkillStages({})
   if (load_common_skills) {
-    await appendMissingCommonSkills(stages, now)
+    await appendMissingCommonSkills(stages, now, SKILL_KIND_STAGE_IDS[kind])
   }
   const skill: Skill = {
     id: randomId(),
     title: title.trim() || '未命名技能',
     skill_type: normalizeSkillType(skill_type),
+    skill_kind: kind,
+    overview: '',
     stages,
     stage_counts: {},
     stage_skill_count: 0,
@@ -575,6 +635,12 @@ export async function mockSaveSkill(
   }
   if (options?.skill_type != null) {
     next = { ...next, skill_type: normalizeSkillType(options.skill_type) }
+  }
+  if (options?.skill_kind != null) {
+    next = { ...next, skill_kind: normalizeSkillKind(options.skill_kind) }
+  }
+  if (options?.overview != null) {
+    next = { ...next, overview: options.overview }
   }
   if (options?.stages != null) {
     const stages = normalizeSkillStages(
@@ -605,7 +671,11 @@ export async function mockLoadCommonSkillsToSkill(
   if (!s) return null
   const now = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z')
   const stages = normalizeSkillStages(s.stages)
-  const result = await appendMissingCommonSkills(stages, now)
+  const result = await appendMissingCommonSkills(
+    stages,
+    now,
+    SKILL_KIND_STAGE_IDS[normalizeSkillKind(s.skill_kind)],
+  )
   const next: Skill = {
     ...s,
     stages,
@@ -630,8 +700,25 @@ export async function mockDeleteSkill(skill_id: string): Promise<boolean> {
     const books = loadMock()
     let changed = false
     for (const [bookId, book] of books) {
-      if (book.linked_skill_id === skill_id) {
-        books.set(bookId, { ...book, linked_skill_id: '' })
+      const linkedByKind = normalizeLinkedSkillIdsByKind(
+        book.linked_skill_ids_by_kind,
+        book.linked_skill_id,
+      )
+      const nextByKind = { ...linkedByKind }
+      for (const kind of SKILL_KIND_KEYS) {
+        nextByKind[kind] = (nextByKind[kind] ?? []).filter((id) => id !== skill_id)
+      }
+      const nextLegacy = firstLinkedSkillId(nextByKind)
+      if (
+        book.linked_skill_id === skill_id ||
+        nextLegacy !== book.linked_skill_id ||
+        JSON.stringify(nextByKind) !== JSON.stringify(linkedByKind)
+      ) {
+        books.set(bookId, {
+          ...book,
+          linked_skill_id: nextLegacy,
+          linked_skill_ids_by_kind: nextByKind,
+        })
         changed = true
       }
     }

@@ -16,6 +16,7 @@ import {
   type Material,
   type MaterialKind,
   type Skill,
+  type SkillKind,
   type StageId,
 } from '../../../bridge'
 import {
@@ -78,6 +79,7 @@ type Props = {
   linkedMaterial?: Material | null
   linkedMaterialsByKind?: Partial<Record<MaterialKind, Material[]>>
   linkedSkill?: Skill | null
+  linkedSkillsByKind?: Partial<Record<SkillKind, Skill[]>>
   readAccess: WorkspaceAgentReadAccessEntry
   writerReadAccess: WorkspaceAgentReadAccessEntry
   expertDraft: ExpertDraft
@@ -137,6 +139,7 @@ function buildSectionWriterToolsInput(
     linkedMaterial: p.linkedMaterial,
     linkedMaterialsByKind: p.linkedMaterialsByKind,
     linkedSkill: p.linkedSkill,
+    linkedSkillsByKind: p.linkedSkillsByKind,
     readAccess: p.writerReadAccess,
     getDraft: () => getProps().expertDraft,
     getRenderedSectionContent: getProps().getRenderedExpertDraftSectionContent,
@@ -168,6 +171,7 @@ function buildCoordinatorToolsInput(
     linkedMaterial: props.linkedMaterial,
     linkedMaterialsByKind: props.linkedMaterialsByKind,
     linkedSkill: props.linkedSkill,
+    linkedSkillsByKind: props.linkedSkillsByKind,
     readAccess: props.readAccess,
     getDraft: () => getProps().expertDraft,
     updateDraft: props.updateDraft,
@@ -548,6 +552,7 @@ export function ExpertDraftAiChat(props: Props) {
         activePanelKindRef.current === 'section-writer'
           ? EXPERT_SECTION_WRITER_AGENT_ID
           : EXPERT_DRAFT_COORDINATOR_AGENT_ID,
+        propsLatestRef.current.linkedSkillsByKind,
       )
 
     const refreshCoordinatorAgentState = (draft: ExpertDraft) => {
@@ -564,6 +569,7 @@ export function ExpertDraftAiChat(props: Props) {
         linkedMaterialsByKind: p.linkedMaterialsByKind,
         template: coordinatorPromptTemplateRef.current,
         linkedSkill: p.linkedSkill,
+        linkedSkillsByKind: p.linkedSkillsByKind,
       })
       agent.state.tools = stripArtifacts(currentCoordinatorTools())
     }
@@ -583,6 +589,7 @@ export function ExpertDraftAiChat(props: Props) {
         linkedMaterialsByKind: p.linkedMaterialsByKind,
         template: sectionWriterPromptTemplateRef.current,
         linkedSkill: p.linkedSkill,
+        linkedSkillsByKind: p.linkedSkillsByKind,
       })
       agent.state.tools = stripArtifacts(buildSectionWriterToolsFor(sectionId))
     }
@@ -678,6 +685,7 @@ export function ExpertDraftAiChat(props: Props) {
             linkedMaterialsByKind: props.linkedMaterialsByKind,
             template: coordinatorTemplate,
             linkedSkill: props.linkedSkill,
+            linkedSkillsByKind: props.linkedSkillsByKind,
           }),
           model: coordinatorModel,
           thinkingLevel: coordinatorThinkingLevel,
@@ -884,6 +892,7 @@ export function ExpertDraftAiChat(props: Props) {
         linkedMaterialsByKind: p.linkedMaterialsByKind,
         template: coordinatorPromptTemplateRef.current,
         linkedSkill: p.linkedSkill,
+        linkedSkillsByKind: p.linkedSkillsByKind,
       })
       coordinatorAgent.state.tools = stripArtifacts(
         buildExpertDraftCoordinatorTools(
@@ -915,6 +924,7 @@ export function ExpertDraftAiChat(props: Props) {
       linkedMaterialsByKind: p.linkedMaterialsByKind,
       template: sectionWriterPromptTemplateRef.current,
       linkedSkill: p.linkedSkill,
+      linkedSkillsByKind: p.linkedSkillsByKind,
     })
     sectionAgent.state.tools = stripArtifacts(
       buildSectionWriterToolsInput(() => propsLatestRef.current, sectionId),
@@ -927,6 +937,7 @@ export function ExpertDraftAiChat(props: Props) {
     props.linkedMaterial,
     props.linkedMaterialsByKind,
     props.linkedSkill,
+    props.linkedSkillsByKind,
     props.readAccess,
     props.writerReadAccess,
     debouncedDraft,

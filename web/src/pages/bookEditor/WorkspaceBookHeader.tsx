@@ -1,5 +1,10 @@
-import type { Book, Material, MaterialKind, Skill } from '../../domain/workspace'
-import { bookTypeLabel, isWorkspaceBook, MATERIAL_KIND_KEYS } from '../../domain/workspace'
+import type { Book, Material, MaterialKind, Skill, SkillKind } from '../../domain/workspace'
+import {
+  bookTypeLabel,
+  isWorkspaceBook,
+  MATERIAL_KIND_KEYS,
+  SKILL_KIND_KEYS,
+} from '../../domain/workspace'
 import {
   autoSaveStatusLabel,
   type AutoSaveStatus,
@@ -12,6 +17,7 @@ type Props = {
   linkedMaterial: Material | null
   linkedMaterialsByKind: Partial<Record<MaterialKind, Material[]>>
   linkedSkill: Skill | null
+  linkedSkillsByKind: Partial<Record<SkillKind, Skill[]>>
   saving: boolean
   error: string | null
   message: string | null
@@ -40,6 +46,7 @@ export function WorkspaceBookHeader({
   linkedMaterial,
   linkedMaterialsByKind,
   linkedSkill,
+  linkedSkillsByKind,
   saving,
   error,
   message,
@@ -64,6 +71,16 @@ export function WorkspaceBookHeader({
       : linkedMaterial
         ? linkedMaterial.title
         : '未关联素材库'
+  const linkedSkillCount = SKILL_KIND_KEYS.reduce(
+    (sum, kind) => sum + (linkedSkillsByKind[kind]?.length ?? 0),
+    0,
+  )
+  const linkedSkillTitle =
+    linkedSkillCount > 0
+      ? `已绑定 ${linkedSkillCount} 个技能库`
+      : linkedSkill
+        ? linkedSkill.title
+        : '未绑定技能库'
   return (
     <header className="editor-header editor-header--agent">
       <button type="button" className="back-link" onClick={onBack}>
@@ -145,19 +162,19 @@ export function WorkspaceBookHeader({
         </button>
         <span
           className="editor-header-material-name"
-          title={linkedSkill ? `已绑定：${linkedSkill.title}` : '未绑定技能库'}
+          title={linkedSkillTitle}
         >
-          {linkedSkill ? linkedSkill.title : '未绑定技能'}
+          {linkedSkillCount > 0 ? `技能 ${linkedSkillCount}` : '未绑定技能'}
         </span>
         <button
           type="button"
           className={
-            linkedSkill
+            linkedSkillCount > 0 || linkedSkill
               ? 'editor-header-material-select editor-header-material-select--active'
               : 'editor-header-material-select'
           }
           aria-label="选择绑定技能库"
-          title={linkedSkill ? `已绑定：${linkedSkill.title}` : '选择绑定技能库'}
+          title={linkedSkillTitle}
           onClick={onOpenSkillSelector}
         >
           技能库选择

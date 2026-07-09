@@ -17,7 +17,7 @@ import type {
   BookType,
   StageId,
 } from '../domain/workspaceCore'
-import type { Material, MaterialKind, Skill } from './libraryDomain'
+import type { Material, MaterialKind, Skill, SkillKind } from './libraryDomain'
 import { getBridgeApi } from './runtime'
 import {
   getWorkspaceAgentReadAccessDefaults,
@@ -173,6 +173,7 @@ export async function getWorkspaceSystemPrompt(
     allowedMaterialKinds?: readonly MaterialKind[]
     linkedMaterialsByKind?: Partial<Record<MaterialKind, Material[]>>
     linkedSkill?: Skill | null
+    linkedSkillsByKind?: Partial<Record<SkillKind, Skill[]>>
   },
 ): Promise<string> {
   const stagesObj: Record<string, string> = {}
@@ -203,6 +204,7 @@ export async function getWorkspaceSystemPrompt(
       ),
       input.linkedSkill,
       stageId,
+      input.linkedSkillsByKind,
     )
   }
 
@@ -233,5 +235,6 @@ export async function getWorkspaceSystemPrompt(
     ),
     input.linkedSkill,
     stageId,
+    input.linkedSkillsByKind,
   )
 }

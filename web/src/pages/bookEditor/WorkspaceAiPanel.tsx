@@ -5,6 +5,8 @@ import type {
   MemoryEntry,
   Material,
   MaterialKind,
+  Skill,
+  SkillKind,
   StageId,
   WorkspaceAgentReadAccessConfig,
 } from '../../domain/workspace'
@@ -142,6 +144,7 @@ type Props = {
   linkedMaterialTitle?: string
   linkedMaterialsByKind: Partial<Record<MaterialKind, Material[]>>
   linkedSkillTitle?: string
+  linkedSkillsByKind: Partial<Record<SkillKind, Skill[]>>
   workspaceSessionsRef: MutableRefObject<Record<string, BookWorkspaceSessionState>>
   getRenderedWorkspaceStageBody: (stageId: StageId) => string | undefined
   applyToStageEditorForBook: (
@@ -190,6 +193,7 @@ export function WorkspaceAiPanel({
   linkedMaterialTitle,
   linkedMaterialsByKind,
   linkedSkillTitle,
+  linkedSkillsByKind,
   workspaceSessionsRef,
   getRenderedWorkspaceStageBody,
   applyToStageEditorForBook,
@@ -225,6 +229,10 @@ export function WorkspaceAiPanel({
     activePlotChildLabel,
   )
   const linkedMaterialCount = Object.values(linkedMaterialsByKind).reduce(
+    (sum, items) => sum + (items?.length ?? 0),
+    0,
+  )
+  const linkedSkillCount = Object.values(linkedSkillsByKind).reduce(
     (sum, items) => sum + (items?.length ?? 0),
     0,
   )
@@ -300,7 +308,11 @@ export function WorkspaceAiPanel({
           : linkedMaterialTitle
             ? ` · 素材：${linkedMaterialTitle}`
             : ''}
-        {linkedSkillTitle ? ` · 技能：${linkedSkillTitle}` : ''}
+        {linkedSkillCount > 0
+          ? ` · 技能：${linkedSkillCount} 个`
+          : linkedSkillTitle
+            ? ` · 技能：${linkedSkillTitle}`
+            : ''}
       </div>
       <div className="workspace-ai-chat-stack">
         {renderedWorkspaceSessions.flatMap((session) => {
@@ -378,6 +390,7 @@ export function WorkspaceAiPanel({
                     linkedMaterial={session.linkedMaterial}
                     linkedMaterialsByKind={session.linkedMaterialsByKind}
                     linkedSkill={session.linkedSkill}
+                    linkedSkillsByKind={session.linkedSkillsByKind}
                     workspaceAgentReadAccess={workspaceAgentReadAccess}
                     includePiArtifacts={WORKSPACE_AI_INCLUDE_PI_ARTIFACTS}
                     applyToStageEditor={(payload) =>
@@ -429,6 +442,7 @@ export function WorkspaceAiPanel({
                 linkedMaterial={session.linkedMaterial}
                 linkedMaterialsByKind={session.linkedMaterialsByKind}
                 linkedSkill={session.linkedSkill}
+                linkedSkillsByKind={session.linkedSkillsByKind}
                 readAccess={resolveReadAccessForBook(
                   session.book,
                   workspaceAgentReadAccess,

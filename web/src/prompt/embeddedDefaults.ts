@@ -42,6 +42,12 @@ const RAW_SKILL_TYPED = import.meta.glob('../../../app/prompt_defaults/skill/*/s
   import: 'default',
 })
 
+const RAW_SKILL_KIND = import.meta.glob('../../../app/prompt_defaults/skill/*/kind/*.txt', {
+  eager: true,
+  query: '?raw',
+  import: 'default',
+})
+
 const RAW_SKILL_LEGACY = import.meta.glob('../../../app/prompt_defaults/skill/*/*.txt', {
   eager: true,
   query: '?raw',
@@ -88,6 +94,12 @@ function normalizeGlobKey(importPath: string): string | null {
     /prompt_defaults\/skill\/([^/]+)\/shared\/skill_manager\.txt$/i,
   )
   if (typedSkillM) return `skill_${typedSkillM[1]}/skill_manager`
+  const typedSkillKindM = up.match(
+    /prompt_defaults\/skill\/([^/]+)\/kind\/([^/]+)\.txt$/i,
+  )
+  if (typedSkillKindM) {
+    return `skill_${typedSkillKindM[1]}/skill_kind_${typedSkillKindM[2]}`
+  }
   const skillManagerM = up.match(
     /prompt_defaults\/skill\/shared\/skill_manager\.txt$/i,
   )
@@ -112,6 +124,7 @@ for (const [k, v] of Object.entries({
   ...RAW_MATERIAL_KIND,
   ...RAW_SKILL_LEGACY,
   ...RAW_SKILL_TYPED,
+  ...RAW_SKILL_KIND,
   ...RAW_LEARNING_IMITATION,
 })) {
   const nk = normalizeGlobKey(k)

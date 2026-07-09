@@ -339,7 +339,7 @@ export function ExpertDraftEditor({
               </span>
             </div>
 
-            <label className="expert-draft-textarea-field">
+            <div className="expert-draft-textarea-field">
               <span className="expert-draft-field-heading">
                 <span>{selectedSection.title || '当前小节'}正文</span>
                 <TextHistoryControls
@@ -383,9 +383,9 @@ export function ExpertDraftEditor({
                 spellCheck={false}
                 readOnly={draft.running}
               />
-            </label>
+            </div>
 
-            <label className="expert-draft-textarea-field">
+            <div className="expert-draft-textarea-field">
               <span className="expert-draft-field-heading">
                 <span>{selectedState.title || defaultStateTitle(selectedSection.title)}</span>
                 <TextHistoryControls
@@ -444,7 +444,7 @@ export function ExpertDraftEditor({
                 spellCheck={false}
                 readOnly={draft.running}
               />
-            </label>
+            </div>
           </section>
         ) : (
           <section className="expert-draft-main-editor">

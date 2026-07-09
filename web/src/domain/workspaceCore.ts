@@ -360,6 +360,10 @@ export interface BookSummary {
   >
   /** 写书工作台绑定的技能库 id，空表示未绑定 */
   linked_skill_id?: string
+  /** 按技能分类绑定的技能库 id 列表 */
+  linked_skill_ids_by_kind?: Partial<
+    Record<'general' | 'plot' | 'style' | 'other', string[]>
+  >
 }
 
 export interface Book extends BookSummary {

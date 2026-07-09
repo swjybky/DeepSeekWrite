@@ -4,10 +4,12 @@ import type {
   MaterialKind,
   MaterialSummary,
   Skill,
+  SkillKind,
   SkillSummary,
 } from '../../domain/workspace'
 import {
   emptyLinkedMaterialIdsByKind,
+  emptyLinkedSkillIdsByKind,
   MATERIAL_KIND_KEYS,
   MATERIAL_KIND_LABELS,
   MATERIAL_KIND_STAGE_IDS,
@@ -15,6 +17,12 @@ import {
   materialMatchesKind,
   materialTypeLabel,
   normalizeLinkedMaterialIdsByKind,
+  normalizeLinkedSkillIdsByKind,
+  SKILL_KIND_KEYS,
+  SKILL_KIND_LABELS,
+  SKILL_KIND_STAGE_IDS,
+  SKILL_STAGE_LABELS,
+  skillMatchesKind,
   skillTypeLabel,
 } from '../../domain/workspace'
 
@@ -32,12 +40,12 @@ type MaterialSelectorDialogProps = {
 type SkillSelectorDialogProps = {
   book: Book
   linkedSkill: Skill | null
+  linkedSkillsByKind: Partial<Record<SkillKind, Skill[]>>
   summaries: SkillSummary[]
   loading: boolean
   saving: boolean
   onClose: () => void
-  onSelect: (skillId: string) => void
-  onClear: () => void
+  onChange: (linkedSkillIdsByKind: Partial<Record<SkillKind, string[]>>) => void
 }
 
 function compactOutputPath(path: string): string {
@@ -199,13 +207,34 @@ export function MaterialSelectorDialog({
 export function SkillSelectorDialog({
   book,
   linkedSkill,
+  linkedSkillsByKind,
   summaries,
   loading,
   saving,
   onClose,
-  onSelect,
-  onClear,
+  onChange,
 }: SkillSelectorDialogProps) {
+  const currentByKind = normalizeLinkedSkillIdsByKind(
+    book.linked_skill_ids_by_kind,
+    book.linked_skill_id,
+  )
+  const linkedCount = SKILL_KIND_KEYS.reduce(
+    (sum, kind) => sum + (linkedSkillsByKind[kind]?.length ?? 0),
+    0,
+  )
+
+  const toggleSkill = (kind: SkillKind, skillId: string) => {
+    const next = normalizeLinkedSkillIdsByKind(currentByKind, null)
+    const ids = new Set(next[kind] ?? [])
+    if (ids.has(skillId)) {
+      ids.delete(skillId)
+    } else {
+      ids.add(skillId)
+    }
+    next[kind] = [...ids]
+    onChange(next)
+  }
+
   return (
     <div
       className="workspace-material-selector-backdrop"
@@ -230,15 +259,15 @@ export function SkillSelectorDialog({
         </div>
         <div className="workspace-material-current">
           当前绑定：
-          <strong>{linkedSkill ? linkedSkill.title : '未绑定'}</strong>
-          {linkedSkill?.output_dir ? (
+          <strong>{linkedCount > 0 ? `${linkedCount} 个技能库` : '未绑定'}</strong>
+          {linkedSkill?.output_dir && linkedCount <= 1 ? (
             <span title={linkedSkill.output_dir}>
               {` · ${compactOutputPath(linkedSkill.output_dir)}`}
             </span>
           ) : null}
         </div>
         <div className="workspace-material-stage-note">
-          AI 会按当前阶段展示可加载技能，并通过 load_skill 读取完整技能内容。
+          可按分类多选技能库；AI 会按当前阶段展示可加载技能，并通过 load_skill 读取完整技能内容。
         </div>
         <div className="workspace-material-list">
           {loading ? (
@@ -246,31 +275,56 @@ export function SkillSelectorDialog({
           ) : summaries.length === 0 ? (
             <p className="muted workspace-material-empty">暂无技能库</p>
           ) : (
-            summaries.map((skill) => {
-              const selected = skill.id === book.linked_skill_id
-              const count = skill.stage_skill_count ?? 0
+            SKILL_KIND_KEYS.map((kind) => {
+              const candidates = summaries.filter(
+                (skill) =>
+                  skill.skill_type === book.book_type &&
+                  skillMatchesKind(skill, kind),
+              )
               return (
-                <button
-                  key={skill.id}
-                  type="button"
-                  className={
-                    selected
-                      ? 'workspace-material-item workspace-material-item--selected'
-                      : 'workspace-material-item'
-                  }
-                  disabled={saving}
-                  onClick={() => onSelect(skill.id)}
-                >
-                  <span className="workspace-material-item-main">
-                    <span className="workspace-material-item-title">{skill.title}</span>
-                    <span className="workspace-material-item-meta">
-                      {skillTypeLabel(skill.skill_type)} · {count > 0 ? `${count} 条阶段技能` : '暂无阶段技能'}
+                <section key={kind} className="workspace-material-kind-group">
+                  <div className="workspace-material-kind-head">
+                    <strong>{SKILL_KIND_LABELS[kind]}</strong>
+                    <span>
+                      {SKILL_KIND_STAGE_IDS[kind]
+                        .map((stageId) => SKILL_STAGE_LABELS[stageId])
+                        .join('、')}
                     </span>
-                  </span>
-                  <span className="workspace-material-item-state">
-                    {selected ? '已绑定' : '绑定'}
-                  </span>
-                </button>
+                  </div>
+                  {candidates.length === 0 ? (
+                    <p className="muted workspace-material-empty">
+                      暂无可绑定技能库
+                    </p>
+                  ) : (
+                    candidates.map((skill) => {
+                      const selected = (currentByKind[kind] ?? []).includes(skill.id)
+                      const count = skill.stage_skill_count ?? 0
+                      return (
+                        <button
+                          key={`${kind}-${skill.id}`}
+                          type="button"
+                          className={
+                            selected
+                              ? 'workspace-material-item workspace-material-item--selected'
+                              : 'workspace-material-item'
+                          }
+                          disabled={saving}
+                          onClick={() => toggleSkill(kind, skill.id)}
+                        >
+                          <span className="workspace-material-item-main">
+                            <span className="workspace-material-item-title">{skill.title}</span>
+                            <span className="workspace-material-item-meta">
+                              {skillTypeLabel(skill.skill_type)} · {SKILL_KIND_LABELS[skill.skill_kind]} · {count > 0 ? `${count} 条阶段技能` : '暂无阶段技能'}
+                            </span>
+                          </span>
+                          <span className="workspace-material-item-state">
+                            {selected ? '已绑定' : '绑定'}
+                          </span>
+                        </button>
+                      )
+                    })
+                  )}
+                </section>
               )
             })
           )}
@@ -279,8 +333,8 @@ export function SkillSelectorDialog({
           <button
             type="button"
             className="btn-material-clear"
-            disabled={saving || !book.linked_skill_id}
-            onClick={onClear}
+            disabled={saving || linkedCount === 0}
+            onClick={() => onChange(emptyLinkedSkillIdsByKind())}
           >
             取消绑定
           </button>

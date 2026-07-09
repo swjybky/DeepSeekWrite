@@ -33,8 +33,14 @@ export function TextHistoryControls({
         disabled={disabled || !history.canUndo(historyKey)}
         aria-label="撤销"
         title="撤销（Ctrl/Cmd+Z）"
-        onMouseDown={(event) => event.preventDefault()}
-        onClick={() => history.undo(historyKey, value, onChange)}
+        onMouseDown={(event) => {
+          event.preventDefault()
+          event.stopPropagation()
+        }}
+        onClick={(event) => {
+          event.stopPropagation()
+          history.undo(historyKey, value, onChange)
+        }}
       >
         <span aria-hidden>←</span>
         <span>撤销</span>
@@ -44,8 +50,14 @@ export function TextHistoryControls({
         disabled={disabled || !history.canRedo(historyKey)}
         aria-label="重做"
         title="重做（Ctrl/Cmd+Shift+Z 或 Ctrl/Cmd+Y）"
-        onMouseDown={(event) => event.preventDefault()}
-        onClick={() => history.redo(historyKey, value, onChange)}
+        onMouseDown={(event) => {
+          event.preventDefault()
+          event.stopPropagation()
+        }}
+        onClick={(event) => {
+          event.stopPropagation()
+          history.redo(historyKey, value, onChange)
+        }}
       >
         <span aria-hidden>→</span>
         <span>重做</span>

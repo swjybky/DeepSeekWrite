@@ -6,6 +6,7 @@ import {
   normalizeSkillSummary,
   type LoadCommonSkillsResult,
   type Skill,
+  type SkillKind,
   type SkillSummary,
   type SkillType,
 } from './libraryDomain'
@@ -41,6 +42,7 @@ export async function createSkill(
   skill_type: SkillType = 'short',
   workspace_root?: string | null,
   load_common_skills = false,
+  skill_kind: SkillKind = 'general',
 ): Promise<Skill> {
   const api = await getBridgeApi()
   if (api?.create_skill) {
@@ -50,10 +52,11 @@ export async function createSkill(
         skill_type,
         workspace_root ?? null,
         load_common_skills,
+        skill_kind,
       ),
     )
   }
-  return mockCreateSkill(title, skill_type, load_common_skills)
+  return mockCreateSkill(title, skill_type, load_common_skills, skill_kind)
 }
 
 

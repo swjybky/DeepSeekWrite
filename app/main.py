@@ -29,6 +29,8 @@ _LLM_PROXY_UPSTREAM: dict[str, str] = {
     "kimi-coding": "https://api.kimi.com/coding",
     "moonshotai-cn": "https://api.moonshot.cn/v1",
     "moonshotai": "https://api.moonshot.ai/v1",
+    "anthropic": "https://api.anthropic.com/v1",
+    "openai": "https://api.openai.com/v1",
 }
 _LLM_PROXY_SKIP_REQUEST_HEADERS = frozenset(
     {
@@ -353,6 +355,23 @@ def _resolve_llm_proxy_target(path: str, query: str) -> str | None:
     if not upstream_base:
         return None
     subpath = remainder[slash + 1 :]
+    if subpath.startswith("u/"):
+        encoded_and_path = subpath[len("u/") :]
+        encoded, sep, rest = encoded_and_path.partition("/")
+        if not encoded or not sep:
+            return None
+        try:
+            padded = encoded + ("=" * (-len(encoded) % 4))
+            custom_base = base64.urlsafe_b64decode(padded.encode("ascii")).decode(
+                "utf-8"
+            )
+        except (ValueError, UnicodeDecodeError):
+            return None
+        parsed_base = urlparse(custom_base)
+        if parsed_base.scheme not in ("http", "https") or not parsed_base.netloc:
+            return None
+        upstream_base = custom_base
+        subpath = rest
     target = f"{upstream_base.rstrip('/')}/{subpath}"
     if query:
         target = f"{target}?{query}"
@@ -1198,6 +1217,7 @@ class Api:
         linked_skill_id: str | None = None,
         linked_material_id: str | None = None,
         linked_material_ids_by_kind: dict | None = None,
+        linked_skill_ids_by_kind: dict | None = None,
     ) -> dict:
         return self._store.create_book(
             title,
@@ -1207,6 +1227,7 @@ class Api:
             linked_skill_id,
             linked_material_id,
             linked_material_ids_by_kind,
+            linked_skill_ids_by_kind,
         )
 
     def get_book(self, book_id: str) -> dict | None:
@@ -1222,6 +1243,7 @@ class Api:
         title: str | None = None,
         status: str | None = None,
         linked_skill_id: str | None = None,
+        linked_skill_ids_by_kind: dict | None = None,
         memory_auto_capture_enabled: bool | None = None,
         linked_material_ids_by_kind: dict | None = None,
     ) -> dict | None:
@@ -1234,6 +1256,7 @@ class Api:
             title=title,
             status=status,
             linked_skill_id=linked_skill_id,
+            linked_skill_ids_by_kind=linked_skill_ids_by_kind,
             memory_auto_capture_enabled=memory_auto_capture_enabled,
             linked_material_ids_by_kind=linked_material_ids_by_kind,
         )
@@ -1362,6 +1385,7 @@ class Api:
         skill_type: str = "short",
         workspace_root: str | None = None,
         load_common_skills: bool = False,
+        skill_kind: str | None = None,
     ) -> dict:
         """创建新技能集合"""
         if workspace_root is None and str(skill_type or "").strip() not in {"short", "long", "script"}:
@@ -1372,6 +1396,7 @@ class Api:
             skill_type,
             workspace_root,
             bool(load_common_skills),
+            skill_kind,
         )
 
     def read_common_skills(self) -> list[dict]:
@@ -1401,6 +1426,8 @@ class Api:
             skill_id,
             title=data.get("title") if "title" in data else None,
             skill_type=data.get("skill_type") if "skill_type" in data else None,
+            skill_kind=data.get("skill_kind") if "skill_kind" in data else None,
+            overview=data.get("overview") if "overview" in data else None,
             stages=data.get("stages") if "stages" in data else None,
         )
 
@@ -1616,18 +1643,27 @@ class Api:
                 context_json = json.dumps(ctx, ensure_ascii=False)
         return render_skill_from_api_context(stage_id, context_json)
 
-    def read_skill_agent_prompt_template(self, skill_type: str | None = None) -> str:
-        return read_raw_skill_agent_prompt_for_editor(skill_type)
+    def read_skill_agent_prompt_template(
+        self,
+        skill_type: str | None = None,
+        prompt_kind: str | None = None,
+    ) -> str:
+        return read_raw_skill_agent_prompt_for_editor(skill_type, prompt_kind)
 
     def save_skill_agent_prompt_override(
         self,
         body: str,
         skill_type: str | None = None,
+        prompt_kind: str | None = None,
     ) -> None:
-        _save_skill_agent_prompt_override(body, skill_type)
+        _save_skill_agent_prompt_override(body, skill_type, prompt_kind)
 
-    def reset_skill_agent_prompt_override(self, skill_type: str | None = None) -> bool:
-        return _reset_skill_agent_prompt_override(skill_type)
+    def reset_skill_agent_prompt_override(
+        self,
+        skill_type: str | None = None,
+        prompt_kind: str | None = None,
+    ) -> bool:
+        return _reset_skill_agent_prompt_override(skill_type, prompt_kind)
 
     # ==================== 学习仿写提示词 API ====================
 
@@ -2058,10 +2094,22 @@ class Api:
                 elif actual_type == "skill":
                     title = data.get("title", "导入技能")
                     skill_type = data.get("skill_type", "short")
-                    created = self._store.create_skill(title, skill_type, ws or None)
+                    skill_kind = data.get("skill_kind", "general")
+                    created = self._store.create_skill(
+                        title,
+                        skill_type,
+                        ws or None,
+                        False,
+                        skill_kind,
+                    )
                     stages = data.get("stages")
-                    if stages:
-                        self._store.save_skill(created["id"], stages=stages)
+                    overview = data.get("overview")
+                    if stages or overview is not None:
+                        self._store.save_skill(
+                            created["id"],
+                            stages=stages if isinstance(stages, dict) else None,
+                            overview=str(overview) if overview is not None else None,
+                        )
 
                     output_dir = created.get("output_dir", "")
                     if output_dir:

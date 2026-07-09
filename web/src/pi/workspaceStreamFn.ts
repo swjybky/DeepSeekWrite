@@ -2,13 +2,18 @@ import { streamSimple } from '@earendil-works/pi-ai'
 import type { Api, Context, Model, SimpleStreamOptions } from '@earendil-works/pi-ai'
 import type { StreamFn } from '@earendil-works/pi-agent-core'
 import { createStreamFn } from '@earendil-works/pi-web-ui'
-import { toWorkspaceRequestModel } from './resolveWorkspaceChatModel'
+import {
+  toWorkspaceRequestModel,
+  WORKSPACE_MODEL_PROVIDER_KEY,
+} from './resolveWorkspaceChatModel'
 
 /** 浏览器/WebView 内无法直连、需走桌面壳本地转发的 provider。 */
 const CORS_PROXY_ALIASES = new Set([
   'kimi-coding',
   'moonshotai-cn',
   'moonshotai',
+  'anthropic',
+  'openai',
 ])
 
 export function isWorkspaceHttpShell(): boolean {
@@ -17,20 +22,40 @@ export function isWorkspaceHttpShell(): boolean {
 }
 
 function resolveCorsProxyAlias(model: Model<Api>): string | null {
-  const provider = model.provider.trim().toLowerCase()
+  const configuredProvider =
+    (model as Model<Api> & { [WORKSPACE_MODEL_PROVIDER_KEY]?: string })[
+      WORKSPACE_MODEL_PROVIDER_KEY
+    ] ?? model.provider
+  const provider = configuredProvider.trim().toLowerCase()
   if (CORS_PROXY_ALIASES.has(provider)) return provider
   return null
 }
 
-/** 将模型 baseUrl 改写为本地 ``/llm-proxy/{provider}``，由 Python 壳转发到上游。 */
+function encodeProxyUpstream(baseUrl: string): string {
+  const bytes = new TextEncoder().encode(baseUrl)
+  let binary = ''
+  bytes.forEach((byte) => {
+    binary += String.fromCharCode(byte)
+  })
+  return window
+    .btoa(binary)
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/g, '')
+}
+
+/** 将模型 baseUrl 改写为本地代理；代理优先转发到用户配置的 baseUrl。 */
 export function applyWorkspaceCorsProxy(model: Model<Api>): Model<Api> {
   if (!isWorkspaceHttpShell()) return model
   const alias = resolveCorsProxyAlias(model)
-  if (!alias || !model.baseUrl) return model
+  if (!alias) return model
   const origin = window.location.origin.replace(/\/$/, '')
+  const proxyBaseUrl = model.baseUrl
+    ? `${origin}/llm-proxy/${alias}/u/${encodeProxyUpstream(model.baseUrl)}`
+    : `${origin}/llm-proxy/${alias}`
   return {
     ...model,
-    baseUrl: `${origin}/llm-proxy/${alias}`,
+    baseUrl: proxyBaseUrl,
   }
 }
 

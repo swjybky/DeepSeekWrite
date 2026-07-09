@@ -11,6 +11,7 @@ import {
   type MemoryEntry,
   type MaterialKind,
   type MaterialSummary,
+  type SkillKind,
   type MaterialType,
   type SkillSummary,
   type SkillType,
@@ -41,10 +42,16 @@ import {
   getMaterialParentGenres,
   getUserMemories,
   emptyLinkedMaterialIdsByKind,
+  emptyLinkedSkillIdsByKind,
   MATERIAL_KIND_KEYS,
   MATERIAL_KIND_LABELS,
+  SKILL_KIND_KEYS,
+  SKILL_KIND_LABELS,
+  SKILL_KIND_STAGE_IDS,
+  SKILL_STAGE_LABELS,
   materialMatchesKind,
   materialTypeLabel,
+  skillMatchesKind,
   saveUserMemories,
   skillTypeLabel,
   TEXT_MODEL_API_KEY_PLACEHOLDER,
@@ -238,11 +245,28 @@ function ModelConfigDialog({
   const draftDirtyRef = useRef(false)
   const modelPickerOpenRef = useRef(false)
   const modelEditorOpenRef = useRef(false)
+  const noticeTimerRef = useRef<number | null>(null)
+
+  const clearNoticeTimer = useCallback(() => {
+    if (noticeTimerRef.current == null) return
+    window.clearTimeout(noticeTimerRef.current)
+    noticeTimerRef.current = null
+  }, [])
 
   const markDraftDirty = useCallback(() => {
     draftDirtyRef.current = true
+    clearNoticeTimer()
     setNotice(null)
-  }, [])
+  }, [clearNoticeTimer])
+
+  const showSaveNotice = useCallback((message: string) => {
+    clearNoticeTimer()
+    setNotice(message)
+    noticeTimerRef.current = window.setTimeout(() => {
+      setNotice(null)
+      noticeTimerRef.current = null
+    }, 1800)
+  }, [clearNoticeTimer])
 
   const canApplyRefreshedSettings = useCallback(
     () =>
@@ -314,6 +338,8 @@ function ModelConfigDialog({
       window.clearTimeout(timer)
     }
   }, [handleRefresh])
+
+  useEffect(() => clearNoticeTimer, [clearNoticeTimer])
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -616,7 +642,7 @@ function ModelConfigDialog({
       const saved = await onSave(settings)
       setDraft(cloneAiSettings(saved))
       draftDirtyRef.current = false
-      setNotice('模型配置已保存')
+      showSaveNotice('配置保存成功')
     } catch (err) {
       setError(err instanceof Error ? err.message : '保存模型配置失败')
     }
@@ -639,6 +665,11 @@ function ModelConfigDialog({
         <form className="model-config-form" onSubmit={validateAndSave}>
           <header className="model-config-head">
             <h2 id="model-config-title">模型配置</h2>
+            {notice && (
+              <div className="model-config-save-toast" role="status">
+                {notice}
+              </div>
+            )}
             <button
               type="button"
               className="model-config-close"
@@ -920,7 +951,6 @@ function ModelConfigDialog({
               </div>
             </section>
 
-            {notice && <p className="form-success" role="status">{notice}</p>}
             {error && <p className="form-error">{error}</p>}
           </div>
 
@@ -1649,7 +1679,8 @@ export function Home() {
   const [bookTitle, setBookTitle] = useState('')
   const [bookType, setBookType] = useState<BookType>('short')
   const [shortGenre, setShortGenre] = useState<string>(SHORT_GENRE_OPTIONS[0])
-  const [bookLinkedSkillId, setBookLinkedSkillId] = useState('')
+  const [bookLinkedSkillIdsByKind, setBookLinkedSkillIdsByKind] =
+    useState<Record<SkillKind, string[]>>(() => emptyLinkedSkillIdsByKind())
   const [bookLinkedMaterialIdsByKind, setBookLinkedMaterialIdsByKind] =
     useState<Record<MaterialKind, string[]>>(() => emptyLinkedMaterialIdsByKind())
   const [submittingBook, setSubmittingBook] = useState(false)
@@ -1684,6 +1715,7 @@ export function Home() {
   const [showSkillForm, setShowSkillForm] = useState(false)
   const [skillTitle, setSkillTitle] = useState('')
   const [skillType, setSkillType] = useState<SkillType>('short')
+  const [skillKind, setSkillKind] = useState<SkillKind>('general')
   const [loadCommonSkills, setLoadCommonSkills] = useState(false)
   const [submittingSkill, setSubmittingSkill] = useState(false)
   const [deletingSkillId, setDeletingSkillId] = useState<string | null>(null)
@@ -1738,6 +1770,21 @@ export function Home() {
         {} as Record<MaterialKind, MaterialSummary[]>,
       ),
     [bookType, materials],
+  )
+
+  const bookSkillOptionsByKind = useMemo(
+    () =>
+      SKILL_KIND_KEYS.reduce(
+        (out, kind) => {
+          out[kind] = skills.filter(
+            (skill) =>
+              skill.skill_type === bookType && skillMatchesKind(skill, kind),
+          )
+          return out
+        },
+        {} as Record<SkillKind, SkillSummary[]>,
+      ),
+    [bookType, skills],
   )
 
   useEffect(() => {
@@ -2029,20 +2076,20 @@ export function Home() {
     setBookError(null)
     try {
       const cats = bookType === 'short' || bookType === 'script' ? [shortGenre] : []
-      const linkedSkillId = bookLinkedSkillId
       await createBook(
         bookTitle,
         bookType,
         cats,
         ws,
-        linkedSkillId || null,
+        null,
         null,
         bookLinkedMaterialIdsByKind,
+        bookLinkedSkillIdsByKind,
       )
       setBookTitle('')
       setBookType('short')
       setShortGenre(SHORT_GENRE_OPTIONS[0])
-      setBookLinkedSkillId('')
+      setBookLinkedSkillIdsByKind(emptyLinkedSkillIdsByKind())
       setBookLinkedMaterialIdsByKind(emptyLinkedMaterialIdsByKind())
       setShowBookForm(false)
       await refreshBooks()
@@ -2138,9 +2185,10 @@ export function Home() {
     setSubmittingSkill(true)
     setSkillError(null)
     try {
-      await createSkill(skillTitle, skillType, ws, loadCommonSkills)
+      await createSkill(skillTitle, skillType, ws, loadCommonSkills, skillKind)
       setSkillTitle('')
       setSkillType('short')
+      setSkillKind('general')
       setLoadCommonSkills(false)
       setShowSkillForm(false)
       await refreshSkills()
@@ -2345,6 +2393,17 @@ export function Home() {
         ...emptyLinkedMaterialIdsByKind(),
         ...current,
         [kind]: materialId ? [materialId] : [],
+      }))
+    },
+    [],
+  )
+
+  const handleBookLinkedSkillChange = useCallback(
+    (kind: SkillKind, skillId: string) => {
+      setBookLinkedSkillIdsByKind((current) => ({
+        ...emptyLinkedSkillIdsByKind(),
+        ...current,
+        [kind]: skillId ? [skillId] : [],
       }))
     },
     [],
@@ -2990,7 +3049,7 @@ export function Home() {
                   checked={bookType === 'short'}
                   onChange={() => {
                     setBookType('short')
-                    setBookLinkedSkillId('')
+                    setBookLinkedSkillIdsByKind(emptyLinkedSkillIdsByKind())
                     setBookLinkedMaterialIdsByKind(emptyLinkedMaterialIdsByKind())
                   }}
                 />
@@ -3003,7 +3062,7 @@ export function Home() {
                   checked={bookType === 'script'}
                   onChange={() => {
                     setBookType('script')
-                    setBookLinkedSkillId('')
+                    setBookLinkedSkillIdsByKind(emptyLinkedSkillIdsByKind())
                     setBookLinkedMaterialIdsByKind(emptyLinkedMaterialIdsByKind())
                   }}
                 />
@@ -3016,7 +3075,7 @@ export function Home() {
                   checked={bookType === 'long'}
                   onChange={() => {
                     setBookType('long')
-                    setBookLinkedSkillId('')
+                    setBookLinkedSkillIdsByKind(emptyLinkedSkillIdsByKind())
                     setBookLinkedMaterialIdsByKind(emptyLinkedMaterialIdsByKind())
                   }}
                 />
@@ -3047,23 +3106,36 @@ export function Home() {
             </>
           )}
 
-          <label className="field">
-            <span className="field-label">绑定技能库</span>
-            <select
-              value={bookLinkedSkillId}
-              onChange={(e) => setBookLinkedSkillId(e.target.value)}
-              disabled={loadingSkills}
-            >
-              <option value="">不绑定</option>
-              {skills
-                .filter((skill) => skill.skill_type === bookType)
-                .map((skill) => (
-                  <option key={skill.id} value={skill.id}>
-                    {skill.title}
-                  </option>
-                ))}
-            </select>
-          </label>
+          <fieldset className="field">
+            <legend className="field-label">绑定技能库</legend>
+            <div className="material-bind-select-grid">
+              {SKILL_KIND_KEYS.map((kind) => {
+                const candidates = bookSkillOptionsByKind[kind] ?? []
+                return (
+                  <label key={kind} className="material-bind-select-field">
+                    <span>{SKILL_KIND_LABELS[kind]}</span>
+                    <select
+                      value={bookLinkedSkillIdsByKind[kind]?.[0] ?? ''}
+                      onChange={(e) => handleBookLinkedSkillChange(kind, e.target.value)}
+                      disabled={loadingSkills}
+                    >
+                      <option value="">不绑定</option>
+                      {candidates.map((skill) => {
+                        const stages = SKILL_KIND_STAGE_IDS[kind]
+                          .map((stageId) => SKILL_STAGE_LABELS[stageId])
+                          .join('、')
+                        return (
+                          <option key={`${kind}-${skill.id}`} value={skill.id}>
+                            {`${skill.title}（${stages}）`}
+                          </option>
+                        )
+                      })}
+                    </select>
+                  </label>
+                )
+              })}
+            </div>
+          </fieldset>
 
           <fieldset className="field">
             <legend className="field-label">绑定素材库</legend>
@@ -3236,6 +3308,23 @@ export function Home() {
             </div>
           </fieldset>
 
+          <fieldset className="field">
+            <legend className="field-label">技能分类</legend>
+            <div className="genre-grid">
+              {SKILL_KIND_KEYS.map((kind) => (
+                <label key={kind} className="radio">
+                  <input
+                    type="radio"
+                    name="skillKind"
+                    checked={skillKind === kind}
+                    onChange={() => setSkillKind(kind)}
+                  />
+                  {SKILL_KIND_LABELS[kind]}
+                </label>
+              ))}
+            </div>
+          </fieldset>
+
           <label className="radio create-form-checkbox">
             <input
               type="checkbox"
@@ -3243,8 +3332,8 @@ export function Home() {
               onChange={(event) => setLoadCommonSkills(event.target.checked)}
             />
             <span>
-              加载通用技能库
-              <small>按通用技能设置中的生效阶段，复制到新技能库</small>
+              加载内置通用技能
+              <small>只复制当前技能分类允许生效的阶段</small>
             </span>
           </label>
 
@@ -3450,6 +3539,6 @@ function skillToExportDialogItem(skill: SkillSummary): ExportDialogItem {
   return {
     id: skill.id,
     title: skill.title || '未命名技能',
-    meta: `${skillTypeLabel(skill.skill_type)} · ${skill.stage_skill_count ?? 0} 条技能`,
+    meta: `${skillTypeLabel(skill.skill_type)} · ${SKILL_KIND_LABELS[skill.skill_kind]} · ${skill.stage_skill_count ?? 0} 条技能`,
   }
 }

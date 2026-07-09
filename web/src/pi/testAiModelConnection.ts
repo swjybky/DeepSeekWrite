@@ -7,6 +7,7 @@ import type {
 } from '@earendil-works/pi-ai'
 
 import type { AiModelConfig } from '../bridge'
+import { WORKSPACE_MODEL_PROVIDER_KEY } from './resolveWorkspaceChatModel'
 import { ensurePiAppStorage } from './setupPiWorkspace'
 import { createWorkspaceStreamFn } from './workspaceStreamFn'
 
@@ -68,6 +69,10 @@ function buildOwnerModel(config: AiModelConfig): Model<Api> {
       zaiToolStream: inferZaiToolStream(config.model_id),
     }
   }
+  const workspaceModel = model as Model<Api> & {
+    [WORKSPACE_MODEL_PROVIDER_KEY]?: string
+  }
+  workspaceModel[WORKSPACE_MODEL_PROVIDER_KEY] = config.provider
   return model
 }
 

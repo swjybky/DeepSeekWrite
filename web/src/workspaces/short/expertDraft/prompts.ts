@@ -1,4 +1,11 @@
-import type { ExpertDraft, Material, MaterialKind, Skill, StageId } from '../../../bridge'
+import type {
+  ExpertDraft,
+  Material,
+  MaterialKind,
+  Skill,
+  SkillKind,
+  StageId,
+} from '../../../bridge'
 import { appendReadableLinkedMaterialsToPrompt } from '../../shared/linkedMaterialPrompt'
 import { appendLoadableSkillsToPrompt } from '../loadSkill'
 
@@ -54,6 +61,7 @@ export function buildExpertDraftCoordinatorSystemPrompt(input: {
   linkedMaterialsByKind?: Partial<Record<MaterialKind, Material[]>>
   template?: string
   linkedSkill?: Skill | null
+  linkedSkillsByKind?: Partial<Record<SkillKind, Skill[]>>
 }): string {
   const template = input.template ?? DEFAULT_COORDINATOR_SYSTEM_PROMPT
   const prompt = renderExpertTemplate(template, {
@@ -68,6 +76,7 @@ export function buildExpertDraftCoordinatorSystemPrompt(input: {
     ),
     input.linkedSkill,
     'expert_draft_coordinator',
+    input.linkedSkillsByKind,
   )
 }
 
@@ -81,6 +90,7 @@ export function buildSectionWriterSystemPrompt(input: {
   linkedMaterialsByKind?: Partial<Record<MaterialKind, Material[]>>
   template?: string
   linkedSkill?: Skill | null
+  linkedSkillsByKind?: Partial<Record<SkillKind, Skill[]>>
 }): string {
   const template = input.template ?? DEFAULT_SECTION_WRITER_SYSTEM_PROMPT
   const prompt = renderExpertTemplate(template, {
@@ -95,6 +105,7 @@ export function buildSectionWriterSystemPrompt(input: {
     ),
     input.linkedSkill,
     'expert_section_writer',
+    input.linkedSkillsByKind,
   )
 }
 

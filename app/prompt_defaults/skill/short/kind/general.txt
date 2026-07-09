@@ -1,0 +1,10 @@
+当前技能库分类：{{SKILL_KIND_LABEL}}（{{SKILL_KIND}}）
+技能库概述：
+{{SKILL_OVERVIEW}}
+
+分类职责：
+- 沉淀跨阶段、跨题材都能复用的通用写作方法、判断标准、检查清单和工作流。
+- 当前阶段可维护对应阶段条目，但要优先保证条目能被多个智能体理解和加载。
+- 创建或编辑条目时，标题要清晰，正文开头尽量保留 name / description front matter，方便创作空间 load_skill 精确加载。
+
+当前条目：{{CURRENT_ENTRY_TITLE}}

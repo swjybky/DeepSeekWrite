@@ -4,7 +4,10 @@ import { Link, useNavigate, useParams } from 'react-router-dom'
 import {
   SKILL_STAGE_KEYS,
   SKILL_STAGE_LABELS,
+  SKILL_KIND_LABELS,
+  SKILL_KIND_STAGE_IDS,
   type Skill,
+  type SkillKind,
   type SkillStageEntry,
   type SkillStageId,
   getSkill,
@@ -94,9 +97,12 @@ function newStageSkillEntry(stageId: SkillStageId): SkillStageEntry {
   }
 }
 
-function selectedIdsFromStages(stages: SkillStages): Partial<Record<SkillStageId, string>> {
+function selectedIdsFromStages(
+  stages: SkillStages,
+  stageKeys: readonly SkillStageId[] = SKILL_STAGE_KEYS,
+): Partial<Record<SkillStageId, string>> {
   const out: Partial<Record<SkillStageId, string>> = {}
-  for (const stageId of SKILL_STAGE_KEYS) {
+  for (const stageId of stageKeys) {
     const first = stages[stageId]?.[0]
     if (first) out[stageId] = first.id
   }
@@ -134,12 +140,19 @@ export function SkillEditor() {
   const [editorStreaming, setEditorStreaming] = useState(false)
   const [editingTitle, setEditingTitle] = useState(false)
   const [titleDraft, setTitleDraft] = useState('')
+  const [overviewDraft, setOverviewDraft] = useState('')
+  const [overviewInitPromptRequest, setOverviewInitPromptRequest] = useState<{
+    id: number
+    prompt: string
+  } | null>(null)
 
   const splitDragRef = useRef<{ startX: number; startWidth: number } | null>(null)
   const textareaRef = useRef<HTMLTextAreaElement | null>(null)
   const stagesRef = useRef<SkillStages>(stages)
+  const overviewDraftRef = useRef('')
   const activeStageRef = useRef<SkillStageId>(activeStage)
   const selectedEntryIdsRef = useRef<Partial<Record<SkillStageId, string>>>({})
+  const overviewInitPromptSeqRef = useRef(0)
   const tokenBufferRef = useRef('')
   const tokenBufferRafRef = useRef<number | undefined>(undefined)
   const textHistory = useTextHistory()
@@ -169,9 +182,39 @@ export function SkillEditor() {
     statusFor: skillSaveStatus,
   } = autoSave
 
+  const overviewAutoSave = useKeyedAutoSave<string>({
+    getSnapshot: (key) => (key === id ? overviewDraftRef.current : null),
+    saveSnapshot: async (key, snapshot) => {
+      try {
+        const next = await saveSkill(key, { overview: snapshot })
+        if (!next) throw new Error('保存失败：技能不存在')
+        setSkill((current) => ({
+          ...next,
+          title: current?.title ?? next.title,
+          stages: stagesRef.current,
+          overview: snapshot,
+        }))
+        setError(null)
+      } catch (cause) {
+        setError(cause instanceof Error ? cause.message : '概述保存失败')
+        throw cause
+      }
+    },
+  })
+  const {
+    flush: flushOverview,
+    markSaved: markOverviewSaved,
+    schedule: scheduleOverviewSave,
+    statusFor: overviewSaveStatus,
+  } = overviewAutoSave
+
   useEffect(() => {
     stagesRef.current = stages
   }, [stages])
+
+  useEffect(() => {
+    overviewDraftRef.current = overviewDraft
+  }, [overviewDraft])
 
   useEffect(() => {
     activeStageRef.current = activeStage
@@ -367,18 +410,24 @@ export function SkillEditor() {
       setSkill({ ...next, stages: normalized })
       stagesRef.current = normalized
       setStages(normalized)
+      const overview = next.overview ?? ''
+      overviewDraftRef.current = overview
+      setOverviewDraft(overview)
+      const stageKeys =
+        SKILL_KIND_STAGE_IDS[(next.skill_kind ?? 'general') as SkillKind] ??
+        SKILL_STAGE_KEYS
 
       if (options?.resetNavigation) {
-        const ids = selectedIdsFromStages(normalized)
+        const ids = selectedIdsFromStages(normalized, stageKeys)
         selectedEntryIdsRef.current = ids
         setSelectedEntryIds(ids)
-        setActiveStage('character_design')
+        setActiveStage(stageKeys[0] ?? 'character_design')
         return
       }
 
       setSelectedEntryIds((prev) => {
         const merged: Partial<Record<SkillStageId, string>> = {}
-        for (const stageId of SKILL_STAGE_KEYS) {
+        for (const stageId of stageKeys) {
           const entries = normalized[stageId] ?? []
           const currentId = prev[stageId]
           if (currentId && entries.some((entry) => entry.id === currentId)) {
@@ -390,6 +439,9 @@ export function SkillEditor() {
         selectedEntryIdsRef.current = merged
         return merged
       })
+      if (!stageKeys.includes(activeStageRef.current)) {
+        setActiveStage(stageKeys[0] ?? 'character_design')
+      }
     },
     [],
   )
@@ -407,12 +459,13 @@ export function SkillEditor() {
       }
       syncSkillState(s, { resetNavigation: true })
       markSkillSaved(s.id)
+      markOverviewSaved(s.id)
     } catch (e) {
       setError(e instanceof Error ? e.message : '加载失败')
     } finally {
       setLoading(false)
     }
-  }, [id, markSkillSaved, syncSkillState])
+  }, [id, markOverviewSaved, markSkillSaved, syncSkillState])
 
   const hasLoadedRef = useRef(false)
   useEffect(() => {
@@ -425,8 +478,12 @@ export function SkillEditor() {
   const flushAutoSave = useCallback(async () => {
     if (!id) return true
     flushAllTokenBuffers()
-    return flushSkill(id)
-  }, [flushAllTokenBuffers, flushSkill, id])
+    const [skillOk, overviewOk] = await Promise.all([
+      flushSkill(id),
+      flushOverview(id),
+    ])
+    return skillOk && overviewOk
+  }, [flushAllTokenBuffers, flushOverview, flushSkill, id])
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
@@ -457,8 +514,8 @@ export function SkillEditor() {
   const handleLoadCommonSkills = useCallback(async () => {
     if (!id || loadingCommonSkills) return
     const ok = await confirm({
-      title: '加载通用技能',
-      message: '将项目通用技能加载到当前技能库。已加载过的通用技能不会重复添加。',
+      title: '加载内置通用技能',
+      message: '将内置通用技能加载到当前技能库。只会写入当前技能分类允许的阶段，已加载过的技能不会重复添加。',
       confirmText: '加载',
     })
     if (!ok) return
@@ -468,7 +525,7 @@ export function SkillEditor() {
     try {
       const saved = await flushAutoSave()
       if (!saved) {
-        setError('当前技能库保存失败，请处理后再加载通用技能。')
+        setError('当前技能库保存失败，请处理后再加载内置通用技能。')
         return
       }
       const result = await loadCommonSkillsToSkill(id)
@@ -478,12 +535,13 @@ export function SkillEditor() {
       }
       syncSkillState(result.skill)
       markSkillSaved(result.skill.id)
+      markOverviewSaved(result.skill.id)
       if (result.available_count === 0) {
         await showAlert({
           title: '暂无通用技能',
           message: '请先在技能库设置中配置通用技能，再回到当前技能库加载。',
         })
-        setMessage('暂无可加载的通用技能')
+        setMessage('暂无可加载的内置通用技能')
         return
       }
       if (result.already_loaded || result.added_count === 0) {
@@ -494,10 +552,10 @@ export function SkillEditor() {
         setMessage('已加载，无需加载')
         return
       }
-      setMessage(`已加载 ${result.added_count} 条通用技能`)
+      setMessage(`已加载 ${result.added_count} 条内置通用技能`)
       window.setTimeout(() => setMessage(null), 2000)
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : '加载通用技能失败')
+      setError(cause instanceof Error ? cause.message : '加载内置通用技能失败')
     } finally {
       setLoadingCommonSkills(false)
     }
@@ -506,6 +564,7 @@ export function SkillEditor() {
     flushAutoSave,
     id,
     loadingCommonSkills,
+    markOverviewSaved,
     markSkillSaved,
     showAlert,
     syncSkillState,
@@ -531,6 +590,79 @@ export function SkillEditor() {
     setStagesAndRef((prev) => ({ ...prev, [stageId]: nextEntries }))
     setSelectedIdsAndRef((prev) => ({ ...prev, [stageId]: nextSelected?.id ?? '' }))
   }
+
+  const selectSkillEntry = useCallback(
+    (stageId: SkillStageId, entryId: string) => {
+      setActiveStage(stageId)
+      activeStageRef.current = stageId
+      setSelectedIdsAndRef((prev) => ({ ...prev, [stageId]: entryId }))
+    },
+    [setSelectedIdsAndRef],
+  )
+
+  const createSkillEntry = useCallback(
+    (input: { stageId: SkillStageId; title: string; body: string }) => {
+      const entry = {
+        ...newStageSkillEntry(input.stageId),
+        title: input.title.trim() || SKILL_STAGE_LABELS[input.stageId],
+        body: input.body,
+      }
+      setStagesAndRef((prev) => ({
+        ...prev,
+        [input.stageId]: [...(prev[input.stageId] ?? []), entry],
+      }))
+      selectSkillEntry(input.stageId, entry.id)
+      return entry
+    },
+    [selectSkillEntry, setStagesAndRef],
+  )
+
+  const editSkillEntry = useCallback(
+    (input: {
+      stageId: SkillStageId
+      entryId: string
+      title?: string
+      body?: string
+    }) => {
+      let changed = false
+      setStagesAndRef((prev) => ({
+        ...prev,
+        [input.stageId]: (prev[input.stageId] ?? []).map((entry) => {
+          if (entry.id !== input.entryId) return entry
+          changed = true
+          return {
+            ...entry,
+            title: input.title ?? entry.title,
+            body: input.body ?? entry.body,
+            updated_at: new Date().toISOString().replace(/\.\d{3}Z$/, 'Z'),
+          }
+        }),
+      }))
+      return changed
+    },
+    [setStagesAndRef],
+  )
+
+  const writeSkillOverview = useCallback(
+    (text: string) => {
+      overviewDraftRef.current = text
+      setOverviewDraft(text)
+      if (id) scheduleOverviewSave(id)
+    },
+    [id, scheduleOverviewSave],
+  )
+
+  const handleInitOverview = useCallback(() => {
+    const hasOverview = overviewDraftRef.current.trim().length > 0
+    const overwriteInstruction = hasOverview
+      ? '当前概述已有内容，请先读取并保留仍然有效的信息，在此基础上更新，最后调用 write_skill_overview，使用 replace 模式并设置 allow_overwrite_existing=true 写入概述。'
+      : '当前概述为空，最后调用 write_skill_overview，使用 replace 模式写入概述。'
+    overviewInitPromptSeqRef.current += 1
+    setOverviewInitPromptRequest({
+      id: overviewInitPromptSeqRef.current,
+      prompt: `请初始化《${skill?.title || '当前技能库'}》的技能库概述。概述需要说明这个技能库的用途、适用阶段、核心写法原则、条目组织方式和后续维护建议。${overwriteInstruction}`,
+    })
+  }, [skill?.title])
 
   if (!id) {
     return (
@@ -567,6 +699,8 @@ export function SkillEditor() {
     )
   }
 
+  const visibleSkillStageKeys =
+    SKILL_KIND_STAGE_IDS[skill.skill_kind] ?? SKILL_STAGE_KEYS
   const activeEntries = stages[activeStage] ?? []
   const selectedEntryId = selectedEntryIds[activeStage] ?? ''
   const activeEntry = activeEntries.find((entry) => entry.id === selectedEntryId) ?? null
@@ -574,6 +708,9 @@ export function SkillEditor() {
   const { total: stageCharTotal, nonSpace: stageCharNonSpace } = stageTextCounts(stageBody)
   const stageLabel = SKILL_STAGE_LABELS[activeStage]
   const skillTypeText = skillTypeLabel(skill.skill_type)
+  const skillKindText = SKILL_KIND_LABELS[skill.skill_kind]
+  const overviewLabel = `${skillKindText}概述`
+  const currentOverviewSaveStatus = overviewSaveStatus(id)
   const entryBodyHistoryKey = `skill:${skill.id}:${activeStage}:${selectedEntryId}:body`
   const applyEntryBody = (value: string) =>
     updateSelectedEntry((entry) => ({ ...entry, body: value }))
@@ -590,6 +727,8 @@ export function SkillEditor() {
               {skill.title || '未命名技能库'}
               {' · '}
               {skillTypeText}
+              {' · '}
+              {skillKindText}
               {' · '}
               {stageLabel}
             </span>
@@ -620,7 +759,7 @@ export function SkillEditor() {
             disabled={loadingCommonSkills}
             onClick={() => void handleLoadCommonSkills()}
           >
-            {loadingCommonSkills ? '加载中...' : '加载通用技能'}
+            {loadingCommonSkills ? '加载中...' : '加载内置通用技能'}
           </button>
         </div>
       </header>
@@ -633,7 +772,7 @@ export function SkillEditor() {
         <aside className="workspace-rail workspace-rail--tree">
           <WorkspaceTreeNav
             rootLabel={skill.title || '未命名技能库'}
-            stages={SKILL_STAGE_KEYS.map((stageId) => ({
+            stages={visibleSkillStageKeys.map((stageId) => ({
               id: stageId,
               label: `${SKILL_STAGE_LABELS[stageId]}（${stages[stageId]?.length ?? 0}）`,
             }))}
@@ -707,6 +846,13 @@ export function SkillEditor() {
               <button
                 type="button"
                 className="workspace-ai-new-chat"
+                onClick={handleInitOverview}
+              >
+                初始化概述
+              </button>
+              <button
+                type="button"
+                className="workspace-ai-new-chat"
                 aria-label="清空技能管理智能体对话并开始新会话"
                 title="清空技能管理智能体对话并开始新会话"
                 onClick={() => setAiChatEpoch((epoch) => epoch + 1)}
@@ -716,7 +862,7 @@ export function SkillEditor() {
             </div>
           </div>
           <div className="workspace-ai-hint muted">
-            技能库 · {skillTypeText} · {stageLabel}
+            技能库 · {skillTypeText} · {skillKindText} · {stageLabel}
             {activeEntry ? ` · ${activeEntry.title}` : ''}
           </div>
           <div className="workspace-ai-chat-stack">
@@ -733,11 +879,30 @@ export function SkillEditor() {
                 bookTitle={skill.title}
                 historyPortalTargetId={historyPortalTargetId}
                 skillType={skill.skill_type}
+                skillKind={skill.skill_kind}
+                skillOverview={overviewDraft}
+                currentEntryTitle={activeEntry?.title ?? ''}
+                skillStageItems={stages}
+                getSkillStages={() => stagesRef.current}
+                getSkillOverview={() => overviewDraftRef.current}
+                selectSkillEntry={selectSkillEntry}
+                createSkillEntry={createSkillEntry}
+                editSkillEntry={editSkillEntry}
+                writeSkillOverview={writeSkillOverview}
                 stageId={activeStage}
                 stageBody={stageBody}
                 allStages={stagePromptBodies}
+                externalPromptRequest={overviewInitPromptRequest}
+                onExternalPromptRequestHandled={(requestId) => {
+                  if (overviewInitPromptRequest?.id === requestId) {
+                    setOverviewInitPromptRequest(null)
+                  }
+                }}
                 includePiArtifacts={WORKSPACE_AI_INCLUDE_PI_ARTIFACTS}
                 applyToStageEditor={applyToStageEditor}
+                onRequestSave={async () => {
+                  if (id) await flushAutoSave()
+                }}
                 workspaceType="skill"
               />
             </div>
@@ -794,6 +959,39 @@ export function SkillEditor() {
         />
 
         <div className="workspace-editor-pane workspace-editor-pane--primary">
+          <section className="material-overview-panel" aria-labelledby="skill-overview-title">
+            <div className="material-overview-head">
+              <label
+                id="skill-overview-title"
+                className="material-overview-title"
+                htmlFor="skill-overview-body"
+              >
+                {overviewLabel}
+              </label>
+              <span
+                className={`workspace-settings-save-state workspace-settings-save-state--${currentOverviewSaveStatus}`}
+                aria-live="polite"
+              >
+                {autoSaveStatusLabel(currentOverviewSaveStatus)}
+              </span>
+            </div>
+            <textarea
+              id="skill-overview-body"
+              className="material-overview-textarea"
+              value={overviewDraft}
+              onChange={(event) => {
+                const value = event.target.value
+                overviewDraftRef.current = value
+                setOverviewDraft(value)
+                if (id) scheduleOverviewSave(id)
+              }}
+              onBlur={() => {
+                if (id) void flushOverview(id)
+              }}
+              placeholder="概述这个技能库的用途、适用阶段、核心规则和条目组织方式…"
+            />
+          </section>
+
           <div className="workspace-stage-heading">
             <label className="workspace-stage-label" htmlFor="stage-body">
               {stageLabel}

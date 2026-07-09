@@ -11,6 +11,8 @@ import type {
   MaterialPromptKind,
   MaterialStageId,
   Skill,
+  SkillKind,
+  SkillStageEntry,
   SkillType,
   SkillStageId,
   WorkspaceAgentReadAccessConfig,
@@ -101,6 +103,24 @@ export type WorkspaceStageAgentContext = {
   }) => boolean
   writeMaterialOverview?: (text: string) => void
   skillType?: SkillType
+  skillKind?: SkillKind
+  skillOverview?: string
+  skillStageItems?: Partial<Record<SkillStageId, SkillStageEntry[]>>
+  getSkillStages?: () => Partial<Record<SkillStageId, SkillStageEntry[]>>
+  getSkillOverview?: () => string
+  selectSkillEntry?: (stageId: SkillStageId, entryId: string) => void
+  createSkillEntry?: (input: {
+    stageId: SkillStageId
+    title: string
+    body: string
+  }) => SkillStageEntry | null
+  editSkillEntry?: (input: {
+    stageId: SkillStageId
+    entryId: string
+    title?: string
+    body?: string
+  }) => boolean
+  writeSkillOverview?: (text: string) => void
   workspaceType?: 'book' | 'material' | 'skill'
   promptKind?: MaterialPromptKind
   stageId: StageId | MaterialStageId | SkillStageId
@@ -115,6 +135,7 @@ export type WorkspaceStageAgentContext = {
   linkedMaterial?: Material | null
   linkedMaterialsByKind?: Partial<Record<MaterialKind, Material[]>>
   linkedSkill?: Skill | null
+  linkedSkillsByKind?: Partial<Record<SkillKind, Skill[]>>
   /** 全局创作空间智能体可读配置（短篇创作空间） */
   workspaceAgentReadAccess?: WorkspaceAgentReadAccessConfig | null
   applyToStageEditor?: (payload: ApplyToStageEditorPayload) => void
@@ -172,9 +193,20 @@ export function getWorkspaceStageAdditionalTools(
       | LongSkillWorkspaceStageAgentContext
       | ScriptSkillWorkspaceStageAgentContext = {
       skillTitle: ctx.bookTitle,
+      skillKind: ctx.skillKind,
+      overview: ctx.skillOverview,
+      currentEntryTitle: ctx.currentEntryTitle,
       stageId: ctx.stageId as SkillStageId,
       stageBody: ctx.stageBody,
+      stageItems: ctx.skillStageItems,
+      getSkillStages: ctx.getSkillStages,
+      getSkillOverview: ctx.getSkillOverview,
+      selectSkillEntry: ctx.selectSkillEntry,
+      createSkillEntry: ctx.createSkillEntry,
+      editSkillEntry: ctx.editSkillEntry,
+      writeSkillOverview: ctx.writeSkillOverview,
       applyToStageEditor: ctx.applyToStageEditor,
+      onRequestSave: ctx.onRequestSave,
       isToolCallStreamed: ctx.isToolCallStreamed,
     }
     if (ctx.skillType === 'script') {
@@ -206,6 +238,7 @@ export function getWorkspaceStageAdditionalTools(
       linkedMaterial: ctx.linkedMaterial,
       linkedMaterialsByKind: ctx.linkedMaterialsByKind,
       linkedSkill: ctx.linkedSkill,
+      linkedSkillsByKind: ctx.linkedSkillsByKind,
       workspaceAgentReadAccess: ctx.workspaceAgentReadAccess,
       allowedWorkspaceStages: readAccess?.workspace as readonly ScriptStageId[] | undefined,
       allowedMaterialStages: readAccess?.material as readonly MaterialKind[] | undefined,
@@ -261,6 +294,7 @@ export function getWorkspaceStageAdditionalTools(
     linkedMaterial: ctx.linkedMaterial,
     linkedMaterialsByKind: ctx.linkedMaterialsByKind,
     linkedSkill: ctx.linkedSkill,
+    linkedSkillsByKind: ctx.linkedSkillsByKind,
     workspaceAgentReadAccess: ctx.workspaceAgentReadAccess,
     allowedWorkspaceStages: readAccess?.workspace as readonly ShortStageId[] | undefined,
     allowedMaterialStages: readAccess?.material as readonly MaterialKind[] | undefined,

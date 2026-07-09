@@ -259,6 +259,7 @@ export function useExpertDraftRuntime({
         linkedMaterial: session.linkedMaterial,
         linkedMaterialsByKind: session.linkedMaterialsByKind,
         linkedSkill: session.linkedSkill,
+        linkedSkillsByKind: session.linkedSkillsByKind,
         bookMemories: options?.bookMemories ?? session.book.memories ?? [],
         userMemories: options?.userMemories ?? [],
         userWritingPrompt: options?.userWritingPrompt,
