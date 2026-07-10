@@ -1473,12 +1473,12 @@ button.back-link:hover {
   font-weight: 600;
 }
 
-.expert-draft-textarea-field:first-of-type {
+.expert-draft-textarea-field--body {
   /* 正文是分节写作时的主要阅读与编辑区域。 */
   flex: 4 1 0%;
 }
 
-.expert-draft-textarea-field:last-of-type {
+.expert-draft-textarea-field--character-state {
   /* 人物状态只需保留简要的续写提示，不占用正文阅读空间。 */
   flex: 1 1 0%;
 }
