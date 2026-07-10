@@ -1,9 +1,9 @@
 # -*- mode: python ; coding: utf-8 -*-
-"""Deep Write Windows 便携目录包（PyInstaller onedir）。在项目根目录执行:
+"""DeepWrite Windows 便携目录包（PyInstaller onedir）。在项目根目录执行:
     pip install pyinstaller
     cd web && npm ci && npm run build
     pyinstaller packaging/DeepSeekWrite.spec
-产出: dist/Deep Write/（含 Deep Write.exe，双击即可运行）。
+产出: dist/DeepWrite/（含 DeepWrite.exe，双击即可运行）。
 用户本机需已安装 Microsoft Edge WebView2 Runtime。
 """
 import sys
@@ -98,7 +98,7 @@ exe = EXE(
     a.scripts,
     [],
     exclude_binaries=True,
-    name="Deep Write",
+    name="DeepWrite",
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -118,5 +118,5 @@ coll = COLLECT(
     strip=False,
     upx=True,
     upx_exclude=[],
-    name="Deep Write",
+    name="DeepWrite",
 )

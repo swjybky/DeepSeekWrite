@@ -1849,7 +1849,7 @@ button.back-link:hover {
   overflow: auto;
 }
 
-/* Deep Write 工具调用：古风/现代双图标 + 主题色（随 data-appearance 切换，无需重渲染） */
+/* DeepWrite 工具调用：古风/现代双图标 + 主题色（随 data-appearance 切换，无需重渲染） */
 .workspace-ai .deepseekwrite-tool-glyph--modern {
   display: none;
 }

@@ -200,7 +200,7 @@ export async function saveLearningImitationPromptOverride(
   try {
     localStorage.setItem(localPromptLsKey('learning_imitation', stageId), body)
   } catch {
-    console.warn('[Deep Write] 无法保存学习仿写提示词覆盖')
+    console.warn('[DeepWrite] 无法保存学习仿写提示词覆盖')
   }
 }
 

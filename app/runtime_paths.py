@@ -12,11 +12,11 @@ import shutil
 import sys
 from pathlib import Path
 
-APP_DATA_DIR_NAME = "Deep Write"
+APP_DATA_DIR_NAME = "DeepWrite"
 # Keep both former application-data locations as migration sources.  The
 # display name changed twice, but users must retain their existing books and
 # preferences after upgrading.
-LEGACY_APP_DATA_DIR_NAMES = ("DeepSeekWrite", "Write" + "Claw")
+LEGACY_APP_DATA_DIR_NAMES = ("Deep Write", "DeepSeekWrite", "Write" + "Claw")
 DATA_DIR_NAME = ".data"
 _DATA_LOCK_FILE = ".deepseekwrite.lock"
 _LEGACY_DATA_LOCK_FILE = ".write" + "_claw.lock"

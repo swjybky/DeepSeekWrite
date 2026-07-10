@@ -715,7 +715,7 @@ function WorkspaceAiChatInner({
         })
         if (next) await p.onBookMemoriesCaptured?.(p.sessionBookId, next)
       } catch (error) {
-        console.warn('[Deep Write memory] capture skipped:', error)
+        console.warn('[DeepWrite memory] capture skipped:', error)
       }
     })()
   }
@@ -784,13 +784,13 @@ function WorkspaceAiChatInner({
       try {
         await ensurePiAppStorage()
       } catch (e) {
-        console.warn('[Deep Write·AI面板] Pi 存储初始化失败，将重试:', e)
+        console.warn('[DeepWrite·AI面板] Pi 存储初始化失败，将重试:', e)
         await new Promise((r) => window.setTimeout(r, 500))
         if (cancelled) return
         try {
           await ensurePiAppStorage()
         } catch (e2) {
-          console.error('[Deep Write·AI面板] Pi 存储初始化最终失败:', e2)
+          console.error('[DeepWrite·AI面板] Pi 存储初始化最终失败:', e2)
           return
         }
       }
@@ -1466,7 +1466,7 @@ function WorkspaceAiChatInner({
       agent.state.tools = includePiArtifacts
         ? mergeAgentToolsPreservingArtifacts(agent.state.tools, extras)
         : extras
-    })().catch((e: unknown) => console.warn('[Deep Write·工作台提示词]', e))
+    })().catch((e: unknown) => console.warn('[DeepWrite·工作台提示词]', e))
   }, [
     chatReady,
     props.bookTitle,
@@ -1526,7 +1526,7 @@ function WorkspaceAiChatInner({
       }
       await iface.sendMessage(prompt, [])
     })().catch((error: unknown) => {
-      console.warn('[Deep Write·AI面板] 外部消息发送失败:', error)
+      console.warn('[DeepWrite·AI面板] 外部消息发送失败:', error)
       void showAlert({
         title: '发送失败',
         message: error instanceof Error ? error.message : '无法发送初始化概述指令。',
