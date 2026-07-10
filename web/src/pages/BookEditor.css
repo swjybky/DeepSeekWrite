@@ -2952,17 +2952,21 @@ button.back-link:hover {
 }
 
 .material-entry-card-index {
+  flex-shrink: 0;
   color: var(--ink-faint);
   font-size: 0.72rem;
   font-weight: 600;
+  line-height: 1.35;
 }
 
 .material-entry-card-name {
+  flex-shrink: 0;
   min-width: 0;
   overflow: hidden;
   color: var(--text-h);
   font-size: 0.98rem;
   font-weight: 700;
+  line-height: 1.4;
   text-overflow: ellipsis;
   white-space: nowrap;
 }

@@ -3,6 +3,7 @@ import type { CSSProperties } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import {
   SKILL_STAGE_KEYS,
+  SKILL_STAGE_LABELS,
   SKILL_KIND_LABELS,
   SKILL_KIND_STAGE_IDS,
   type Skill,
@@ -38,11 +39,12 @@ const WORKSPACE_COL_L = 18
 const WORKSPACE_COL_R = 36
 const WORKSPACE_COL_SUM = 18 + 36 + 36
 const EDITOR_MIN_FOR_LAYOUT = 160
-const SKILL_TREE_OVERVIEW_ID = 'overview'
 const SKILL_TREE_LIST_ID = 'skill-list'
+const SKILL_ENTRY_CARD_PAGE_SIZE = 4
 
 type SkillStages = Record<SkillStageId, SkillStageEntry[]>
-export type SkillTreeSection = typeof SKILL_TREE_OVERVIEW_ID | typeof SKILL_TREE_LIST_ID
+/** 兼容旧 URL `view=overview`；界面已合并为列表（概述叠在列表上方）。 */
+export type SkillTreeSection = typeof SKILL_TREE_LIST_ID | 'overview'
 
 function usableWidthLessSplitter(viewportWidth: number): number {
   return Math.max(0, viewportWidth - WORKSPACE_SPLITTER_W)
@@ -101,16 +103,12 @@ function newStageSkillEntry(): SkillStageEntry {
   }
 }
 
-function selectedIdsFromStages(
-  stages: SkillStages,
-  stageKeys: readonly SkillStageId[] = SKILL_STAGE_KEYS,
-): Partial<Record<SkillStageId, string>> {
-  const out: Partial<Record<SkillStageId, string>> = {}
-  for (const stageId of stageKeys) {
-    const first = stages[stageId]?.[0]
-    if (first) out[stageId] = first.id
-  }
-  return out
+function skillEntryTitle(entry: SkillStageEntry): string {
+  return entry.title?.trim() || '未命名技能'
+}
+
+function skillEntryBodyPreview(entry: SkillStageEntry): string {
+  return entry.body.trim() || '暂无技能内容'
 }
 
 function stagesToPromptText(stages: SkillStages): Record<SkillStageId, string> {
@@ -133,6 +131,7 @@ export type SkillEditorGroupContext = {
 type SkillEditorProps = {
   skillId?: string
   groupContext?: SkillEditorGroupContext | null
+  /** @deprecated 概述已合并进技能列表；保留以兼容旧 URL `view=` */
   initialView?: SkillTreeSection | null
   initialStageId?: SkillStageId | null
   initialEntryId?: string | null
@@ -149,7 +148,7 @@ type SkillEditorProps = {
 export function SkillEditor({
   skillId: skillIdProp,
   groupContext = null,
-  initialView = null,
+  initialView: _initialView = null,
   initialStageId = null,
   initialEntryId = null,
   onGroupSkillChange,
@@ -177,8 +176,7 @@ export function SkillEditor({
   const [editingTitle, setEditingTitle] = useState(false)
   const [titleDraft, setTitleDraft] = useState('')
   const [overviewDraft, setOverviewDraft] = useState('')
-  const [activeTreeSection, setActiveTreeSection] =
-    useState<SkillTreeSection>(SKILL_TREE_OVERVIEW_ID)
+  const [entryCardPageIndex, setEntryCardPageIndex] = useState(0)
   const [overviewInitPromptRequest, setOverviewInitPromptRequest] = useState<{
     id: number
     prompt: string
@@ -193,7 +191,14 @@ export function SkillEditor({
   const overviewInitPromptSeqRef = useRef(0)
   const tokenBufferRef = useRef('')
   const tokenBufferRafRef = useRef<number | undefined>(undefined)
+  const initialStageIdRef = useRef(initialStageId)
+  const initialEntryIdRef = useRef(initialEntryId)
   const textHistory = useTextHistory()
+
+  useEffect(() => {
+    initialStageIdRef.current = initialStageId
+    initialEntryIdRef.current = initialEntryId
+  }, [initialEntryId, initialStageId])
 
   const autoSave = useKeyedAutoSave<SkillStages>({
     getSnapshot: (key) => (key === id ? { ...stagesRef.current } : null),
@@ -447,7 +452,6 @@ export function SkillEditor({
       next: Skill,
       options?: {
         resetNavigation?: boolean
-        initialView?: SkillTreeSection | null
         initialStageId?: SkillStageId | null
         initialEntryId?: string | null
       },
@@ -464,7 +468,7 @@ export function SkillEditor({
         SKILL_STAGE_KEYS
 
       if (options?.resetNavigation) {
-        const ids = selectedIdsFromStages(normalized, stageKeys)
+        const ids: Partial<Record<SkillStageId, string>> = {}
         const requestedStageId = options.initialStageId
         const requestedEntryId = options.initialEntryId?.trim()
         const hasRequestedEntry =
@@ -482,12 +486,6 @@ export function SkillEditor({
           stageKeys.find((stageId) => (normalized[stageId] ?? []).length > 0) ??
           stageKeys[0] ??
           'character_design'
-        setActiveTreeSection(
-          options.initialView ??
-            (requestedStageId && hasRequestedEntry
-              ? SKILL_TREE_LIST_ID
-              : SKILL_TREE_OVERVIEW_ID),
-        )
         setActiveStage(
           requestedStageId && hasRequestedEntry
             ? requestedStageId
@@ -503,8 +501,6 @@ export function SkillEditor({
           const currentId = prev[stageId]
           if (currentId && entries.some((entry) => entry.id === currentId)) {
             merged[stageId] = currentId
-          } else if (entries[0]) {
-            merged[stageId] = entries[0].id
           }
         }
         selectedEntryIdsRef.current = merged
@@ -531,11 +527,11 @@ export function SkillEditor({
         setError('未找到该技能')
         return
       }
+      // 仅在技能库 id 变化时完整加载；同库内切换条目只改 URL，不走这里，避免整页/智能体重置
       syncSkillState(s, {
         resetNavigation: true,
-        initialView,
-        initialStageId,
-        initialEntryId,
+        initialStageId: initialStageIdRef.current,
+        initialEntryId: initialEntryIdRef.current,
       })
       markSkillSaved(s.id)
       markOverviewSaved(s.id)
@@ -560,9 +556,6 @@ export function SkillEditor({
   }, [
     groupContext,
     id,
-    initialEntryId,
-    initialStageId,
-    initialView,
     markOverviewSaved,
     markSkillSaved,
     syncSkillState,
@@ -577,6 +570,21 @@ export function SkillEditor({
       cancelled = true
     }
   }, [load])
+
+  // 同库深链/树节点切换：只同步选中条目，不重新 load（否则 loading 会卸掉 AI 面板）
+  useEffect(() => {
+    if (loading || !skill || skill.id !== id) return
+    const stageId = initialStageId
+    const entryId = initialEntryId?.trim()
+    if (!stageId || !entryId) return
+    const currentId = selectedEntryIdsRef.current[stageId]
+    if (currentId === entryId && activeStageRef.current === stageId) return
+    const entries = stagesRef.current[stageId] ?? []
+    if (!entries.some((entry) => entry.id === entryId)) return
+    setActiveStage(stageId)
+    activeStageRef.current = stageId
+    setSelectedIdsAndRef((prev) => ({ ...prev, [stageId]: entryId }))
+  }, [id, initialEntryId, initialStageId, loading, skill, setSelectedIdsAndRef])
 
   const flushAutoSave = useCallback(async () => {
     if (!id) return true
@@ -603,10 +611,8 @@ export function SkillEditor({
   const handleStageSelect = (stageId: SkillStageId) => {
     void flushAutoSave()
     setActiveStage(stageId)
-    const entries = stagesRef.current[stageId] ?? []
-    if (!selectedEntryIdsRef.current[stageId] && entries[0]) {
-      setSelectedIdsAndRef((prev) => ({ ...prev, [stageId]: entries[0].id }))
-    }
+    setEntryCardPageIndex(0)
+    setSelectedIdsAndRef((prev) => ({ ...prev, [stageId]: '' }))
   }
 
   const skillTreeBooks = useMemo(() => {
@@ -638,10 +644,6 @@ export function SkillEditor({
           meta: item.title || '未命名技能库',
           stages: [
             {
-              id: SKILL_TREE_OVERVIEW_ID,
-              label: '概述',
-            },
-            {
               id: SKILL_TREE_LIST_ID,
               label: '技能列表',
               children: entryChildren,
@@ -659,12 +661,12 @@ export function SkillEditor({
   ) => {
     const rawNodeId = String(treeNodeId ?? '')
     const viewTarget =
-      rawNodeId === SKILL_TREE_OVERVIEW_ID || rawNodeId === SKILL_TREE_LIST_ID
-        ? (rawNodeId as SkillTreeSection)
+      rawNodeId === SKILL_TREE_LIST_ID || rawNodeId === 'overview'
+        ? SKILL_TREE_LIST_ID
         : null
     const [targetStageId, targetEntryId] = rawNodeId.split(':')
     const parsedTarget: {
-      view: SkillTreeSection
+      view: typeof SKILL_TREE_LIST_ID
       stageId: SkillStageId
       entryId: string
     } | null =
@@ -676,20 +678,19 @@ export function SkillEditor({
           }
         : null
     if (skillId === skill?.id) {
-      if (viewTarget === SKILL_TREE_OVERVIEW_ID) {
+      if (viewTarget) {
         void flushAutoSave()
-        setActiveTreeSection(SKILL_TREE_OVERVIEW_ID)
-        return
-      }
-      if (viewTarget === SKILL_TREE_LIST_ID) {
-        void flushAutoSave()
-        setActiveTreeSection(SKILL_TREE_LIST_ID)
         setSelectedIdsAndRef((prev) => ({ ...prev, [activeStageRef.current]: '' }))
+        if (groupContext && onGroupSkillChange) {
+          onGroupSkillChange(skillId, { view: SKILL_TREE_LIST_ID })
+        }
         return
       }
       if (parsedTarget) {
-        setActiveTreeSection(SKILL_TREE_LIST_ID)
         selectSkillEntry(parsedTarget.stageId, parsedTarget.entryId)
+        if (groupContext && onGroupSkillChange) {
+          onGroupSkillChange(skillId, parsedTarget)
+        }
       } else if (treeNodeId && !rawNodeId.includes(':')) {
         handleStageSelect(treeNodeId as SkillStageId)
       }
@@ -787,7 +788,6 @@ export function SkillEditor({
   const handleAddEntry = () => {
     const stageId = activeStageRef.current
     const entry = newStageSkillEntry()
-    setActiveTreeSection(SKILL_TREE_LIST_ID)
     setStagesAndRef((prev) => ({
       ...prev,
       [stageId]: [...(prev[stageId] ?? []), entry],
@@ -808,7 +808,6 @@ export function SkillEditor({
 
   const selectSkillEntry = useCallback(
     (stageId: SkillStageId, entryId: string) => {
-      setActiveTreeSection(SKILL_TREE_LIST_ID)
       setActiveStage(stageId)
       activeStageRef.current = stageId
       setSelectedIdsAndRef((prev) => ({ ...prev, [stageId]: entryId }))
@@ -925,12 +924,19 @@ export function SkillEditor({
   const activeEntry = activeEntries.find((entry) => entry.id === selectedEntryId) ?? null
   const stageBody = activeEntry?.body ?? ''
   const { total: stageCharTotal, nonSpace: stageCharNonSpace } = stageTextCounts(stageBody)
-  const activeTreeStageId = activeTreeSection
-  const activeTreeChildId =
-    activeTreeSection === SKILL_TREE_LIST_ID && selectedEntryId
-      ? `${activeStage}:${selectedEntryId}`
-      : ''
-  const showOverview = activeTreeSection === SKILL_TREE_OVERVIEW_ID
+  const isSkillEntryList = !activeEntry
+  const activeTreeStageId = SKILL_TREE_LIST_ID
+  const activeTreeChildId = selectedEntryId ? `${activeStage}:${selectedEntryId}` : ''
+  const entryCardPageCount = Math.max(
+    1,
+    Math.ceil(activeKindEntries.length / SKILL_ENTRY_CARD_PAGE_SIZE),
+  )
+  const safeEntryCardPageIndex = Math.min(entryCardPageIndex, entryCardPageCount - 1)
+  const entryCardStart = safeEntryCardPageIndex * SKILL_ENTRY_CARD_PAGE_SIZE
+  const visibleEntryCards = activeKindEntries.slice(
+    entryCardStart,
+    entryCardStart + SKILL_ENTRY_CARD_PAGE_SIZE,
+  )
   const skillTypeText = skillTypeLabel(skill.skill_type)
   const skillKindText = SKILL_KIND_LABELS[skill.skill_kind]
   const overviewLabel = `${skillKindText}概述`
@@ -938,6 +944,7 @@ export function SkillEditor({
   const entryBodyHistoryKey = `skill:${skill.id}:${activeStage}:${selectedEntryId}:body`
   const applyEntryBody = (value: string) =>
     updateSelectedEntry((entry) => ({ ...entry, body: value }))
+  const showStageMetaOnCards = activeSkillStageKeys.length > 1
 
   return (
     <div className="editor-page editor-page--workspace">
@@ -1192,7 +1199,7 @@ export function SkillEditor({
         />
 
         <div className="workspace-editor-pane workspace-editor-pane--primary">
-          {showOverview ? (
+          {isSkillEntryList ? (
             <section className="material-overview-panel" aria-labelledby="skill-overview-title">
               <div className="material-overview-head">
                 <label
@@ -1225,131 +1232,160 @@ export function SkillEditor({
                 placeholder="概述这个技能库的用途、适用阶段、核心规则和条目组织方式…"
               />
             </section>
-          ) : (
-            <>
-              <div className="workspace-stage-heading">
-                <label className="workspace-stage-label" htmlFor="stage-body">
-                  技能列表
-                </label>
-                <span
-                  className="workspace-char-count muted"
-                  aria-live="polite"
-                  title={
-                    activeEntry
-                      ? `不含空白字数 ${stageCharNonSpace.toLocaleString('zh-CN')}；总字符（含空格与换行）${stageCharTotal.toLocaleString('zh-CN')}`
-                      : `共 ${activeKindEntries.length.toLocaleString('zh-CN')} 个技能`
-                  }
-                >
-                  {activeEntry ? (
-                    <>
-                      {stageCharNonSpace.toLocaleString('zh-CN')} 字
-                      <span className="workspace-char-count-sep" aria-hidden>
-                        {' · '}
-                      </span>
-                      <span className="workspace-char-count-detail">
-                        {stageCharTotal.toLocaleString('zh-CN')} 字符
-                      </span>
-                    </>
-                  ) : (
-                    <>{activeKindEntries.length.toLocaleString('zh-CN')} 个技能</>
-                  )}
-                </span>
-              </div>
+          ) : null}
 
-              <section className="skill-stage-items" aria-label="技能列表">
-                <div className="skill-stage-items-head">
-                  <span>{activeKindEntries.length} 个技能</span>
-                  <button type="button" className="btn-secondary btn-small" onClick={handleAddEntry}>
-                    新增技能
-                  </button>
-                </div>
-                {activeKindEntries.length === 0 ? (
-                  <p className="skill-stage-items-empty muted">
-                    当前分类还没有技能，点击“新增技能”开始沉淀。
-                  </p>
-                ) : (
-                  <div className="skill-stage-item-list">
-                    {activeKindEntries.map(({ stageId, entry }) => (
+          <div className="workspace-stage-heading">
+            <label className="workspace-stage-label" htmlFor={activeEntry ? 'stage-body' : undefined}>
+              {isSkillEntryList ? '技能列表' : skillEntryTitle(activeEntry)}
+            </label>
+            <span
+              className="workspace-char-count muted"
+              aria-live="polite"
+              title={
+                isSkillEntryList
+                  ? `共 ${activeKindEntries.length.toLocaleString('zh-CN')} 个技能；每页 ${SKILL_ENTRY_CARD_PAGE_SIZE} 个`
+                  : `不含空白字数 ${stageCharNonSpace.toLocaleString('zh-CN')}；总字符（含空格与换行）${stageCharTotal.toLocaleString('zh-CN')}`
+              }
+            >
+              {isSkillEntryList ? (
+                <>{activeKindEntries.length.toLocaleString('zh-CN')} 个技能</>
+              ) : (
+                <>
+                  {stageCharNonSpace.toLocaleString('zh-CN')} 字
+                  <span className="workspace-char-count-sep" aria-hidden>
+                    {' · '}
+                  </span>
+                  <span className="workspace-char-count-detail">
+                    {stageCharTotal.toLocaleString('zh-CN')} 字符
+                  </span>
+                </>
+              )}
+            </span>
+          </div>
+
+          {isSkillEntryList ? (
+            <div className="material-entry-card-view" aria-label="技能列表">
+              {activeKindEntries.length > 0 ? (
+                <>
+                  <div className="material-entry-card-list">
+                    {visibleEntryCards.map(({ stageId, entry }, index) => (
                       <button
-                        key={entry.id}
+                        key={`${stageId}-${entry.id}`}
                         type="button"
-                        className={
-                          entry.id === selectedEntryId
-                            ? 'skill-stage-item skill-stage-item--active'
-                            : 'skill-stage-item'
-                        }
+                        className="material-entry-card"
                         onClick={() => {
                           void flushAutoSave()
                           selectSkillEntry(stageId, entry.id)
                         }}
+                        title={`编辑${skillEntryTitle(entry)}`}
                       >
-                        {entry.title || '未命名技能'}
+                        <span className="material-entry-card-index">
+                          第 {entryCardStart + index + 1} 个
+                          {showStageMetaOnCards
+                            ? ` · ${SKILL_STAGE_LABELS[stageId]}`
+                            : ''}
+                        </span>
+                        <span className="material-entry-card-name">
+                          {skillEntryTitle(entry)}
+                        </span>
+                        <span className="material-entry-card-body">
+                          {skillEntryBodyPreview(entry)}
+                        </span>
                       </button>
                     ))}
                   </div>
-                )}
-              </section>
-
-              {activeEntry ? (
-                <div className="skill-entry-editor">
-                  <div className="skill-entry-toolbar">
-                    <label className="field skill-entry-title-field">
-                      <span className="field-label">技能名称</span>
-                      <input
-                        type="text"
-                        value={activeEntry.title}
-                        onChange={(e) =>
-                          updateSelectedEntry((entry) => ({
-                            ...entry,
-                            title: e.target.value,
-                          }))
-                        }
-                        onBlur={() => void flushAutoSave()}
-                        placeholder="请输入技能名称"
-                      />
-                    </label>
+                  <div className="material-entry-pagination">
                     <button
                       type="button"
-                      className="btn-secondary btn-small"
-                      onClick={() => handleDeleteEntry(activeEntry.id)}
+                      className="material-entry-page-button"
+                      disabled={safeEntryCardPageIndex <= 0}
+                      onClick={() =>
+                        setEntryCardPageIndex(Math.max(0, safeEntryCardPageIndex - 1))
+                      }
                     >
-                      删除技能
+                      上一页
+                    </button>
+                    <span className="material-entry-page-state muted">
+                      {safeEntryCardPageIndex + 1} / {entryCardPageCount}
+                    </span>
+                    <button
+                      type="button"
+                      className="material-entry-page-button"
+                      disabled={safeEntryCardPageIndex >= entryCardPageCount - 1}
+                      onClick={() =>
+                        setEntryCardPageIndex(
+                          Math.min(entryCardPageCount - 1, safeEntryCardPageIndex + 1),
+                        )
+                      }
+                    >
+                      下一页
                     </button>
                   </div>
-                  <MarkdownTextEditor
-                    id="stage-body"
-                    textareaRef={textareaRef}
-                    className="editor-body workspace-textarea"
-                    value={activeEntry.body}
-                    onValueChange={(value) =>
-                      textHistory.change(
-                        entryBodyHistoryKey,
-                        activeEntry.body,
-                        value,
-                        applyEntryBody,
-                      )
-                    }
-                    onKeyDown={(event) =>
-                      textHistory.handleKeyDown(
-                        event,
-                        entryBodyHistoryKey,
-                        activeEntry.body,
-                        applyEntryBody,
-                        { redoKey: 'm', standardRedo: false },
-                      )
-                    }
-                    onBlur={() => void flushAutoSave()}
-                    spellCheck={false}
-                    readOnly={editorStreaming}
-                    placeholder={`沉淀「${activeEntry.title || '当前技能'}」的写作技能、规则、示例或注意事项…`}
-                  />
-                </div>
+                </>
               ) : (
                 <div className="workspace-stage-empty">
-                  <p className="muted">请选择或新增一个技能。</p>
+                  <p className="muted">左侧点击“新增技能”开始沉淀技能卡片。</p>
                 </div>
               )}
-            </>
+            </div>
+          ) : activeEntry ? (
+            <div className="skill-entry-editor">
+              <div className="skill-entry-toolbar">
+                <label className="field skill-entry-title-field">
+                  <span className="field-label">技能名称</span>
+                  <input
+                    type="text"
+                    value={activeEntry.title}
+                    onChange={(e) =>
+                      updateSelectedEntry((entry) => ({
+                        ...entry,
+                        title: e.target.value,
+                      }))
+                    }
+                    onBlur={() => void flushAutoSave()}
+                    placeholder="请输入技能名称"
+                  />
+                </label>
+                <button
+                  type="button"
+                  className="btn-secondary btn-small"
+                  onClick={() => handleDeleteEntry(activeEntry.id)}
+                >
+                  删除技能
+                </button>
+              </div>
+              <MarkdownTextEditor
+                id="stage-body"
+                textareaRef={textareaRef}
+                className="editor-body workspace-textarea"
+                value={activeEntry.body}
+                onValueChange={(value) =>
+                  textHistory.change(
+                    entryBodyHistoryKey,
+                    activeEntry.body,
+                    value,
+                    applyEntryBody,
+                  )
+                }
+                onKeyDown={(event) =>
+                  textHistory.handleKeyDown(
+                    event,
+                    entryBodyHistoryKey,
+                    activeEntry.body,
+                    applyEntryBody,
+                    { redoKey: 'm', standardRedo: false },
+                  )
+                }
+                onBlur={() => void flushAutoSave()}
+                spellCheck={false}
+                readOnly={editorStreaming}
+                placeholder={`沉淀「${activeEntry.title || '当前技能'}」的写作技能、规则、示例或注意事项…`}
+              />
+            </div>
+          ) : (
+            <div className="workspace-stage-empty">
+              <p className="muted">请选择或新增一个技能。</p>
+            </div>
           )}
         </div>
       </div>

@@ -1,7 +1,7 @@
 import {
   MATERIAL_KIND_LABELS,
   materialMatchesKind,
-  materialTypeLabel,
+  materialMetaLabel,
   type Material,
   type MaterialKind,
 } from '../../bridge/libraryDomain'
@@ -36,11 +36,7 @@ export function appendReadableLinkedMaterialsToPrompt(
 
     sections.push(`【${MATERIAL_KIND_LABELS[kind]}】`)
     for (const material of materials) {
-      const meta = [
-        materialTypeLabel(material.material_type),
-        MATERIAL_KIND_LABELS[material.material_kind],
-        material.parent_genre,
-      ].filter(Boolean).join(' / ')
+      const meta = materialMetaLabel(material)
       sections.push(
         [
           `- 《${material.title || '未命名素材库'}》 material_id=${material.id}`,

@@ -191,6 +191,19 @@ export interface MaterialSummary {
   output_dir?: string
 }
 
+/** 素材库标签：短篇/长篇/剧本素材 · 分类 · 类型（如「短篇素材 · 世情 · 人设素材库」） */
+export function materialMetaLabel(
+  material: Pick<MaterialSummary, 'material_type' | 'material_kind' | 'parent_genre'>,
+): string {
+  return [
+    materialTypeLabel(material.material_type),
+    material.parent_genre?.trim(),
+    MATERIAL_KIND_LABELS[material.material_kind],
+  ]
+    .filter(Boolean)
+    .join(' · ')
+}
+
 export interface Material extends MaterialSummary {
   overview?: string
   stages?: Partial<Record<MaterialStageId, string>>
@@ -269,7 +282,7 @@ export const SKILL_KIND_LABELS: Record<SkillKind, string> = {
 
 export const SKILL_KIND_STAGE_IDS: Record<SkillKind, SkillStageId[]> = {
   general: [...SKILL_STAGE_KEYS],
-  plot: ['plot_design', 'outline'],
+  plot: ['character_design', 'plot_design', 'outline'],
   style: ['draft', 'expert_section_writer'],
   other: [...SKILL_STAGE_KEYS],
 }

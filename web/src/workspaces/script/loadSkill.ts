@@ -46,7 +46,13 @@ function resolveLoadableSkillStageId(raw: string): SkillStageId | null {
 }
 
 function matchingSkillKindForStage(stageId: SkillStageId): SkillKind | null {
-  if (stageId === 'plot_design' || stageId === 'outline') return 'plot'
+  if (
+    stageId === 'character_design' ||
+    stageId === 'plot_design' ||
+    stageId === 'outline'
+  ) {
+    return 'plot'
+  }
   if (stageId === 'draft' || stageId === 'expert_section_writer') return 'style'
   return null
 }

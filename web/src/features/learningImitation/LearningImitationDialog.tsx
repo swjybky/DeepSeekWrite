@@ -20,7 +20,7 @@ import {
   getMaterial,
   getSkill,
   getMaterialParentGenres,
-  materialTypeLabel,
+  materialMetaLabel,
   materialMatchesKind,
   skillMatchesKind,
   normalizeMaterialStageItems,
@@ -1224,7 +1224,7 @@ export function LearningImitationDialog({
                   <option value="">未选择，落盘时新建</option>
                   {materialOptionsForKind(kind).map((item) => (
                     <option key={item.id} value={item.id}>
-                      {item.title} · {materialTypeLabel(item.material_type)} · {MATERIAL_KIND_LABELS[item.material_kind]}
+                      {item.title} · {materialMetaLabel(item)}
                     </option>
                   ))}
                 </select>

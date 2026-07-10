@@ -14,7 +14,7 @@ import {
   MATERIAL_STAGE_LABELS,
   MATERIAL_STAGE_KIND,
   materialMatchesKind,
-  materialTypeLabel,
+  materialMetaLabel,
   normalizeMaterialStages,
 } from '../../bridge'
 import type { PlotChildStageId, ShortStageId } from './stages'
@@ -574,11 +574,7 @@ function formatMaterialBlock(
   query = '',
 ): string {
   const label = MATERIAL_STAGE_LABELS[stageId]
-  const genre = [
-    materialTypeLabel(material.material_type),
-    MATERIAL_KIND_LABELS[material.material_kind],
-    material.parent_genre,
-  ].filter(Boolean).join(' · ')
+  const genre = materialMetaLabel(material)
   const location = material.output_dir?.trim()
     ? `\n素材库地址：${material.output_dir}`
     : ''

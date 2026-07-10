@@ -13,6 +13,7 @@ import {
   type MaterialSummary,
   getMaterial,
   listMaterials,
+  materialMetaLabel,
   materialStageItemsToStages,
   materialTypeLabel,
   normalizeMaterialStageItems,
@@ -261,10 +262,7 @@ function upsertMaterialSummary(
 }
 
 function materialTreeMeta(material: MaterialSummary): string {
-  return [
-    materialTypeLabel(material.material_type),
-    material.parent_genre?.trim(),
-  ].filter(Boolean).join(' · ')
+  return materialMetaLabel(material)
 }
 
 export type MaterialEditorGroupContext = {
@@ -769,12 +767,8 @@ export function MaterialEditor({
         summaries = [activeSummary, ...summaries]
       }
     } else {
-      const groupedSummaries = materialSummaries.filter(
-        (summary) => summary.material_kind === material.material_kind,
-      )
-      summaries = groupedSummaries.some((summary) => summary.id === material.id)
-        ? groupedSummaries
-        : [activeSummary, ...groupedSummaries]
+      // 独立素材：只显示当前素材，不与同 kind / 已入组素材混列
+      summaries = [activeSummary]
     }
 
     return summaries.map((summary) => {
@@ -1077,11 +1071,7 @@ export function MaterialEditor({
     entryCardStart + MATERIAL_ENTRY_CARD_PAGE_SIZE,
   )
   const materialGenreText = material.parent_genre?.trim() || ''
-  const materialTypeText = [
-    materialTypeLabel(material.material_type),
-    MATERIAL_KIND_LABELS[material.material_kind],
-    materialGenreText,
-  ].filter(Boolean).join(' · ')
+  const materialTypeText = materialMetaLabel(material)
   const entryBodyHistoryKey = `material:${material.id}:${activeStage}:${selectedEntryId}:body`
   const applyEntryBody = (value: string) =>
     updateSelectedEntry((entry) => ({ ...entry, body: value }))

@@ -16,6 +16,7 @@ export {
   getMaterialSubGenres,
   libraryTypeLabel,
   listMaterials,
+  materialMetaLabel,
   materialStageItemsToStages,
   materialTypeLabel,
   normalizeMaterialStageItems,

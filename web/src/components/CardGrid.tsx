@@ -3,10 +3,9 @@ import {
   bookTypeLabel,
   countLibraryGroupMembers,
   MATERIAL_KIND_KEYS,
-  MATERIAL_KIND_LABELS,
   SKILL_KIND_KEYS,
   SKILL_KIND_LABELS,
-  materialTypeLabel,
+  materialMetaLabel,
   skillTypeLabel,
   type BookSummary,
   type MaterialLibraryGroup,
@@ -112,12 +111,8 @@ export function CardGrid({ items, emptyText = '暂无项目', onDelete, deleting
                       {item.meta && ` · ${item.meta}`}
                     </span>
                   ) : (
-                    <span className="card-type" title={[
-                      item.meta,
-                      item.genre,
-                    ].filter(Boolean).join(' · ')}>
+                    <span className="card-type" title={item.meta || undefined}>
                       {item.meta}
-                      {item.genre && ` · ${item.genre}`}
                     </span>
                   )}
                 </div>
@@ -210,7 +205,7 @@ export function materialToCardItem(material: MaterialSummary): CardItem {
     title: material.title,
     type: 'material',
     subtype: material.material_type,
-    meta: `${materialTypeLabel(material.material_type)} · ${MATERIAL_KIND_LABELS[material.material_kind]}`,
+    meta: materialMetaLabel(material),
     genre: material.parent_genre,
     outputDir: material.output_dir,
     to: `/material/${material.id}`,

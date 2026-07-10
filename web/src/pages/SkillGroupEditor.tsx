@@ -22,7 +22,9 @@ function firstMemberId(group: SkillLibraryGroup): string | null {
 }
 
 function normalizeSkillTreeView(raw: string): SkillTreeSection | null {
-  return raw === 'overview' || raw === 'skill-list' ? raw : null
+  // 旧链接 view=overview 已合并进技能列表（概述叠在列表上方）
+  if (raw === 'overview' || raw === 'skill-list') return 'skill-list'
+  return null
 }
 
 export function SkillGroupEditor() {
@@ -63,7 +65,8 @@ export function SkillGroupEditor() {
   )
 
   const libFromQuery = searchParams.get('lib')?.trim() || ''
-  const viewFromQuery = normalizeSkillTreeView(searchParams.get('view')?.trim() || '')
+  const rawView = searchParams.get('view')?.trim() || ''
+  const viewFromQuery = normalizeSkillTreeView(rawView)
   const stageFromQuery = searchParams.get('stage')?.trim() || ''
   const entryFromQuery = searchParams.get('entry')?.trim() || ''
   const activeSkillId = useMemo(() => {
@@ -74,16 +77,19 @@ export function SkillGroupEditor() {
 
   useEffect(() => {
     if (!group || !activeSkillId) return
-    if (libFromQuery === activeSkillId) return
+    if (libFromQuery === activeSkillId && rawView !== 'overview') return
     setSearchParams(
       (prev) => {
         const next = new URLSearchParams(prev)
         next.set('lib', activeSkillId)
+        if (rawView === 'overview') {
+          next.set('view', 'skill-list')
+        }
         return next
       },
       { replace: true },
     )
-  }, [activeSkillId, group, libFromQuery, setSearchParams])
+  }, [activeSkillId, group, libFromQuery, rawView, setSearchParams])
 
   if (loading) {
     return (

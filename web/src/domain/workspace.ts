@@ -93,6 +93,7 @@ export {
   getMaterialSubGenres,
   libraryTypeLabel,
   materialMatchesKind,
+  materialMetaLabel,
   materialTypeLabel,
   normalizeAiModelSettings,
   normalizeAppearanceStyle,

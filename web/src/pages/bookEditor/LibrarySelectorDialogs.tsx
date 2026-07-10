@@ -15,7 +15,7 @@ import {
   MATERIAL_KIND_STAGE_IDS,
   MATERIAL_STAGE_LABELS,
   materialMatchesKind,
-  materialTypeLabel,
+  materialMetaLabel,
   normalizeLinkedMaterialIdsByKind,
   normalizeLinkedSkillIdsByKind,
   SKILL_KIND_KEYS,
@@ -148,11 +148,7 @@ export function MaterialSelectorDialog({
                   ) : (
                     candidates.map((material) => {
                       const selected = (currentByKind[kind] ?? []).includes(material.id)
-                      const genre = [
-                        materialTypeLabel(material.material_type),
-                        MATERIAL_KIND_LABELS[material.material_kind],
-                        material.parent_genre,
-                      ].filter(Boolean).join(' · ')
+                      const genre = materialMetaLabel(material)
                       return (
                         <button
                           key={`${kind}-${material.id}`}

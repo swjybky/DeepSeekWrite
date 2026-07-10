@@ -15,8 +15,11 @@ import {
   type MaterialStageEntry,
   type MaterialStageId,
   type MaterialSummary,
+  type Skill,
   type SkillKind,
   type SkillLibraryGroup,
+  type SkillStageEntry,
+  type SkillStageId,
   type MaterialType,
   type SkillSummary,
   type SkillType,
@@ -46,6 +49,8 @@ import {
   listMaterialLibraryGroups,
   createMaterialLibraryGroup,
   deleteMaterialLibraryGroup,
+  getSkill,
+  saveSkill,
   listSkillLibraryGroups,
   createSkillLibraryGroup,
   deleteSkillLibraryGroup,
@@ -63,8 +68,10 @@ import {
   SKILL_KIND_KEYS,
   SKILL_KIND_LABELS,
   SKILL_KIND_STAGE_IDS,
+  SKILL_STAGE_KEYS,
   SKILL_STAGE_LABELS,
   materialMatchesKind,
+  materialMetaLabel,
   materialTypeLabel,
   skillMatchesKind,
   saveUserMemories,
@@ -279,12 +286,30 @@ type ModelRefreshOptions = {
 }
 
 type MaterialSplitMode = 'group' | 'single'
+type SkillSplitMode = 'group' | 'single'
+
+/**
+ * 一键拆分时从综合/通用技能库拆出的目标分类（按条目内容归类，不是按阶段硬拆）：
+ * - plot：剧情相关 + 人设相关
+ * - general：跨阶段重复的通用能力（去 AI 味、逻辑审核等）
+ * - other：其余不想归入剧情/通用的条目
+ */
+const SKILL_SPLIT_KIND_KEYS = ['plot', 'general', 'other'] as const
+type SkillSplitKind = (typeof SKILL_SPLIT_KIND_KEYS)[number]
 
 function materialKindShortLabel(kind: MaterialKind): string {
   return MATERIAL_KIND_LABELS[kind].replace(/素材库$/, '')
 }
 
+function skillKindShortLabel(kind: SkillKind): string {
+  return SKILL_KIND_LABELS[kind].replace(/技能库$/, '')
+}
+
 function materialEntryHasContent(entry: MaterialStageEntry): boolean {
+  return Boolean(entry.title?.trim() || entry.body?.trim())
+}
+
+function skillEntryHasContent(entry: SkillStageEntry): boolean {
   return Boolean(entry.title?.trim() || entry.body?.trim())
 }
 
@@ -293,6 +318,89 @@ function materialKindHasContent(material: Material, kind: MaterialKind): boolean
   return MATERIAL_KIND_STAGE_IDS[kind].some((stageId) =>
     (stageItems[stageId] ?? []).some(materialEntryHasContent),
   )
+}
+
+function skillEntryFingerprint(entry: SkillStageEntry): string {
+  const title = entry.title?.trim() || ''
+  const body = entry.body?.trim() || ''
+  if (entry.source_common_skill_id?.trim()) {
+    return `common:${entry.source_common_skill_id.trim()}`
+  }
+  return `content:${title}\n${body}`
+}
+
+function skillEntrySearchText(entry: SkillStageEntry): string {
+  return `${entry.title ?? ''}\n${entry.body ?? ''}`.toLowerCase()
+}
+
+/** 跨阶段重复的通用能力：去 AI 味、逻辑审核等 → 通用技能库 */
+function isGeneralSplitSkillEntry(entry: SkillStageEntry): boolean {
+  const text = skillEntrySearchText(entry)
+  return (
+    /去除.*ai|ai\s*味|ai\s*痕迹|生成痕迹|humanizer/.test(text) ||
+    /逻辑(判断|审查|审核|校验)|一致性审查|故事发展逻辑/.test(text)
+  )
+}
+
+/** 剧情 / 人设相关 → 剧情设计技能库 */
+function isPlotSplitSkillEntry(entry: SkillStageEntry): boolean {
+  const text = skillEntrySearchText(entry)
+  return (
+    /剧情|导语|大纲|细化|书名/.test(text) ||
+    /人设|人物设计|角色设计/.test(text)
+  )
+}
+
+function classifySkillEntryForSplit(entry: SkillStageEntry): SkillSplitKind {
+  if (isGeneralSplitSkillEntry(entry)) return 'general'
+  if (isPlotSplitSkillEntry(entry)) return 'plot'
+  return 'other'
+}
+
+function cloneSkillEntry(entry: SkillStageEntry, now: string): SkillStageEntry {
+  return {
+    id: globalThis.crypto?.randomUUID?.() ?? Math.random().toString(36).slice(2),
+    title: entry.title?.trim() || '未命名技能',
+    body: entry.body ?? '',
+    created_at: now,
+    updated_at: now,
+    ...(entry.source_common_skill_id
+      ? { source_common_skill_id: entry.source_common_skill_id }
+      : {}),
+  }
+}
+
+/**
+ * 按条目内容拆分技能库：
+ * 1. 去 AI 味 / 逻辑审核等跨阶段重复能力 → general（去重后只保留一份）
+ * 2. 剧情、人设相关 → plot（保留原阶段槽位）
+ * 3. 其余 → other
+ */
+function splitSkillStagesByContent(
+  skill: Skill,
+): Partial<Record<SkillSplitKind, Partial<Record<SkillStageId, SkillStageEntry[]>>>> {
+  const now = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z')
+  const out: Partial<
+    Record<SkillSplitKind, Partial<Record<SkillStageId, SkillStageEntry[]>>>
+  > = {}
+  const generalSeen = new Set<string>()
+  const sourceStages = skill.stages ?? {}
+
+  for (const stageId of SKILL_STAGE_KEYS) {
+    for (const entry of sourceStages[stageId] ?? []) {
+      if (!skillEntryHasContent(entry)) continue
+      const kind = classifySkillEntryForSplit(entry)
+      if (kind === 'general') {
+        const fingerprint = skillEntryFingerprint(entry)
+        if (generalSeen.has(fingerprint)) continue
+        generalSeen.add(fingerprint)
+      }
+      const bucket = (out[kind] ??= {})
+      const list = (bucket[stageId] ??= [])
+      list.push(cloneSkillEntry(entry, now))
+    }
+  }
+  return out
 }
 
 function copyMaterialStageItemsForKind(
@@ -1819,6 +1927,13 @@ export function Home() {
   const [submittingSkill, setSubmittingSkill] = useState(false)
   const [deletingSkillId, setDeletingSkillId] = useState<string | null>(null)
   const [skillError, setSkillError] = useState<string | null>(null)
+  const [skillActionsExpanded, setSkillActionsExpanded] = useState(false)
+  const [showSkillSplitDialog, setShowSkillSplitDialog] = useState(false)
+  const [skillSplitSourceId, setSkillSplitSourceId] = useState('')
+  const [skillSplitMode, setSkillSplitMode] = useState<SkillSplitMode>('group')
+  const [skillSplitGroupTitle, setSkillSplitGroupTitle] = useState('')
+  const [splittingSkill, setSplittingSkill] = useState(false)
+  const [skillSplitError, setSkillSplitError] = useState<string | null>(null)
 
   // ==================== 素材/技能分组状态 ====================
   const [materialGroups, setMaterialGroups] = useState<MaterialLibraryGroup[]>([])
@@ -2391,6 +2506,14 @@ export function Home() {
     [materials],
   )
 
+  const skillSplitCandidates = useMemo(
+    () =>
+      skills
+        .filter((skill) => skill.skill_kind === 'general')
+        .sort((a, b) => a.title.localeCompare(b.title, 'zh-Hans-CN')),
+    [skills],
+  )
+
   const skillGroupOptionsByKind = useMemo(
     () =>
       SKILL_KIND_KEYS.reduce(
@@ -2421,6 +2544,16 @@ export function Home() {
     setMaterialSplitSourceId(source?.id ?? '')
     setMaterialSplitGroupTitle(source ? `${source.title}分组` : '')
     setShowMaterialSplitDialog(true)
+  }
+
+  const openSkillSplitDialog = () => {
+    const source = skillSplitCandidates[0]
+    setSkillError(null)
+    setSkillSplitError(null)
+    setSkillSplitMode('group')
+    setSkillSplitSourceId(source?.id ?? '')
+    setSkillSplitGroupTitle(source ? `${source.title}分组` : '')
+    setShowSkillSplitDialog(true)
   }
 
   const openSkillGroupForm = () => {
@@ -2509,6 +2642,73 @@ export function Home() {
       setMaterialSplitError(err instanceof Error ? err.message : '拆分素材库失败')
     } finally {
       setSplittingMaterial(false)
+    }
+  }
+
+  const handleSplitSkill = async (e: React.FormEvent) => {
+    e.preventDefault()
+    const ws = workspaceRoot?.trim()
+    if (!ws && isPywebviewDesktopBundle()) {
+      setSkillSplitError('请先在上方选择工作文件夹')
+      return
+    }
+    const sourceSummary = skills.find((item) => item.id === skillSplitSourceId)
+    if (!sourceSummary) {
+      setSkillSplitError('请选择要拆分的技能库')
+      return
+    }
+    setSplittingSkill(true)
+    setSkillSplitError(null)
+    try {
+      const source = await getSkill(sourceSummary.id)
+      if (!source) throw new Error('技能库不存在或已被删除')
+
+      const createdMembers: Partial<Record<SkillKind, string>> = {}
+      const sourceTitle = source.title.trim() || sourceSummary.title || '未命名技能'
+      const splitBuckets = splitSkillStagesByContent(source)
+
+      for (const kind of SKILL_SPLIT_KIND_KEYS) {
+        const stages = splitBuckets[kind]
+        if (!stages || Object.values(stages).every((entries) => !entries?.length)) {
+          continue
+        }
+        const title =
+          source.skill_kind === kind
+            ? sourceTitle
+            : `${sourceTitle}-${skillKindShortLabel(kind)}`
+        const created = await createSkill(
+          title,
+          source.skill_type,
+          ws || null,
+          false,
+          kind,
+        )
+        await saveSkill(created.id, {
+          overview: source.overview ?? '',
+          stages,
+        })
+        createdMembers[kind] = created.id
+      }
+
+      if (Object.values(createdMembers).every((id) => !id)) {
+        throw new Error('这个技能库没有可拆分的条目内容')
+      }
+
+      if (skillSplitMode === 'group') {
+        await createSkillLibraryGroup(
+          skillSplitGroupTitle.trim() || `${sourceTitle}分组`,
+          createdMembers,
+        )
+      }
+
+      setShowSkillSplitDialog(false)
+      setSkillSplitSourceId('')
+      setSkillSplitGroupTitle('')
+      await refreshSkills()
+    } catch (err) {
+      setSkillSplitError(err instanceof Error ? err.message : '拆分技能库失败')
+    } finally {
+      setSplittingSkill(false)
     }
   }
 
@@ -3303,47 +3503,70 @@ export function Home() {
                   : `${skills.length} 个技能`}
               </span>
             </div>
-            <div className="card-header-actions">
+            <div className="card-header-actions skill-header-actions">
               <button
                 type="button"
-                className="btn-secondary btn-small btn-icon"
-                aria-label="刷新技能库"
-                title="刷新技能库"
-                disabled={loadingSkills}
-                onClick={() => void refreshSkills()}
+                className="btn-secondary btn-small btn-icon skill-actions-toggle"
+                aria-label={skillActionsExpanded ? '收回技能库操作按钮' : '展开技能库操作按钮'}
+                aria-controls="skill-extra-actions"
+                aria-expanded={skillActionsExpanded}
+                title={skillActionsExpanded ? '收回技能库操作按钮' : '展开技能库操作按钮'}
+                onClick={() => setSkillActionsExpanded((value) => !value)}
               >
-                <RefreshIcon spinning={loadingSkills} />
+                {skillActionsExpanded ? <ChevronRightIcon /> : <ChevronLeftIcon />}
               </button>
-              <button
-                type="button"
-                className="btn-secondary btn-small"
-                disabled={importingSkill}
-                onClick={() => void handleImportSkill()}
-              >
-                {importingSkill ? '导入中…' : '导入'}
-              </button>
-              <button
-                type="button"
-                className="btn-secondary btn-small"
-                disabled={skills.length === 0}
-                onClick={openExportSkillDialog}
-              >
-                导出
-              </button>
-              <Link
-                className="btn-secondary btn-small"
-                to="/skill-settings"
-              >
-                设置
-              </Link>
-              <button
-                type="button"
-                className="btn-secondary btn-small"
-                disabled={skills.length === 0}
-                onClick={openSkillGroupForm}
-              >
-                + 新建分组
-              </button>
+              {skillActionsExpanded ? (
+                <div className="skill-extra-actions" id="skill-extra-actions">
+                  <button
+                    type="button"
+                    className="btn-secondary btn-small btn-icon"
+                    aria-label="刷新技能库"
+                    title="刷新技能库"
+                    disabled={loadingSkills}
+                    onClick={() => void refreshSkills()}
+                  >
+                    <RefreshIcon spinning={loadingSkills} />
+                  </button>
+                  <button
+                    type="button"
+                    className="btn-secondary btn-small"
+                    disabled={importingSkill}
+                    onClick={() => void handleImportSkill()}
+                  >
+                    {importingSkill ? '导入中…' : '导入'}
+                  </button>
+                  <button
+                    type="button"
+                    className="btn-secondary btn-small"
+                    disabled={skills.length === 0}
+                    onClick={openExportSkillDialog}
+                  >
+                    导出
+                  </button>
+                  <Link
+                    className="btn-secondary btn-small"
+                    to="/skill-settings"
+                  >
+                    设置
+                  </Link>
+                  <button
+                    type="button"
+                    className="btn-secondary btn-small"
+                    disabled={skillSplitCandidates.length === 0}
+                    onClick={openSkillSplitDialog}
+                  >
+                    一键拆分
+                  </button>
+                  <button
+                    type="button"
+                    className="btn-secondary btn-small"
+                    disabled={skills.length === 0}
+                    onClick={openSkillGroupForm}
+                  >
+                    + 新建分组
+                  </button>
+                </div>
+              ) : null}
               <button
                 type="button"
                 className="btn-primary btn-small"
@@ -3571,12 +3794,7 @@ export function Home() {
                     >
                       <option value="">不绑定</option>
                       {candidates.map((material) => {
-                        const meta = [
-                          MATERIAL_KIND_LABELS[material.material_kind],
-                          material.parent_genre,
-                        ]
-                          .filter(Boolean)
-                          .join(' · ')
+                        const meta = materialMetaLabel(material)
                         return (
                           <option key={`${kind}-${material.id}`} value={material.id}>
                             {meta ? `${material.title}（${meta}）` : material.title}
@@ -3776,6 +3994,95 @@ export function Home() {
           </p>
 
           {materialSplitError && <p className="form-error">{materialSplitError}</p>}
+        </CreateDialog>
+      )}
+
+      {showSkillSplitDialog && (
+        <CreateDialog
+          title="一键拆分技能库"
+          titleId="split-skill-title"
+          submitting={splittingSkill}
+          submitLabel="开始拆分"
+          submittingLabel="拆分中…"
+          submitDisabled={!skillSplitSourceId}
+          onClose={() => setShowSkillSplitDialog(false)}
+          onSubmit={handleSplitSkill}
+        >
+          <label className="field">
+            <span className="field-label">选择通用技能库</span>
+            <select
+              value={skillSplitSourceId}
+              onChange={(event) => {
+                const value = event.target.value
+                const next = skills.find((item) => item.id === value)
+                setSkillSplitSourceId(value)
+                if (next) setSkillSplitGroupTitle(`${next.title}分组`)
+              }}
+              required
+              autoFocus
+            >
+              <option value="">请选择技能库</option>
+              {skillSplitCandidates.map((item) => (
+                <option key={item.id} value={item.id}>
+                  {item.title}（{SKILL_KIND_LABELS[item.skill_kind]} · {skillTypeLabel(item.skill_type)}）
+                </option>
+              ))}
+            </select>
+          </label>
+
+          {skillSplitCandidates.length === 0 && (
+            <p className="material-split-note">
+              当前没有可拆分的通用技能库。
+            </p>
+          )}
+
+          <fieldset className="field">
+            <legend className="field-label">拆分方式</legend>
+            <div className="material-split-mode-grid">
+              <label className="material-split-mode">
+                <input
+                  type="radio"
+                  name="skillSplitMode"
+                  checked={skillSplitMode === 'group'}
+                  onChange={() => setSkillSplitMode('group')}
+                />
+                <span>
+                  拆成分组
+                  <small>生成多个分类技能库，并自动放入一个新分组</small>
+                </span>
+              </label>
+              <label className="material-split-mode">
+                <input
+                  type="radio"
+                  name="skillSplitMode"
+                  checked={skillSplitMode === 'single'}
+                  onChange={() => setSkillSplitMode('single')}
+                />
+                <span>
+                  拆成单个的
+                  <small>只生成独立技能库，不创建分组</small>
+                </span>
+              </label>
+            </div>
+          </fieldset>
+
+          {skillSplitMode === 'group' && (
+            <label className="field">
+              <span className="field-label">分组名称</span>
+              <input
+                type="text"
+                value={skillSplitGroupTitle}
+                onChange={(event) => setSkillSplitGroupTitle(event.target.value)}
+                placeholder="例如：短篇通用技能组"
+              />
+            </label>
+          )}
+
+          <p className="material-split-note">
+            按条目内容拆分：剧情/人设进剧情库，去 AI 味与逻辑审核等跨阶段重复能力进通用库，其余进其他库；原技能库会保留，不会被删除。
+          </p>
+
+          {skillSplitError && <p className="form-error">{skillSplitError}</p>}
         </CreateDialog>
       )}
 
@@ -4135,13 +4442,7 @@ function materialToExportDialogItem(material: MaterialSummary): ExportDialogItem
   return {
     id: material.id,
     title: material.title || '未命名素材',
-    meta: [
-      materialTypeLabel(material.material_type),
-      MATERIAL_KIND_LABELS[material.material_kind],
-      material.parent_genre,
-    ]
-      .filter(Boolean)
-      .join(' · '),
+    meta: materialMetaLabel(material),
   }
 }
 

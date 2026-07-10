@@ -7,7 +7,7 @@ import {
   MATERIAL_STAGE_LABELS,
   MATERIAL_STAGE_KIND,
   materialMatchesKind,
-  materialTypeLabel,
+  materialMetaLabel,
   normalizeMaterialStageItems,
   type Material,
   type MaterialKind,
@@ -121,11 +121,7 @@ function entryTitle(row: LinkedMaterialEntryRow): string {
 }
 
 function materialGenreLine(material: Material): string {
-  return [
-    materialTypeLabel(material.material_type),
-    MATERIAL_KIND_LABELS[material.material_kind],
-    material.parent_genre,
-  ].filter(Boolean).join(' / ')
+  return materialMetaLabel(material)
 }
 
 function tokensForSearch(query: string): string[] {

@@ -909,7 +909,7 @@ SKILL_KIND_LABELS: dict[str, str] = {
 }
 SKILL_KIND_STAGE_ORDER: dict[str, tuple[str, ...]] = {
     "general": SKILL_STAGES_ORDER,
-    "plot": ("plot_design", "outline"),
+    "plot": ("character_design", "plot_design", "outline"),
     "style": ("draft", "expert_section_writer"),
     "other": SKILL_STAGES_ORDER,
 }

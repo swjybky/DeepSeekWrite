@@ -94,7 +94,7 @@ SKILL_KIND_KEYS: tuple[str, ...] = (
 
 SKILL_KIND_STAGE_KEYS: dict[str, tuple[str, ...]] = {
     "general": SKILL_STAGE_KEYS,
-    "plot": ("plot_design", "outline"),
+    "plot": ("character_design", "plot_design", "outline"),
     "style": ("draft", "expert_section_writer"),
     "other": SKILL_STAGE_KEYS,
 }

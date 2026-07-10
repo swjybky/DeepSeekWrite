@@ -371,16 +371,19 @@
   height: 1rem;
 }
 
-.material-header-actions {
+.material-header-actions,
+.skill-header-actions {
   min-width: 0;
   justify-content: flex-end;
 }
 
-.material-actions-toggle {
+.material-actions-toggle,
+.skill-actions-toggle {
   flex-shrink: 0;
 }
 
-.material-extra-actions {
+.material-extra-actions,
+.skill-extra-actions {
   display: flex;
   align-items: center;
   gap: 0.4rem;
