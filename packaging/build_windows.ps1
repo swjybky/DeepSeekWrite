@@ -1,4 +1,4 @@
-# Deep Write Windows release build
+# DeepWrite Windows release build
 $ErrorActionPreference = "Stop"
 $Root = Split-Path -Parent $PSScriptRoot
 
@@ -11,21 +11,21 @@ Write-Host "==> PyInstaller"
 Set-Location $Root
 pyinstaller (Join-Path $Root "packaging\DeepSeekWrite.spec") --noconfirm --distpath (Join-Path $Root "dist") --workpath (Join-Path $Root "build")
 
-$OutDir = Join-Path $Root "dist\Deep Write"
+$OutDir = Join-Path $Root "dist\DeepWrite"
 
 $ResetBat = Join-Path $Root "packaging\reset_and_start.bat"
 if (Test-Path $ResetBat) { Copy-Item $ResetBat $OutDir -Force }
 
 $ExeConfig = Join-Path $Root "packaging\DeepSeekWrite.exe.config"
 if (Test-Path $ExeConfig) {
-    Copy-Item $ExeConfig (Join-Path $OutDir "Deep Write.exe.config") -Force
+    Copy-Item $ExeConfig (Join-Path $OutDir "DeepWrite.exe.config") -Force
 }
 
-$ZipPath = Join-Path $Root "dist\Deep Write.zip"
+$ZipPath = Join-Path $Root "dist\DeepWrite.zip"
 if (Test-Path $ZipPath) { Remove-Item $ZipPath -Force }
 Compress-Archive -Path $OutDir -DestinationPath $ZipPath -Force
 
-$exe = Join-Path $OutDir "Deep Write.exe"
+$exe = Join-Path $OutDir "DeepWrite.exe"
 $zipMb = [math]::Round((Get-Item $ZipPath).Length / 1MB, 2)
 Write-Host ""
 Write-Host "Done."

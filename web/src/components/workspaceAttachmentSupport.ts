@@ -215,7 +215,7 @@ export function installWorkspaceSendValidationGuard(chatPanel: ChatPanel) {
       await originalSendMessage(input, attachments)
     } catch (error) {
       if (isWorkspaceSendValidationError(error)) {
-        console.warn('[Deep Write·AI面板] 发送已取消:', error.message)
+        console.warn('[DeepWrite·AI面板] 发送已取消:', error.message)
         refreshWorkspaceChatInput(chatPanel)
         return
       }

@@ -63,6 +63,17 @@ export function SkillGroupEditor() {
     () => (group ? orderedMemberIds(group) : []),
     [group],
   )
+  const editorGroupContext = useMemo(
+    () =>
+      group
+        ? {
+            groupId: group.id,
+            title: group.title,
+            memberIdsOrdered: memberIds,
+          }
+        : null,
+    [group, memberIds],
+  )
 
   const libFromQuery = searchParams.get('lib')?.trim() || ''
   const rawView = searchParams.get('view')?.trim() || ''
@@ -120,13 +131,8 @@ export function SkillGroupEditor() {
 
   return (
     <SkillEditor
-      key={`${group.id}:${activeSkillId}`}
       skillId={activeSkillId}
-      groupContext={{
-        groupId: group.id,
-        title: group.title,
-        memberIdsOrdered: memberIds,
-      }}
+      groupContext={editorGroupContext}
       initialView={viewFromQuery}
       initialStageId={(stageFromQuery as SkillStageId) || null}
       initialEntryId={entryFromQuery || null}

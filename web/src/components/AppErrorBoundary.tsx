@@ -12,7 +12,7 @@ export class AppErrorBoundary extends Component<Props, State> {
   }
 
   componentDidCatch(error: Error, info: ErrorInfo) {
-    console.error('[Deep Write] UI error', error, info.componentStack)
+    console.error('[DeepWrite] UI error', error, info.componentStack)
   }
 
   render() {

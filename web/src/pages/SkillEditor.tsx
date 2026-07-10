@@ -190,6 +190,8 @@ export function SkillEditor({
 
   const splitDragRef = useRef<{ startX: number; startWidth: number } | null>(null)
   const textareaRef = useRef<HTMLTextAreaElement | null>(null)
+  const skillRef = useRef<Skill | null>(null)
+  const groupSkillsRef = useRef<Skill[]>([])
   const stagesRef = useRef<SkillStages>(stages)
   const overviewDraftRef = useRef('')
   const activeStageRef = useRef<SkillStageId>(activeStage)
@@ -199,6 +201,7 @@ export function SkillEditor({
   const tokenBufferRafRef = useRef<number | undefined>(undefined)
   const initialStageIdRef = useRef(initialStageId)
   const initialEntryIdRef = useRef(initialEntryId)
+  const loadSeqRef = useRef(0)
   const textHistory = useTextHistory()
 
   useEffect(() => {
@@ -272,6 +275,10 @@ export function SkillEditor({
   useEffect(() => {
     selectedEntryIdsRef.current = selectedEntryIds
   }, [selectedEntryIds])
+
+  useEffect(() => {
+    groupSkillsRef.current = groupSkills
+  }, [groupSkills])
 
   useEffect(() => {
     return () => {
@@ -463,7 +470,9 @@ export function SkillEditor({
       },
     ) => {
       const normalized = normalizeSkillStages(next.stages)
-      setSkill({ ...next, stages: normalized })
+      const normalizedSkill = { ...next, stages: normalized }
+      skillRef.current = normalizedSkill
+      setSkill(normalizedSkill)
       stagesRef.current = normalized
       setStages(normalized)
       const overview = next.overview ?? ''
@@ -521,14 +530,18 @@ export function SkillEditor({
 
   const load = useCallback(async () => {
     if (!id) return
-    setLoading(true)
+    const loadSeq = ++loadSeqRef.current
+    // 分组成员之间切换时保留编辑器和 AI ChatPanel，只在首次进入时显示加载页。
+    if (!skillRef.current) setLoading(true)
     setError(null)
     try {
       const [s, summaries] = await Promise.all([
         getSkill(id),
         groupContext ? listSkills() : Promise.resolve([] as SkillSummary[]),
       ])
+      if (loadSeq !== loadSeqRef.current) return
       if (!s) {
+        skillRef.current = null
         setSkill(null)
         setError('未找到该技能')
         return
@@ -547,6 +560,7 @@ export function SkillEditor({
           (memberId) => memberId !== s.id,
         )
         const details = await Promise.all(detailIds.map((memberId) => getSkill(memberId)))
+        if (loadSeq !== loadSeqRef.current) return
         setGroupSkills([
           s,
           ...details.filter((item): item is Skill => Boolean(item)),
@@ -555,9 +569,10 @@ export function SkillEditor({
         setGroupSkills([])
       }
     } catch (e) {
+      if (loadSeq !== loadSeqRef.current) return
       setError(e instanceof Error ? e.message : '加载失败')
     } finally {
-      setLoading(false)
+      if (loadSeq === loadSeqRef.current) setLoading(false)
     }
   }, [
     groupContext,
@@ -704,6 +719,23 @@ export function SkillEditor({
     }
     await flushAutoSave()
     if (groupContext && onGroupSkillChange) {
+      // 先用已加载缓存立即切换；随后由 id 驱动的 load 从存储刷新，不替换页面或共享 AI 面板。
+      const currentSnapshot = skill
+        ? { ...skill, stages: stagesRef.current, overview: overviewDraftRef.current }
+        : null
+      const cachedSkills = groupSkillsRef.current.map((item) =>
+        item.id === currentSnapshot?.id ? currentSnapshot : item,
+      )
+      const cachedTarget = cachedSkills.find((item) => item.id === skillId)
+      groupSkillsRef.current = cachedSkills
+      setGroupSkills(cachedSkills)
+      if (cachedTarget) {
+        syncSkillState(cachedTarget, {
+          resetNavigation: true,
+          initialStageId: parsedTarget?.stageId ?? null,
+          initialEntryId: parsedTarget?.entryId ?? null,
+        })
+      }
       onGroupSkillChange(
         skillId,
         parsedTarget ?? (viewTarget ? { view: viewTarget } : undefined),
@@ -954,6 +986,8 @@ export function SkillEditor({
     entryCardStart + SKILL_ENTRY_CARD_PAGE_SIZE,
   )
   const isBuiltinSkill = Boolean(skill.is_builtin)
+  // 同一技能分组的全部列表共用一个管理智能体和一套对话。
+  const aiSessionOwnerId = groupContext?.groupId ?? skill.id
   const skillTypeText = isBuiltinSkill ? '全类型' : skillTypeLabel(skill.skill_type)
   const skillKindText = SKILL_KIND_LABELS[skill.skill_kind]
   const overviewLabel = `${skillKindText}概述`
@@ -1171,12 +1205,12 @@ export function SkillEditor({
           ) : <div className="workspace-ai-chat-stack">
             <div className="workspace-ai-chat-layer workspace-ai-chat-layer--active">
               <WorkspaceAiChat
-                key={`${skill.id}-skill-manager-${aiChatEpoch}`}
-                sessionBookId={skill.id}
+                key={`${aiSessionOwnerId}-skill-manager-${aiChatEpoch}`}
+                sessionBookId={aiSessionOwnerId}
                 sessionEpoch={aiChatEpoch}
                 chatHistoryScope={{
                   owner_type: 'skill',
-                  owner_id: skill.id,
+                  owner_id: aiSessionOwnerId,
                   category_id: 'skill_manager',
                 }}
                 bookTitle={skill.title}

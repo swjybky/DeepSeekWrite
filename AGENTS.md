@@ -1,4 +1,4 @@
-# Deep Write 项目指南
+# DeepWrite 项目指南
 
 本文件为 AI 编码代理提供在操作本仓库代码时的指引。读者应被假设为对项目一无所知。若与源码冲突，以源码为准。
 
@@ -6,7 +6,7 @@
 
 ## 项目概述
 
-Deep Write 是一款**本地桌面写作应用**，面向网文、短篇小说与**剧本**创作。采用**混合架构**：
+DeepWrite 是一款**本地桌面写作应用**，面向网文、短篇小说与**剧本**创作。采用**混合架构**：
 
 - **后端**：Python 3.10+，基于 [pywebview](https://pywebview.flowrl.com/) 提供桌面壳窗口，通过 `js_api` 向前端暴露原生 API。
 - **前端**：React 19 + TypeScript + Vite 构建的静态 SPA。
@@ -52,7 +52,7 @@ npm run build
 
 ### 运行桌面应用
 
-在项目根目录（`Deep Write/`）执行：
+在项目根目录（`DeepWrite/`）执行：
 
 ```bash
 pip install -r requirements.txt
@@ -96,14 +96,14 @@ pip install pyinstaller
 pyinstaller packaging/DeepSeekWrite.spec
 ```
 
-产出 `dist/Deep Write/` 文件夹，压缩后分发。用户需安装 WebView2 Runtime（或同目录已捆绑）。
+产出 `dist/DeepWrite/` 文件夹，压缩后分发。用户需安装 WebView2 Runtime（或同目录已捆绑）。
 
 ---
 
 ## 项目结构
 
 ```
-Deep Write/
+DeepWrite/
 ├── app/                          # Python 后端
 │   ├── main.py                   # pywebview 窗口、Api 类、本地 HTTP 服务、LLM 代理
 │   ├── storage.py                # BookStore：原子化 JSON 读写 + 磁盘阶段文件导出 + 偏好配置
@@ -237,7 +237,7 @@ Deep Write/
 - **`ai_env.py`**：
   - 按优先级读取 `.env`、`.deepseek.env`、`.kimi.env`（先 `writable_root()`，再模块目录，再 `app/` 目录）；冻结版优先读取可执行文件旁的配置。
   - 支持旧配置迁移：`model_name_main`（或旧键 `model_name`）、`model_name_flash`、`model_api_key`、`model_source`。
-  - 内置默认文字模型（`Deep Write Free`）和内置图像模型配置，用于新用户零配置体验。
+  - 内置默认文字模型（`DeepWrite Free`）和内置图像模型配置，用于新用户零配置体验。
   - 支持 `models_type=owner` 自定义多模型列表，以及 `models_type=pi` 走 Pi 原生模型选择。
 
 - **`prompt_store.py`**：

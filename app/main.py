@@ -2396,7 +2396,7 @@ def main() -> None:
     _httpd, url = _resolve_desktop_url(_dist_dir())
     url = _resolve_main_window_url(_dist_dir(), url)
     webview.create_window(
-        "Deep Write",
+        "DeepWrite",
         url,
         js_api=api,
         width=1500,

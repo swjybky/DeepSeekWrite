@@ -366,7 +366,7 @@ export function ExpertDraftAiChat(props: Props) {
         })
         if (next) await p.onBookMemoriesCaptured?.(p.bookId, next)
       } catch (error) {
-        console.warn('[Deep Write memory] expert capture skipped:', error)
+        console.warn('[DeepWrite memory] expert capture skipped:', error)
       }
     })()
   }
@@ -602,13 +602,13 @@ export function ExpertDraftAiChat(props: Props) {
       try {
         await ensurePiAppStorage()
       } catch (e) {
-        console.warn('[Deep Write·正文专家面板] Pi 存储初始化失败，将重试:', e)
+        console.warn('[DeepWrite·正文专家面板] Pi 存储初始化失败，将重试:', e)
         await new Promise((r) => window.setTimeout(r, 500))
         if (cancelled) return
         try {
           await ensurePiAppStorage()
         } catch (e2) {
-          console.error('[Deep Write·正文专家面板] Pi 存储初始化最终失败:', e2)
+          console.error('[DeepWrite·正文专家面板] Pi 存储初始化最终失败:', e2)
           return
         }
       }
