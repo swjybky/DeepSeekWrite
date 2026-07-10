@@ -17,7 +17,6 @@ import {
   type MaterialSummary,
   type Skill,
   type SkillKind,
-  type SkillLibraryGroup,
   type SkillStageEntry,
   type SkillStageId,
   type MaterialType,
@@ -1870,12 +1869,13 @@ export function Home() {
   const books = useHomeStore((state) => state.books)
   const materials = useHomeStore((state) => state.materials)
   const skills = useHomeStore((state) => state.skills)
+  const skillGroups = useHomeStore((state) => state.skillGroups)
   const bookCovers = useHomeStore((state) => state.bookCovers)
   const cachedWorkspaceRoot = useHomeStore((state) => state.workspaceRoot)
   const cachedAiSettings = useHomeStore((state) => state.aiSettings)
   const setBooks = useHomeStore((state) => state.setBooks)
   const setMaterials = useHomeStore((state) => state.setMaterials)
-  const setSkills = useHomeStore((state) => state.setSkills)
+  const setSkillLibraryData = useHomeStore((state) => state.setSkillLibraryData)
   const setBookCovers = useHomeStore((state) => state.setBookCovers)
   const setWorkspaceRoot = useHomeStore((state) => state.setWorkspaceRoot)
   const setAiSettings = useHomeStore((state) => state.setAiSettings)
@@ -1953,7 +1953,6 @@ export function Home() {
 
   // ==================== 素材/技能分组状态 ====================
   const [materialGroups, setMaterialGroups] = useState<MaterialLibraryGroup[]>([])
-  const [skillGroups, setSkillGroups] = useState<SkillLibraryGroup[]>([])
   const [showMaterialGroupForm, setShowMaterialGroupForm] = useState(false)
   const [showSkillGroupForm, setShowSkillGroupForm] = useState(false)
   const [materialGroupTitle, setMaterialGroupTitle] = useState('')
@@ -2198,14 +2197,13 @@ export function Home() {
         listSkills(),
         listSkillLibraryGroups(),
       ])
-      setSkills(list)
-      setSkillGroups(groups)
+      setSkillLibraryData(list, groups)
     } catch (e) {
       setSkillError(e instanceof Error ? e.message : '加载技能库失败')
     } finally {
       setLoadingSkills(false)
     }
-  }, [setSkills])
+  }, [setSkillLibraryData])
 
   // 初始加载素材与技能；已有缓存时在后台刷新，避免回首页闪 loading。
   useEffect(() => {

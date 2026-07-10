@@ -3,6 +3,7 @@ import type {
   AiModelSettings,
   BookSummary,
   MaterialSummary,
+  SkillLibraryGroup,
   SkillSummary,
 } from '../bridge'
 
@@ -10,6 +11,7 @@ type HomeStoreState = {
   books: BookSummary[]
   materials: MaterialSummary[]
   skills: SkillSummary[]
+  skillGroups: SkillLibraryGroup[]
   bookCovers: Record<string, string>
   workspaceRoot: string | null
   aiSettings: AiModelSettings | null
@@ -19,7 +21,10 @@ type HomeStoreState = {
   hasAiSettings: boolean
   setBooks: (books: BookSummary[]) => void
   setMaterials: (materials: MaterialSummary[]) => void
-  setSkills: (skills: SkillSummary[]) => void
+  setSkillLibraryData: (
+    skills: SkillSummary[],
+    skillGroups: SkillLibraryGroup[],
+  ) => void
   setBookCovers: (bookCovers: Record<string, string>) => void
   setWorkspaceRoot: (workspaceRoot: string | null) => void
   setAiSettings: (aiSettings: AiModelSettings) => void
@@ -29,6 +34,7 @@ export const useHomeStore = create<HomeStoreState>((set) => ({
   books: [],
   materials: [],
   skills: [],
+  skillGroups: [],
   bookCovers: {},
   workspaceRoot: null,
   aiSettings: null,
@@ -39,7 +45,8 @@ export const useHomeStore = create<HomeStoreState>((set) => ({
 
   setBooks: (books) => set({ books, hasBooks: true }),
   setMaterials: (materials) => set({ materials, hasMaterials: true }),
-  setSkills: (skills) => set({ skills, hasSkills: true }),
+  setSkillLibraryData: (skills, skillGroups) =>
+    set({ skills, skillGroups, hasSkills: true }),
   setBookCovers: (bookCovers) => set({ bookCovers }),
   setWorkspaceRoot: (workspaceRoot) => set({ workspaceRoot }),
   setAiSettings: (aiSettings) => set({ aiSettings, hasAiSettings: true }),
