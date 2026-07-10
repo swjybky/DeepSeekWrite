@@ -339,7 +339,7 @@ export function ExpertDraftEditor({
               </span>
             </div>
 
-            <div className="expert-draft-textarea-field">
+            <div className="expert-draft-textarea-field expert-draft-textarea-field--body">
               <span className="expert-draft-field-heading">
                 <span>{selectedSection.title || '当前小节'}正文</span>
                 <TextHistoryControls
@@ -385,7 +385,7 @@ export function ExpertDraftEditor({
               />
             </div>
 
-            <div className="expert-draft-textarea-field">
+            <div className="expert-draft-textarea-field expert-draft-textarea-field--character-state">
               <span className="expert-draft-field-heading">
                 <span>{selectedState.title || defaultStateTitle(selectedSection.title)}</span>
                 <TextHistoryControls

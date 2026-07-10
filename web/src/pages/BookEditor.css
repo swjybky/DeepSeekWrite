@@ -1473,11 +1473,11 @@ button.back-link:hover {
   font-weight: 600;
 }
 
-.expert-draft-textarea-field:first-of-type {
+.expert-draft-textarea-field--body {
   flex: 2 1 0%;
 }
 
-.expert-draft-textarea-field:last-of-type {
+.expert-draft-textarea-field--character-state {
   flex: 1 1 0%;
 }
 
