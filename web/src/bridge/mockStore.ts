@@ -15,7 +15,6 @@ import type {
   StageId,
 } from '../domain/workspaceCore'
 import type { SaveSkillOptions } from './apiTypes'
-import { readCommonSkills } from './commonSkillsClient'
 import {
   SCRIPT_MATERIAL_GENRES,
   SHORT_MATERIAL_GENRES,
@@ -48,8 +47,7 @@ import {
   occupiedLibraryIdsFromGroups,
   createLocalMaterialLibraryGroup,
   createLocalSkillLibraryGroup,
-  type CommonSkill,
-  type LoadCommonSkillsResult,
+  type ImportSkillEntriesResult,
   type Material,
   type MaterialKind,
   type MaterialKindWithMixed,
@@ -59,18 +57,19 @@ import {
   type MaterialSummary,
   type Skill,
   type SkillKind,
+  type SkillImportSelection,
+  type SkillImportSource,
   type SkillLibraryGroup,
-  type SkillStageEntry,
   type SkillStageId,
   type SkillSummary,
 } from './libraryDomain'
 
-const DEFAULT_SKILL_TEMPLATE_MODULES = import.meta.glob(
-  '../../../app/prompt_defaults/skill/default_skill_template.json',
+const COMMON_SKILLS_MODULES = import.meta.glob(
+  '../../../app/prompt_defaults/skill/common_skills.json',
   { eager: true, import: 'default' },
-) as Record<string, { title?: string; stages?: Record<string, unknown> }>
+) as Record<string, { skills?: unknown[] }>
 
-const defaultSkillTemplate = Object.values(DEFAULT_SKILL_TEMPLATE_MODULES)[0] ?? null
+const OFFICIAL_GENERAL_SKILL_LIBRARY_ID = 'official-general-skill-library'
 const MOCK_STORAGE_KEY = 'deepseekwrite_dev_books'
 
 function loadMock(): Map<string, Book> {
@@ -104,7 +103,7 @@ function normalizeMockLinkedSkillIdsByKind(
       const skill = skills.get(id)
       return Boolean(
         skill &&
-          skill.skill_type === bookType &&
+          (skill.is_builtin || skill.skill_type === bookType) &&
           normalizeSkillKind(skill.skill_kind) === kind,
       )
     })
@@ -495,98 +494,66 @@ export function loadMockSkills(): Map<string, Skill> {
   try {
     const raw = localStorage.getItem(MOCK_SKILLS_KEY)
     if (!raw) {
-      const seeded = seedDefaultMockSkill()
-      if (seeded.size > 0) {
-        saveMockSkills(seeded)
-        return seeded
-      }
-      return new Map()
+      const seeded = new Map<string, Skill>()
+      ensureOfficialMockSkill(seeded)
+      saveMockSkills(seeded)
+      return seeded
     }
     const arr = JSON.parse(raw) as Array<Partial<Skill> & { id: string; stages?: unknown }>
-    return new Map(arr.map((s) => [s.id, normalizeSkill(s)]))
+    const map = new Map(arr.map((s) => [s.id, normalizeSkill(s)]))
+    if (ensureOfficialMockSkill(map)) saveMockSkills(map)
+    return map
   } catch {
-    return new Map()
+    const seeded = new Map<string, Skill>()
+    ensureOfficialMockSkill(seeded)
+    return seeded
   }
 }
 
-function seedDefaultMockSkill(): Map<string, Skill> {
-  try {
-    const tpl = defaultSkillTemplate
-    if (!tpl?.stages) return new Map()
-    const now = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z')
-    const skill = normalizeSkill({
-      id: randomId(),
-      title: tpl.title || '参考技能',
-      skill_type: 'short',
-      skill_kind: 'general',
-      overview: '',
-      stages: tpl.stages,
-      created_at: now,
-      updated_at: now,
-    } as Parameters<typeof normalizeSkill>[0])
-    return new Map([[skill.id, skill]])
-  } catch {
-    return new Map()
+function ensureOfficialMockSkill(map: Map<string, Skill>): boolean {
+  if (map.has(OFFICIAL_GENERAL_SKILL_LIBRARY_ID)) return false
+  const now = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z')
+  const stages = normalizeSkillStages({})
+  const rawSkills = Object.values(COMMON_SKILLS_MODULES)[0]?.skills
+  for (const raw of Array.isArray(rawSkills) ? rawSkills : []) {
+    if (!raw || typeof raw !== 'object') continue
+    const item = raw as { id?: unknown; title?: unknown; body?: unknown; effective_stages?: unknown }
+    const entryId = typeof item.id === 'string' && item.id ? item.id : randomId()
+    const title = typeof item.title === 'string' && item.title.trim() ? item.title.trim() : '未命名技能'
+    const body = typeof item.body === 'string' ? item.body : ''
+    for (const stageId of Array.isArray(item.effective_stages) ? item.effective_stages : []) {
+      if (!SKILL_STAGE_KEYS.includes(stageId as SkillStageId)) continue
+      stages[stageId as SkillStageId].push({ id: entryId, title, body, created_at: now, updated_at: now })
+    }
   }
+  map.set(OFFICIAL_GENERAL_SKILL_LIBRARY_ID, normalizeSkill({
+    id: OFFICIAL_GENERAL_SKILL_LIBRARY_ID,
+    title: '官方内置通用技能库',
+    skill_type: 'short',
+    skill_kind: 'general',
+    is_builtin: true,
+    overview: '官方提供的通用写作技能，仅供加载和使用。',
+    stages,
+    created_at: now,
+    updated_at: now,
+  } as Parameters<typeof normalizeSkill>[0]))
+  return true
 }
 
 function saveMockSkills(map: Map<string, Skill>) {
   localStorage.setItem(MOCK_SKILLS_KEY, JSON.stringify([...map.values()]))
 }
 
-function sameLoadedCommonSkill(entry: SkillStageEntry, commonSkill: CommonSkill): boolean {
-  if (
-    commonSkill.id &&
-    entry.source_common_skill_id &&
-    entry.source_common_skill_id === commonSkill.id
-  ) {
-    return true
-  }
-  return (
-    entry.title.trim() === commonSkill.title.trim() &&
-    entry.body.trim() === commonSkill.body.trim()
-  )
-}
-
-async function appendMissingCommonSkills(
-  stages: Skill['stages'],
-  now: string,
-  allowedStageIds: readonly SkillStageId[] = SKILL_STAGE_KEYS,
-): Promise<{ added_count: number; available_count: number }> {
-  let added_count = 0
-  let available_count = 0
-  for (const commonSkill of await readCommonSkills()) {
-    for (const stageId of commonSkill.effective_stages) {
-      if (!allowedStageIds.includes(stageId)) continue
-      available_count += 1
-      const entries = stages[stageId] ?? []
-      if (entries.some((entry) => sameLoadedCommonSkill(entry, commonSkill))) {
-        continue
-      }
-      entries.push({
-        id: randomId(),
-        title: commonSkill.title,
-        body: commonSkill.body,
-        created_at: now,
-        updated_at: now,
-        source_common_skill_id: commonSkill.id,
-      })
-      stages[stageId] = entries
-      added_count += 1
-    }
-  }
-  return { added_count, available_count }
-}
-
 export async function mockListSkills(): Promise<SkillSummary[]> {
   const map = loadMockSkills()
   return [...map.values()]
     .sort((a, b) => (b.updated_at || '').localeCompare(a.updated_at || ''))
-    .map(({ id, title, skill_type, skill_kind, stages, output_dir }) => ({
+    .map(({ id, title, skill_type, skill_kind, is_builtin, stages, output_dir }) => ({
       id,
       title,
       skill_type,
       skill_kind,
+      is_builtin,
       stage_counts: Object.fromEntries(
         SKILL_STAGE_KEYS.map((stageId) => [stageId, stages[stageId]?.length ?? 0]),
       ) as Partial<Record<SkillStageId, number>>,
@@ -605,16 +572,12 @@ export async function mockGetSkill(skill_id: string): Promise<Skill | null> {
 export async function mockCreateSkill(
   title: string,
   skill_type = 'short',
-  load_common_skills = false,
   skill_kind: SkillKind = 'general',
 ): Promise<Skill> {
   const map = loadMockSkills()
   const now = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z')
   const kind = normalizeSkillKind(skill_kind)
   const stages = normalizeSkillStages({})
-  if (load_common_skills) {
-    await appendMissingCommonSkills(stages, now, SKILL_KIND_STAGE_IDS[kind])
-  }
   const skill: Skill = {
     id: randomId(),
     title: title.trim() || '未命名技能',
@@ -639,6 +602,7 @@ export async function mockSaveSkill(
   const map = loadMockSkills()
   const s = map.get(skill_id)
   if (!s) return null
+  if (s.is_builtin) throw new Error('官方内置通用技能库为只读，不能修改')
   const now = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z')
   let next: Skill = { ...s, updated_at: now }
   if (options?.title != null) {
@@ -674,37 +638,102 @@ export async function mockSaveSkill(
   return next
 }
 
-export async function mockLoadCommonSkillsToSkill(
-  skill_id: string,
-): Promise<LoadCommonSkillsResult | null> {
+export async function mockListSkillImportSources(
+  target_skill_id: string,
+): Promise<SkillImportSource[]> {
   const map = loadMockSkills()
-  const s = map.get(skill_id)
-  if (!s) return null
+  const target = map.get(target_skill_id)
+  if (!target) return []
+  const allowed = new Set(SKILL_KIND_STAGE_IDS[normalizeSkillKind(target.skill_kind)])
+  return [...map.values()]
+    .filter((source) => source.id !== target.id)
+    .map((source) => ({
+      id: source.id,
+      title: source.title,
+      skill_type: source.skill_type,
+      skill_kind: source.skill_kind,
+      is_builtin: Boolean(source.is_builtin),
+      stages: Object.fromEntries(
+        SKILL_STAGE_KEYS.flatMap((stageId) => {
+          const entries = source.stages[stageId] ?? []
+          return allowed.has(stageId) && entries.length > 0
+            ? [[stageId, entries.map(({ id, title }) => ({ id, title }))]]
+            : []
+        }),
+      ) as Partial<Record<SkillStageId, { id: string; title: string }[]>>,
+    }))
+    .filter((source) => Object.keys(source.stages).length > 0)
+    .sort((a, b) => Number(b.is_builtin) - Number(a.is_builtin) || a.title.localeCompare(b.title))
+}
+
+export async function mockImportSkillEntries(
+  target_skill_id: string,
+  selections: SkillImportSelection[],
+): Promise<ImportSkillEntriesResult | null> {
+  const map = loadMockSkills()
+  const target = map.get(target_skill_id)
+  if (!target) return null
+  if (target.is_builtin) throw new Error('官方内置通用技能库为只读，不能写入技能')
   const now = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z')
-  const stages = normalizeSkillStages(s.stages)
-  const result = await appendMissingCommonSkills(
-    stages,
-    now,
-    SKILL_KIND_STAGE_IDS[normalizeSkillKind(s.skill_kind)],
-  )
-  const next: Skill = {
-    ...s,
-    stages,
-    updated_at: result.added_count > 0 ? now : s.updated_at,
+  const allowed = new Set(SKILL_KIND_STAGE_IDS[normalizeSkillKind(target.skill_kind)])
+  let added_count = 0
+  let skipped_count = 0
+  const seen = new Set<string>()
+  for (const selection of selections) {
+    const key = `${selection.source_skill_id}:${selection.stage_id}:${selection.entry_id}`
+    if (seen.has(key) || !allowed.has(selection.stage_id)) {
+      skipped_count += 1
+      continue
+    }
+    seen.add(key)
+    const source = map.get(selection.source_skill_id)
+    const entry = source?.stages[selection.stage_id]?.find((item) => item.id === selection.entry_id)
+    if (!source || source.id === target.id || !entry) {
+      skipped_count += 1
+      continue
+    }
+    const targetEntries = target.stages[selection.stage_id] ?? []
+    const duplicate = targetEntries.some((item) =>
+      item.source_skill_id === source.id && item.source_skill_entry_id === entry.id,
+    ) || (
+      source.id === OFFICIAL_GENERAL_SKILL_LIBRARY_ID
+      && targetEntries.some((item) => item.source_common_skill_id === entry.id)
+    )
+    if (duplicate) {
+      skipped_count += 1
+      continue
+    }
+    targetEntries.push({
+      id: randomId(),
+      title: entry.title,
+      body: entry.body,
+      created_at: now,
+      updated_at: now,
+      source_skill_id: source.id,
+      source_skill_entry_id: entry.id,
+    })
+    target.stages[selection.stage_id] = targetEntries
+    added_count += 1
   }
-  if (result.added_count > 0) {
-    map.set(skill_id, next)
+  const next: Skill = {
+    ...target,
+    stages: normalizeSkillStages(target.stages),
+    updated_at: added_count > 0 ? now : target.updated_at,
+  }
+  if (added_count > 0) {
+    map.set(target_skill_id, next)
     saveMockSkills(map)
   }
   return {
     skill: next,
-    ...result,
-    already_loaded: result.available_count > 0 && result.added_count === 0,
+    added_count,
+    skipped_count,
   }
 }
 
 export async function mockDeleteSkill(skill_id: string): Promise<boolean> {
   const map = loadMockSkills()
+  if (map.get(skill_id)?.is_builtin) return false
   const ok = map.delete(skill_id)
   if (ok) {
     saveMockSkills(map)

@@ -8,6 +8,8 @@ const LEGACY_QINGGAN_PROMPT_KIND = 'qinggan'
 const SHARED_PROMPT_LS_MIGRATION_MARKER =
   'deepseekwrite_shared_prompt_migration_from_qinggan_v1'
 const PLOT_PROMPT_LS_MERGE_MARKER = 'deepseekwrite_plot_prompt_merge_v1'
+const WORKSPACE_PROMPT_DEFAULTS_V2_RESET_MARKER =
+  'deepseekwrite_workspace_prompt_defaults_v2_reset'
 
 export function localPromptLsKey(promptKind: string, stage: string): string {
   return PROMPT_TEMPLATE_LS_PREFIX + `${promptKind}:${stage}`
@@ -63,4 +65,24 @@ export function ensureLocalPlotPromptMerged(): void {
 export function ensureLocalScriptPromptPrepared(): void {
   // Legacy entry point kept for callers; script prompts now fall back to
   // script built-in defaults instead of copying short prompt overrides.
+}
+
+export function ensureLocalWorkspacePromptDefaultsV2Reset(): void {
+  try {
+    if (localStorage.getItem(WORKSPACE_PROMPT_DEFAULTS_V2_RESET_MARKER)) return
+    const removablePrefixes = [
+      `${PROMPT_TEMPLATE_LS_PREFIX}${SHARED_WORKSPACE_PROMPT_KIND}:`,
+      `${PROMPT_TEMPLATE_LS_PREFIX}${SCRIPT_SHARED_WORKSPACE_PROMPT_KIND}:`,
+      `${PROMPT_TEMPLATE_LS_PREFIX}${LEGACY_QINGGAN_PROMPT_KIND}:`,
+    ]
+    for (let index = localStorage.length - 1; index >= 0; index -= 1) {
+      const key = localStorage.key(index)
+      if (key && removablePrefixes.some((prefix) => key.startsWith(prefix))) {
+        localStorage.removeItem(key)
+      }
+    }
+    localStorage.setItem(WORKSPACE_PROMPT_DEFAULTS_V2_RESET_MARKER, '1')
+  } catch {
+    /* ignore */
+  }
 }

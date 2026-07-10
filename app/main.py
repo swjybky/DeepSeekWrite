@@ -1384,7 +1384,6 @@ class Api:
         title: str,
         skill_type: str = "short",
         workspace_root: str | None = None,
-        load_common_skills: bool = False,
         skill_kind: str | None = None,
     ) -> dict:
         """创建新技能集合"""
@@ -1395,25 +1394,20 @@ class Api:
             title,
             skill_type,
             workspace_root,
-            bool(load_common_skills),
             skill_kind,
         )
 
-    def read_common_skills(self) -> list[dict]:
-        """读取随应用发布、不会写入用户数据目录的通用技能配置。"""
-        from app.common_skill_store import read_common_skills
+    def list_skill_import_sources(self, target_skill_id: str) -> list[dict]:
+        """列出可加载到目标技能库的其他库技能。"""
+        return self._store.list_skill_import_sources(target_skill_id)
 
-        return read_common_skills()
-
-    def save_common_skills(self, skills: list | None = None) -> list[dict]:
-        """保存随应用发布的通用技能配置。"""
-        from app.common_skill_store import save_common_skills
-
-        return save_common_skills(skills or [])
-
-    def load_common_skills_to_skill(self, skill_id: str) -> dict | None:
-        """将通用技能合并到已有技能库，已加载的条目不会重复添加。"""
-        return self._store.load_common_skills_to_skill(skill_id)
+    def import_skill_entries(
+        self,
+        target_skill_id: str,
+        selections: list[dict] | None = None,
+    ) -> dict | None:
+        """将选中的其他库技能条目复制到目标技能库。"""
+        return self._store.import_skill_entries(target_skill_id, selections)
 
     def save_skill(
         self,
@@ -1509,7 +1503,7 @@ class Api:
         return _download_latest_update()
 
     def get_workspace_agent_read_access(self, workspace_type: str | None = None) -> dict[str, object]:
-        """全局创作空间智能体可读的 workspace/material 阶段列表。"""
+        """全局创作空间智能体可读的 workspace/material/skill 范围。"""
         if workspace_type:
             return read_workspace_agent_read_access_for_type(workspace_type)
         return read_workspace_agent_read_access()
@@ -2143,7 +2137,6 @@ class Api:
                         title,
                         skill_type,
                         ws or None,
-                        False,
                         skill_kind,
                     )
                     stages = data.get("stages")
@@ -2403,7 +2396,7 @@ def main() -> None:
     _httpd, url = _resolve_desktop_url(_dist_dir())
     url = _resolve_main_window_url(_dist_dir(), url)
     webview.create_window(
-        "DeepSeekWrite",
+        "Deep Write",
         url,
         js_api=api,
         width=1500,

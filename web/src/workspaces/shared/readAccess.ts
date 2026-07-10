@@ -5,6 +5,8 @@
 export type WorkspaceAgentReadAccessEntry = {
   workspace: string[]
   material: string[]
+  /** 当前智能体允许从已绑定技能库中加载的技能分类。 */
+  skill?: string[]
 }
 
 export type WorkspaceAgentReadAccessConfig = Record<

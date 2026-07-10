@@ -695,6 +695,7 @@ export function BookEditor() {
     materialSelectorOpen,
     setMaterialSelectorOpen,
     materialSummaries,
+    materialGroups,
     materialSelectorLoading,
     materialSelectorSaving,
     openMaterialSelector,
@@ -702,6 +703,7 @@ export function BookEditor() {
     skillSelectorOpen,
     setSkillSelectorOpen,
     skillSummaries,
+    skillGroups,
     skillSelectorLoading,
     skillSelectorSaving,
     openSkillSelector,
@@ -1321,6 +1323,7 @@ export function BookEditor() {
             linkedMaterial={linkedMaterial}
             linkedMaterialsByKind={linkedMaterialsByKind}
             summaries={materialSummaries}
+            groups={materialGroups}
             loading={materialSelectorLoading}
             saving={materialSelectorSaving}
             onClose={() => setMaterialSelectorOpen(false)}
@@ -1334,6 +1337,7 @@ export function BookEditor() {
             linkedSkill={linkedSkill}
             linkedSkillsByKind={linkedSkillsByKind}
             summaries={skillSummaries}
+            groups={skillGroups}
             loading={skillSelectorLoading}
             saving={skillSelectorSaving}
             onClose={() => setSkillSelectorOpen(false)}

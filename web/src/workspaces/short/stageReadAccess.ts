@@ -1,4 +1,4 @@
-import type { MaterialKind, MaterialStageId } from '../../bridge'
+import type { MaterialKind, MaterialStageId, SkillKind } from '../../bridge'
 import {
   SHORT_WORKSPACE_CONTENT_STAGES,
   SHORT_WORKSPACE_STAGES,
@@ -62,6 +62,13 @@ export const ALL_MATERIAL_KIND_IDS: MaterialKind[] = [
   'other',
 ]
 
+export const ALL_SKILL_KIND_IDS: SkillKind[] = [
+  'general',
+  'plot',
+  'style',
+  'other',
+]
+
 const MATERIAL_STAGE_TO_KIND: Record<MaterialStageId, MaterialKind> = {
   gimmick: 'gimmick',
   character: 'character',
@@ -81,22 +88,27 @@ const FALLBACK_DEFAULTS: WorkspaceAgentReadAccessConfig = {
   character_design: {
     workspace: ['character_design', 'plot_design', 'plot_refine'],
     material: ['character', 'other'],
+    skill: ['general', 'plot', 'other'],
   },
   plot_design: {
     workspace: ['character_design', 'intro_design', 'plot_design', 'plot_refine'],
     material: ['gimmick', 'character', 'plot', 'other'],
+    skill: ['general', 'plot', 'other'],
   },
   outline: {
     workspace: ['intro_design', 'plot_design', 'plot_refine', 'outline', 'character_design'],
     material: ['character', 'plot', 'other'],
+    skill: ['general', 'plot', 'other'],
   },
   expert_draft_coordinator: {
     workspace: ['outline', 'draft'],
     material: ['plot', 'draft', 'other'],
+    skill: ['general', 'style', 'other'],
   },
   expert_section_writer: {
     workspace: ['outline', 'draft'],
     material: ['draft', 'character', 'other'],
+    skill: ['general', 'style', 'other'],
   },
 }
 
@@ -121,6 +133,10 @@ function isMaterialStageId(id: string): id is MaterialStageId {
 
 function isMaterialKindId(id: string): id is MaterialKind {
   return ALL_MATERIAL_KIND_IDS.includes(id as MaterialKind)
+}
+
+function isSkillKindId(id: string): id is SkillKind {
+  return ALL_SKILL_KIND_IDS.includes(id as SkillKind)
 }
 
 function normalizeMaterialAccessIds(raw: readonly string[]): MaterialKind[] {
@@ -154,9 +170,13 @@ function loadBuiltinDefaults(): WorkspaceAgentReadAccessConfig {
     const material = Array.isArray(entry.material)
       ? normalizeMaterialAccessIds(entry.material.map(String))
       : FALLBACK_DEFAULTS[agentId].material
+    const skill = Array.isArray(entry.skill)
+      ? entry.skill.map(String).filter(isSkillKindId)
+      : FALLBACK_DEFAULTS[agentId].skill
     result[agentId] = {
       workspace: ensureRequiredWorkspaceStages(agentId, workspace),
       material,
+      skill: dedupe(skill ?? []),
     }
   }
   return result
@@ -243,6 +263,7 @@ function normalizeEntry(
   const obj = raw as Record<string, unknown>
   const workspaceRaw = Array.isArray(obj.workspace) ? obj.workspace : null
   const materialRaw = Array.isArray(obj.material) ? obj.material : null
+  const skillRaw = Array.isArray(obj.skill) ? obj.skill : null
   const workspace =
     workspaceRaw === null
       ? fallback.workspace
@@ -251,9 +272,14 @@ function normalizeEntry(
     materialRaw === null
       ? fallback.material
       : normalizeMaterialAccessIds(materialRaw.map(String))
+  const skill =
+    skillRaw === null
+      ? fallback.skill ?? []
+      : dedupe(skillRaw.map(String).filter(isSkillKindId))
   return {
     workspace: ensureRequiredWorkspaceStages(agentId, workspace),
     material,
+    skill,
   }
 }
 
@@ -263,8 +289,10 @@ function mergePlotAgentReadAccessInput(
   const sourceIds = ['plot_design', 'intro_design', 'plot_refine']
   const workspace: string[] = []
   const material: string[] = []
+  const skill: string[] = []
   let hasWorkspace = false
   let hasMaterial = false
+  let hasSkill = false
 
   for (const id of sourceIds) {
     const raw = input[id]
@@ -278,15 +306,20 @@ function mergePlotAgentReadAccessInput(
       hasMaterial = true
       material.push(...obj.material.map(String))
     }
+    if (Array.isArray(obj.skill)) {
+      hasSkill = true
+      skill.push(...obj.skill.map(String))
+    }
   }
 
-  if (!hasWorkspace && !hasMaterial) return input.plot_design
+  if (!hasWorkspace && !hasMaterial && !hasSkill) return input.plot_design
   return {
     ...(input.plot_design && typeof input.plot_design === 'object'
       ? (input.plot_design as Record<string, unknown>)
       : {}),
     ...(hasWorkspace ? { workspace } : {}),
     ...(hasMaterial ? { material } : {}),
+    ...(hasSkill ? { skill } : {}),
   }
 }
 
@@ -324,5 +357,10 @@ export function isWorkspaceAgentReadAccessCustomized(
   const sameMaterial =
     current.material.length === defaults.material.length &&
     current.material.every((id) => defaults.material.includes(id))
-  return !sameWorkspace || !sameMaterial
+  const currentSkill = current.skill ?? []
+  const defaultSkill = defaults.skill ?? []
+  const sameSkill =
+    currentSkill.length === defaultSkill.length &&
+    currentSkill.every((id) => defaultSkill.includes(id))
+  return !sameWorkspace || !sameMaterial || !sameSkill
 }

@@ -1,4 +1,4 @@
-# DeepSeekWrite 项目指南
+# Deep Write 项目指南
 
 本文件为 AI 编码代理提供在操作本仓库代码时的指引。读者应被假设为对项目一无所知。若与源码冲突，以源码为准。
 
@@ -6,7 +6,7 @@
 
 ## 项目概述
 
-DeepSeekWrite 是一款**本地桌面写作应用**，面向网文、短篇小说与**剧本**创作。采用**混合架构**：
+Deep Write 是一款**本地桌面写作应用**，面向网文、短篇小说与**剧本**创作。采用**混合架构**：
 
 - **后端**：Python 3.10+，基于 [pywebview](https://pywebview.flowrl.com/) 提供桌面壳窗口，通过 `js_api` 向前端暴露原生 API。
 - **前端**：React 19 + TypeScript + Vite 构建的静态 SPA。
@@ -52,7 +52,7 @@ npm run build
 
 ### 运行桌面应用
 
-在项目根目录（`DeepSeekWrite/`）执行：
+在项目根目录（`Deep Write/`）执行：
 
 ```bash
 pip install -r requirements.txt
@@ -96,20 +96,20 @@ pip install pyinstaller
 pyinstaller packaging/DeepSeekWrite.spec
 ```
 
-产出 `dist/DeepSeekWrite/` 文件夹，压缩后分发。用户需安装 WebView2 Runtime（或同目录已捆绑）。
+产出 `dist/Deep Write/` 文件夹，压缩后分发。用户需安装 WebView2 Runtime（或同目录已捆绑）。
 
 ---
 
 ## 项目结构
 
 ```
-DeepSeekWrite/
+Deep Write/
 ├── app/                          # Python 后端
 │   ├── main.py                   # pywebview 窗口、Api 类、本地 HTTP 服务、LLM 代理
 │   ├── storage.py                # BookStore：原子化 JSON 读写 + 磁盘阶段文件导出 + 偏好配置
 │   ├── models.py                 # Book / Material / Skill 数据类、阶段键定义、数据迁移
 │   ├── ai_env.py                 # .env 解析、内置默认模型、旧配置迁移
-│   ├── prompt_store.py           # 提示词模板读取、覆盖、迁移、占位符渲染
+│   ├── prompt_store.py           # 提示词模板读取、覆盖、迁移；素材/技能占位符渲染
 │   ├── runtime_paths.py          # bundle_root() / writable_root()：区分源码与 PyInstaller 冻结环境
 │   ├── image_generate.py         # 图像生成 API 调用（封面）
 │   ├── prompt_defaults/          # 默认提示词模板（.txt）与读取范围默认配置
@@ -237,7 +237,7 @@ DeepSeekWrite/
 - **`ai_env.py`**：
   - 按优先级读取 `.env`、`.deepseek.env`、`.kimi.env`（先 `writable_root()`，再模块目录，再 `app/` 目录）；冻结版优先读取可执行文件旁的配置。
   - 支持旧配置迁移：`model_name_main`（或旧键 `model_name`）、`model_name_flash`、`model_api_key`、`model_source`。
-  - 内置默认文字模型（`DeepSeekWriteFree`）和内置图像模型配置，用于新用户零配置体验。
+  - 内置默认文字模型（`Deep Write Free`）和内置图像模型配置，用于新用户零配置体验。
   - 支持 `models_type=owner` 自定义多模型列表，以及 `models_type=pi` 走 Pi 原生模型选择。
 
 - **`prompt_store.py`**：
@@ -247,7 +247,8 @@ DeepSeekWrite/
   - 旧剧情设计 / 导语设计 / 剧情细化覆盖会合并为新的「剧情」智能体提示词（`plot_design.txt`）。
   - 剧本提示词与短篇提示词隔离；缺少用户覆盖时直接读取 `app/prompt_defaults/script/shared/` 内置默认模板。
   - 创作空间当前启用的 Agent ID：`character_design`、`plot_design`、`outline`、`expert_draft_coordinator`、`expert_section_writer`。
-  - 创作空间提示词支持占位符：`{{BOOK_TITLE}}`、`{{BOOK_GENRE}}`；专家总控与分节写手内部还有其它上下文注入（由前端/工具层处理）。
+  - 创作空间系统提示词不使用书名/分类占位符。书名、类型、分类、当前阶段或当前小节由前端在每次模型请求前，与长期记忆合并为一条运行时 user 上下文消息。
+  - 升级到新版五智能体默认提示词时，会通过 `.workspace_prompt_defaults_v2_reset` 一次性清除短篇/剧本用户提示词覆盖；读取范围、书籍、记忆、素材和技能配置不受影响。
   - 素材库提示词支持占位符：`{{MATERIAL_TITLE}}`、`{{MATERIAL_TYPE}}`、`{{MATERIAL_GENRE}}`、`{{STAGE_BODY}}`、`{{OTHER_STAGES_EXCERPT}}` 等。
   - 技能库提示词支持占位符：`{{SKILL_TITLE}}`、`{{SKILL_TYPE}}`、`{{STAGE_BODY}}`、`{{OTHER_STAGES_EXCERPT}}` 等。
 
@@ -275,7 +276,7 @@ DeepSeekWrite/
 
 - **`pages/WorkspaceSettings.tsx`**：
   - 集中管理短篇与剧本创作空间 5 个普通/专家智能体的共享系统提示词和读取范围。
-  - 书籍分类仅作为 `{{BOOK_GENRE}}` 上下文传入模板，不影响提示词路径、工具集或会话标识。
+  - 书籍分类通过每次请求的运行时创作上下文传给模型，不影响提示词路径、工具集或会话标识。
 
 - **`pi/` 目录**：
   - `setupPiWorkspace.ts`：初始化 IndexedDB 后端（`dbName: 'deepseekwrite_pi'`），存储会话、API Key、设置。
@@ -329,7 +330,7 @@ DeepSeekWrite/
 
 遗留兼容键（不再在左侧展示）：`draft_review`、`format_conversion`。
 
-**注意**：所有短篇分类共用上述阶段定义和 `short/shared/` 提示词；分类仅作为 `{{BOOK_GENRE}}` 上下文传入。
+**注意**：所有短篇分类共用上述阶段定义和 `short/shared/` 提示词；分类随运行时创作上下文传入。
 
 ### 剧本工作台阶段（`SCRIPT_WORKSPACE_STAGES`）
 

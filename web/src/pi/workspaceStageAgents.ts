@@ -242,6 +242,7 @@ export function getWorkspaceStageAdditionalTools(
       workspaceAgentReadAccess: ctx.workspaceAgentReadAccess,
       allowedWorkspaceStages: readAccess?.workspace as readonly ScriptStageId[] | undefined,
       allowedMaterialStages: readAccess?.material as readonly MaterialKind[] | undefined,
+      allowedSkillKinds: readAccess?.skill as readonly SkillKind[] | undefined,
       applyToStageEditor: ctx.applyToStageEditor,
       selectPlotChildStage: ctx.selectPlotChildStage
         ? (stageId) => ctx.selectPlotChildStage?.(stageId)
@@ -298,6 +299,7 @@ export function getWorkspaceStageAdditionalTools(
     workspaceAgentReadAccess: ctx.workspaceAgentReadAccess,
     allowedWorkspaceStages: readAccess?.workspace as readonly ShortStageId[] | undefined,
     allowedMaterialStages: readAccess?.material as readonly MaterialKind[] | undefined,
+    allowedSkillKinds: readAccess?.skill as readonly SkillKind[] | undefined,
     applyToStageEditor: ctx.applyToStageEditor,
     selectPlotChildStage: ctx.selectPlotChildStage
       ? (stageId) => ctx.selectPlotChildStage?.(stageId)

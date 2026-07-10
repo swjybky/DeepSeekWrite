@@ -12,6 +12,8 @@ MaterialKind = Literal["character", "gimmick", "plot", "draft", "other"]
 SkillType = Literal["long", "short", "script"]
 SkillKind = Literal["general", "plot", "style", "other"]
 
+OFFICIAL_GENERAL_SKILL_LIBRARY_ID = "official-general-skill-library"
+
 WORKSPACE_BOOK_TYPES: tuple[str, ...] = ("short", "long", "script")
 LIBRARY_TYPES: tuple[str, ...] = ("short", "long", "script")
 MEMORY_TAGS: tuple[str, ...] = (
@@ -1030,6 +1032,8 @@ def _skill_stage_item(
     created_at: Any | None = None,
     updated_at: Any | None = None,
     source_common_skill_id: Any | None = None,
+    source_skill_id: Any | None = None,
+    source_skill_entry_id: Any | None = None,
 ) -> dict[str, str]:
     item = {
         "id": str(item_id or new_skill_stage_item_id()),
@@ -1041,6 +1045,12 @@ def _skill_stage_item(
     source_id = str(source_common_skill_id or "").strip()
     if source_id:
         item["source_common_skill_id"] = source_id
+    source_library_id = str(source_skill_id or "").strip()
+    if source_library_id:
+        item["source_skill_id"] = source_library_id
+    source_entry_id = str(source_skill_entry_id or "").strip()
+    if source_entry_id:
+        item["source_skill_entry_id"] = source_entry_id
     return item
 
 
@@ -1065,6 +1075,8 @@ def normalize_skill_stage_items(stage_id: str, raw: Any) -> list[dict[str, str]]
                         created_at=item.get("created_at"),
                         updated_at=item.get("updated_at"),
                         source_common_skill_id=item.get("source_common_skill_id"),
+                        source_skill_id=item.get("source_skill_id"),
+                        source_skill_entry_id=item.get("source_skill_entry_id"),
                     ),
                 )
             elif isinstance(item, str) and item.strip():
@@ -1081,6 +1093,8 @@ def normalize_skill_stage_items(stage_id: str, raw: Any) -> list[dict[str, str]]
                     created_at=raw.get("created_at"),
                     updated_at=raw.get("updated_at"),
                     source_common_skill_id=raw.get("source_common_skill_id"),
+                    source_skill_id=raw.get("source_skill_id"),
+                    source_skill_entry_id=raw.get("source_skill_entry_id"),
                 ),
             ]
     return []
@@ -1175,6 +1189,7 @@ class Skill:
     skill_type: SkillType = "short"
     skill_kind: str = "general"
     overview: str = ""
+    is_builtin: bool = False
     stages: dict[str, list[dict[str, str]]] = field(default_factory=default_skill_stages)
     output_dir: str = ""
     created_at: str = ""
@@ -1204,6 +1219,7 @@ class Skill:
             skill_type=normalize_skill_type(data.get("skill_type")),
             skill_kind=normalize_skill_kind(data.get("skill_kind")),
             overview=str(data.get("overview") or ""),
+            is_builtin=normalize_bool(data.get("is_builtin")),
             stages=stages,
             output_dir=str(data.get("output_dir") or ""),
             created_at=str(data.get("created_at") or ""),

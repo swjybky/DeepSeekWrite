@@ -57,7 +57,17 @@ function matchingSkillKindForStage(stageId: SkillStageId): SkillKind | null {
   return null
 }
 
-function skillKindsForStage(stageId: SkillStageId): SkillKind[] {
+function skillKindsForStage(
+  stageId: SkillStageId,
+  configuredKinds?: readonly SkillKind[],
+): SkillKind[] {
+  if (configuredKinds !== undefined) {
+    return [
+      ...new Set(
+        configuredKinds.filter((kind) => SKILL_KIND_KEYS.includes(kind)),
+      ),
+    ]
+  }
   const kinds: SkillKind[] = ['general']
   const matched = matchingSkillKindForStage(stageId)
   if (matched) kinds.push(matched)
@@ -78,10 +88,11 @@ function linkedSkillsForStage(
   linkedSkill: Skill | null | undefined,
   stageId: SkillStageId,
   linkedSkillsByKind?: Partial<Record<SkillKind, Skill[]>>,
+  allowedSkillKinds?: readonly SkillKind[],
 ): Skill[] {
   if (hasLinkedSkillsByKind(linkedSkillsByKind)) {
     const byId = new Map<string, Skill>()
-    for (const kind of skillKindsForStage(stageId)) {
+    for (const kind of skillKindsForStage(stageId, allowedSkillKinds)) {
       for (const skill of linkedSkillsByKind?.[kind] ?? []) {
         if (skill?.id) byId.set(skill.id, skill)
       }
@@ -129,32 +140,38 @@ export function getLoadableSkillsForStage(
   linkedSkill: Skill | null | undefined,
   stageId: string,
   linkedSkillsByKind?: Partial<Record<SkillKind, Skill[]>>,
+  allowedSkillKinds?: readonly SkillKind[],
 ): LoadableSkill[] {
   const effectiveStageId = resolveLoadableSkillStageId(stageId)
   if (!effectiveStageId) return []
+  const sourceStageIds = hasLinkedSkillsByKind(linkedSkillsByKind)
+    ? LOADABLE_SKILL_STAGE_IDS
+    : [effectiveStageId]
   return linkedSkillsForStage(
     linkedSkill,
     effectiveStageId,
     linkedSkillsByKind,
+    allowedSkillKinds,
   ).flatMap((skill) => {
-    const entries = skill.stages?.[effectiveStageId] ?? []
-    return entries.flatMap((entry) => {
-      const body = String(entry.body ?? '')
-      const meta = parseSkillFrontMatter(body)
-      if (!meta) return []
-      return [
-        {
-          id: entry.id,
-          libraryId: skill.id,
-          libraryTitle: skill.title || '未命名技能库',
-          skillKind: skill.skill_kind ?? 'general',
-          stageId: effectiveStageId,
-          name: meta.name,
-          description: meta.description,
-          body,
-        },
-      ]
-    })
+    return sourceStageIds.flatMap((sourceStageId) =>
+      (skill.stages?.[sourceStageId] ?? []).flatMap((entry) => {
+        const body = String(entry.body ?? '')
+        const meta = parseSkillFrontMatter(body)
+        if (!meta) return []
+        return [
+          {
+            id: entry.id,
+            libraryId: skill.id,
+            libraryTitle: skill.title || '未命名技能库',
+            skillKind: skill.skill_kind ?? 'general',
+            stageId: sourceStageId,
+            name: meta.name,
+            description: meta.description,
+            body,
+          },
+        ]
+      }),
+    )
   })
 }
 
@@ -174,14 +191,16 @@ export function appendLoadableSkillsToPrompt(
   linkedSkill: Skill | null | undefined,
   stageId: string,
   linkedSkillsByKind?: Partial<Record<SkillKind, Skill[]>>,
+  allowedSkillKinds?: readonly SkillKind[],
 ): string {
   const effectiveStageId = resolveLoadableSkillStageId(stageId)
   const skills = getLoadableSkillsForStage(
     linkedSkill,
     stageId,
     linkedSkillsByKind,
+    allowedSkillKinds,
   )
-  if (skills.length === 0) return prompt
+  if (!effectiveStageId || skills.length === 0) return prompt
 
   const rows = skills
     .map(
@@ -195,7 +214,9 @@ export function appendLoadableSkillsToPrompt(
 ---
 
 # 可加载技能
-已绑定技能库分类：通用技能库 + 当前阶段匹配分类 + 其他技能库
+当前阶段关联技能分类：${skillKindsForStage(effectiveStageId, allowedSkillKinds)
+  .map((kind) => SKILL_KIND_LABELS[kind])
+  .join('、')}
 当前阶段：${stageLabel(stageId)}（${effectiveStageId ?? stageId}）
 
 如需使用下列技能，且本轮上下文中尚未出现「【已加载技能：技能名】」或「【已加载技能内容】」，必须调用工具 load_skill，并传入当前阶段 stage_id 与精确的 skill_name。
@@ -210,6 +231,7 @@ ${rows}`
 export function buildLoadSkillTool(input: {
   linkedSkill?: Skill | null
   linkedSkillsByKind?: Partial<Record<SkillKind, Skill[]>>
+  allowedSkillKinds?: readonly SkillKind[]
   currentStageId: string
 }): AgentTool {
   const effectiveStageId = resolveLoadableSkillStageId(input.currentStageId)
@@ -217,7 +239,7 @@ export function buildLoadSkillTool(input: {
     name: 'load_skill',
     label: '加载技能',
     description:
-      '加载当前书籍绑定技能库中指定阶段、指定技能名的完整技能内容。只允许加载当前智能体阶段的技能。仅当当前上下文尚未包含「【已加载技能：...】」或「【已加载技能内容】」时调用；如果用户已通过 / 技能快捷机制注入技能正文，禁止重复调用本工具，直接使用上下文中的技能内容。',
+      '从当前智能体已关联的技能分类库中，按技能名加载完整技能内容。stage_id 只用于校验当前智能体。仅当当前上下文尚未包含「【已加载技能：...】」或「【已加载技能内容】」时调用；如果用户已通过 / 技能快捷机制注入技能正文，禁止重复调用本工具，直接使用上下文中的技能内容。',
     parameters: Type.Object({
       stage_id: Type.String({
         description: `当前智能体阶段 ID，必须传 ${effectiveStageId ?? input.currentStageId}`,
@@ -250,10 +272,11 @@ export function buildLoadSkillTool(input: {
         input.linkedSkill,
         currentStageId,
         input.linkedSkillsByKind,
+        input.allowedSkillKinds,
       )
       if (skills.length === 0) {
         return textBlock(
-          `已绑定技能库，但「${stageLabel(currentStageId)}」暂无可加载技能。请确认技能正文开头包含 name 和 description front matter，并且技能库分类适用于当前阶段。`,
+          `已绑定技能库，但「${stageLabel(currentStageId)}」暂无可加载技能。请确认技能正文开头包含 name 和 description front matter，并在创作空间设置中为当前阶段关联对应技能分类。`,
         )
       }
 

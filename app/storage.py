@@ -16,6 +16,7 @@ from app.common_skill_store import read_common_skills
 from app.models import (
     Book,
     LONG_STAGE_KEYS,
+    LIBRARY_TYPES,
     MATERIAL_KIND_KEYS,
     MATERIAL_STAGE_KEYS,
     SCRIPT_STAGE_KEYS,
@@ -23,6 +24,7 @@ from app.models import (
     SKILL_KIND_KEYS,
     SKILL_KIND_STAGE_KEYS,
     SKILL_STAGE_KEYS,
+    OFFICIAL_GENERAL_SKILL_LIBRARY_ID,
     normalize_book_status,
     normalize_book_type,
     normalize_material_type,
@@ -689,12 +691,14 @@ def _validate_read_access_entry(
     entry: dict[str, Any],
     valid_workspace_stages: set[str],
     valid_material_stages: set[str],
+    valid_skill_kinds: set[str],
     required_workspace_stages: tuple[str, ...] = (),
 ) -> dict[str, Any] | None:
     if not isinstance(entry, dict):
         return None
     workspace_raw = entry.get("workspace")
     material_raw = entry.get("material")
+    skill_raw = entry.get("skill")
     out: dict[str, Any] = {}
     workspace: list[str] = []
     if isinstance(workspace_raw, list):
@@ -717,6 +721,13 @@ def _validate_read_access_entry(
             if kind and kind in valid_material_stages and kind not in material:
                 material.append(kind)
         out["material"] = material
+    if isinstance(skill_raw, list):
+        skill: list[str] = []
+        for raw_id in skill_raw:
+            skill_id = str(raw_id)
+            if skill_id in valid_skill_kinds and skill_id not in skill:
+                skill.append(skill_id)
+        out["skill"] = skill
     return out if out else None
 
 
@@ -734,6 +745,7 @@ def sync_workspace_agent_read_access_defaults(
         is_script = normalized == "script"
         valid_workspace = set(SCRIPT_STAGE_KEYS if is_script else SHORT_STAGE_KEYS)
     valid_material = set(MATERIAL_KIND_KEYS)
+    valid_skill = set(SKILL_KIND_KEYS)
 
     user_config = read_workspace_agent_read_access_for_type(normalized)
 
@@ -747,6 +759,7 @@ def sync_workspace_agent_read_access_defaults(
             raw_entry,
             valid_workspace,
             valid_material,
+            valid_skill,
             _required_workspace_stages_for_read_access(normalized, agent_id),
         )
         if validated:
@@ -785,6 +798,7 @@ def read_workspace_agent_read_access_defaults(
         is_script = normalized == "script"
         valid_workspace = set(SCRIPT_STAGE_KEYS if is_script else SHORT_STAGE_KEYS)
     valid_material = set(MATERIAL_KIND_KEYS)
+    valid_skill = set(SKILL_KIND_KEYS)
 
     target_path = _builtin_read_access_default_path(normalized)
     if not target_path.is_file():
@@ -808,6 +822,7 @@ def read_workspace_agent_read_access_defaults(
             entry,
             valid_workspace,
             valid_material,
+            valid_skill,
             _required_workspace_stages_for_read_access(normalized, agent_id),
         )
         if validated:
@@ -1200,63 +1215,55 @@ def load_skills(path: Path) -> dict[str, Skill]:
     return skills
 
 
-def _load_default_skill_template() -> dict[str, Any] | None:
-    """从 bundle_root 读取默认技能模板 JSON。"""
-    template_path = (
-        bundle_root() / "app" / "prompt_defaults" / "skill" / "default_skill_template.json"
-    )
-    if not template_path.exists():
-        return None
-    try:
-        raw = template_path.read_text(encoding="utf-8")
-        return json.loads(raw) if raw.strip() else None
-    except (json.JSONDecodeError, OSError):
-        return None
-
-
-def _seed_default_skill(skills_path: Path) -> dict[str, Skill]:
-    """首次启动无技能时，从内置模板创建默认参考技能。"""
-    template = _load_default_skill_template()
-    if not template:
-        return {}
+def _official_general_skill() -> Skill:
+    """从随应用发布的通用技能资源构建只读官方技能库。"""
     now = datetime.now(timezone.utc).strftime(ISO_FMT)
-    sid = new_skill_id()
-    title = str(template.get("title") or "参考技能")
-    raw_stages = template.get("stages") or {}
-    merged_stages = normalize_skill_stages_from_storage(
-        raw_stages if isinstance(raw_stages, dict) else {}
-    )
-    stages: dict[str, list[dict[str, str]]] = {}
-    for stage_key in SKILL_STAGE_KEYS:
-        entries = merged_stages.get(stage_key, [])
-        normalized: list[dict[str, str]] = []
-        for entry in entries:
-            if not isinstance(entry, dict):
+    stages = normalize_skill_stages_from_storage(None)
+    for common_skill in read_common_skills():
+        source_id = str(common_skill.get("id") or "").strip() or new_skill_stage_item_id()
+        title = str(common_skill.get("title") or "未命名技能").strip() or "未命名技能"
+        body = str(common_skill.get("body") or "")
+        for stage_id in common_skill.get("effective_stages") or []:
+            if stage_id not in SKILL_STAGE_KEYS:
                 continue
-            body = str(entry.get("body") or "")
-            entry_title = str(entry.get("title") or "未命名技能").strip() or "未命名技能"
-            normalized.append({
-                "id": new_skill_stage_item_id(),
-                "title": entry_title,
+            stages[stage_id].append({
+                "id": source_id,
+                "title": title,
                 "body": body,
                 "created_at": now,
                 "updated_at": now,
             })
-        stages[stage_key] = normalized
-    skill = Skill(
-        id=sid,
-        title=title,
+    return Skill(
+        id=OFFICIAL_GENERAL_SKILL_LIBRARY_ID,
+        title="官方内置通用技能库",
         skill_type="short",
         skill_kind="general",
-        overview=str(template.get("overview") or ""),
+        overview="官方提供的通用写作技能，仅供加载和使用。",
         stages=stages,
+        is_builtin=True,
         output_dir="",
         created_at=now,
         updated_at=now,
     )
-    skills = {sid: skill}
-    save_skills_atomic(skills_path, skills)
-    return skills
+
+
+def _skill_stage_content_signature(
+    stages: dict[str, list[dict[str, Any]]],
+) -> tuple[tuple[str, tuple[tuple[str, str, str], ...]], ...]:
+    return tuple(
+        (
+            stage_id,
+            tuple(
+                (
+                    str(entry.get("id") or ""),
+                    str(entry.get("title") or ""),
+                    str(entry.get("body") or ""),
+                )
+                for entry in stages.get(stage_id, [])
+            ),
+        )
+        for stage_id in SKILL_STAGE_KEYS
+    )
 
 
 def save_materials_atomic(path: Path, materials: dict[str, Material]) -> None:
@@ -1368,11 +1375,28 @@ class BookStore:
         self._reload_books_unlocked()
         self._reload_materials_unlocked()
         self._reload_skills_unlocked()
+        self._ensure_official_general_skill_unlocked()
         self._normalize_all_book_material_links_unlocked()
         self._normalize_all_book_skill_links_unlocked()
-        if not self._skills and not self._skills_path.exists():
-            self._skills = _seed_default_skill(self._skills_path)
-            self._skills_signature = _file_signature(self._skills_path)
+
+    def _ensure_official_general_skill_unlocked(self) -> None:
+        expected = _official_general_skill()
+        existing = self._skills.get(OFFICIAL_GENERAL_SKILL_LIBRARY_ID)
+        if existing is not None:
+            expected.created_at = existing.created_at or expected.created_at
+            same_content = (
+                existing.title == expected.title
+                and existing.skill_kind == expected.skill_kind
+                and existing.is_builtin
+                and existing.overview == expected.overview
+                and _skill_stage_content_signature(existing.stages)
+                == _skill_stage_content_signature(expected.stages)
+            )
+            if same_content:
+                return
+        self._skills[expected.id] = expected
+        save_skills_atomic(self._skills_path, self._skills)
+        self._mark_skills_saved_unlocked()
 
     def _reload_books_unlocked(self) -> None:
         signature = _file_signature(self._path)
@@ -1480,7 +1504,7 @@ class BookStore:
         skill = self._skills.get(skill_id)
         if skill is None:
             return False
-        if skill.skill_type != book_type:
+        if not skill.is_builtin and skill.skill_type != book_type:
             return False
         return skill.skill_kind == skill_kind
 
@@ -1492,7 +1516,7 @@ class BookStore:
         out: dict[str, list[str]] = {kind: [] for kind in SKILL_KIND_KEYS}
         sid = (skill_id or "").strip()
         skill = self._skills.get(sid)
-        if not sid or skill is None or skill.skill_type != book_type:
+        if not sid or skill is None or (not skill.is_builtin and skill.skill_type != book_type):
             return out
         if skill.skill_kind in out:
             out[skill.skill_kind] = [sid]
@@ -1948,6 +1972,7 @@ class BookStore:
                     "title": s.title,
                     "skill_type": s.skill_type,
                     "skill_kind": s.skill_kind,
+                    "is_builtin": s.is_builtin,
                     "stage_counts": {
                         stage_id: len(s.stages.get(stage_id, []))
                         for stage_id in SKILL_STAGE_KEYS
@@ -1978,7 +2003,6 @@ class BookStore:
         title: str,
         skill_type: str = "short",
         workspace_root: str | None = None,
-        load_common_skills: bool = False,
         skill_kind: str | None = None,
     ) -> dict[str, Any]:
         """创建新技能集合"""
@@ -2011,12 +2035,6 @@ class BookStore:
                     )
             sid = new_skill_id()
             stages = normalize_skill_stages_from_storage(None)
-            if load_common_skills:
-                _append_missing_common_skills(
-                    stages,
-                    now,
-                    SKILL_KIND_STAGE_KEYS.get(sk, SKILL_STAGE_KEYS),
-                )
             s = Skill(
                 id=sid,
                 title=title.strip() or "未命名技能",
@@ -2034,30 +2052,114 @@ class BookStore:
             _write_skill_stages_to_disk(s)
             return s.to_dict()
 
-    def load_common_skills_to_skill(self, skill_id: str) -> dict[str, Any] | None:
-        """将内置通用技能合并到已有技能库，已存在的通用技能不会重复加载。"""
+    def list_skill_import_sources(self, target_skill_id: str) -> list[dict[str, Any]]:
+        """列出可向目标技能库复制的其他技能库条目。"""
         with _data_file_lock():
             self._reload_skills_unlocked()
-            sid = (skill_id or "").strip()
-            s = self._skills.get(sid)
-            if s is None:
+            target = self._skills.get((target_skill_id or "").strip())
+            if target is None:
+                return []
+            allowed = set(SKILL_KIND_STAGE_KEYS.get(target.skill_kind, SKILL_STAGE_KEYS))
+            rows: list[dict[str, Any]] = []
+            for source in self._skills.values():
+                if source.id == target.id:
+                    continue
+                stages: dict[str, list[dict[str, str]]] = {}
+                for stage_id in SKILL_STAGE_KEYS:
+                    if stage_id not in allowed:
+                        continue
+                    entries = source.stages.get(stage_id, [])
+                    if entries:
+                        stages[stage_id] = [
+                            {"id": str(entry.get("id") or ""), "title": str(entry.get("title") or "未命名技能")}
+                            for entry in entries
+                        ]
+                if not stages:
+                    continue
+                rows.append({
+                    "id": source.id,
+                    "title": source.title,
+                    "skill_type": source.skill_type,
+                    "skill_kind": source.skill_kind,
+                    "is_builtin": source.is_builtin,
+                    "stages": stages,
+                })
+            return sorted(rows, key=lambda row: (not bool(row["is_builtin"]), row["skill_type"], row["title"]))
+
+    def import_skill_entries(
+        self,
+        target_skill_id: str,
+        selections: list[dict[str, Any]] | None = None,
+    ) -> dict[str, Any] | None:
+        """按来源库、阶段和条目 ID 将技能条目复制到目标库。"""
+        with _data_file_lock():
+            self._reload_skills_unlocked()
+            target = self._skills.get((target_skill_id or "").strip())
+            if target is None:
                 return None
+            if target.is_builtin:
+                raise PermissionError("官方内置通用技能库为只读，不能写入技能")
+            allowed = set(SKILL_KIND_STAGE_KEYS.get(target.skill_kind, SKILL_STAGE_KEYS))
+            added_count = 0
+            skipped_count = 0
+            seen: set[tuple[str, str, str]] = set()
             now = _utc_now_iso()
-            added_count, available_count = _append_missing_common_skills(
-                s.stages,
-                now,
-                SKILL_KIND_STAGE_KEYS.get(s.skill_kind, SKILL_STAGE_KEYS),
-            )
-            if added_count > 0:
-                s.updated_at = now
+            for selection in selections or []:
+                if not isinstance(selection, dict):
+                    skipped_count += 1
+                    continue
+                source_id = str(selection.get("source_skill_id") or "").strip()
+                stage_id = str(selection.get("stage_id") or "").strip()
+                entry_id = str(selection.get("entry_id") or "").strip()
+                key = (source_id, stage_id, entry_id)
+                if key in seen or stage_id not in allowed:
+                    skipped_count += 1
+                    continue
+                seen.add(key)
+                source = self._skills.get(source_id)
+                if source is None or source.id == target.id:
+                    skipped_count += 1
+                    continue
+                source_entry = next(
+                    (entry for entry in source.stages.get(stage_id, []) if str(entry.get("id") or "") == entry_id),
+                    None,
+                )
+                if source_entry is None:
+                    skipped_count += 1
+                    continue
+                target_entries = target.stages.setdefault(stage_id, [])
+                duplicate = any(
+                    str(entry.get("source_skill_id") or "") == source_id
+                    and str(entry.get("source_skill_entry_id") or "") == entry_id
+                    for entry in target_entries
+                )
+                if not duplicate and source_id == OFFICIAL_GENERAL_SKILL_LIBRARY_ID:
+                    duplicate = any(
+                        str(entry.get("source_common_skill_id") or "") == entry_id
+                        for entry in target_entries
+                    )
+                if duplicate:
+                    skipped_count += 1
+                    continue
+                target_entries.append({
+                    "id": new_skill_stage_item_id(),
+                    "title": str(source_entry.get("title") or "未命名技能"),
+                    "body": str(source_entry.get("body") or ""),
+                    "created_at": now,
+                    "updated_at": now,
+                    "source_skill_id": source_id,
+                    "source_skill_entry_id": entry_id,
+                })
+                added_count += 1
+            if added_count:
+                target.updated_at = now
                 save_skills_atomic(self._skills_path, self._skills)
                 self._mark_skills_saved_unlocked()
-                _write_skill_stages_to_disk(s)
+                _write_skill_stages_to_disk(target)
             return {
-                "skill": s.to_dict(),
+                "skill": target.to_dict(),
                 "added_count": added_count,
-                "available_count": available_count,
-                "already_loaded": available_count > 0 and added_count == 0,
+                "skipped_count": skipped_count,
             }
 
     def save_skill(
@@ -2075,6 +2177,8 @@ class BookStore:
             s = self._skills.get(skill_id)
             if s is None:
                 return None
+            if s.is_builtin:
+                raise PermissionError("官方内置通用技能库为只读，不能修改")
             if title is not None:
                 s.title = title.strip()
             if skill_type is not None:
@@ -2099,6 +2203,8 @@ class BookStore:
             if not sid or sid not in self._skills:
                 return False
             s = self._skills[sid]
+            if s.is_builtin:
+                return False
             output_dir = s.output_dir
             del self._skills[sid]
             save_skills_atomic(self._skills_path, self._skills)

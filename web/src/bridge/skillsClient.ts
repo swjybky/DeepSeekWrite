@@ -4,8 +4,10 @@ import { deleteAiChatSessionsForOwner } from './aiChatHistoryClient'
 import {
   normalizeSkill,
   normalizeSkillSummary,
-  type LoadCommonSkillsResult,
+  type ImportSkillEntriesResult,
   type Skill,
+  type SkillImportSelection,
+  type SkillImportSource,
   type SkillKind,
   type SkillSummary,
   type SkillType,
@@ -14,8 +16,9 @@ import {
   mockCreateSkill,
   mockDeleteSkill,
   mockGetSkill,
+  mockImportSkillEntries,
   mockListSkills,
-  mockLoadCommonSkillsToSkill,
+  mockListSkillImportSources,
   mockSaveSkill,
 } from './mockStore'
 
@@ -41,7 +44,6 @@ export async function createSkill(
   title: string,
   skill_type: SkillType = 'short',
   workspace_root?: string | null,
-  load_common_skills = false,
   skill_kind: SkillKind = 'general',
 ): Promise<Skill> {
   const api = await getBridgeApi()
@@ -51,12 +53,11 @@ export async function createSkill(
         title,
         skill_type,
         workspace_root ?? null,
-        load_common_skills,
         skill_kind,
       ),
     )
   }
-  return mockCreateSkill(title, skill_type, load_common_skills, skill_kind)
+  return mockCreateSkill(title, skill_type, skill_kind)
 }
 
 
@@ -73,22 +74,32 @@ export async function saveSkill(
   return mockSaveSkill(skill_id, opts)
 }
 
-export async function loadCommonSkillsToSkill(
-  skill_id: string,
-): Promise<LoadCommonSkillsResult | null> {
+export async function listSkillImportSources(
+  target_skill_id: string,
+): Promise<SkillImportSource[]> {
   const api = await getBridgeApi()
-  if (api?.load_common_skills_to_skill) {
-    const raw = await api.load_common_skills_to_skill(skill_id)
+  if (api?.list_skill_import_sources) {
+    return await api.list_skill_import_sources(target_skill_id)
+  }
+  return mockListSkillImportSources(target_skill_id)
+}
+
+export async function importSkillEntries(
+  target_skill_id: string,
+  selections: SkillImportSelection[],
+): Promise<ImportSkillEntriesResult | null> {
+  const api = await getBridgeApi()
+  if (api?.import_skill_entries) {
+    const raw = await api.import_skill_entries(target_skill_id, selections)
     return raw
       ? {
           skill: normalizeSkill(raw.skill),
           added_count: Number(raw.added_count || 0),
-          available_count: Number(raw.available_count || 0),
-          already_loaded: Boolean(raw.already_loaded),
+          skipped_count: Number(raw.skipped_count || 0),
         }
       : null
   }
-  return mockLoadCommonSkillsToSkill(skill_id)
+  return mockImportSkillEntries(target_skill_id, selections)
 }
 
 export async function deleteSkill(skill_id: string): Promise<boolean> {

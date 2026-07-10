@@ -3,10 +3,9 @@ import {
   bookTypeLabel,
   countLibraryGroupMembers,
   MATERIAL_KIND_KEYS,
+  MATERIAL_KIND_LABELS,
   SKILL_KIND_KEYS,
   SKILL_KIND_LABELS,
-  materialMetaLabel,
-  skillTypeLabel,
   type BookSummary,
   type MaterialLibraryGroup,
   type MaterialSummary,
@@ -29,6 +28,7 @@ export interface CardItem {
   meta?: string
   outputDir?: string
   coverData?: string
+  isBuiltin?: boolean
   to: string
 }
 
@@ -94,12 +94,16 @@ export function CardGrid({ items, emptyText = '暂无项目', onDelete, deleting
                       {item.meta}
                       {item.genre && ` · ${item.genre}`}
                     </span>
-                  ) : item.type === 'skill' || item.type === 'skill_group' ? (
+                  ) : item.type === 'skill' ? (
+                    <span className="card-type" title={item.meta || '技能库'}>
+                      {item.meta || '技能库'}
+                    </span>
+                  ) : item.type === 'skill_group' ? (
                     <span className="card-type" title={[
-                      item.type === 'skill_group' ? '技能分组' : '技能库',
+                      '技能分组',
                       item.meta,
                     ].filter(Boolean).join(' · ')}>
-                      {item.type === 'skill_group' ? '技能分组' : '技能库'}
+                      技能分组
                       {item.meta && ` · ${item.meta}`}
                     </span>
                   ) : item.type === 'material_group' ? (
@@ -123,7 +127,7 @@ export function CardGrid({ items, emptyText = '暂无项目', onDelete, deleting
                 {truncatePath(item.outputDir, 24)}
               </span>
             )}
-            {onDelete && (
+            {onDelete && !item.isBuiltin && (
               <button
                 type="button"
                 className="card-delete-btn"
@@ -205,7 +209,7 @@ export function materialToCardItem(material: MaterialSummary): CardItem {
     title: material.title,
     type: 'material',
     subtype: material.material_type,
-    meta: materialMetaLabel(material),
+    meta: MATERIAL_KIND_LABELS[material.material_kind],
     genre: material.parent_genre,
     outputDir: material.output_dir,
     to: `/material/${material.id}`,
@@ -215,13 +219,14 @@ export function materialToCardItem(material: MaterialSummary): CardItem {
 // 辅助函数：将 SkillSummary 转换为 CardItem
 // eslint-disable-next-line react-refresh/only-export-components
 export function skillToCardItem(skill: SkillSummary): CardItem {
-  const count = skill.stage_skill_count ?? 0
   return {
     id: skill.id,
     title: skill.title,
     type: 'skill',
     subtype: skill.skill_type,
-    meta: `${skillTypeLabel(skill.skill_type)} · ${SKILL_KIND_LABELS[skill.skill_kind]} · ${count > 0 ? `${count} 个阶段技能` : '暂无阶段技能'}`,
+    // 技能库卡片封面标签只展示技能分类，避免与卡片类型“技能库”重复。
+    meta: skill.is_builtin ? '官方内置 · 全类型' : SKILL_KIND_LABELS[skill.skill_kind],
+    isBuiltin: skill.is_builtin,
     outputDir: skill.output_dir,
     to: `/skill/${skill.id}`,
   }

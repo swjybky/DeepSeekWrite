@@ -4,7 +4,7 @@
 
 ## 项目概述
 
-DeepSeekWrite 是一款本地桌面写作应用（网文/短篇小说创作工具），后端基于 **pywebview**（Python），前端基于 **React 19 + TypeScript + Vite**。Python 后端通过 `js_api` 向前端暴露 API，数据持久化存储在项目目录下 `.data/` 的 JSON 文件中。
+Deep Write 是一款本地桌面写作应用（网文/短篇小说创作工具），后端基于 **pywebview**（Python），前端基于 **React 19 + TypeScript + Vite**。Python 后端通过 `js_api` 向前端暴露 API，数据持久化存储在项目目录下 `.data/` 的 JSON 文件中。
 
 ## 常用命令
 

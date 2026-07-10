@@ -55,7 +55,10 @@ import {
 import { createWorkspaceStreamFn } from '../pi/workspaceStreamFn'
 import { convertToLlmWithSkillAsUser } from '../pi/skillMessageTransform'
 import { refreshChatPanelTranscript } from '../pi/chatPanelTranscript'
-import { createMemoryAwareConvertToLlm } from '../pi/memoryMessageTransform'
+import {
+  createMemoryAwareConvertToLlm,
+  type WorkspaceRuntimeLocation,
+} from '../pi/memoryMessageTransform'
 import { captureBookMemoryFromMessages } from '../pi/memoryCapture'
 import {
   getLoadableSkillsForStage as getShortLoadableSkillsForStage,
@@ -74,8 +77,14 @@ import {
 import {
   resolveWorkspaceAgentReadAccess as resolveLongWorkspaceAgentReadAccess,
 } from '../workspaces/long/stageReadAccess'
-import { SHORT_WORKSPACE_CONTENT_STAGES } from '../workspaces/short/stages'
-import { SCRIPT_WORKSPACE_CONTENT_STAGES } from '../workspaces/script/stages'
+import {
+  SHORT_WORKSPACE_CONTENT_STAGES,
+  SHORT_WORKSPACE_STAGES,
+} from '../workspaces/short/stages'
+import {
+  SCRIPT_WORKSPACE_CONTENT_STAGES,
+  SCRIPT_WORKSPACE_STAGES,
+} from '../workspaces/script/stages'
 import { isLongStageId } from '../workspaces/long/stages'
 import {
   configureWorkspaceAttachmentOptions,
@@ -106,6 +115,30 @@ function isBookContentStageTarget(
   if (bookType === 'long') return isLongStageId(stageId)
   if (bookType === 'script') return SCRIPT_BOOK_CONTENT_STAGE_IDS.has(stageId)
   return SHORT_BOOK_CONTENT_STAGE_IDS.has(stageId)
+}
+
+function resolveBookRuntimeLocation(
+  props: Pick<Props, 'bookType' | 'stageId' | 'activeStageContentId'>,
+): WorkspaceRuntimeLocation | undefined {
+  if (props.bookType !== 'short' && props.bookType !== 'script') return undefined
+  const visibleStages =
+    props.bookType === 'script' ? SCRIPT_WORKSPACE_STAGES : SHORT_WORKSPACE_STAGES
+  const contentStages =
+    props.bookType === 'script'
+      ? SCRIPT_WORKSPACE_CONTENT_STAGES
+      : SHORT_WORKSPACE_CONTENT_STAGES
+  const stageLabel =
+    visibleStages.find((stage) => stage.id === props.stageId)?.label ??
+    contentStages.find((stage) => stage.id === props.stageId)?.label ??
+    String(props.stageId)
+  if (props.stageId !== 'plot_design') {
+    return { kind: 'stage', stageLabel }
+  }
+  const activeContentId = props.activeStageContentId ?? props.stageId
+  const stageDetailLabel = contentStages.find(
+    (stage) => stage.id === activeContentId,
+  )?.label
+  return { kind: 'stage', stageLabel, stageDetailLabel }
 }
 
 function resolvePromptReadAccess(
@@ -144,6 +177,15 @@ function resolvePromptAllowedMaterialKinds(
 ): readonly MaterialKind[] {
   return resolvePromptReadAccess(bookType, config, agentId)
     .material as readonly MaterialKind[]
+}
+
+function resolvePromptAllowedSkillKinds(
+  bookType: BookType | undefined,
+  config: WorkspaceAgentReadAccessConfig | null | undefined,
+  agentId: WorkspaceAgentId | string,
+): readonly SkillKind[] {
+  return (resolvePromptReadAccess(bookType, config, agentId).skill ??
+    []) as readonly SkillKind[]
 }
 
 function hasUserMessage(messages: AgentMessage[]): boolean {
@@ -414,17 +456,33 @@ function resolveQuickLoadableSkills(
 ): QuickLoadableSkill[] {
   if (workspaceType !== 'book') return []
   if (props.bookType === 'script') {
+    const agentId = (props.stageId === 'draft'
+      ? EXPERT_DRAFT_COORDINATOR_AGENT_ID
+      : props.stageId) as WorkspaceAgentId
     return getScriptLoadableSkillsForStage(
       props.linkedSkill,
       props.stageId,
       props.linkedSkillsByKind,
+      resolvePromptAllowedSkillKinds(
+        props.bookType,
+        props.workspaceAgentReadAccess,
+        agentId,
+      ),
     )
   }
   if (props.bookType === 'long') return []
+  const agentId = (props.stageId === 'draft'
+    ? EXPERT_DRAFT_COORDINATOR_AGENT_ID
+    : props.stageId) as WorkspaceAgentId
   return getShortLoadableSkillsForStage(
     props.linkedSkill,
     props.stageId,
     props.linkedSkillsByKind,
+    resolvePromptAllowedSkillKinds(
+      props.bookType,
+      props.workspaceAgentReadAccess,
+      agentId,
+    ),
   )
 }
 
@@ -657,7 +715,7 @@ function WorkspaceAiChatInner({
         })
         if (next) await p.onBookMemoriesCaptured?.(p.sessionBookId, next)
       } catch (error) {
-        console.warn('[DeepSeekWrite memory] capture skipped:', error)
+        console.warn('[Deep Write memory] capture skipped:', error)
       }
     })()
   }
@@ -726,13 +784,13 @@ function WorkspaceAiChatInner({
       try {
         await ensurePiAppStorage()
       } catch (e) {
-        console.warn('[DeepSeekWrite·AI面板] Pi 存储初始化失败，将重试:', e)
+        console.warn('[Deep Write·AI面板] Pi 存储初始化失败，将重试:', e)
         await new Promise((r) => window.setTimeout(r, 500))
         if (cancelled) return
         try {
           await ensurePiAppStorage()
         } catch (e2) {
-          console.error('[DeepSeekWrite·AI面板] Pi 存储初始化最终失败:', e2)
+          console.error('[Deep Write·AI面板] Pi 存储初始化最终失败:', e2)
           return
         }
       }
@@ -905,6 +963,13 @@ function WorkspaceAiChatInner({
                     ? EXPERT_DRAFT_COORDINATOR_AGENT_ID
                     : props.stageId) as WorkspaceAgentId,
                 ),
+                allowedSkillKinds: resolvePromptAllowedSkillKinds(
+                  props.bookType,
+                  props.workspaceAgentReadAccess,
+                  (props.bookType !== 'long' && props.stageId === 'draft'
+                    ? EXPERT_DRAFT_COORDINATOR_AGENT_ID
+                    : props.stageId) as WorkspaceAgentId,
+                ),
                 linkedMaterialsByKind: props.linkedMaterialsByKind,
                 linkedSkill: props.linkedSkill,
                 linkedSkillsByKind: props.linkedSkillsByKind,
@@ -939,6 +1004,11 @@ function WorkspaceAiChatInner({
             return {
               bookTitle: latest.bookTitle,
               bookType: latest.bookType,
+              bookGenre: latest.bookGenre,
+              currentLocation:
+                workspaceType === 'book'
+                  ? resolveBookRuntimeLocation(latest)
+                  : undefined,
               bookMemories: workspaceType === 'book' ? latest.bookMemories : [],
               userMemories: workspaceType === 'book' ? latest.userMemories : [],
             }
@@ -1297,6 +1367,13 @@ function WorkspaceAiChatInner({
                     ? EXPERT_DRAFT_COORDINATOR_AGENT_ID
                     : p.stageId) as WorkspaceAgentId,
                 ),
+                allowedSkillKinds: resolvePromptAllowedSkillKinds(
+                  p.bookType,
+                  p.workspaceAgentReadAccess,
+                  (p.bookType !== 'long' && p.stageId === 'draft'
+                    ? EXPERT_DRAFT_COORDINATOR_AGENT_ID
+                    : p.stageId) as WorkspaceAgentId,
+                ),
                 linkedMaterialsByKind: p.linkedMaterialsByKind,
                 linkedSkill: p.linkedSkill,
                 linkedSkillsByKind: p.linkedSkillsByKind,
@@ -1389,7 +1466,7 @@ function WorkspaceAiChatInner({
       agent.state.tools = includePiArtifacts
         ? mergeAgentToolsPreservingArtifacts(agent.state.tools, extras)
         : extras
-    })().catch((e: unknown) => console.warn('[DeepSeekWrite·工作台提示词]', e))
+    })().catch((e: unknown) => console.warn('[Deep Write·工作台提示词]', e))
   }, [
     chatReady,
     props.bookTitle,
@@ -1449,7 +1526,7 @@ function WorkspaceAiChatInner({
       }
       await iface.sendMessage(prompt, [])
     })().catch((error: unknown) => {
-      console.warn('[DeepSeekWrite·AI面板] 外部消息发送失败:', error)
+      console.warn('[Deep Write·AI面板] 外部消息发送失败:', error)
       void showAlert({
         title: '发送失败',
         message: error instanceof Error ? error.message : '无法发送初始化概述指令。',

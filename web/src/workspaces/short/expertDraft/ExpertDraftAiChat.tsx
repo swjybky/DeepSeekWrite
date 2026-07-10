@@ -25,7 +25,10 @@ import {
   syncWorkspaceModelButtonLabel,
 } from '../../../pi/resolveWorkspaceChatModel'
 import { convertToLlmWithSkillAsUser } from '../../../pi/skillMessageTransform'
-import { createMemoryAwareConvertToLlm } from '../../../pi/memoryMessageTransform'
+import {
+  createMemoryAwareConvertToLlm,
+  resolveSectionRuntimeLocation,
+} from '../../../pi/memoryMessageTransform'
 import { createPiSessionId } from '../../../pi/sessionId'
 import { ensurePiAppStorage } from '../../../pi/setupPiWorkspace'
 import { refreshChatPanelTranscript } from '../../../pi/chatPanelTranscript'
@@ -363,7 +366,7 @@ export function ExpertDraftAiChat(props: Props) {
         })
         if (next) await p.onBookMemoriesCaptured?.(p.bookId, next)
       } catch (error) {
-        console.warn('[DeepSeekWrite memory] expert capture skipped:', error)
+        console.warn('[Deep Write memory] expert capture skipped:', error)
       }
     })()
   }
@@ -553,6 +556,9 @@ export function ExpertDraftAiChat(props: Props) {
           ? EXPERT_SECTION_WRITER_AGENT_ID
           : EXPERT_DRAFT_COORDINATOR_AGENT_ID,
         propsLatestRef.current.linkedSkillsByKind,
+        (activePanelKindRef.current === 'section-writer'
+          ? propsLatestRef.current.writerReadAccess.skill
+          : propsLatestRef.current.readAccess.skill) as readonly SkillKind[] | undefined,
       )
 
     const refreshCoordinatorAgentState = (draft: ExpertDraft) => {
@@ -560,12 +566,11 @@ export function ExpertDraftAiChat(props: Props) {
       if (!agent) return
       const p = propsLatestRef.current
       agent.state.systemPrompt = buildExpertDraftCoordinatorSystemPrompt({
-        bookTitle: p.bookTitle,
-        bookGenre: p.bookGenre,
         draft,
         workspaceStages: p.stages,
         allowedWorkspaceStages: p.readAccess.workspace as readonly StageId[],
         allowedMaterialKinds: p.readAccess.material as readonly MaterialKind[],
+        allowedSkillKinds: p.readAccess.skill as readonly SkillKind[] | undefined,
         linkedMaterialsByKind: p.linkedMaterialsByKind,
         template: coordinatorPromptTemplateRef.current,
         linkedSkill: p.linkedSkill,
@@ -580,12 +585,11 @@ export function ExpertDraftAiChat(props: Props) {
       if (!agent || !section) return
       const p = propsLatestRef.current
       agent.state.systemPrompt = buildSectionWriterSystemPrompt({
-        bookTitle: p.bookTitle,
-        bookGenre: p.bookGenre,
         stageBody: section.body,
         workspaceStages: p.stages,
         allowedWorkspaceStages: p.writerReadAccess.workspace as readonly StageId[],
         allowedMaterialKinds: p.writerReadAccess.material as readonly MaterialKind[],
+        allowedSkillKinds: p.writerReadAccess.skill as readonly SkillKind[] | undefined,
         linkedMaterialsByKind: p.linkedMaterialsByKind,
         template: sectionWriterPromptTemplateRef.current,
         linkedSkill: p.linkedSkill,
@@ -598,13 +602,13 @@ export function ExpertDraftAiChat(props: Props) {
       try {
         await ensurePiAppStorage()
       } catch (e) {
-        console.warn('[DeepSeekWrite·正文专家面板] Pi 存储初始化失败，将重试:', e)
+        console.warn('[Deep Write·正文专家面板] Pi 存储初始化失败，将重试:', e)
         await new Promise((r) => window.setTimeout(r, 500))
         if (cancelled) return
         try {
           await ensurePiAppStorage()
         } catch (e2) {
-          console.error('[DeepSeekWrite·正文专家面板] Pi 存储初始化最终失败:', e2)
+          console.error('[Deep Write·正文专家面板] Pi 存储初始化最终失败:', e2)
           return
         }
       }
@@ -665,6 +669,8 @@ export function ExpertDraftAiChat(props: Props) {
           () => ({
             bookTitle: propsLatestRef.current.bookTitle,
             bookType: 'short',
+            bookGenre: propsLatestRef.current.bookGenre,
+            currentLocation: { kind: 'coordinator' },
             bookMemories: propsLatestRef.current.bookMemories,
             userMemories: propsLatestRef.current.userMemories,
           }),
@@ -676,12 +682,11 @@ export function ExpertDraftAiChat(props: Props) {
         toolExecution: 'sequential',
         initialState: {
           systemPrompt: buildExpertDraftCoordinatorSystemPrompt({
-            bookTitle: props.bookTitle,
-            bookGenre: props.bookGenre,
             draft: props.expertDraft,
             workspaceStages: props.stages,
             allowedWorkspaceStages: props.readAccess.workspace as readonly StageId[],
             allowedMaterialKinds: props.readAccess.material as readonly MaterialKind[],
+            allowedSkillKinds: props.readAccess.skill as readonly SkillKind[] | undefined,
             linkedMaterialsByKind: props.linkedMaterialsByKind,
             template: coordinatorTemplate,
             linkedSkill: props.linkedSkill,
@@ -778,12 +783,23 @@ export function ExpertDraftAiChat(props: Props) {
           sessionId: resolveWriterPiSessionId(),
           convertToLlm: createMemoryAwareConvertToLlm(
             convertToLlmWithSkillAsUser,
-            () => ({
-              bookTitle: propsLatestRef.current.bookTitle,
-              bookType: 'short',
-              bookMemories: propsLatestRef.current.bookMemories,
-              userMemories: propsLatestRef.current.userMemories,
-            }),
+            () => {
+              const latest = propsLatestRef.current
+              const sectionId = latest.expertDraft.active_section_id ?? ''
+              return {
+                bookTitle: latest.bookTitle,
+                bookType: 'short',
+                bookGenre: latest.bookGenre,
+                currentSectionId: sectionId || undefined,
+                currentLocation: resolveSectionRuntimeLocation(
+                  latest.expertDraft,
+                  sectionId,
+                  'short',
+                ),
+                bookMemories: latest.bookMemories,
+                userMemories: latest.userMemories,
+              }
+            },
           ),
           getApiKey: createWorkspaceModelApiKeyResolver(
             () => sectionWriterAgent?.state.model ?? model,
@@ -883,12 +899,11 @@ export function ExpertDraftAiChat(props: Props) {
     if (coordinatorAgent) {
       const p = propsLatestRef.current
       coordinatorAgent.state.systemPrompt = buildExpertDraftCoordinatorSystemPrompt({
-        bookTitle: p.bookTitle,
-        bookGenre: p.bookGenre,
         draft: debouncedDraft,
         workspaceStages: p.stages,
         allowedWorkspaceStages: p.readAccess.workspace as readonly StageId[],
         allowedMaterialKinds: p.readAccess.material as readonly MaterialKind[],
+        allowedSkillKinds: p.readAccess.skill as readonly SkillKind[] | undefined,
         linkedMaterialsByKind: p.linkedMaterialsByKind,
         template: coordinatorPromptTemplateRef.current,
         linkedSkill: p.linkedSkill,
@@ -915,12 +930,11 @@ export function ExpertDraftAiChat(props: Props) {
     if (!sectionAgent || !section) return
     const p = propsLatestRef.current
     sectionAgent.state.systemPrompt = buildSectionWriterSystemPrompt({
-      bookTitle: p.bookTitle,
-      bookGenre: p.bookGenre,
       stageBody: section.body,
       workspaceStages: p.stages,
       allowedWorkspaceStages: p.writerReadAccess.workspace as readonly StageId[],
       allowedMaterialKinds: p.writerReadAccess.material as readonly MaterialKind[],
+      allowedSkillKinds: p.writerReadAccess.skill as readonly SkillKind[] | undefined,
       linkedMaterialsByKind: p.linkedMaterialsByKind,
       template: sectionWriterPromptTemplateRef.current,
       linkedSkill: p.linkedSkill,

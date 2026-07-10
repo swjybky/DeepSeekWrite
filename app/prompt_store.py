@@ -20,6 +20,7 @@ SHARED_WORKSPACE_PROMPT_DIR = "shared"
 LEGACY_QINGGAN_PROMPT_DIR = "qinggan"
 SHARED_PROMPT_MIGRATION_MARKER = ".shared_prompt_migration_from_qinggan_v1"
 PLOT_PROMPT_MERGE_MARKER = ".plot_prompt_merge_v1"
+WORKSPACE_PROMPT_DEFAULTS_V2_RESET_MARKER = ".workspace_prompt_defaults_v2_reset"
 
 SHORT_STAGES_ORDER: tuple[str, ...] = (
     "character_design",
@@ -59,9 +60,6 @@ PEEK_EMPTY_MESSAGE = "（其它阶段暂无内容）"
 OTHER_STAGES_PEER_MAX = 2000
 STAGE_BODY_EXCERPT_CAP = 12000
 
-_WORKSPACE_PLACEHOLDER_RE = re.compile(
-    r"\{\{(BOOK_TITLE|BOOK_GENRE)\}\}"
-)
 _MATERIAL_PLACEHOLDER_RE = re.compile(
     r"\{\{(BOOK_TITLE|BOOK_LINE|MATERIAL_TITLE|MATERIAL_LINE|MATERIAL_TYPE|MATERIAL_GENRE|MATERIAL_KIND|MATERIAL_KIND_LABEL|MATERIAL_OVERVIEW|CURRENT_ENTRY_TITLE|STAGE_ID|STAGE_LABEL|STAGE_BODY|OTHER_STAGES_EXCERPT)\}\}"
 )
@@ -230,15 +228,38 @@ def _ensure_script_prompt_prepared() -> None:
     return
 
 
+def _ensure_workspace_prompt_defaults_v2_reset() -> None:
+    """升级到新版五智能体提示词时，一次性清除短篇/剧本用户覆盖。"""
+    overrides_root = data_root() / "prompt_overrides"
+    marker = overrides_root / WORKSPACE_PROMPT_DEFAULTS_V2_RESET_MARKER
+    if marker.is_file():
+        return
+    try:
+        for prefix in (SHORT_PREFIX, SCRIPT_PREFIX):
+            workspace_root = overrides_root / prefix
+            if not workspace_root.is_dir():
+                continue
+            for path in workspace_root.rglob("*.txt"):
+                if path.is_file():
+                    path.unlink()
+        marker.parent.mkdir(parents=True, exist_ok=True)
+        marker.write_text("reset\n", encoding="utf-8")
+    except OSError:
+        # 删除或写标记失败时不落半完成标记，下次读取继续重试。
+        return
+
+
 def _ensure_workspace_prompt_prepared(workspace_type: str | None = None) -> None:
     prompt_type = normalize_workspace_prompt_type(workspace_type)
     if prompt_type == "long":
         return
     if prompt_type == "script":
         _ensure_script_prompt_prepared()
+        _ensure_workspace_prompt_defaults_v2_reset()
         return
     _ensure_shared_prompt_override_migrated()
     _ensure_plot_prompt_override_merged()
+    _ensure_workspace_prompt_defaults_v2_reset()
 
 
 def resolve_workspace_agent_read_path(
@@ -323,19 +344,7 @@ def render_workspace_system_prompt(
         )
         if template_id in {"intro_design", "plot_refine"}:
             template_id = "plot_design"
-    raw = read_workspace_agent_prompt_template(template_id, workspace_type)
-
-    title = (book_title or "").strip()
-    genre = (book_genre or "").strip() or "未分类"
-    replacements = {
-        "BOOK_TITLE": title,
-        "BOOK_GENRE": genre,
-    }
-
-    def repl(m: re.Match[str]) -> str:
-        return replacements[m.group(1)]
-
-    return _WORKSPACE_PLACEHOLDER_RE.sub(repl, raw)
+    return read_workspace_agent_prompt_template(template_id, workspace_type)
 
 
 def parse_context_payload(context_raw: object) -> dict[str, object]:

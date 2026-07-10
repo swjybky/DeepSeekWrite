@@ -305,6 +305,7 @@ export interface SkillSummary {
   title: string
   skill_type: SkillType
   skill_kind: SkillKind
+  is_builtin?: boolean
   stage_counts?: Partial<Record<SkillStageId, number>>
   stage_skill_count?: number
   output_dir?: string
@@ -324,20 +325,34 @@ export interface SkillStageEntry {
   created_at?: string
   updated_at?: string
   source_common_skill_id?: string
+  source_skill_id?: string
+  source_skill_entry_id?: string
 }
 
-export interface CommonSkill {
+export interface SkillImportSourceEntry {
   id: string
   title: string
-  body: string
-  effective_stages: SkillStageId[]
 }
 
-export interface LoadCommonSkillsResult {
+export interface SkillImportSource {
+  id: string
+  title: string
+  skill_type: SkillType
+  skill_kind: SkillKind
+  is_builtin: boolean
+  stages: Partial<Record<SkillStageId, SkillImportSourceEntry[]>>
+}
+
+export interface SkillImportSelection {
+  source_skill_id: string
+  stage_id: SkillStageId
+  entry_id: string
+}
+
+export interface ImportSkillEntriesResult {
   skill: Skill
   added_count: number
-  available_count: number
-  already_loaded: boolean
+  skipped_count: number
 }
 
 export interface MaterialLibraryGroup {
@@ -354,6 +369,48 @@ export interface SkillLibraryGroup {
   members: Partial<Record<SkillKind, string>>
   created_at: string
   updated_at: string
+}
+
+export function materialLibraryGroupLinks(
+  group: MaterialLibraryGroup,
+  materials: MaterialSummary[],
+  bookType: BookType,
+): Record<MaterialKind, string[]> {
+  const byId = new Map(materials.map((material) => [material.id, material]))
+  const out = emptyLinkedMaterialIdsByKind()
+  for (const kind of MATERIAL_KIND_KEYS) {
+    const id = group.members[kind]
+    const material = id ? byId.get(id) : undefined
+    if (
+      material &&
+      material.material_type === bookType &&
+      materialMatchesKind(material, kind)
+    ) {
+      out[kind] = [material.id]
+    }
+  }
+  return out
+}
+
+export function skillLibraryGroupLinks(
+  group: SkillLibraryGroup,
+  skills: SkillSummary[],
+  bookType: BookType,
+): Record<SkillKind, string[]> {
+  const byId = new Map(skills.map((skill) => [skill.id, skill]))
+  const out = emptyLinkedSkillIdsByKind()
+  for (const kind of SKILL_KIND_KEYS) {
+    const id = group.members[kind]
+    const skill = id ? byId.get(id) : undefined
+    if (
+      skill &&
+      (skill.is_builtin || skill.skill_type === bookType) &&
+      skillMatchesKind(skill, kind)
+    ) {
+      out[kind] = [skill.id]
+    }
+  }
+  return out
 }
 
 function newLocalLibraryGroupId(): string {
@@ -595,6 +652,12 @@ function normalizeSkillStageEntry(
       source_common_skill_id:
         typeof item.source_common_skill_id === 'string'
           ? item.source_common_skill_id
+          : undefined,
+      source_skill_id:
+        typeof item.source_skill_id === 'string' ? item.source_skill_id : undefined,
+      source_skill_entry_id:
+        typeof item.source_skill_entry_id === 'string'
+          ? item.source_skill_entry_id
           : undefined,
     },
   ]
@@ -950,6 +1013,7 @@ export function normalizeSkillSummary(raw: Partial<SkillSummary> & { id: string 
     title: typeof raw.title === 'string' ? raw.title : '未命名技能',
     skill_type: normalizeSkillType(raw.skill_type),
     skill_kind: normalizeSkillKind(raw.skill_kind),
+    is_builtin: raw.is_builtin === true,
     stage_counts,
     stage_skill_count,
     output_dir: typeof raw.output_dir === 'string' ? raw.output_dir : undefined,

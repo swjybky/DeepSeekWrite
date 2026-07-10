@@ -1,4 +1,4 @@
-# DeepSeekWrite
+# Deep Write
 
 面向网文与短篇小说创作的**本地桌面写作应用**。Python（pywebview）提供桌面壳与数据持久化，React 构建前端界面，内嵌 [Pi](https://github.com/badlogic/pi) 框架实现多阶段 AI 协作写作。所有数据保存在本机，无需联网服务器。
 
@@ -50,7 +50,7 @@
 
 ```bash
 git clone <仓库地址>
-cd DeepSeekWrite
+cd "Deep Write"
 
 # Python 虚拟环境（推荐）
 python3 -m venv .venv
@@ -155,7 +155,7 @@ python -m app.main
 ## 项目结构
 
 ```
-DeepSeekWrite/
+Deep Write/
 ├── app/                          # Python 后端
 │   ├── main.py                   # pywebview 窗口、本地 HTTP 服务、JS API
 │   ├── storage.py                # JSON 原子读写、阶段 txt 导出
@@ -300,7 +300,7 @@ pip install pyinstaller
 pyinstaller packaging/DeepSeekWrite.spec
 ```
 
-产出 `dist/DeepSeekWrite/` 目录，压缩后分发。用户需安装 WebView2 Runtime。
+产出 `dist/Deep Write/` 目录，压缩后分发。用户需安装 WebView2 Runtime。
 
 ## 文档
 

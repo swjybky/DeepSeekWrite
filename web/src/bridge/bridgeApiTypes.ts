@@ -11,8 +11,7 @@ import type {
   AppearanceStyle,
 } from './aiModelConfig'
 import type {
-  CommonSkill,
-  LoadCommonSkillsResult,
+  ImportSkillEntriesResult,
   Material,
   MaterialKind,
   MaterialKindWithMixed,
@@ -21,6 +20,8 @@ import type {
   MaterialStageId,
   MaterialSummary,
   Skill,
+  SkillImportSelection,
+  SkillImportSource,
   SkillKind,
   SkillLibraryGroup,
   SkillSummary,
@@ -217,7 +218,6 @@ declare global {
           title: string,
           skill_type?: string | null,
           workspace_root?: string | null,
-          load_common_skills?: boolean,
           skill_kind?: SkillKind | string | null,
         ): Promise<Skill>
         save_skill(
@@ -225,11 +225,11 @@ declare global {
           payload?: Record<string, unknown> | null,
         ): Promise<Skill | null>
         delete_skill(skill_id: string): Promise<boolean>
-        read_common_skills(): Promise<CommonSkill[]>
-        save_common_skills(skills: CommonSkill[]): Promise<CommonSkill[]>
-        load_common_skills_to_skill(
-          skill_id: string,
-        ): Promise<LoadCommonSkillsResult | null>
+        list_skill_import_sources(target_skill_id: string): Promise<SkillImportSource[]>
+        import_skill_entries(
+          target_skill_id: string,
+          selections: SkillImportSelection[],
+        ): Promise<ImportSkillEntriesResult | null>
 
         // ==================== 素材库提示词 API ====================
         get_material_system_prompt(

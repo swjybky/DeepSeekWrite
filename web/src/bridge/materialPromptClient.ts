@@ -144,7 +144,7 @@ export async function saveMaterialAgentPromptOverride(
       body,
     )
   } catch {
-    console.warn('[DeepSeekWrite] 无法保存素材库智能体提示词覆盖：无桌面桥接且无可用 localStorage')
+    console.warn('[Deep Write] 无法保存素材库智能体提示词覆盖：无桌面桥接且无可用 localStorage')
   }
 }
 
@@ -164,7 +164,7 @@ export async function saveMaterialKindPromptOverride(
       body,
     )
   } catch {
-    console.warn('[DeepSeekWrite] 无法保存素材库类型提示词覆盖：无桌面桥接且无可用 localStorage')
+    console.warn('[Deep Write] 无法保存素材库类型提示词覆盖：无桌面桥接且无可用 localStorage')
   }
 }
 

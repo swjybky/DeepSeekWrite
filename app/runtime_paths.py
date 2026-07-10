@@ -12,8 +12,11 @@ import shutil
 import sys
 from pathlib import Path
 
-APP_DATA_DIR_NAME = "DeepSeekWrite"
-LEGACY_APP_DATA_DIR_NAME = "Write" + "Claw"
+APP_DATA_DIR_NAME = "Deep Write"
+# Keep both former application-data locations as migration sources.  The
+# display name changed twice, but users must retain their existing books and
+# preferences after upgrading.
+LEGACY_APP_DATA_DIR_NAMES = ("DeepSeekWrite", "Write" + "Claw")
 DATA_DIR_NAME = ".data"
 _DATA_LOCK_FILE = ".deepseekwrite.lock"
 _LEGACY_DATA_LOCK_FILE = ".write" + "_claw.lock"
@@ -54,9 +57,10 @@ def _app_data_base_root() -> Path:
     return Path(base).expanduser() if base else Path.home() / ".local" / "share"
 
 
-def legacy_app_data_root() -> Path:
-    """旧品牌名使用过的用户数据目录。"""
-    return (_app_data_base_root() / LEGACY_APP_DATA_DIR_NAME).resolve()
+def legacy_app_data_roots() -> tuple[Path, ...]:
+    """返回旧品牌名使用过的用户数据目录，用于无损迁移。"""
+    base = _app_data_base_root()
+    return tuple((base / name).resolve() for name in LEGACY_APP_DATA_DIR_NAMES)
 
 
 def legacy_data_root() -> Path:
@@ -95,7 +99,10 @@ def _migrate_legacy_data_root(target: Path) -> None:
     if marker.is_file():
         return
 
-    sources = [legacy_app_data_root() / DATA_DIR_NAME, legacy_data_root()]
+    sources = [
+        *(root / DATA_DIR_NAME for root in legacy_app_data_roots()),
+        legacy_data_root(),
+    ]
     seen: set[Path] = set()
     for source in sources:
         if not source.is_dir():

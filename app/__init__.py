@@ -1,1 +1,1 @@
-"""DeepSeekWrite desktop app package."""
+"""Deep Write desktop app package."""

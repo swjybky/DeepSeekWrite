@@ -33,7 +33,10 @@ import {
   resolveWorkspaceModelApiKey,
 } from '../../../pi/resolveWorkspaceChatModel'
 import { convertToLlmWithSkillAsUser } from '../../../pi/skillMessageTransform'
-import { createMemoryAwareConvertToLlm } from '../../../pi/memoryMessageTransform'
+import {
+  createMemoryAwareConvertToLlm,
+  resolveSectionRuntimeLocation,
+} from '../../../pi/memoryMessageTransform'
 import { createPiSessionId } from '../../../pi/sessionId'
 import { ensurePiAppStorage } from '../../../pi/setupPiWorkspace'
 import {
@@ -251,6 +254,7 @@ export function buildSectionWriterTools(input: {
     buildLoadSkillTool({
       linkedSkill: input.linkedSkill,
       linkedSkillsByKind: input.linkedSkillsByKind,
+      allowedSkillKinds: readAccess.skill as readonly SkillKind[] | undefined,
       currentStageId: EXPERT_SECTION_WRITER_AGENT_ID,
     }),
   )
@@ -301,6 +305,7 @@ export async function runExpertDraftSectionWriter(
       opts.getDraft().sections.some((section) => section.id === id),
     )
     let currentAgent: Agent | null = null
+    let currentSectionId = ''
     const runStartedAt = Date.now()
 
     for (const [sectionIndex, sectionId] of ids.entries()) {
@@ -308,6 +313,7 @@ export async function runExpertDraftSectionWriter(
       const draftBefore = opts.getDraft()
       const section = draftBefore.sections.find((s) => s.id === sectionId)
       if (!section) continue
+      currentSectionId = sectionId
       const systemPromptTemplate = await readWorkspaceAgentPromptTemplate(
         EXPERT_SECTION_WRITER_AGENT_ID,
       )
@@ -321,12 +327,11 @@ export async function runExpertDraftSectionWriter(
       let characterStateWritten = ''
 
       const systemPrompt = buildSectionWriterSystemPrompt({
-        bookTitle: opts.bookTitle,
-        bookGenre: opts.bookGenre,
         stageBody: section.body,
         workspaceStages: opts.getWorkspaceStages(),
         allowedWorkspaceStages: opts.readAccess.workspace as readonly StageId[],
         allowedMaterialKinds: opts.readAccess.material as readonly MaterialKind[],
+        allowedSkillKinds: opts.readAccess.skill as readonly SkillKind[] | undefined,
         linkedMaterialsByKind: opts.linkedMaterialsByKind,
         template: systemPromptTemplate,
         linkedSkill: opts.linkedSkill,
@@ -372,6 +377,12 @@ export async function runExpertDraftSectionWriter(
             () => ({
               bookTitle: opts.bookTitle,
               bookType: 'short',
+              bookGenre: opts.bookGenre,
+              currentLocation: resolveSectionRuntimeLocation(
+                opts.getDraft(),
+                currentSectionId,
+                'short',
+              ),
               bookMemories: opts.bookMemories,
               userMemories: opts.userMemories,
             }),
@@ -403,9 +414,6 @@ export async function runExpertDraftSectionWriter(
       try {
         const userPrompt = buildSectionWriterUserPrompt({
           sectionId,
-          sectionTitle: section.title,
-          sectionIndex,
-          sectionCount: ids.length,
           draft: draftBefore,
           userWritingPrompt: opts.userWritingPrompt,
         })

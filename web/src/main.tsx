@@ -30,7 +30,7 @@ function showBootFatalError(message: string) {
   if (!rootEl) return
   rootEl.innerHTML = `
     <div class="boot-splash" role="alert">
-      <p class="boot-splash-title">DeepSeekWrite</p>
+      <p class="boot-splash-title">Deep Write</p>
       <p class="boot-splash-hint" style="max-width: 28rem; text-align: center; white-space: pre-wrap;">
         ${escapeHtml(message)}
       </p>
@@ -60,12 +60,12 @@ function boot() {
     const message = String(event.message || '')
     if (isBenignResizeObserverError(message)) {
       event.preventDefault()
-      console.warn('[DeepSeekWrite] 已忽略 ResizeObserver 布局通知:', message)
+      console.warn('[Deep Write] 已忽略 ResizeObserver 布局通知:', message)
       return
     }
     if (appMounted) {
       event.preventDefault()
-      console.error('[DeepSeekWrite] 未处理脚本错误:', event.error ?? message)
+      console.error('[Deep Write] 未处理脚本错误:', event.error ?? message)
       return
     }
     const detail =
@@ -81,7 +81,7 @@ function boot() {
       reason instanceof Error && reason.name === 'DeepSeekWriteSendValidationError'
     if (isExpectedSendCancel) {
       event.preventDefault()
-      console.warn('[DeepSeekWrite] 用户操作已取消:', msg)
+      console.warn('[Deep Write] 用户操作已取消:', msg)
       return
     }
     if (
@@ -90,12 +90,12 @@ function boot() {
       msg.includes('IndexedDB')
     ) {
       event.preventDefault()
-      console.warn('[DeepSeekWrite] IndexedDB 瞬态错误（多窗口并发），已忽略:', msg)
+      console.warn('[Deep Write] IndexedDB 瞬态错误（多窗口并发），已忽略:', msg)
       return
     }
     if (appMounted) {
       event.preventDefault()
-      console.error('[DeepSeekWrite] 未处理 Promise 错误:', reason)
+      console.error('[Deep Write] 未处理 Promise 错误:', reason)
       return
     }
     const detail =

@@ -4,7 +4,9 @@ import {
   getMaterial,
   getSkill,
   listMaterials,
+  listMaterialLibraryGroups,
   listSkills,
+  listSkillLibraryGroups,
   MATERIAL_KIND_KEYS,
   SKILL_KIND_KEYS,
   materialMatchesKind,
@@ -15,9 +17,11 @@ import {
   type Book,
   type Material,
   type MaterialKind,
+  type MaterialLibraryGroup,
   type MaterialSummary,
   type Skill,
   type SkillKind,
+  type SkillLibraryGroup,
   type SkillSummary,
 } from '../../bridge'
 import type { BookWorkspaceSessionState } from '../../stores/workspaceStore'
@@ -58,10 +62,12 @@ export function useLibrarySelectors({
 }: UseLibrarySelectorsInput) {
   const [materialSelectorOpen, setMaterialSelectorOpen] = useState(false)
   const [materialSummaries, setMaterialSummaries] = useState<MaterialSummary[]>([])
+  const [materialGroups, setMaterialGroups] = useState<MaterialLibraryGroup[]>([])
   const [materialSelectorLoading, setMaterialSelectorLoading] = useState(false)
   const [materialSelectorSaving, setMaterialSelectorSaving] = useState(false)
   const [skillSelectorOpen, setSkillSelectorOpen] = useState(false)
   const [skillSummaries, setSkillSummaries] = useState<SkillSummary[]>([])
+  const [skillGroups, setSkillGroups] = useState<SkillLibraryGroup[]>([])
   const [skillSelectorLoading, setSkillSelectorLoading] = useState(false)
   const [skillSelectorSaving, setSkillSelectorSaving] = useState(false)
 
@@ -101,7 +107,12 @@ export function useLibrarySelectors({
     setMaterialSelectorLoading(true)
     setError(null)
     try {
-      setMaterialSummaries(await listMaterials())
+      const [summaries, groups] = await Promise.all([
+        listMaterials(),
+        listMaterialLibraryGroups(),
+      ])
+      setMaterialSummaries(summaries)
+      setMaterialGroups(groups)
     } catch (e) {
       setError(e instanceof Error ? e.message : '无法加载素材库列表')
     } finally {
@@ -165,7 +176,12 @@ export function useLibrarySelectors({
     setSkillSelectorLoading(true)
     setError(null)
     try {
-      setSkillSummaries(await listSkills())
+      const [summaries, groups] = await Promise.all([
+        listSkills(),
+        listSkillLibraryGroups(),
+      ])
+      setSkillSummaries(summaries)
+      setSkillGroups(groups)
     } catch (e) {
       setError(e instanceof Error ? e.message : '无法加载技能库列表')
     } finally {
@@ -192,7 +208,7 @@ export function useLibrarySelectors({
         .filter(
           (skill): skill is Skill =>
             skill !== null &&
-            skill.skill_type === nextBook.book_type &&
+            (skill.is_builtin || skill.skill_type === nextBook.book_type) &&
             skillMatchesKind(skill, kind),
         )
     }
@@ -258,6 +274,7 @@ export function useLibrarySelectors({
     materialSelectorOpen,
     setMaterialSelectorOpen,
     materialSummaries,
+    materialGroups,
     materialSelectorLoading,
     materialSelectorSaving,
     openMaterialSelector,
@@ -265,6 +282,7 @@ export function useLibrarySelectors({
     skillSelectorOpen,
     setSkillSelectorOpen,
     skillSummaries,
+    skillGroups,
     skillSelectorLoading,
     skillSelectorSaving,
     openSkillSelector,

@@ -71,9 +71,11 @@ import {
   SKILL_STAGE_KEYS,
   SKILL_STAGE_LABELS,
   materialMatchesKind,
+  materialLibraryGroupLinks,
   materialMetaLabel,
   materialTypeLabel,
   skillMatchesKind,
+  skillLibraryGroupLinks,
   saveUserMemories,
   skillTypeLabel,
   TEXT_MODEL_API_KEY_PLACEHOLDER,
@@ -287,14 +289,16 @@ type ModelRefreshOptions = {
 
 type MaterialSplitMode = 'group' | 'single'
 type SkillSplitMode = 'group' | 'single'
+type LibraryBindingMode = 'single' | 'group'
 
 /**
  * 一键拆分时从综合/通用技能库拆出的目标分类（按条目内容归类，不是按阶段硬拆）：
  * - plot：剧情相关 + 人设相关
+ * - style：正文专家编写、分节写手等文风执行技能
  * - general：跨阶段重复的通用能力（去 AI 味、逻辑审核等）
  * - other：其余不想归入剧情/通用的条目
  */
-const SKILL_SPLIT_KIND_KEYS = ['plot', 'general', 'other'] as const
+const SKILL_SPLIT_KIND_KEYS = ['plot', 'style', 'general', 'other'] as const
 type SkillSplitKind = (typeof SKILL_SPLIT_KIND_KEYS)[number]
 
 function materialKindShortLabel(kind: MaterialKind): string {
@@ -351,7 +355,13 @@ function isPlotSplitSkillEntry(entry: SkillStageEntry): boolean {
   )
 }
 
-function classifySkillEntryForSplit(entry: SkillStageEntry): SkillSplitKind {
+function classifySkillEntryForSplit(
+  stageId: SkillStageId,
+  entry: SkillStageEntry,
+): SkillSplitKind {
+  // 分节写手是单节正文的文风执行入口，必须保留在文风写作技能库。
+  // 不能只依靠词语匹配，否则无标题或未写明“文风”的有效技能会被错分到“其他”。
+  if (stageId === 'expert_section_writer') return 'style'
   if (isGeneralSplitSkillEntry(entry)) return 'general'
   if (isPlotSplitSkillEntry(entry)) return 'plot'
   return 'other'
@@ -372,9 +382,10 @@ function cloneSkillEntry(entry: SkillStageEntry, now: string): SkillStageEntry {
 
 /**
  * 按条目内容拆分技能库：
- * 1. 去 AI 味 / 逻辑审核等跨阶段重复能力 → general（去重后只保留一份）
- * 2. 剧情、人设相关 → plot（保留原阶段槽位）
- * 3. 其余 → other
+ * 1. 分节写手阶段 → style，确保文风执行技能不会混入其他库
+ * 2. 去 AI 味 / 逻辑审核等跨阶段重复能力 → general（去重后只保留一份）
+ * 3. 剧情、人设相关 → plot（保留原阶段槽位）
+ * 4. 其余 → other
  */
 function splitSkillStagesByContent(
   skill: Skill,
@@ -389,7 +400,7 @@ function splitSkillStagesByContent(
   for (const stageId of SKILL_STAGE_KEYS) {
     for (const entry of sourceStages[stageId] ?? []) {
       if (!skillEntryHasContent(entry)) continue
-      const kind = classifySkillEntryForSplit(entry)
+      const kind = classifySkillEntryForSplit(stageId, entry)
       if (kind === 'general') {
         const fingerprint = skillEntryFingerprint(entry)
         if (generalSeen.has(fingerprint)) continue
@@ -968,7 +979,7 @@ function ModelConfigDialog({
 
                         {builtinFreeModel ? (
                           <div className="model-config-locked-summary">
-                            <strong>{model.label || 'DeepSeekWriteFree'}</strong>
+                            <strong>{model.label || 'Deep Write Free'}</strong>
                             <span>{model.model_id}</span>
                           </div>
                         ) : officialPreset ? (
@@ -1883,6 +1894,12 @@ export function Home() {
     useState<Record<SkillKind, string[]>>(() => emptyLinkedSkillIdsByKind())
   const [bookLinkedMaterialIdsByKind, setBookLinkedMaterialIdsByKind] =
     useState<Record<MaterialKind, string[]>>(() => emptyLinkedMaterialIdsByKind())
+  const [bookSkillBindingMode, setBookSkillBindingMode] =
+    useState<LibraryBindingMode>('single')
+  const [bookMaterialBindingMode, setBookMaterialBindingMode] =
+    useState<LibraryBindingMode>('single')
+  const [bookLinkedSkillGroupId, setBookLinkedSkillGroupId] = useState('')
+  const [bookLinkedMaterialGroupId, setBookLinkedMaterialGroupId] = useState('')
   const [submittingBook, setSubmittingBook] = useState(false)
   const [deletingBookId, setDeletingBookId] = useState<string | null>(null)
   const [bookError, setBookError] = useState<string | null>(null)
@@ -1923,7 +1940,6 @@ export function Home() {
   const [skillTitle, setSkillTitle] = useState('')
   const [skillType, setSkillType] = useState<SkillType>('short')
   const [skillKind, setSkillKind] = useState<SkillKind>('general')
-  const [loadCommonSkills, setLoadCommonSkills] = useState(false)
   const [submittingSkill, setSubmittingSkill] = useState(false)
   const [deletingSkillId, setDeletingSkillId] = useState<string | null>(null)
   const [skillError, setSkillError] = useState<string | null>(null)
@@ -2012,13 +2028,33 @@ export function Home() {
         (out, kind) => {
           out[kind] = skills.filter(
             (skill) =>
-              skill.skill_type === bookType && skillMatchesKind(skill, kind),
+              (skill.is_builtin || skill.skill_type === bookType) && skillMatchesKind(skill, kind),
           )
           return out
         },
         {} as Record<SkillKind, SkillSummary[]>,
       ),
     [bookType, skills],
+  )
+
+  const bookMaterialGroupOptions = useMemo(
+    () =>
+      materialGroups.filter((group) =>
+        MATERIAL_KIND_KEYS.some(
+          (kind) => materialLibraryGroupLinks(group, materials, bookType)[kind].length > 0,
+        ),
+      ),
+    [bookType, materialGroups, materials],
+  )
+
+  const bookSkillGroupOptions = useMemo(
+    () =>
+      skillGroups.filter((group) =>
+        SKILL_KIND_KEYS.some(
+          (kind) => skillLibraryGroupLinks(group, skills, bookType)[kind].length > 0,
+        ),
+      ),
+    [bookType, skillGroups, skills],
   )
 
   useEffect(() => {
@@ -2333,6 +2369,10 @@ export function Home() {
       setShortGenre(SHORT_GENRE_OPTIONS[0])
       setBookLinkedSkillIdsByKind(emptyLinkedSkillIdsByKind())
       setBookLinkedMaterialIdsByKind(emptyLinkedMaterialIdsByKind())
+      setBookSkillBindingMode('single')
+      setBookMaterialBindingMode('single')
+      setBookLinkedSkillGroupId('')
+      setBookLinkedMaterialGroupId('')
       setShowBookForm(false)
       await refreshBooks()
     } catch (err) {
@@ -2427,11 +2467,10 @@ export function Home() {
     setSubmittingSkill(true)
     setSkillError(null)
     try {
-      await createSkill(skillTitle, skillType, ws, loadCommonSkills, skillKind)
+      await createSkill(skillTitle, skillType, ws, skillKind)
       setSkillTitle('')
       setSkillType('short')
       setSkillKind('general')
-      setLoadCommonSkills(false)
       setShowSkillForm(false)
       await refreshSkills()
     } catch (err) {
@@ -2443,7 +2482,7 @@ export function Home() {
 
   const handleDeleteSkill = async (skillId: string) => {
     const s = skills.find((item) => item.id === skillId)
-    if (!s) return
+    if (!s || s.is_builtin) return
     const ok = await confirm({
       title: '删除技能',
       message: `确定删除技能「${s.title}」？`,
@@ -2680,7 +2719,6 @@ export function Home() {
           title,
           source.skill_type,
           ws || null,
-          false,
           kind,
         )
         await saveSkill(created.id, {
@@ -2969,6 +3007,32 @@ export function Home() {
     [],
   )
 
+  const handleBookLinkedMaterialGroupChange = useCallback(
+    (groupId: string) => {
+      setBookLinkedMaterialGroupId(groupId)
+      const group = materialGroups.find((item) => item.id === groupId)
+      setBookLinkedMaterialIdsByKind(
+        group
+          ? materialLibraryGroupLinks(group, materials, bookType)
+          : emptyLinkedMaterialIdsByKind(),
+      )
+    },
+    [bookType, materialGroups, materials],
+  )
+
+  const handleBookLinkedSkillGroupChange = useCallback(
+    (groupId: string) => {
+      setBookLinkedSkillGroupId(groupId)
+      const group = skillGroups.find((item) => item.id === groupId)
+      setBookLinkedSkillIdsByKind(
+        group
+          ? skillLibraryGroupLinks(group, skills, bookType)
+          : emptyLinkedSkillIdsByKind(),
+      )
+    },
+    [bookType, skillGroups, skills],
+  )
+
   // ==================== 渲染 ====================
   const loadUserMemoryList = useCallback(async (type: 'short' | 'long' | 'script') => {
     setLoadingUserMemories(true)
@@ -3065,7 +3129,7 @@ export function Home() {
     <div className="home">
       <header className="home-header">
         <div className="home-brand">
-          <h1 className="home-title">DeepSeekWrite</h1>
+          <h1 className="home-title">Deep Write</h1>
           <span className="home-tagline muted">简素为骨 · 笔墨为形</span>
         </div>
         <nav className="home-config-nav" aria-label="系统设置">
@@ -3693,6 +3757,8 @@ export function Home() {
                     setBookType('short')
                     setBookLinkedSkillIdsByKind(emptyLinkedSkillIdsByKind())
                     setBookLinkedMaterialIdsByKind(emptyLinkedMaterialIdsByKind())
+                    setBookLinkedSkillGroupId('')
+                    setBookLinkedMaterialGroupId('')
                   }}
                 />
                 短篇
@@ -3706,6 +3772,8 @@ export function Home() {
                     setBookType('script')
                     setBookLinkedSkillIdsByKind(emptyLinkedSkillIdsByKind())
                     setBookLinkedMaterialIdsByKind(emptyLinkedMaterialIdsByKind())
+                    setBookLinkedSkillGroupId('')
+                    setBookLinkedMaterialGroupId('')
                   }}
                 />
                 剧本
@@ -3719,6 +3787,8 @@ export function Home() {
                     setBookType('long')
                     setBookLinkedSkillIdsByKind(emptyLinkedSkillIdsByKind())
                     setBookLinkedMaterialIdsByKind(emptyLinkedMaterialIdsByKind())
+                    setBookLinkedSkillGroupId('')
+                    setBookLinkedMaterialGroupId('')
                   }}
                 />
                 长篇
@@ -3749,66 +3819,164 @@ export function Home() {
           )}
 
           <fieldset className="field">
-            <legend className="field-label">绑定技能库</legend>
-            <div className="material-bind-select-grid">
-              {SKILL_KIND_KEYS.map((kind) => {
-                const candidates = bookSkillOptionsByKind[kind] ?? []
-                return (
-                  <label key={kind} className="material-bind-select-field">
-                    <span>{SKILL_KIND_LABELS[kind]}</span>
-                    <select
-                      value={bookLinkedSkillIdsByKind[kind]?.[0] ?? ''}
-                      onChange={(e) => handleBookLinkedSkillChange(kind, e.target.value)}
-                      disabled={loadingSkills}
-                    >
-                      <option value="">不绑定</option>
-                      {candidates.map((skill) => {
-                        const stages = SKILL_KIND_STAGE_IDS[kind]
-                          .map((stageId) => SKILL_STAGE_LABELS[stageId])
-                          .join('、')
-                        return (
-                          <option key={`${kind}-${skill.id}`} value={skill.id}>
-                            {`${skill.title}（${stages}）`}
-                          </option>
-                        )
-                      })}
-                    </select>
-                  </label>
-                )
-              })}
-            </div>
+            <legend className="field-label library-bind-legend">
+              <span>绑定技能库</span>
+              <span className="library-bind-mode-options">
+                <label className="radio">
+                  <input
+                    type="radio"
+                    name="bookSkillBindingMode"
+                    checked={bookSkillBindingMode === 'single'}
+                    onChange={() => {
+                      setBookSkillBindingMode('single')
+                      setBookLinkedSkillGroupId('')
+                      setBookLinkedSkillIdsByKind(emptyLinkedSkillIdsByKind())
+                    }}
+                  />
+                  单个
+                </label>
+                <label className="radio">
+                  <input
+                    type="radio"
+                    name="bookSkillBindingMode"
+                    checked={bookSkillBindingMode === 'group'}
+                    onChange={() => {
+                      setBookSkillBindingMode('group')
+                      setBookLinkedSkillGroupId('')
+                      setBookLinkedSkillIdsByKind(emptyLinkedSkillIdsByKind())
+                    }}
+                  />
+                  分组
+                </label>
+              </span>
+            </legend>
+            {bookSkillBindingMode === 'single' ? (
+              <div className="material-bind-select-grid">
+                {SKILL_KIND_KEYS.map((kind) => {
+                  const candidates = bookSkillOptionsByKind[kind] ?? []
+                  return (
+                    <label key={kind} className="material-bind-select-field">
+                      <span>{SKILL_KIND_LABELS[kind]}</span>
+                      <select
+                        value={bookLinkedSkillIdsByKind[kind]?.[0] ?? ''}
+                        onChange={(e) => handleBookLinkedSkillChange(kind, e.target.value)}
+                        disabled={loadingSkills}
+                      >
+                        <option value="">不绑定</option>
+                        {candidates.map((skill) => {
+                          const stages = SKILL_KIND_STAGE_IDS[kind]
+                            .map((stageId) => SKILL_STAGE_LABELS[stageId])
+                            .join('、')
+                          return (
+                            <option key={`${kind}-${skill.id}`} value={skill.id}>
+                              {`${skill.title}（${stages}）`}
+                            </option>
+                          )
+                        })}
+                      </select>
+                    </label>
+                  )
+                })}
+              </div>
+            ) : (
+              <label className="material-bind-select-field">
+                <span>技能分组</span>
+                <select
+                  value={bookLinkedSkillGroupId}
+                  onChange={(event) => handleBookLinkedSkillGroupChange(event.target.value)}
+                  disabled={loadingSkills}
+                >
+                  <option value="">不绑定</option>
+                  {bookSkillGroupOptions.map((group) => (
+                    <option key={group.id} value={group.id}>{group.title}</option>
+                  ))}
+                </select>
+                {!loadingSkills && bookSkillGroupOptions.length === 0 ? (
+                  <span className="field-hint">暂无适用于当前书籍类型的技能分组</span>
+                ) : null}
+              </label>
+            )}
           </fieldset>
 
           <fieldset className="field">
-            <legend className="field-label">绑定素材库</legend>
-            <div className="material-bind-select-grid">
-              {MATERIAL_KIND_KEYS.map((kind) => {
-                const candidates = bookMaterialOptionsByKind[kind] ?? []
-                return (
-                  <label key={kind} className="material-bind-select-field">
-                    <span>{MATERIAL_KIND_LABELS[kind]}</span>
-                    <select
-                      value={bookLinkedMaterialIdsByKind[kind]?.[0] ?? ''}
-                      onChange={(e) => handleBookLinkedMaterialChange(kind, e.target.value)}
-                      disabled={loadingMaterials}
-                    >
-                      <option value="">不绑定</option>
-                      {candidates.map((material) => {
-                        const meta = materialMetaLabel(material)
-                        return (
-                          <option key={`${kind}-${material.id}`} value={material.id}>
-                            {meta ? `${material.title}（${meta}）` : material.title}
-                          </option>
-                        )
-                      })}
-                    </select>
-                    {!loadingMaterials && candidates.length === 0 ? (
-                      <span className="field-hint">暂无可用素材库</span>
-                    ) : null}
-                  </label>
-                )
-              })}
-            </div>
+            <legend className="field-label library-bind-legend">
+              <span>绑定素材库</span>
+              <span className="library-bind-mode-options">
+                <label className="radio">
+                  <input
+                    type="radio"
+                    name="bookMaterialBindingMode"
+                    checked={bookMaterialBindingMode === 'single'}
+                    onChange={() => {
+                      setBookMaterialBindingMode('single')
+                      setBookLinkedMaterialGroupId('')
+                      setBookLinkedMaterialIdsByKind(emptyLinkedMaterialIdsByKind())
+                    }}
+                  />
+                  单个
+                </label>
+                <label className="radio">
+                  <input
+                    type="radio"
+                    name="bookMaterialBindingMode"
+                    checked={bookMaterialBindingMode === 'group'}
+                    onChange={() => {
+                      setBookMaterialBindingMode('group')
+                      setBookLinkedMaterialGroupId('')
+                      setBookLinkedMaterialIdsByKind(emptyLinkedMaterialIdsByKind())
+                    }}
+                  />
+                  分组
+                </label>
+              </span>
+            </legend>
+            {bookMaterialBindingMode === 'single' ? (
+              <div className="material-bind-select-grid">
+                {MATERIAL_KIND_KEYS.map((kind) => {
+                  const candidates = bookMaterialOptionsByKind[kind] ?? []
+                  return (
+                    <label key={kind} className="material-bind-select-field">
+                      <span>{MATERIAL_KIND_LABELS[kind]}</span>
+                      <select
+                        value={bookLinkedMaterialIdsByKind[kind]?.[0] ?? ''}
+                        onChange={(e) => handleBookLinkedMaterialChange(kind, e.target.value)}
+                        disabled={loadingMaterials}
+                      >
+                        <option value="">不绑定</option>
+                        {candidates.map((material) => {
+                          const meta = materialMetaLabel(material)
+                          return (
+                            <option key={`${kind}-${material.id}`} value={material.id}>
+                              {meta ? `${material.title}（${meta}）` : material.title}
+                            </option>
+                          )
+                        })}
+                      </select>
+                      {!loadingMaterials && candidates.length === 0 ? (
+                        <span className="field-hint">暂无可用素材库</span>
+                      ) : null}
+                    </label>
+                  )
+                })}
+              </div>
+            ) : (
+              <label className="material-bind-select-field">
+                <span>素材分组</span>
+                <select
+                  value={bookLinkedMaterialGroupId}
+                  onChange={(event) => handleBookLinkedMaterialGroupChange(event.target.value)}
+                  disabled={loadingMaterials}
+                >
+                  <option value="">不绑定</option>
+                  {bookMaterialGroupOptions.map((group) => (
+                    <option key={group.id} value={group.id}>{group.title}</option>
+                  ))}
+                </select>
+                {!loadingMaterials && bookMaterialGroupOptions.length === 0 ? (
+                  <span className="field-hint">暂无适用于当前书籍类型的素材分组</span>
+                ) : null}
+              </label>
+            )}
           </fieldset>
 
           {bookError && <p className="form-error">{bookError}</p>}
@@ -4079,7 +4247,7 @@ export function Home() {
           )}
 
           <p className="material-split-note">
-            按条目内容拆分：剧情/人设进剧情库，去 AI 味与逻辑审核等跨阶段重复能力进通用库，其余进其他库；原技能库会保留，不会被删除。
+            按条目内容拆分：分节写手技能进文风库，剧情/人设进剧情库，去 AI 味与逻辑审核等跨阶段重复能力进通用库，其余进其他库；原技能库会保留，不会被删除。
           </p>
 
           {skillSplitError && <p className="form-error">{skillSplitError}</p>}
@@ -4140,18 +4308,6 @@ export function Home() {
             </div>
           </fieldset>
 
-          <label className="radio create-form-checkbox">
-            <input
-              type="checkbox"
-              checked={loadCommonSkills}
-              onChange={(event) => setLoadCommonSkills(event.target.checked)}
-            />
-            <span>
-              加载内置通用技能
-              <small>只复制当前技能分类允许生效的阶段</small>
-            </span>
-          </label>
-
           {skillError && <p className="form-error">{skillError}</p>}
         </CreateDialog>
       )}
@@ -4181,9 +4337,9 @@ export function Home() {
           </label>
           <fieldset className="field">
             <legend className="field-label">按部门各选一个素材库</legend>
-            <div className="genre-grid" style={{ gridTemplateColumns: '1fr' }}>
+            <div className="library-group-picker-grid">
               {MATERIAL_KIND_KEYS.map((kind) => (
-                <label key={kind} className="field">
+                <label key={kind} className="field library-group-picker-field">
                   <span className="field-label">{MATERIAL_KIND_LABELS[kind]}</span>
                   <select
                     value={materialGroupMembers[kind] ?? ''}
@@ -4237,9 +4393,9 @@ export function Home() {
           </label>
           <fieldset className="field">
             <legend className="field-label">按分类各选一个技能库</legend>
-            <div className="genre-grid" style={{ gridTemplateColumns: '1fr' }}>
+            <div className="library-group-picker-grid">
               {SKILL_KIND_KEYS.map((kind) => (
-                <label key={kind} className="field">
+                <label key={kind} className="field library-group-picker-field">
                   <span className="field-label">{SKILL_KIND_LABELS[kind]}</span>
                   <select
                     value={skillGroupMembers[kind] ?? ''}
@@ -4338,7 +4494,6 @@ export function Home() {
         <LearningImitationDialog
           visible={learningImitationOpen}
           workspaceRoot={workspaceRoot}
-          materials={materials}
           skills={skills}
           onClose={() => {
             setLearningImitationOpen(false)
@@ -4351,7 +4506,6 @@ export function Home() {
           onBackgroundFinished={() => {
             setLearningImitationBackground(false)
           }}
-          onRefreshMaterials={() => refreshMaterials({ showLoading: false })}
           onRefreshSkills={() => refreshSkills({ showLoading: false })}
         />
       )}

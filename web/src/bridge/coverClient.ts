@@ -54,7 +54,7 @@ export async function generateBookCover(
     return api.generate_book_cover(book_id, prompt)
   }
   // 浏览器开发模式：模拟成功
-  console.warn('[DeepSeekWrite] 浏览器开发模式：封面生成 API 不可用，返回模拟数据')
+  console.warn('[Deep Write] 浏览器开发模式：封面生成 API 不可用，返回模拟数据')
   return { cover_path: null, success: false, error: '浏览器开发模式暂不支持封面生成' }
 }
 

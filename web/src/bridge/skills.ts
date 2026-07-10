@@ -6,8 +6,9 @@ export {
   createSkill,
   deleteSkill,
   getSkill,
+  importSkillEntries,
   listSkills,
-  loadCommonSkillsToSkill,
+  listSkillImportSources,
   normalizeSkillStageId,
   normalizeSkillStages,
   normalizeSkillType,
@@ -17,8 +18,10 @@ export {
 
 export type {
   SaveSkillOptions,
-  LoadCommonSkillsResult,
+  ImportSkillEntriesResult,
   Skill,
+  SkillImportSelection,
+  SkillImportSource,
   SkillStageEntry,
   SkillStageId,
   SkillSummary,

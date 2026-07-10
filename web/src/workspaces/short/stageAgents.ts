@@ -58,6 +58,8 @@ export type ShortWorkspaceStageAgentContext = {
   allowedWorkspaceStages?: readonly ShortStageId[]
   /** 全局配置解析后：当前阶段允许读取的素材库部门 */
   allowedMaterialStages?: readonly MaterialKind[]
+  /** 全局配置解析后：当前阶段允许加载的技能分类 */
+  allowedSkillKinds?: readonly SkillKind[]
   workspaceAgentReadAccess?: WorkspaceAgentReadAccessConfig | null
   applyToStageEditor?: (payload: {
     mode: 'replace' | 'append' | 'append_token' | 'streaming_end'
@@ -460,11 +462,17 @@ function resolveAllowedStagesFromContext(
 ): {
   workspace: readonly ShortStageId[]
   material: readonly MaterialKind[]
+  skill: readonly SkillKind[]
 } {
-  if (ctx.allowedWorkspaceStages !== undefined || ctx.allowedMaterialStages !== undefined) {
+  if (
+    ctx.allowedWorkspaceStages !== undefined ||
+    ctx.allowedMaterialStages !== undefined ||
+    ctx.allowedSkillKinds !== undefined
+  ) {
     return {
       workspace: ctx.allowedWorkspaceStages ?? [],
       material: ctx.allowedMaterialStages ?? [],
+      skill: ctx.allowedSkillKinds ?? [],
     }
   }
   const agentId = resolveWorkspaceAgentIdForStage(ctx.stageId)
@@ -475,6 +483,7 @@ function resolveAllowedStagesFromContext(
   return {
     workspace: resolved.workspace as readonly ShortStageId[],
     material: resolved.material as readonly MaterialKind[],
+    skill: (resolved.skill ?? []) as readonly SkillKind[],
   }
 }
 
@@ -1010,7 +1019,11 @@ function readMaterialTools(
 export function buildShortWorkspaceAdditionalTools(
   ctx: ShortWorkspaceStageAgentContext,
 ): AgentTool[] {
-  const { workspace: allowedWorkspace, material: allowedMaterial } =
+  const {
+    workspace: allowedWorkspace,
+    material: allowedMaterial,
+    skill: allowedSkillKinds,
+  } =
     resolveAllowedStagesFromContext(ctx)
 
   const readSaved = readWorkspaceTools(ctx, allowedWorkspace)
@@ -1019,6 +1032,7 @@ export function buildShortWorkspaceAdditionalTools(
   const loadSkill = buildLoadSkillTool({
     linkedSkill: ctx.linkedSkill,
     linkedSkillsByKind: ctx.linkedSkillsByKind,
+    allowedSkillKinds,
     currentStageId: ctx.stageId,
   })
 

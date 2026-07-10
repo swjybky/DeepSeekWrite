@@ -12,11 +12,14 @@ import {
   type SkillStageId,
   type SkillSummary,
   getSkill,
+  importSkillEntries,
   listSkills,
-  loadCommonSkillsToSkill,
+  listSkillImportSources,
   normalizeSkillStages,
   saveSkill,
   skillTypeLabel,
+  type SkillImportSelection,
+  type SkillImportSource,
 } from '../bridge'
 import { WorkspaceAiChat } from '../components/WorkspaceAiChat'
 import { WorkspaceTreeNav } from '../components/WorkspaceTreeNav'
@@ -148,7 +151,6 @@ type SkillEditorProps = {
 export function SkillEditor({
   skillId: skillIdProp,
   groupContext = null,
-  initialView: _initialView = null,
   initialStageId = null,
   initialEntryId = null,
   onGroupSkillChange,
@@ -157,7 +159,7 @@ export function SkillEditor({
   const { id: routeId } = useParams<{ id: string }>()
   const id = skillIdProp ?? routeId
   const navigate = useNavigate()
-  const { alert: showAlert, confirm, dialog } = useAppDialog()
+  const { dialog } = useAppDialog()
   const [skill, setSkill] = useState<Skill | null>(null)
   const [stages, setStages] = useState<SkillStages>(() => normalizeSkillStages({}))
   const [skillSummaries, setSkillSummaries] = useState<SkillSummary[]>([])
@@ -169,7 +171,11 @@ export function SkillEditor({
   const [loading, setLoading] = useState(true)
   const [message, setMessage] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const [loadingCommonSkills, setLoadingCommonSkills] = useState(false)
+  const [importDialogOpen, setImportDialogOpen] = useState(false)
+  const [importSources, setImportSources] = useState<SkillImportSource[]>([])
+  const [selectedImportKeys, setSelectedImportKeys] = useState<Set<string>>(() => new Set())
+  const [loadingImportSources, setLoadingImportSources] = useState(false)
+  const [importingSkills, setImportingSkills] = useState(false)
   const [aiPanelWidth, setAiPanelWidth] = useState(readStoredAiWidth)
   const [aiChatEpoch, setAiChatEpoch] = useState(0)
   const [editorStreaming, setEditorStreaming] = useState(false)
@@ -726,66 +732,72 @@ export function SkillEditor({
     navigate('/')
   }, [flushAutoSave, navigate])
 
-  const handleLoadCommonSkills = useCallback(async () => {
-    if (!id || loadingCommonSkills) return
-    const ok = await confirm({
-      title: '加载内置通用技能',
-      message: '将内置通用技能加载到当前技能库。只会写入当前技能分类允许的阶段，已加载过的技能不会重复添加。',
-      confirmText: '加载',
-    })
-    if (!ok) return
-    setLoadingCommonSkills(true)
+  const handleOpenSkillImport = useCallback(async () => {
+    if (!id || skill?.is_builtin || loadingImportSources) return
+    setLoadingImportSources(true)
     setError(null)
     setMessage(null)
     try {
       const saved = await flushAutoSave()
       if (!saved) {
-        setError('当前技能库保存失败，请处理后再加载内置通用技能。')
+        setError('当前技能库保存失败，请处理后再加载其他库技能。')
         return
       }
-      const result = await loadCommonSkillsToSkill(id)
-      if (!result) {
-        setError('加载失败：技能库不存在')
-        return
+      const sources = await listSkillImportSources(id)
+      setImportSources(sources)
+      setSelectedImportKeys(new Set())
+      setImportDialogOpen(true)
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : '加载其他库技能失败')
+    } finally {
+      setLoadingImportSources(false)
+    }
+  }, [
+    flushAutoSave,
+    id,
+    loadingImportSources,
+    skill?.is_builtin,
+  ])
+
+  const toggleImportKeys = useCallback((keys: string[], checked: boolean) => {
+    setSelectedImportKeys((current) => {
+      const next = new Set(current)
+      for (const key of keys) {
+        if (checked) next.add(key)
+        else next.delete(key)
       }
+      return next
+    })
+  }, [])
+
+  const handleImportSelectedSkills = useCallback(async () => {
+    if (!id || importingSkills || selectedImportKeys.size === 0) return
+    setImportingSkills(true)
+    setError(null)
+    try {
+      const selections: SkillImportSelection[] = [...selectedImportKeys].map((key) => {
+        const [source_skill_id, stage_id, entry_id] = key.split('\u0000')
+        return { source_skill_id, stage_id: stage_id as SkillStageId, entry_id }
+      })
+      const result = await importSkillEntries(id, selections)
+      if (!result) throw new Error('加载失败：技能库不存在')
       syncSkillState(result.skill)
       markSkillSaved(result.skill.id)
       markOverviewSaved(result.skill.id)
-      if (result.available_count === 0) {
-        await showAlert({
-          title: '暂无通用技能',
-          message: '请先在技能库设置中配置通用技能，再回到当前技能库加载。',
-        })
-        setMessage('暂无可加载的内置通用技能')
-        return
-      }
-      if (result.already_loaded || result.added_count === 0) {
-        await showAlert({
-          title: '无需重复加载',
-          message: '当前技能库已加载这些通用技能，不需要再次添加。',
-        })
-        setMessage('已加载，无需加载')
-        return
-      }
-      setMessage(`已加载 ${result.added_count} 条内置通用技能`)
-      window.setTimeout(() => setMessage(null), 2000)
+      setImportDialogOpen(false)
+      setMessage(result.skipped_count > 0
+        ? `已加载 ${result.added_count} 条技能，跳过 ${result.skipped_count} 条重复或不可用技能`
+        : `已加载 ${result.added_count} 条技能`)
+      window.setTimeout(() => setMessage(null), 3000)
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : '加载内置通用技能失败')
+      setError(cause instanceof Error ? cause.message : '加载其他库技能失败')
     } finally {
-      setLoadingCommonSkills(false)
+      setImportingSkills(false)
     }
-  }, [
-    confirm,
-    flushAutoSave,
-    id,
-    loadingCommonSkills,
-    markOverviewSaved,
-    markSkillSaved,
-    showAlert,
-    syncSkillState,
-  ])
+  }, [id, importingSkills, markOverviewSaved, markSkillSaved, selectedImportKeys, syncSkillState])
 
   const handleAddEntry = () => {
+    if (skill?.is_builtin) return
     const stageId = activeStageRef.current
     const entry = newStageSkillEntry()
     setStagesAndRef((prev) => ({
@@ -797,6 +809,7 @@ export function SkillEditor({
   }
 
   const handleDeleteEntry = (entryId: string) => {
+    if (skill?.is_builtin) return
     const stageId = activeStageRef.current
     const entries = stagesRef.current[stageId] ?? []
     const index = entries.findIndex((entry) => entry.id === entryId)
@@ -817,6 +830,7 @@ export function SkillEditor({
 
   const createSkillEntry = useCallback(
     (input: { stageId: SkillStageId; title: string; body: string }) => {
+      if (skill?.is_builtin) return null
       const entry = {
         ...newStageSkillEntry(),
         title: input.title.trim() || '未命名技能',
@@ -829,7 +843,7 @@ export function SkillEditor({
       selectSkillEntry(input.stageId, entry.id)
       return entry
     },
-    [selectSkillEntry, setStagesAndRef],
+    [selectSkillEntry, setStagesAndRef, skill?.is_builtin],
   )
 
   const editSkillEntry = useCallback(
@@ -839,6 +853,7 @@ export function SkillEditor({
       title?: string
       body?: string
     }) => {
+      if (skill?.is_builtin) return false
       let changed = false
       setStagesAndRef((prev) => ({
         ...prev,
@@ -855,16 +870,17 @@ export function SkillEditor({
       }))
       return changed
     },
-    [setStagesAndRef],
+    [setStagesAndRef, skill?.is_builtin],
   )
 
   const writeSkillOverview = useCallback(
     (text: string) => {
+      if (skill?.is_builtin) return
       overviewDraftRef.current = text
       setOverviewDraft(text)
       if (id) scheduleOverviewSave(id)
     },
-    [id, scheduleOverviewSave],
+    [id, scheduleOverviewSave, skill?.is_builtin],
   )
 
   const handleInitOverview = useCallback(() => {
@@ -937,7 +953,8 @@ export function SkillEditor({
     entryCardStart,
     entryCardStart + SKILL_ENTRY_CARD_PAGE_SIZE,
   )
-  const skillTypeText = skillTypeLabel(skill.skill_type)
+  const isBuiltinSkill = Boolean(skill.is_builtin)
+  const skillTypeText = isBuiltinSkill ? '全类型' : skillTypeLabel(skill.skill_type)
   const skillKindText = SKILL_KIND_LABELS[skill.skill_kind]
   const overviewLabel = `${skillKindText}概述`
   const currentOverviewSaveStatus = overviewSaveStatus(id)
@@ -945,6 +962,8 @@ export function SkillEditor({
   const applyEntryBody = (value: string) =>
     updateSelectedEntry((entry) => ({ ...entry, body: value }))
   const showStageMetaOnCards = activeSkillStageKeys.length > 1
+  const importEntryKey = (sourceId: string, stageId: SkillStageId, entryId: string) =>
+    [sourceId, stageId, entryId].join('\u0000')
 
   return (
     <div className="editor-page editor-page--workspace">
@@ -960,6 +979,7 @@ export function SkillEditor({
               {skillTypeText}
               {' · '}
               {skillKindText}
+              {isBuiltinSkill ? ' · 官方内置（只读）' : ''}
             </span>
             {error || message ? (
               <span
@@ -982,17 +1002,58 @@ export function SkillEditor({
           </span>
         </div>
         <div className="editor-header-actions">
-          <button
-            type="button"
-            className="editor-header-material-select"
-            disabled={loadingCommonSkills}
-            onClick={() => void handleLoadCommonSkills()}
-          >
-            {loadingCommonSkills ? '加载中...' : '加载内置通用技能'}
-          </button>
+          {!isBuiltinSkill ? (
+            <button type="button" className="editor-header-material-select" disabled={loadingImportSources} onClick={() => void handleOpenSkillImport()}>
+              {loadingImportSources ? '加载中...' : '加载其他库相关技能'}
+            </button>
+          ) : null}
         </div>
       </header>
       {dialog}
+      {importDialogOpen ? (
+        <div className="skill-import-backdrop" role="presentation" onMouseDown={() => !importingSkills && setImportDialogOpen(false)}>
+          <section className="skill-import-dialog" role="dialog" aria-modal="true" aria-labelledby="skill-import-title" onMouseDown={(event) => event.stopPropagation()}>
+            <header className="skill-import-dialog-head">
+              <div><span>跨技能库加载</span><h2 id="skill-import-title">加载其他库相关技能</h2></div>
+              <button type="button" className="skill-import-close" disabled={importingSkills} onClick={() => setImportDialogOpen(false)} aria-label="关闭">×</button>
+            </header>
+            <div className="skill-import-dialog-body">
+              <p className="muted">按“技能库 → 阶段 → 技能”选择。只显示可写入当前技能库分类的阶段。</p>
+              {importSources.length === 0 ? <p className="workspace-stage-empty">暂无可加载的其他技能。</p> : (
+                <div className="skill-import-tree">
+                  {importSources.map((source) => {
+                    const stageRows = SKILL_STAGE_KEYS.flatMap((stageId) => {
+                      const entries = source.stages[stageId] ?? []
+                      return entries.length > 0 ? [[stageId, entries] as const] : []
+                    })
+                    const sourceKeys = stageRows.flatMap(([stageId, entries]) => entries.map((entry) => importEntryKey(source.id, stageId, entry.id)))
+                    const sourceChecked = sourceKeys.length > 0 && sourceKeys.every((key) => selectedImportKeys.has(key))
+                    return <section className="skill-import-tree-library" key={source.id}>
+                      <label className="skill-import-tree-node skill-import-tree-node--library">
+                        <input type="checkbox" checked={sourceChecked} onChange={(event) => toggleImportKeys(sourceKeys, event.target.checked)} />
+                        <span>{source.title}</span><em>{source.is_builtin ? '官方内置 · 全类型' : `${skillTypeLabel(source.skill_type)} · ${SKILL_KIND_LABELS[source.skill_kind]}`}</em>
+                      </label>
+                      <div className="skill-import-tree-children">
+                        {stageRows.map(([stageId, entries]) => {
+                          const stageKeys = entries.map((entry) => importEntryKey(source.id, stageId, entry.id))
+                          const stageChecked = stageKeys.length > 0 && stageKeys.every((key) => selectedImportKeys.has(key))
+                          return <div className="skill-import-tree-stage" key={`${source.id}:${stageId}`}>
+                            <label className="skill-import-tree-node skill-import-tree-node--stage"><input type="checkbox" checked={stageChecked} onChange={(event) => toggleImportKeys(stageKeys, event.target.checked)} /><span>{SKILL_STAGE_LABELS[stageId]}</span></label>
+                            <div className="skill-import-tree-entries">
+                              {entries.map((entry) => { const key = importEntryKey(source.id, stageId, entry.id); return <label className="skill-import-tree-node skill-import-tree-node--entry" key={entry.id}><input type="checkbox" checked={selectedImportKeys.has(key)} onChange={(event) => toggleImportKeys([key], event.target.checked)} /><span>{entry.title || '未命名技能'}</span></label> })}
+                            </div>
+                          </div>
+                        })}
+                      </div>
+                    </section>
+                  })}
+                </div>
+              )}
+            </div>
+            <footer className="skill-import-dialog-foot"><span className="muted">已选择 {selectedImportKeys.size} 条技能</span><button type="button" className="btn-secondary" disabled={importingSkills} onClick={() => setImportDialogOpen(false)}>取消</button><button type="button" className="btn-primary" disabled={importingSkills || selectedImportKeys.size === 0} onClick={() => void handleImportSelectedSkills()}>{importingSkills ? '加载中…' : '加载选中技能'}</button></footer>
+          </section>
+        </div>
+      ) : null}
 
       <div
         className="workspace-grid"
@@ -1016,10 +1077,8 @@ export function SkillEditor({
             onBookStageChildSelect={(skillId, _treeNodeId, childId) =>
               void handleTreeSkillSelect(skillId, childId)
             }
-            onBookStageChildCreate={(skillId) =>
-              handleTreeSkillChildCreate(skillId)
-            }
-            editingTitle={editingTitle}
+            onBookStageChildCreate={isBuiltinSkill ? undefined : (skillId) => handleTreeSkillChildCreate(skillId)}
+            editingTitle={!isBuiltinSkill && editingTitle}
             titleDraft={titleDraft}
             onTitleDraftChange={(value) =>
               textHistory.change(
@@ -1030,11 +1089,13 @@ export function SkillEditor({
               )
             }
             onTitleEditStart={() => {
+              if (isBuiltinSkill) return
               textHistory.clear(`skill:${skill.id}:title`, skill.title)
               setTitleDraft(skill.title)
               setEditingTitle(true)
             }}
             onTitleEditEnd={() => {
+              if (isBuiltinSkill) return
               const trimmed = titleDraft.trim()
               if (trimmed && trimmed !== skill.title) {
                 void (async () => {
@@ -1083,14 +1144,14 @@ export function SkillEditor({
                 id={historyPortalTargetId}
                 className="workspace-ai-header-history-slot"
               />
-              <button
+              {!isBuiltinSkill ? <button
                 type="button"
                 className="workspace-ai-new-chat"
                 onClick={handleInitOverview}
               >
                 初始化概述
-              </button>
-              <button
+              </button> : null}
+              {!isBuiltinSkill ? <button
                 type="button"
                 className="workspace-ai-new-chat"
                 aria-label="清空技能管理智能体对话并开始新会话"
@@ -1098,14 +1159,16 @@ export function SkillEditor({
                 onClick={() => setAiChatEpoch((epoch) => epoch + 1)}
               >
                 新建对话
-              </button>
+              </button> : null}
             </div>
           </div>
           <div className="workspace-ai-hint muted">
             技能库 · {skillTypeText} · {skillKindText}
             {activeEntry ? ` · ${activeEntry.title}` : ''}
           </div>
-          <div className="workspace-ai-chat-stack">
+          {isBuiltinSkill ? (
+            <div className="workspace-stage-empty"><p className="muted">官方内置通用技能库仅供浏览、绑定和加载，不能在此编辑。</p></div>
+          ) : <div className="workspace-ai-chat-stack">
             <div className="workspace-ai-chat-layer workspace-ai-chat-layer--active">
               <WorkspaceAiChat
                 key={`${skill.id}-skill-manager-${aiChatEpoch}`}
@@ -1146,7 +1209,7 @@ export function SkillEditor({
                 workspaceType="skill"
               />
             </div>
-          </div>
+          </div>}
         </aside>
 
         <div
@@ -1220,7 +1283,9 @@ export function SkillEditor({
                 id="skill-overview-body"
                 className="material-overview-textarea"
                 value={overviewDraft}
+                readOnly={isBuiltinSkill}
                 onChange={(event) => {
+                  if (isBuiltinSkill) return
                   const value = event.target.value
                   overviewDraftRef.current = value
                   setOverviewDraft(value)
@@ -1336,6 +1401,7 @@ export function SkillEditor({
                   <input
                     type="text"
                     value={activeEntry.title}
+                    disabled={isBuiltinSkill}
                     onChange={(e) =>
                       updateSelectedEntry((entry) => ({
                         ...entry,
@@ -1346,13 +1412,13 @@ export function SkillEditor({
                     placeholder="请输入技能名称"
                   />
                 </label>
-                <button
+                {!isBuiltinSkill ? <button
                   type="button"
                   className="btn-secondary btn-small"
                   onClick={() => handleDeleteEntry(activeEntry.id)}
                 >
                   删除技能
-                </button>
+                </button> : null}
               </div>
               <MarkdownTextEditor
                 id="stage-body"
@@ -1378,7 +1444,7 @@ export function SkillEditor({
                 }
                 onBlur={() => void flushAutoSave()}
                 spellCheck={false}
-                readOnly={editorStreaming}
+                readOnly={editorStreaming || isBuiltinSkill}
                 placeholder={`沉淀「${activeEntry.title || '当前技能'}」的写作技能、规则、示例或注意事项…`}
               />
             </div>

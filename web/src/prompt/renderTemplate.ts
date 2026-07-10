@@ -125,8 +125,6 @@ export function peekAllowedWorkspaceStagesExcerpt(
   return peekOtherStagesExcerpt('workspace', null, filtered)
 }
 
-const WORKSPACE_TAG =
-  /\{\{(BOOK_TITLE|BOOK_GENRE)\}\}/g
 const MATERIAL_TAG =
   /\{\{(BOOK_TITLE|BOOK_LINE|MATERIAL_TITLE|MATERIAL_LINE|MATERIAL_TYPE|MATERIAL_GENRE|MATERIAL_KIND|MATERIAL_KIND_LABEL|MATERIAL_OVERVIEW|CURRENT_ENTRY_TITLE|STAGE_ID|STAGE_LABEL|STAGE_BODY|OTHER_STAGES_EXCERPT)\}\}/g
 const SKILL_TAG =
@@ -174,20 +172,16 @@ export function substitutePromptPlaceholders(
   templateRaw: string,
   input: PromptSubstitutePayload,
 ): string {
+  if (input.promptKind === 'workspace') return templateRaw
   const bt = input.bookTitle.trim()
-  const genre = input.bookGenre?.trim() || '未分类'
   const materialLine = `素材：《${bt}》`
   const skillLine = `技能：《${bt}》`
-  const bookLine =
-    input.promptKind === 'workspace'
-      ? `书名：《${bt}》`
-      : isSkillPromptKind(input.promptKind)
-        ? skillLine
-        : materialLine
+  const bookLine = isSkillPromptKind(input.promptKind)
+    ? skillLine
+    : materialLine
   const rep: Record<string, string> = {
     BOOK_TITLE: bt,
     BOOK_LINE: bookLine,
-    BOOK_GENRE: genre,
     MATERIAL_TITLE: bt,
     MATERIAL_LINE: materialLine,
     MATERIAL_TYPE: input.materialType?.trim() || '未分类素材',
@@ -207,12 +201,7 @@ export function substitutePromptPlaceholders(
     STAGE_BODY: excerptText(input.stageBody),
     OTHER_STAGES_EXCERPT: input.otherStagesComputed,
   }
-  const tag =
-    input.promptKind === 'workspace'
-      ? WORKSPACE_TAG
-      : isSkillPromptKind(input.promptKind)
-        ? SKILL_TAG
-        : MATERIAL_TAG
+  const tag = isSkillPromptKind(input.promptKind) ? SKILL_TAG : MATERIAL_TAG
   return templateRaw.replace(tag, (_, k: keyof typeof rep) => rep[k] ?? '')
 }
 

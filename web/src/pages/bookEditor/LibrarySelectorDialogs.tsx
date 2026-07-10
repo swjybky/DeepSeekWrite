@@ -1,10 +1,13 @@
+import { useState } from 'react'
 import type {
   Book,
   Material,
   MaterialKind,
+  MaterialLibraryGroup,
   MaterialSummary,
   Skill,
   SkillKind,
+  SkillLibraryGroup,
   SkillSummary,
 } from '../../domain/workspace'
 import {
@@ -15,6 +18,7 @@ import {
   MATERIAL_KIND_STAGE_IDS,
   MATERIAL_STAGE_LABELS,
   materialMatchesKind,
+  materialLibraryGroupLinks,
   materialMetaLabel,
   normalizeLinkedMaterialIdsByKind,
   normalizeLinkedSkillIdsByKind,
@@ -23,6 +27,7 @@ import {
   SKILL_KIND_STAGE_IDS,
   SKILL_STAGE_LABELS,
   skillMatchesKind,
+  skillLibraryGroupLinks,
   skillTypeLabel,
 } from '../../domain/workspace'
 
@@ -31,6 +36,7 @@ type MaterialSelectorDialogProps = {
   linkedMaterial: Material | null
   linkedMaterialsByKind: Partial<Record<MaterialKind, Material[]>>
   summaries: MaterialSummary[]
+  groups: MaterialLibraryGroup[]
   loading: boolean
   saving: boolean
   onClose: () => void
@@ -42,6 +48,7 @@ type SkillSelectorDialogProps = {
   linkedSkill: Skill | null
   linkedSkillsByKind: Partial<Record<SkillKind, Skill[]>>
   summaries: SkillSummary[]
+  groups: SkillLibraryGroup[]
   loading: boolean
   saving: boolean
   onClose: () => void
@@ -54,16 +61,33 @@ function compactOutputPath(path: string): string {
     : path
 }
 
+type LibraryBindingMode = 'single' | 'group'
+
+function linkedIdsEqual<K extends string>(
+  keys: readonly K[],
+  left: Partial<Record<K, string[]>>,
+  right: Partial<Record<K, string[]>>,
+): boolean {
+  return keys.every((key) => {
+    const leftIds = [...(left[key] ?? [])].sort()
+    const rightIds = [...(right[key] ?? [])].sort()
+    return leftIds.length === rightIds.length &&
+      leftIds.every((id, index) => id === rightIds[index])
+  })
+}
+
 export function MaterialSelectorDialog({
   book,
   linkedMaterial,
   linkedMaterialsByKind,
   summaries,
+  groups,
   loading,
   saving,
   onClose,
   onChange,
 }: MaterialSelectorDialogProps) {
+  const [bindingMode, setBindingMode] = useState<LibraryBindingMode>('single')
   const currentByKind = normalizeLinkedMaterialIdsByKind(
     book.linked_material_ids_by_kind,
     book.linked_material_id,
@@ -72,6 +96,12 @@ export function MaterialSelectorDialog({
     (sum, kind) => sum + (linkedMaterialsByKind[kind]?.length ?? 0),
     0,
   )
+  const groupOptions = groups
+    .map((group) => ({
+      group,
+      links: materialLibraryGroupLinks(group, summaries, book.book_type),
+    }))
+    .filter(({ links }) => MATERIAL_KIND_KEYS.some((kind) => links[kind].length > 0))
 
   const toggleMaterial = (kind: MaterialKind, materialId: string) => {
     const next = normalizeLinkedMaterialIdsByKind(currentByKind, null)
@@ -94,9 +124,31 @@ export function MaterialSelectorDialog({
     >
       <div className="workspace-material-selector-panel">
         <div className="workspace-material-selector-head">
-          <h2 id="wc-material-selector-title" className="workspace-material-selector-title">
-            选择关联素材库
-          </h2>
+          <div className="workspace-library-selector-heading">
+            <h2 id="wc-material-selector-title" className="workspace-material-selector-title">
+              选择关联素材库
+            </h2>
+            <div className="workspace-library-binding-modes" role="radiogroup" aria-label="素材库绑定方式">
+              <label>
+                <input
+                  type="radio"
+                  name="workspaceMaterialBindingMode"
+                  checked={bindingMode === 'single'}
+                  onChange={() => setBindingMode('single')}
+                />
+                单个
+              </label>
+              <label>
+                <input
+                  type="radio"
+                  name="workspaceMaterialBindingMode"
+                  checked={bindingMode === 'group'}
+                  onChange={() => setBindingMode('group')}
+                />
+                分组
+              </label>
+            </div>
+          </div>
           <button
             type="button"
             className="workspace-material-selector-close"
@@ -117,11 +169,47 @@ export function MaterialSelectorDialog({
           ) : null}
         </div>
         <div className="workspace-material-stage-note">
-          可按部门多选素材库；旧综合素材库可出现在所有部门。
+          {bindingMode === 'single'
+            ? '可按部门多选素材库；旧综合素材库可出现在所有部门。'
+            : '选择一个素材分组，将一次关联该分组内适用于当前书籍类型的全部素材库。'}
         </div>
         <div className="workspace-material-list">
           {loading ? (
             <p className="muted workspace-material-empty">加载中…</p>
+          ) : bindingMode === 'group' ? (
+            groupOptions.length === 0 ? (
+              <p className="muted workspace-material-empty">暂无适用于当前书籍类型的素材分组</p>
+            ) : (
+              groupOptions.map(({ group, links }) => {
+                const selected = linkedIdsEqual(MATERIAL_KIND_KEYS, currentByKind, links)
+                const memberNames = MATERIAL_KIND_KEYS.flatMap((kind) => links[kind])
+                  .map((id) => summaries.find((item) => item.id === id)?.title)
+                  .filter((title): title is string => Boolean(title))
+                return (
+                  <button
+                    key={group.id}
+                    type="button"
+                    className={
+                      selected
+                        ? 'workspace-material-item workspace-material-item--selected'
+                        : 'workspace-material-item'
+                    }
+                    disabled={saving}
+                    onClick={() => onChange(links)}
+                  >
+                    <span className="workspace-material-item-main">
+                      <span className="workspace-material-item-title">{group.title}</span>
+                      <span className="workspace-material-item-meta">
+                        {memberNames.join('、') || '暂无可用成员'}
+                      </span>
+                    </span>
+                    <span className="workspace-material-item-state">
+                      {selected ? '已关联' : '关联分组'}
+                    </span>
+                  </button>
+                )
+              })
+            )
           ) : summaries.length === 0 ? (
             <p className="muted workspace-material-empty">暂无素材库</p>
           ) : (
@@ -205,11 +293,13 @@ export function SkillSelectorDialog({
   linkedSkill,
   linkedSkillsByKind,
   summaries,
+  groups,
   loading,
   saving,
   onClose,
   onChange,
 }: SkillSelectorDialogProps) {
+  const [bindingMode, setBindingMode] = useState<LibraryBindingMode>('single')
   const currentByKind = normalizeLinkedSkillIdsByKind(
     book.linked_skill_ids_by_kind,
     book.linked_skill_id,
@@ -218,6 +308,12 @@ export function SkillSelectorDialog({
     (sum, kind) => sum + (linkedSkillsByKind[kind]?.length ?? 0),
     0,
   )
+  const groupOptions = groups
+    .map((group) => ({
+      group,
+      links: skillLibraryGroupLinks(group, summaries, book.book_type),
+    }))
+    .filter(({ links }) => SKILL_KIND_KEYS.some((kind) => links[kind].length > 0))
 
   const toggleSkill = (kind: SkillKind, skillId: string) => {
     const next = normalizeLinkedSkillIdsByKind(currentByKind, null)
@@ -240,9 +336,31 @@ export function SkillSelectorDialog({
     >
       <div className="workspace-material-selector-panel">
         <div className="workspace-material-selector-head">
-          <h2 id="wc-skill-selector-title" className="workspace-material-selector-title">
-            选择绑定技能库
-          </h2>
+          <div className="workspace-library-selector-heading">
+            <h2 id="wc-skill-selector-title" className="workspace-material-selector-title">
+              选择绑定技能库
+            </h2>
+            <div className="workspace-library-binding-modes" role="radiogroup" aria-label="技能库绑定方式">
+              <label>
+                <input
+                  type="radio"
+                  name="workspaceSkillBindingMode"
+                  checked={bindingMode === 'single'}
+                  onChange={() => setBindingMode('single')}
+                />
+                单个
+              </label>
+              <label>
+                <input
+                  type="radio"
+                  name="workspaceSkillBindingMode"
+                  checked={bindingMode === 'group'}
+                  onChange={() => setBindingMode('group')}
+                />
+                分组
+              </label>
+            </div>
+          </div>
           <button
             type="button"
             className="workspace-material-selector-close"
@@ -263,18 +381,54 @@ export function SkillSelectorDialog({
           ) : null}
         </div>
         <div className="workspace-material-stage-note">
-          可按分类多选技能库；AI 会按当前阶段展示可加载技能，并通过 load_skill 读取完整技能内容。
+          {bindingMode === 'single'
+            ? '可按分类多选技能库；AI 会按当前阶段展示可加载技能，并通过 load_skill 读取完整技能内容。'
+            : '选择一个技能分组，将一次绑定该分组内适用于当前书籍类型的全部技能库。'}
         </div>
         <div className="workspace-material-list">
           {loading ? (
             <p className="muted workspace-material-empty">加载中…</p>
+          ) : bindingMode === 'group' ? (
+            groupOptions.length === 0 ? (
+              <p className="muted workspace-material-empty">暂无适用于当前书籍类型的技能分组</p>
+            ) : (
+              groupOptions.map(({ group, links }) => {
+                const selected = linkedIdsEqual(SKILL_KIND_KEYS, currentByKind, links)
+                const memberNames = SKILL_KIND_KEYS.flatMap((kind) => links[kind])
+                  .map((id) => summaries.find((item) => item.id === id)?.title)
+                  .filter((title): title is string => Boolean(title))
+                return (
+                  <button
+                    key={group.id}
+                    type="button"
+                    className={
+                      selected
+                        ? 'workspace-material-item workspace-material-item--selected'
+                        : 'workspace-material-item'
+                    }
+                    disabled={saving}
+                    onClick={() => onChange(links)}
+                  >
+                    <span className="workspace-material-item-main">
+                      <span className="workspace-material-item-title">{group.title}</span>
+                      <span className="workspace-material-item-meta">
+                        {memberNames.join('、') || '暂无可用成员'}
+                      </span>
+                    </span>
+                    <span className="workspace-material-item-state">
+                      {selected ? '已绑定' : '绑定分组'}
+                    </span>
+                  </button>
+                )
+              })
+            )
           ) : summaries.length === 0 ? (
             <p className="muted workspace-material-empty">暂无技能库</p>
           ) : (
             SKILL_KIND_KEYS.map((kind) => {
               const candidates = summaries.filter(
                 (skill) =>
-                  skill.skill_type === book.book_type &&
+                  (skill.is_builtin || skill.skill_type === book.book_type) &&
                   skillMatchesKind(skill, kind),
               )
               return (

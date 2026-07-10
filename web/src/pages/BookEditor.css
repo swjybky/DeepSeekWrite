@@ -1474,10 +1474,12 @@ button.back-link:hover {
 }
 
 .expert-draft-textarea-field:first-of-type {
-  flex: 2 1 0%;
+  /* 正文是分节写作时的主要阅读与编辑区域。 */
+  flex: 4 1 0%;
 }
 
 .expert-draft-textarea-field:last-of-type {
+  /* 人物状态只需保留简要的续写提示，不占用正文阅读空间。 */
   flex: 1 1 0%;
 }
 
@@ -1734,9 +1736,14 @@ button.back-link:hover {
 }
 
 .workspace-ai message-editor textarea {
+  padding: 0.45rem 0.75rem;
   color: var(--ink);
   caret-color: var(--accent);
-  line-height: 1.6;
+  line-height: 1.45;
+}
+
+.workspace-ai message-editor > .bg-card > .px-2.pb-2 {
+  padding-bottom: 0.35rem;
 }
 
 .workspace-ai message-editor textarea::placeholder {
@@ -1842,7 +1849,7 @@ button.back-link:hover {
   overflow: auto;
 }
 
-/* DeepSeekWrite 工具调用：古风/现代双图标 + 主题色（随 data-appearance 切换，无需重渲染） */
+/* Deep Write 工具调用：古风/现代双图标 + 主题色（随 data-appearance 切换，无需重渲染） */
 .workspace-ai .deepseekwrite-tool-glyph--modern {
   display: none;
 }
@@ -2300,6 +2307,32 @@ button.back-link:hover {
   margin: 0;
   font-size: 1rem;
   font-weight: 600;
+}
+
+.workspace-library-selector-heading {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.workspace-library-binding-modes {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.75rem;
+  font-size: 0.78rem;
+  color: var(--text);
+}
+
+.workspace-library-binding-modes label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  cursor: pointer;
+}
+
+.workspace-library-binding-modes input {
+  accent-color: var(--accent);
 }
 
 .workspace-material-selector-close {
@@ -3145,4 +3178,71 @@ button.back-link:hover {
   .ai-bubble {
     transition: none;
   }
+}
+
+.skill-import-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 10050;
+  display: grid;
+  place-items: center;
+  padding: 1rem;
+  background: color-mix(in oklab, #111 48%, transparent);
+  backdrop-filter: blur(3px);
+}
+
+.skill-import-dialog {
+  width: min(760px, 100%);
+  max-height: min(760px, calc(100vh - 2rem));
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--paper-elevated);
+  box-shadow: 0 24px 80px rgb(0 0 0 / 28%);
+}
+
+.skill-import-dialog-head,
+.skill-import-dialog-foot {
+  display: flex;
+  align-items: center;
+  gap: .8rem;
+  padding: .9rem 1rem;
+}
+
+.skill-import-dialog-head {
+  justify-content: space-between;
+  border-bottom: 1px solid var(--border);
+}
+
+.skill-import-dialog-head span,
+.skill-import-tree-node em {
+  color: var(--ink-faint);
+  font-size: .78rem;
+  font-style: normal;
+}
+
+.skill-import-dialog-head h2 { margin: .15rem 0 0; font-size: 1.1rem; }
+.skill-import-close { border: 0; background: transparent; color: var(--ink-faint); font-size: 1.5rem; cursor: pointer; }
+.skill-import-dialog-body { min-height: 0; overflow: auto; padding: 1rem; }
+.skill-import-dialog-foot { justify-content: flex-end; border-top: 1px solid var(--border); }
+.skill-import-dialog-foot > :first-child { margin-right: auto; }
+.skill-import-tree { display: grid; gap: .7rem; }
+.skill-import-tree-library { border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.skill-import-tree-node { display: flex; align-items: center; gap: .5rem; min-width: 0; padding: .5rem .7rem; cursor: pointer; }
+.skill-import-tree-node input { flex: 0 0 auto; accent-color: var(--accent); }
+.skill-import-tree-node span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.skill-import-tree-node em { margin-left: auto; white-space: nowrap; }
+.skill-import-tree-node--library { background: var(--paper); font-weight: 650; }
+.skill-import-tree-children { padding: .3rem .4rem .55rem 1.2rem; }
+.skill-import-tree-stage + .skill-import-tree-stage { border-top: 1px dashed var(--border); }
+.skill-import-tree-node--stage { font-weight: 600; }
+.skill-import-tree-entries { padding-left: 1.25rem; }
+.skill-import-tree-node--entry { font-size: .9rem; }
+
+@media (max-width: 640px) {
+  .skill-import-backdrop { padding: .65rem; }
+  .skill-import-dialog { max-height: calc(100vh - 1.3rem); }
+  .skill-import-dialog-foot { flex-wrap: wrap; }
 }

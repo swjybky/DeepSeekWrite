@@ -90,7 +90,7 @@ async function loadLinkedSkillsForBook(
       .filter(
         (skill): skill is Skill =>
           skill !== null &&
-          skill.skill_type === book.book_type &&
+          (skill.is_builtin || skill.skill_type === book.book_type) &&
           skillMatchesKind(skill, kind),
       )
   }

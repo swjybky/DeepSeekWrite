@@ -96,7 +96,7 @@ def _fetch_manifest(url: str) -> dict[str, Any]:
         url,
         headers={
             "Accept": "application/json",
-            "User-Agent": "DeepSeekWrite-Updater/1.0",
+            "User-Agent": "Deep-Write-Updater/1.0",
         },
     )
     try:
@@ -256,7 +256,7 @@ def download_latest_update() -> dict[str, object]:
         temporary_path = downloads_dir / f".{file_name}.{uuid.uuid4().hex}.part"
         request = Request(
             download_url,
-            headers={"User-Agent": "DeepSeekWrite-Updater/1.0"},
+            headers={"User-Agent": "Deep-Write-Updater/1.0"},
         )
         try:
             with urlopen(

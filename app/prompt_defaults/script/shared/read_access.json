@@ -8,6 +8,11 @@
       "draft",
       "character",
       "other"
+    ],
+    "skill": [
+      "general",
+      "style",
+      "other"
     ]
   },
   "expert_draft_coordinator": {
@@ -18,6 +23,11 @@
     "material": [
       "plot",
       "draft",
+      "other"
+    ],
+    "skill": [
+      "general",
+      "style",
       "other"
     ]
   },
@@ -32,6 +42,11 @@
       "character",
       "plot",
       "other"
+    ],
+    "skill": [
+      "general",
+      "plot",
+      "other"
     ]
   },
   "character_design": {
@@ -42,6 +57,11 @@
     ],
     "material": [
       "character",
+      "other"
+    ],
+    "skill": [
+      "general",
+      "plot",
       "other"
     ]
   },
@@ -54,6 +74,11 @@
     "material": [
       "character",
       "gimmick",
+      "plot",
+      "other"
+    ],
+    "skill": [
+      "general",
       "plot",
       "other"
     ]

@@ -1,5 +1,4 @@
 import { getEmbeddedPromptTemplate } from '../prompt/embeddedDefaults'
-import { renderPromptFromTemplateRaw } from '../prompt/renderTemplate'
 import { appendLoadableSkillsToPrompt } from '../workspaces/short/loadSkill'
 import { appendReadableLinkedMaterialsToPrompt } from '../workspaces/shared/linkedMaterialPrompt'
 import {
@@ -27,6 +26,7 @@ import {
   ensureLocalPlotPromptMerged,
   ensureLocalScriptPromptPrepared,
   ensureLocalSharedPromptMigrated,
+  ensureLocalWorkspacePromptDefaultsV2Reset,
   localPromptLsKey,
   LONG_SHARED_WORKSPACE_PROMPT_KIND,
   SCRIPT_SHARED_WORKSPACE_PROMPT_KIND,
@@ -46,6 +46,13 @@ function agentIdsForWorkspaceType(workspaceType: BookType): readonly AnyWorkspac
   return workspaceType === 'long' ? LONG_WORKSPACE_AGENT_IDS : WORKSPACE_AGENT_IDS
 }
 
+function prepareLocalWorkspacePrompts(workspaceType: BookType): void {
+  ensureLocalSharedPromptMigrated()
+  ensureLocalPlotPromptMerged()
+  if (workspaceType === 'script') ensureLocalScriptPromptPrepared()
+  if (workspaceType !== 'long') ensureLocalWorkspacePromptDefaultsV2Reset()
+}
+
 /** 磁盘 / 嵌入式默认 + （浏览器）localStorage 覆盖；供集中设置页使用。 */
 export async function readWorkspaceAgentPromptTemplate(
   agentId: AnyWorkspaceAgentId,
@@ -56,9 +63,7 @@ export async function readWorkspaceAgentPromptTemplate(
     const t = await api.read_workspace_agent_prompt_template(agentId, workspaceType)
     return t.endsWith('\n') ? t.slice(0, -1) : t
   }
-  ensureLocalSharedPromptMigrated()
-  ensureLocalPlotPromptMerged()
-  if (workspaceType === 'script') ensureLocalScriptPromptPrepared()
+  prepareLocalWorkspacePrompts(workspaceType)
   try {
     const ls = localStorage.getItem(
       localPromptLsKey(promptKindForWorkspaceType(workspaceType), agentId),
@@ -83,16 +88,14 @@ export async function saveWorkspaceAgentPromptOverride(
     await api.save_workspace_agent_prompt_override(agentId, body, workspaceType)
     return
   }
-  ensureLocalSharedPromptMigrated()
-  ensureLocalPlotPromptMerged()
-  if (workspaceType === 'script') ensureLocalScriptPromptPrepared()
+  prepareLocalWorkspacePrompts(workspaceType)
   try {
     localStorage.setItem(
       localPromptLsKey(promptKindForWorkspaceType(workspaceType), agentId),
       body,
     )
   } catch {
-    console.warn('[DeepSeekWrite] 无法保存创作空间提示词覆盖：无桌面桥接且无可用 localStorage')
+    console.warn('[Deep Write] 无法保存创作空间提示词覆盖：无桌面桥接且无可用 localStorage')
   }
 }
 
@@ -104,9 +107,7 @@ export async function resetWorkspaceAgentPromptOverride(
   if (api?.reset_workspace_agent_prompt_override) {
     return api.reset_workspace_agent_prompt_override(agentId, workspaceType)
   }
-  ensureLocalSharedPromptMigrated()
-  ensureLocalPlotPromptMerged()
-  if (workspaceType === 'script') ensureLocalScriptPromptPrepared()
+  prepareLocalWorkspacePrompts(workspaceType)
   try {
     const k = localPromptLsKey(promptKindForWorkspaceType(workspaceType), agentId)
     const had = localStorage.getItem(k) != null
@@ -131,9 +132,7 @@ export async function resetAllWorkspaceSettings(
       ),
     )
   } else {
-    ensureLocalSharedPromptMigrated()
-    ensureLocalPlotPromptMerged()
-    if (workspaceType === 'script') ensureLocalScriptPromptPrepared()
+    prepareLocalWorkspacePrompts(workspaceType)
     try {
       const prefix = promptKindForWorkspaceType(workspaceType)
       for (const agentId of agentIdsForWorkspaceType(workspaceType)) {
@@ -171,6 +170,7 @@ export async function getWorkspaceSystemPrompt(
     allStages: Partial<Record<StageId, string>>
     allowedWorkspaceStages: readonly StageId[]
     allowedMaterialKinds?: readonly MaterialKind[]
+    allowedSkillKinds?: readonly SkillKind[]
     linkedMaterialsByKind?: Partial<Record<MaterialKind, Material[]>>
     linkedSkill?: Skill | null
     linkedSkillsByKind?: Partial<Record<SkillKind, Skill[]>>
@@ -205,13 +205,10 @@ export async function getWorkspaceSystemPrompt(
       input.linkedSkill,
       stageId,
       input.linkedSkillsByKind,
+      input.allowedSkillKinds,
     )
   }
 
-  const allowed = new Set(input.allowedWorkspaceStages)
-  const filteredStages = Object.fromEntries(
-    Object.entries(input.allStages).filter(([id]) => allowed.has(id as StageId)),
-  ) as Partial<Record<StageId, string>>
   const promptAgentId =
     workspaceType === 'long'
       ? resolveLongWorkspaceAgentIdForStage(stageId as LongStageId)
@@ -219,22 +216,15 @@ export async function getWorkspaceSystemPrompt(
           stageId as Parameters<typeof resolveWorkspaceAgentIdForStage>[0],
         )
   const raw = await readWorkspaceAgentPromptTemplate(promptAgentId, workspaceType)
-  const prompt = renderPromptFromTemplateRaw(raw, {
-    bookTitle: input.bookTitle,
-    bookGenre: input.bookGenre,
-    stageBody: input.stageBody,
-    allStages: filteredStages,
-    promptKind: 'workspace',
-    stageId,
-  })
   return appendLoadableSkillsToPrompt(
     appendReadableLinkedMaterialsToPrompt(
-      prompt,
+      raw,
       input.linkedMaterialsByKind,
       input.allowedMaterialKinds,
     ),
     input.linkedSkill,
     stageId,
     input.linkedSkillsByKind,
+    input.allowedSkillKinds,
   )
 }

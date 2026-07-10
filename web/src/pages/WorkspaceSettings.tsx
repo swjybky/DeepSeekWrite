@@ -8,6 +8,8 @@ import { useNavigate } from 'react-router-dom'
 import {
   MATERIAL_KIND_KEYS,
   MATERIAL_KIND_LABELS,
+  SKILL_KIND_KEYS,
+  SKILL_KIND_LABELS,
   bookTypeLabel,
   getWorkspaceAgentReadAccess,
   getWorkspaceAgentReadAccessDefaults,
@@ -19,6 +21,7 @@ import {
   syncWorkspaceSettingsDefaults,
   type BookType,
   type MaterialKind,
+  type SkillKind,
   type StageId,
   type WorkspaceAgentId,
   type WorkspaceAgentReadAccessConfig,
@@ -65,8 +68,6 @@ const AGENT_LABELS: Record<WorkspaceAgentId, string> = {
 const EMPTY_PROMPTS = Object.fromEntries(
   WORKSPACE_AGENT_IDS.map((agentId) => [agentId, '']),
 ) as PromptDrafts
-const WORKSPACE_PLACEHOLDER_HINT =
-  '当前书籍：《{{BOOK_TITLE}}》  当前类型分类：{{BOOK_GENRE}}'
 
 function getDefaultReadAccessForType(
   workspaceType: WorkspaceSettingsType,
@@ -304,8 +305,8 @@ export function WorkspaceSettings() {
 
   const patchReadAccess = useCallback(
     (
-      kind: 'workspace' | 'material',
-      id: StageId | MaterialKind,
+      kind: 'workspace' | 'material' | 'skill',
+      id: StageId | MaterialKind | SkillKind,
       checked: boolean,
     ) => {
       if (
@@ -329,12 +330,19 @@ export function WorkspaceSettings() {
                 ? [...new Set([...entry.workspace, id as StageId])]
                 : entry.workspace.filter((stageId) => stageId !== id),
             }
-          : {
-              ...entry,
-              material: checked
-                ? [...new Set([...entry.material, id as MaterialKind])]
-                : entry.material.filter((stageId) => stageId !== id),
-            }
+          : kind === 'material'
+            ? {
+                ...entry,
+                material: checked
+                  ? [...new Set([...entry.material, id as MaterialKind])]
+                  : entry.material.filter((stageId) => stageId !== id),
+              }
+            : {
+                ...entry,
+                skill: checked
+                  ? [...new Set([...(entry.skill ?? []), id as SkillKind])]
+                  : (entry.skill ?? []).filter((skillKind) => skillKind !== id),
+              }
       const next = normalizeReadAccessForType(workspaceType, {
         ...current,
         [activeAgentRef.current]: nextEntry,
@@ -513,7 +521,7 @@ export function WorkspaceSettings() {
         </button>
         <div className="workspace-settings-title-block">
           <h1>创作空间设置</h1>
-          <p>短篇与剧本分别保存智能体提示词与读取范围。</p>
+          <p>短篇与剧本分别保存智能体提示词、读取范围与关联技能分类。</p>
           <span
             className={`workspace-settings-save-state workspace-settings-save-state--${headerStatus}`}
             aria-live="polite"
@@ -633,7 +641,7 @@ export function WorkspaceSettings() {
                     <p>停止输入 1 秒后自动保存，持续输入最长 5 秒落盘一次。</p>
                   </div>
                   <p className="workspace-settings-placeholder-hint">
-                    可用占位符：<code>{WORKSPACE_PLACEHOLDER_HINT}</code>
+                    书名、创作类型、分类和当前位置会在每次请求时自动提供，无需写入系统提示词。
                   </p>
                   <textarea
                     value={activePrompt}
@@ -718,6 +726,26 @@ export function WorkspaceSettings() {
                           }
                         />
                         <span>{MATERIAL_KIND_LABELS[materialKind]}</span>
+                      </label>
+                    ))}
+                  </fieldset>
+
+                  <fieldset>
+                    <legend>关联技能分类</legend>
+                    {SKILL_KIND_KEYS.map((skillKind) => (
+                      <label key={skillKind}>
+                        <input
+                          type="checkbox"
+                          checked={(activeEntry.skill ?? []).includes(skillKind)}
+                          onChange={(event) =>
+                            patchReadAccess(
+                              'skill',
+                              skillKind,
+                              event.target.checked,
+                            )
+                          }
+                        />
+                        <span>{SKILL_KIND_LABELS[skillKind]}</span>
                       </label>
                     ))}
                   </fieldset>

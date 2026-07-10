@@ -72,6 +72,7 @@ export function buildExpertDraftCoordinatorTools(
     buildLoadSkillTool({
       linkedSkill: ctx.linkedSkill,
       linkedSkillsByKind: ctx.linkedSkillsByKind,
+      allowedSkillKinds: ctx.readAccess.skill as readonly SkillKind[] | undefined,
       currentStageId: 'expert_draft_coordinator',
     }),
   )
