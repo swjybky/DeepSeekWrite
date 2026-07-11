@@ -317,6 +317,14 @@
   line-height: 1.6;
 }
 
+.common-skill-card .manager-skill-description {
+  min-height: 76px;
+}
+
+.common-skill-card .manager-skill-body {
+  min-height: 260px;
+}
+
 .common-skill-card fieldset {
   margin: 0;
   padding: 0.8rem;

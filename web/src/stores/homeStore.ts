@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import type {
   AiModelSettings,
   BookSummary,
+  MaterialLibraryGroup,
   MaterialSummary,
   SkillLibraryGroup,
   SkillSummary,
@@ -10,6 +11,7 @@ import type {
 type HomeStoreState = {
   books: BookSummary[]
   materials: MaterialSummary[]
+  materialGroups: MaterialLibraryGroup[]
   skills: SkillSummary[]
   skillGroups: SkillLibraryGroup[]
   bookCovers: Record<string, string>
@@ -20,7 +22,10 @@ type HomeStoreState = {
   hasSkills: boolean
   hasAiSettings: boolean
   setBooks: (books: BookSummary[]) => void
-  setMaterials: (materials: MaterialSummary[]) => void
+  setMaterialLibraryData: (
+    materials: MaterialSummary[],
+    materialGroups: MaterialLibraryGroup[],
+  ) => void
   setSkillLibraryData: (
     skills: SkillSummary[],
     skillGroups: SkillLibraryGroup[],
@@ -33,6 +38,7 @@ type HomeStoreState = {
 export const useHomeStore = create<HomeStoreState>((set) => ({
   books: [],
   materials: [],
+  materialGroups: [],
   skills: [],
   skillGroups: [],
   bookCovers: {},
@@ -44,7 +50,8 @@ export const useHomeStore = create<HomeStoreState>((set) => ({
   hasAiSettings: false,
 
   setBooks: (books) => set({ books, hasBooks: true }),
-  setMaterials: (materials) => set({ materials, hasMaterials: true }),
+  setMaterialLibraryData: (materials, materialGroups) =>
+    set({ materials, materialGroups, hasMaterials: true }),
   setSkillLibraryData: (skills, skillGroups) =>
     set({ skills, skillGroups, hasSkills: true }),
   setBookCovers: (bookCovers) => set({ bookCovers }),

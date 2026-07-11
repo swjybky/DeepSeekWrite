@@ -191,6 +191,8 @@ import webview
 
 from app.runtime_paths import app_data_root, bundle_root, data_root, writable_root
 from app.prompt_store import (
+    read_default_expert_writing_task_prompt,
+    read_expert_writing_task_prompt,
     read_raw_learning_imitation_prompt_for_editor,
     read_raw_material_prompt_for_editor,
     read_raw_material_agent_prompt_for_editor,
@@ -207,15 +209,22 @@ from app.prompt_store import (
     reset_material_prompt_override as _reset_material_prompt_override,
     reset_skill_agent_prompt_override as _reset_skill_agent_prompt_override,
     reset_workspace_agent_prompt_override as _reset_workspace_agent_prompt_override,
+    reset_expert_writing_task_prompt as _reset_expert_writing_task_prompt,
     save_learning_imitation_prompt_override as _save_learning_imitation_prompt_override,
     save_material_agent_prompt_override as _save_material_agent_prompt_override,
     save_material_kind_prompt_override as _save_material_kind_prompt_override,
     save_material_prompt_override as _save_material_prompt_override,
     save_skill_agent_prompt_override as _save_skill_agent_prompt_override,
     save_workspace_agent_prompt_override as _save_workspace_agent_prompt_override,
+    save_expert_writing_task_prompt as _save_expert_writing_task_prompt,
     sync_workspace_prompt_defaults as _sync_workspace_prompt_defaults,
 )
 from app.models import SCRIPT_STAGE_KEYS, SHORT_STAGE_KEYS, long_stage_keys_from_stages
+from app.skill_manager_skill_store import (
+    read_skill_manager_skills as _read_skill_manager_skills,
+    reset_skill_manager_skills as _reset_skill_manager_skills,
+    save_skill_manager_skills as _save_skill_manager_skills,
+)
 from app.storage import (
     BookStore,
     read_appearance_style,
@@ -1590,6 +1599,31 @@ class Api:
     ) -> bool:
         return _reset_workspace_agent_prompt_override(agent_id, workspace_type)
 
+    def get_expert_writing_task_prompt(
+        self,
+        workspace_type: str | None = None,
+    ) -> str:
+        return read_expert_writing_task_prompt(workspace_type)
+
+    def get_default_expert_writing_task_prompt(
+        self,
+        workspace_type: str | None = None,
+    ) -> str:
+        return read_default_expert_writing_task_prompt(workspace_type)
+
+    def save_expert_writing_task_prompt(
+        self,
+        workspace_type: str,
+        body: str,
+    ) -> None:
+        _save_expert_writing_task_prompt(body, workspace_type)
+
+    def reset_expert_writing_task_prompt(
+        self,
+        workspace_type: str | None = None,
+    ) -> bool:
+        return _reset_expert_writing_task_prompt(workspace_type)
+
     # ==================== 素材库提示词 API ====================
 
     def get_material_system_prompt(
@@ -1702,6 +1736,21 @@ class Api:
         prompt_kind: str | None = None,
     ) -> bool:
         return _reset_skill_agent_prompt_override(skill_type, prompt_kind)
+
+    def read_skill_manager_skills(self) -> list[dict[str, str]]:
+        """读取技能库管理智能体当前生效的全局管理技能。"""
+        return _read_skill_manager_skills()
+
+    def save_skill_manager_skills(
+        self,
+        skills: list | None = None,
+    ) -> list[dict[str, str]]:
+        """校验并保存技能库管理智能体的全局管理技能覆盖。"""
+        return _save_skill_manager_skills(skills or [])
+
+    def reset_skill_manager_skills(self) -> list[dict[str, str]]:
+        """清除管理技能覆盖并返回随应用发布的默认技能。"""
+        return _reset_skill_manager_skills()
 
     # ==================== 学习仿写提示词 API ====================
 

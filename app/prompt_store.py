@@ -46,6 +46,7 @@ LONG_WORKSPACE_AGENT_IDS: tuple[str, ...] = (
 
 EXPERT_DRAFT_COORDINATOR_AGENT_ID = "expert_draft_coordinator"
 EXPERT_SECTION_WRITER_AGENT_ID = "expert_section_writer"
+EXPERT_WRITING_TASK_PROMPT_FILE = "expert_writing_task.txt"
 WORKSPACE_STAGE_AGENT_IDS: tuple[str, ...] = tuple(
     stage_id
     for stage_id in SHORT_STAGES_ORDER
@@ -305,6 +306,75 @@ def reset_workspace_agent_prompt_override(
 ) -> bool:
     _ensure_workspace_prompt_prepared(workspace_type)
     path = workspace_agent_override_absolute_path(agent_id, workspace_type)
+    if path.is_file():
+        path.unlink()
+        return True
+    return False
+
+
+def expert_writing_task_prompt_override_path(
+    workspace_type: str | None = None,
+) -> Path:
+    return (
+        _workspace_override_root(workspace_type)
+        / SHARED_WORKSPACE_PROMPT_DIR
+        / EXPERT_WRITING_TASK_PROMPT_FILE
+    ).resolve()
+
+
+def expert_writing_task_prompt_default_path(
+    workspace_type: str | None = None,
+) -> Path:
+    prompt_type = normalize_workspace_prompt_type(workspace_type)
+    if prompt_type == "long":
+        raise ValueError("长篇工作台暂不支持专家自动写作任务提示词")
+    return (
+        bundle_root()
+        / "app"
+        / "prompt_defaults"
+        / _workspace_prefix(prompt_type)
+        / SHARED_WORKSPACE_PROMPT_DIR
+        / EXPERT_WRITING_TASK_PROMPT_FILE
+    )
+
+
+def read_default_expert_writing_task_prompt(
+    workspace_type: str | None = None,
+) -> str:
+    path = expert_writing_task_prompt_default_path(workspace_type)
+    if not path.is_file():
+        return ""
+    text = path.read_text(encoding="utf-8")
+    return text[:-1] if text.endswith("\n") else text
+
+
+def read_expert_writing_task_prompt(
+    workspace_type: str | None = None,
+) -> str:
+    _ensure_workspace_prompt_prepared(workspace_type)
+    override_path = expert_writing_task_prompt_override_path(workspace_type)
+    if override_path.is_file():
+        text = override_path.read_text(encoding="utf-8")
+        return text[:-1] if text.endswith("\n") else text
+    return read_default_expert_writing_task_prompt(workspace_type)
+
+
+def save_expert_writing_task_prompt(
+    body: str,
+    workspace_type: str | None = None,
+) -> None:
+    if not body.strip():
+        raise ValueError("自动写作任务提示词不能为空")
+    _ensure_workspace_prompt_prepared(workspace_type)
+    path = expert_writing_task_prompt_override_path(workspace_type)
+    _write_text_atomic(path, body if body.endswith("\n") else body + "\n")
+
+
+def reset_expert_writing_task_prompt(
+    workspace_type: str | None = None,
+) -> bool:
+    _ensure_workspace_prompt_prepared(workspace_type)
+    path = expert_writing_task_prompt_override_path(workspace_type)
     if path.is_file():
         path.unlink()
         return True

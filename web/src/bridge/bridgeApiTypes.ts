@@ -24,6 +24,7 @@ import type {
   SkillImportSource,
   SkillKind,
   SkillLibraryGroup,
+  SkillManagerSkill,
   SkillSummary,
 } from './libraryDomain'
 
@@ -165,6 +166,19 @@ declare global {
           agent_id: string,
           workspace_type?: string | null,
         ): Promise<boolean>
+        get_expert_writing_task_prompt(
+          workspace_type?: string | null,
+        ): Promise<string>
+        get_default_expert_writing_task_prompt(
+          workspace_type?: string | null,
+        ): Promise<string>
+        save_expert_writing_task_prompt(
+          workspace_type: string,
+          body: string,
+        ): Promise<void>
+        reset_expert_writing_task_prompt(
+          workspace_type?: string | null,
+        ): Promise<boolean>
 
         // ==================== 素材库 API ====================
         list_materials(): Promise<MaterialSummary[]>
@@ -290,6 +304,11 @@ declare global {
           skill_type?: string | null,
           prompt_kind?: string | null,
         ): Promise<boolean>
+        read_skill_manager_skills(): Promise<SkillManagerSkill[]>
+        save_skill_manager_skills(
+          skills: SkillManagerSkill[],
+        ): Promise<SkillManagerSkill[]>
+        reset_skill_manager_skills(): Promise<SkillManagerSkill[]>
 
         // ==================== 学习仿写提示词 API ====================
         get_learning_imitation_system_prompt(

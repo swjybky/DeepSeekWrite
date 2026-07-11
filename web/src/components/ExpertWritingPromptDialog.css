@@ -1,0 +1,172 @@
+.expert-writing-prompt-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 10020;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(15, 23, 42, 0.58);
+}
+
+.expert-writing-prompt-dialog {
+  display: flex;
+  flex-direction: column;
+  width: min(820px, 100%);
+  max-height: min(86vh, 820px);
+  overflow: hidden;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  background: var(--paper-elevated);
+  color: var(--text-h);
+  box-shadow: 0 24px 70px rgba(15, 23, 42, 0.24);
+}
+
+.expert-writing-prompt-head,
+.expert-writing-prompt-foot,
+.expert-writing-prompt-recommendation-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.expert-writing-prompt-head {
+  padding: 20px 22px 14px;
+}
+
+.expert-writing-prompt-head h2,
+.expert-writing-prompt-recommendation h3 {
+  margin: 0;
+}
+
+.expert-writing-prompt-head p,
+.expert-writing-prompt-recommendation-head p,
+.expert-writing-prompt-note {
+  margin: 6px 0 0;
+  color: var(--ink-soft);
+  font-size: 13px;
+}
+
+.expert-writing-prompt-close {
+  flex: 0 0 auto;
+  border: 0;
+  background: transparent;
+  color: var(--ink-soft);
+  font-size: 26px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.expert-writing-prompt-tabs {
+  display: flex;
+  gap: 6px;
+  padding: 0 22px;
+  border-bottom: 1px solid var(--border);
+}
+
+.expert-writing-prompt-tabs button {
+  padding: 10px 14px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--ink-soft);
+  cursor: pointer;
+}
+
+.expert-writing-prompt-tabs button.is-active {
+  border-bottom-color: var(--accent);
+  color: var(--accent-hover);
+  font-weight: 600;
+}
+
+.expert-writing-prompt-body {
+  min-height: 360px;
+  overflow: auto;
+  padding: 20px 22px;
+}
+
+.expert-writing-prompt-body > label {
+  display: block;
+  margin-bottom: 8px;
+  font-weight: 600;
+}
+
+.expert-writing-prompt-body textarea {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 330px;
+  resize: vertical;
+  padding: 13px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--paper);
+  color: var(--ink);
+  font: inherit;
+  line-height: 1.65;
+}
+
+.expert-writing-prompt-error {
+  margin: 0 0 12px;
+  color: var(--danger);
+}
+
+.expert-writing-prompt-loading {
+  color: var(--ink-faint);
+}
+
+.expert-writing-prompt-recommendation {
+  padding: 18px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--paper);
+}
+
+.expert-writing-prompt-recommendation-head button,
+.expert-writing-prompt-primary {
+  border: 0;
+  border-radius: 8px;
+  background: var(--accent);
+  color: #fff;
+  cursor: pointer;
+}
+
+.expert-writing-prompt-recommendation-head button {
+  padding: 9px 13px;
+}
+
+.expert-writing-prompt-recommendation pre {
+  margin: 18px 0 0;
+  white-space: pre-wrap;
+  color: inherit;
+  font: inherit;
+  line-height: 1.65;
+}
+
+.expert-writing-prompt-foot {
+  padding: 14px 22px 18px;
+  border-top: 1px solid var(--border);
+}
+
+.expert-writing-prompt-foot > div {
+  display: flex;
+  gap: 10px;
+}
+
+.expert-writing-prompt-secondary,
+.expert-writing-prompt-primary {
+  padding: 9px 16px;
+}
+
+.expert-writing-prompt-secondary {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--paper-elevated);
+  color: var(--ink-soft);
+  cursor: pointer;
+}
+
+.expert-writing-prompt-dialog button:disabled,
+.expert-writing-prompt-dialog textarea:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}

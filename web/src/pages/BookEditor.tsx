@@ -83,6 +83,7 @@ import { useKeyedAutoSave } from '../hooks/useKeyedAutoSave'
 import { useTextHistory } from '../hooks/useTextHistory'
 import { useAppDialog } from '../components/useAppDialog'
 import { MemoryManagerDialog } from '../components/MemoryManagerDialog'
+import { ExpertWritingPromptDialog } from '../components/ExpertWritingPromptDialog'
 import './BookEditor.css'
 
 export function BookEditor() {
@@ -134,6 +135,7 @@ export function BookEditor() {
   const [expertAiChatEpoch, setExpertAiChatEpoch] = useState(0)
   const [coverData, setCoverData] = useState<string | null>(null)
   const [bookMemoryOpen, setBookMemoryOpen] = useState(false)
+  const [expertWritingPromptOpen, setExpertWritingPromptOpen] = useState(false)
   const [bookMemories, setBookMemories] = useState<MemoryEntry[]>([])
   const [workspaceUserMemories, setWorkspaceUserMemories] = useState<MemoryEntry[]>([])
   const [bookMemorySaving, setBookMemorySaving] = useState(false)
@@ -1121,12 +1123,20 @@ export function BookEditor() {
           onCoverError={clearCoverDataForActiveBook}
           onOpenMaterialSelector={() => void openMaterialSelector()}
           onOpenSkillSelector={() => void openSkillSelector()}
+          onOpenExpertWritingPrompt={() => setExpertWritingPromptOpen(true)}
           onOpenMemoryManager={openBookMemoryManager}
           onToggleStatus={() => void handleToggleBookStatus()}
           memoryUnread={bookMemoryUnread}
         />
       ) : null}
       {dialog}
+      {expertWritingPromptOpen && book.book_type !== 'long' ? (
+        <ExpertWritingPromptDialog
+          key={book.book_type}
+          workspaceType={book.book_type}
+          onClose={() => setExpertWritingPromptOpen(false)}
+        />
+      ) : null}
       {bookMemoryOpen ? (
         <MemoryManagerDialog
           title="书籍记忆"

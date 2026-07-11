@@ -28,6 +28,7 @@ type Props = {
   onCoverError: () => void
   onOpenMaterialSelector: () => void
   onOpenSkillSelector: () => void
+  onOpenExpertWritingPrompt: () => void
   onOpenMemoryManager: () => void
   onToggleStatus: () => void
   memoryUnread?: boolean
@@ -57,6 +58,7 @@ export function WorkspaceBookHeader({
   onCoverError,
   onOpenMaterialSelector,
   onOpenSkillSelector,
+  onOpenExpertWritingPrompt,
   onOpenMemoryManager,
   onToggleStatus,
   memoryUnread = false,
@@ -178,6 +180,13 @@ export function WorkspaceBookHeader({
           onClick={onOpenSkillSelector}
         >
           技能库选择
+        </button>
+        <button
+          type="button"
+          className="btn-book-memory"
+          onClick={onOpenExpertWritingPrompt}
+        >
+          自动写作提示词
         </button>
         <button
           type="button"

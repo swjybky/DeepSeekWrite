@@ -8,6 +8,7 @@ import type { Api, Model } from '@earendil-works/pi-ai'
 import { ApiKeyPromptDialog } from '@earendil-works/pi-web-ui'
 
 import {
+  getExpertWritingTaskPrompt,
   readWorkspaceAgentPromptTemplate,
   type ExpertDraft,
   type MemoryEntry,
@@ -82,6 +83,8 @@ export type RunExpertDraftSectionWriterOptions = {
   userMemories?: MemoryEntry[]
   /** 用户在启动分节写作时补充的整体写作倾向 */
   userWritingPrompt?: string
+  /** 启动批次时解析的自动写作任务提示词；同一批次保持不变。 */
+  taskPromptSnapshot?: string
   model?: Model<Api>
   thinkingLevel?: ThinkingLevel
   /** 分节写手智能体的全局可读配置 */
@@ -293,6 +296,8 @@ export async function runExpertDraftSectionWriter(
   opts: RunExpertDraftSectionWriterOptions,
 ): Promise<void> {
   try {
+    const taskPromptSnapshot =
+      opts.taskPromptSnapshot?.trim() || await getExpertWritingTaskPrompt('script')
     await ensurePiAppStorage()
     const model = opts.model ?? await resolvePreferredWorkspaceChatModel()
     const hasKey = await ensureModelApiKey(model)
@@ -414,6 +419,7 @@ export async function runExpertDraftSectionWriter(
 
       try {
         const userPrompt = buildSectionWriterUserPrompt({
+          taskPrompt: taskPromptSnapshot,
           sectionId,
           draft: draftBefore,
           userWritingPrompt: opts.userWritingPrompt,
