@@ -12,6 +12,7 @@ import type {
   MaterialStageId,
   Skill,
   SkillKind,
+  SkillManagerSkill,
   SkillStageEntry,
   SkillType,
   SkillStageId,
@@ -104,6 +105,7 @@ export type WorkspaceStageAgentContext = {
   writeMaterialOverview?: (text: string) => void
   skillType?: SkillType
   skillKind?: SkillKind
+  skillManagerSkills?: readonly SkillManagerSkill[]
   skillOverview?: string
   skillStageItems?: Partial<Record<SkillStageId, SkillStageEntry[]>>
   getSkillStages?: () => Partial<Record<SkillStageId, SkillStageEntry[]>>
@@ -194,6 +196,7 @@ export function getWorkspaceStageAdditionalTools(
       | ScriptSkillWorkspaceStageAgentContext = {
       skillTitle: ctx.bookTitle,
       skillKind: ctx.skillKind,
+      managerSkills: ctx.skillManagerSkills,
       overview: ctx.skillOverview,
       currentEntryTitle: ctx.currentEntryTitle,
       stageId: ctx.stageId as SkillStageId,

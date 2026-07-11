@@ -6,10 +6,12 @@ import {
   SKILL_KIND_STAGE_IDS,
   SKILL_STAGE_LABELS,
   type SkillKind,
+  type SkillManagerSkill,
   type SkillStageEntry,
   type SkillStageId,
 } from '../../bridge'
 import { defineTool, excerptFn as excerpt, textBlock } from '../shared/piToolkit'
+import { buildSkillManagerLoadSkillTool } from './managerSkills'
 
 export type ApplyToStageEditorPayload = {
   text: string
@@ -19,6 +21,7 @@ export type ApplyToStageEditorPayload = {
 export type SkillWorkspaceStageAgentContext = {
   skillTitle: string
   skillKind?: SkillKind
+  managerSkills?: readonly SkillManagerSkill[]
   overview?: string
   currentEntryTitle?: string
   stageId: SkillStageId
@@ -105,6 +108,7 @@ export function buildSkillWorkspaceAdditionalTools(
   )
 
   return [
+    buildSkillManagerLoadSkillTool(ctx.managerSkills ?? []),
     defineTool({
       name: 'list_skill_entries',
       label: '列出技能条目',

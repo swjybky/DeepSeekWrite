@@ -1,5 +1,6 @@
 import { getEmbeddedPromptTemplate } from '../prompt/embeddedDefaults'
 import { renderPromptFromTemplateRaw } from '../prompt/renderTemplate'
+import { appendSkillManagerSkillsToPrompt } from '../workspaces/skill/managerSkills'
 import { getBridgeApi } from './runtime'
 import {
   SKILL_MANAGER_AGENT_ID,
@@ -8,6 +9,7 @@ import {
   SKILL_KIND_LABELS,
   skillTypeLabel,
   type SkillKind,
+  type SkillManagerSkill,
   type SkillPromptKind,
   type SkillStageId,
   type SkillType,
@@ -25,6 +27,7 @@ export async function getSkillSystemPrompt(
     stageBody: string
     allStages: Partial<Record<SkillStageId, string>>
   },
+  managerSkills: readonly SkillManagerSkill[] = [],
 ): Promise<string> {
   const stagesObj: Record<string, string> = {}
   for (const [k, v] of Object.entries(input.allStages ?? {})) {
@@ -33,7 +36,7 @@ export async function getSkillSystemPrompt(
 
   const api = await getBridgeApi()
   if (api?.get_skill_system_prompt) {
-    return api.get_skill_system_prompt(
+    const prompt = await api.get_skill_system_prompt(
       stageId,
       JSON.stringify({
         skill_title: input.skillTitle,
@@ -47,6 +50,7 @@ export async function getSkillSystemPrompt(
       }),
       input.skillType ?? 'short',
     )
+    return appendSkillManagerSkillsToPrompt(prompt, managerSkills)
   }
 
   const [managerRaw, kindRaw] = await Promise.all([
@@ -57,7 +61,7 @@ export async function getSkillSystemPrompt(
     ),
   ])
   const raw = `${managerRaw.trimEnd()}\n\n---\n\n${kindRaw.trim()}`
-  return renderPromptFromTemplateRaw(raw, {
+  const prompt = renderPromptFromTemplateRaw(raw, {
     bookTitle: input.skillTitle,
     skillType: skillTypeLabel(input.skillType ?? 'short'),
     skillKind: input.skillKind ?? 'general',
@@ -69,6 +73,7 @@ export async function getSkillSystemPrompt(
     promptKind: SKILL_MANAGER_PROMPT_KIND,
     stageId,
   })
+  return appendSkillManagerSkillsToPrompt(prompt, managerSkills)
 }
 
 export async function readSkillAgentPromptTemplate(): Promise<string> {

@@ -511,8 +511,10 @@ export function loadMockSkills(): Map<string, Skill> {
 }
 
 function ensureOfficialMockSkill(map: Map<string, Skill>): boolean {
-  if (map.has(OFFICIAL_GENERAL_SKILL_LIBRARY_ID)) return false
+  const existing = map.get(OFFICIAL_GENERAL_SKILL_LIBRARY_ID)
   const now = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z')
+  const createdAt = existing?.created_at || now
+  const updatedAt = existing?.updated_at || createdAt
   const stages = normalizeSkillStages({})
   const rawSkills = Object.values(COMMON_SKILLS_MODULES)[0]?.skills
   for (const raw of Array.isArray(rawSkills) ? rawSkills : []) {
@@ -523,10 +525,16 @@ function ensureOfficialMockSkill(map: Map<string, Skill>): boolean {
     const body = typeof item.body === 'string' ? item.body : ''
     for (const stageId of Array.isArray(item.effective_stages) ? item.effective_stages : []) {
       if (!SKILL_STAGE_KEYS.includes(stageId as SkillStageId)) continue
-      stages[stageId as SkillStageId].push({ id: entryId, title, body, created_at: now, updated_at: now })
+      stages[stageId as SkillStageId].push({
+        id: entryId,
+        title,
+        body,
+        created_at: createdAt,
+        updated_at: updatedAt,
+      })
     }
   }
-  map.set(OFFICIAL_GENERAL_SKILL_LIBRARY_ID, normalizeSkill({
+  const expected = normalizeSkill({
     id: OFFICIAL_GENERAL_SKILL_LIBRARY_ID,
     title: '官方内置通用技能库',
     skill_type: 'short',
@@ -534,9 +542,11 @@ function ensureOfficialMockSkill(map: Map<string, Skill>): boolean {
     is_builtin: true,
     overview: '官方提供的通用写作技能，仅供加载和使用。',
     stages,
-    created_at: now,
-    updated_at: now,
-  } as Parameters<typeof normalizeSkill>[0]))
+    created_at: createdAt,
+    updated_at: updatedAt,
+  } as Parameters<typeof normalizeSkill>[0])
+  if (existing && JSON.stringify(existing) === JSON.stringify(expected)) return false
+  map.set(OFFICIAL_GENERAL_SKILL_LIBRARY_ID, expected)
   return true
 }
 

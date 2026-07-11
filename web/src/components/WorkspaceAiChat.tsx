@@ -20,6 +20,7 @@ import type {
   MaterialPromptKind,
   Skill,
   SkillKind,
+  SkillManagerSkill,
   SkillStageEntry,
   SkillType,
   SkillStageId,
@@ -33,6 +34,7 @@ import {
   getWorkspaceSystemPrompt,
   getMaterialSystemPrompt,
   getSkillSystemPrompt,
+  readSkillManagerSkills,
   listAiChatSessions,
   saveAiChatSession,
 } from '../bridge'
@@ -524,6 +526,7 @@ function WorkspaceAiChatInner({
   const propsLatestRef = useRef(props)
   const isPausedRef = useRef(isPaused)
   const promptPullSeqRef = useRef(0)
+  const skillManagerSkillsRef = useRef<SkillManagerSkill[]>([])
   const activeHistorySessionIdRef = useRef('')
   const blankHistoryNonceRef = useRef(0)
   const historySaveSeqRef = useRef(0)
@@ -795,6 +798,14 @@ function WorkspaceAiChatInner({
         }
       }
       if (cancelled) return
+      try {
+        skillManagerSkillsRef.current =
+          workspaceType === 'skill' ? await readSkillManagerSkills() : []
+      } catch (error) {
+        skillManagerSkillsRef.current = []
+        console.warn('[DeepWrite·AI面板] 技能库管理技能加载失败:', error)
+      }
+      if (cancelled) return
       const initialModel = await resolvePreferredWorkspaceChatModel()
       const root = hostRef.current
       if (cancelled || !root) return
@@ -857,6 +868,7 @@ function WorkspaceAiChatInner({
           writeMaterialOverview: latest.writeMaterialOverview,
           skillType: latest.skillType,
           skillKind: latest.skillKind,
+          skillManagerSkills: skillManagerSkillsRef.current,
           skillOverview: latest.getSkillOverview?.() ?? latest.skillOverview,
           skillStageItems: latest.getSkillStages?.() ?? latest.skillStageItems,
           getSkillStages: latest.getSkillStages,
@@ -923,6 +935,7 @@ function WorkspaceAiChatInner({
                 stageBody: resolveCurrentStageBody(props),
                 allStages: mergeCurrentStageIntoAllStages(props) as Partial<Record<SkillStageId, string>>,
               },
+              skillManagerSkillsRef.current,
             )
           : workspaceType === 'material'
             ? await getMaterialSystemPrompt(
@@ -1327,6 +1340,7 @@ function WorkspaceAiChatInner({
                stageBody: latestStageBody,
                 allStages: latestAllStages as Partial<Record<SkillStageId, string>>,
               },
+              skillManagerSkillsRef.current,
             )
           : workspaceType === 'material'
             ? await getMaterialSystemPrompt(

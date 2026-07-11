@@ -329,6 +329,13 @@ export interface SkillStageEntry {
   source_skill_entry_id?: string
 }
 
+export interface SkillManagerSkill {
+  id: string
+  name: string
+  description: string
+  body: string
+}
+
 export interface SkillImportSourceEntry {
   id: string
   title: string

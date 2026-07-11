@@ -33,6 +33,8 @@ type Props = {
   layoutControls?: ReactNode
 }
 
+type SectionEditorTab = 'body' | 'character_state'
+
 function textCounts(text: string): { total: number; nonSpace: number } {
   return {
     total: text.length,
@@ -94,6 +96,8 @@ export function ExpertDraftEditor({
 }: Props) {
   const { confirm, dialog } = useAppDialog()
   const [exportDialogOpen, setExportDialogOpen] = useState(false)
+  const [activeSectionTab, setActiveSectionTab] =
+    useState<SectionEditorTab>('body')
   const selectedSection = draft.sections.find(
     (section) => section.id === draft.active_section_id,
   )
@@ -106,11 +110,15 @@ export function ExpertDraftEditor({
       }
     : null
   const isSectionMode = Boolean(selectedSection && selectedState)
-  const counts = textCounts(isSectionMode ? (selectedSection?.body ?? '') : stageBody)
+  const activeSectionText =
+    activeSectionTab === 'character_state'
+      ? (selectedState?.body ?? '')
+      : (selectedSection?.body ?? '')
+  const counts = textCounts(isSectionMode ? activeSectionText : stageBody)
   const bodyKey = `${historyPrefix}:expert:${selectedId}:body`
   const stateKey = `${historyPrefix}:expert:${selectedId}:character-state`
   const mainBodyKey = `${historyPrefix}:stage:draft`
-  const sectionCounts = textCounts(selectedSection?.body ?? '')
+  const sectionCounts = textCounts(activeSectionText)
 
   const deleteSelectedSection = async () => {
     if (!selectedSection || draft.running) return
@@ -339,9 +347,32 @@ export function ExpertDraftEditor({
               </span>
             </div>
 
-            <div className="expert-draft-textarea-field expert-draft-textarea-field--body">
-              <span className="expert-draft-field-heading">
-                <span>{selectedSection.title || '当前小节'}正文</span>
+            <div className="expert-draft-editor-tabbar">
+              <div
+                className="expert-draft-editor-tabs"
+                role="tablist"
+                aria-label={`${selectedSection.title || '当前小节'}内容类型`}
+              >
+                <button
+                  type="button"
+                  className={`expert-draft-editor-tab${activeSectionTab === 'body' ? ' expert-draft-editor-tab--active' : ''}`}
+                  role="tab"
+                  aria-selected={activeSectionTab === 'body'}
+                  onClick={() => setActiveSectionTab('body')}
+                >
+                  正文
+                </button>
+                <button
+                  type="button"
+                  className={`expert-draft-editor-tab${activeSectionTab === 'character_state' ? ' expert-draft-editor-tab--active' : ''}`}
+                  role="tab"
+                  aria-selected={activeSectionTab === 'character_state'}
+                  onClick={() => setActiveSectionTab('character_state')}
+                >
+                  人物状态
+                </button>
+              </div>
+              {activeSectionTab === 'body' ? (
                 <TextHistoryControls
                   history={textHistory}
                   historyKey={bodyKey}
@@ -354,40 +385,7 @@ export function ExpertDraftEditor({
                   }
                   disabled={draft.running}
                 />
-              </span>
-              <MarkdownTextEditor
-                className="editor-body workspace-textarea expert-draft-textarea"
-                value={selectedSection.body}
-                aria-label={`${selectedSection.title}正文`}
-                textareaRef={(node) =>
-                  onSectionTextareaRef?.(selectedId, 'body', node)
-                }
-                onValueChange={(value) => {
-                  textHistory.change(bodyKey, selectedSection.body, value, (body) =>
-                    updateDraft((current) => ({
-                      ...current,
-                      sections: updateSectionList(current.sections, selectedId, { body }),
-                    })),
-                  )
-                }}
-                onKeyDown={(event) =>
-                  textHistory.handleKeyDown(event, bodyKey, selectedSection.body, (body) =>
-                    updateDraft((current) => ({
-                      ...current,
-                      sections: updateSectionList(current.sections, selectedId, { body }),
-                    })),
-                  )
-                }
-                onBlur={onTextBlur}
-                placeholder="正文内容..."
-                spellCheck={false}
-                readOnly={draft.running}
-              />
-            </div>
-
-            <div className="expert-draft-textarea-field expert-draft-textarea-field--character-state">
-              <span className="expert-draft-field-heading">
-                <span>{selectedState.title || defaultStateTitle(selectedSection.title)}</span>
+              ) : (
                 <TextHistoryControls
                   history={textHistory}
                   historyKey={stateKey}
@@ -405,45 +403,83 @@ export function ExpertDraftEditor({
                   }
                   disabled={draft.running}
                 />
-              </span>
-              <MarkdownTextEditor
-                className="editor-body workspace-textarea expert-draft-state-textarea"
-                value={selectedState.body}
-                aria-label={`${selectedSection.title}人物状态`}
-                textareaRef={(node) =>
-                  onSectionTextareaRef?.(selectedId, 'character_state', node)
-                }
-                onValueChange={(value) => {
-                  textHistory.change(stateKey, selectedState.body, value, (body) =>
-                    updateDraft((current) => ({
-                      ...current,
-                      character_states: updateStateList(
-                        current.character_states,
-                        selectedId,
-                        { body },
-                        selectedSection.title,
-                      ),
-                    })),
-                  )
-                }}
-                onKeyDown={(event) =>
-                  textHistory.handleKeyDown(event, stateKey, selectedState.body, (body) =>
-                    updateDraft((current) => ({
-                      ...current,
-                      character_states: updateStateList(
-                        current.character_states,
-                        selectedId,
-                        { body },
-                        selectedSection.title,
-                      ),
-                    })),
-                  )
-                }
-                onBlur={onTextBlur}
-                placeholder="人物状态..."
-                spellCheck={false}
-                readOnly={draft.running}
-              />
+              )}
+            </div>
+
+            <div
+              className="expert-draft-textarea-field expert-draft-tab-panel"
+              role="tabpanel"
+              aria-label={activeSectionTab === 'body' ? '正文' : '人物状态'}
+            >
+              {activeSectionTab === 'body' ? (
+                <MarkdownTextEditor
+                  className="editor-body workspace-textarea expert-draft-textarea"
+                  value={selectedSection.body}
+                  aria-label={`${selectedSection.title}正文`}
+                  textareaRef={(node) =>
+                    onSectionTextareaRef?.(selectedId, 'body', node)
+                  }
+                  onValueChange={(value) => {
+                    textHistory.change(bodyKey, selectedSection.body, value, (body) =>
+                      updateDraft((current) => ({
+                        ...current,
+                        sections: updateSectionList(current.sections, selectedId, { body }),
+                      })),
+                    )
+                  }}
+                  onKeyDown={(event) =>
+                    textHistory.handleKeyDown(event, bodyKey, selectedSection.body, (body) =>
+                      updateDraft((current) => ({
+                        ...current,
+                        sections: updateSectionList(current.sections, selectedId, { body }),
+                      })),
+                    )
+                  }
+                  onBlur={onTextBlur}
+                  placeholder="正文内容..."
+                  spellCheck={false}
+                  readOnly={draft.running}
+                />
+              ) : (
+                <MarkdownTextEditor
+                  className="editor-body workspace-textarea expert-draft-state-textarea"
+                  value={selectedState.body}
+                  aria-label={`${selectedSection.title}人物状态`}
+                  textareaRef={(node) =>
+                    onSectionTextareaRef?.(selectedId, 'character_state', node)
+                  }
+                  onValueChange={(value) => {
+                    textHistory.change(stateKey, selectedState.body, value, (body) =>
+                      updateDraft((current) => ({
+                        ...current,
+                        character_states: updateStateList(
+                          current.character_states,
+                          selectedId,
+                          { body },
+                          selectedSection.title,
+                        ),
+                      })),
+                    )
+                  }}
+                  onKeyDown={(event) =>
+                    textHistory.handleKeyDown(event, stateKey, selectedState.body, (body) =>
+                      updateDraft((current) => ({
+                        ...current,
+                        character_states: updateStateList(
+                          current.character_states,
+                          selectedId,
+                          { body },
+                          selectedSection.title,
+                        ),
+                      })),
+                    )
+                  }
+                  onBlur={onTextBlur}
+                  placeholder="人物状态..."
+                  spellCheck={false}
+                  readOnly={draft.running}
+                />
+              )}
             </div>
           </section>
         ) : (

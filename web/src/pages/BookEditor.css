@@ -1458,6 +1458,63 @@ button.back-link:hover {
   white-space: nowrap;
 }
 
+.expert-draft-editor-tabbar {
+  flex: 0 0 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.expert-draft-editor-tabs {
+  min-width: 0;
+  display: flex;
+  align-items: flex-end;
+  gap: 0.15rem;
+}
+
+.expert-draft-editor-tab {
+  position: relative;
+  border: 0;
+  border-radius: 0;
+  padding: 0.48rem 0.9rem 0.44rem;
+  background: transparent;
+  color: var(--ink-soft);
+  font: inherit;
+  font-size: 0.8rem;
+  font-weight: 600;
+  line-height: 1.2;
+  cursor: pointer;
+}
+
+.expert-draft-editor-tab:hover {
+  background: transparent;
+  color: var(--text-h);
+}
+
+.expert-draft-editor-tab--active {
+  background: transparent;
+  color: var(--accent-hover);
+}
+
+.expert-draft-editor-tab--active::after {
+  content: '';
+  position: absolute;
+  right: 0.55rem;
+  bottom: -1px;
+  left: 0.55rem;
+  height: 2px;
+  border-radius: 999px;
+  background: var(--accent);
+}
+
+.expert-draft-editor-tab:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
 .expert-draft-textarea-field {
   min-height: 0;
   min-width: 0;
@@ -1473,13 +1530,7 @@ button.back-link:hover {
   font-weight: 600;
 }
 
-.expert-draft-textarea-field--body {
-  /* 正文是分节写作时的主要阅读与编辑区域。 */
-  flex: 4 1 0%;
-}
-
-.expert-draft-textarea-field--character-state {
-  /* 人物状态只需保留简要的续写提示，不占用正文阅读空间。 */
+.expert-draft-tab-panel {
   flex: 1 1 0%;
 }
 
