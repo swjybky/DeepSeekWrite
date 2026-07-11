@@ -14,7 +14,7 @@ export const EXCEL_ATTACHMENT_MIME_TYPES = [
   'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
   'application/vnd.ms-excel',
 ]
-export const TEXT_ATTACHMENT_EXTENSIONS = ['.txt', '.md']
+export const TEXT_ATTACHMENT_EXTENSIONS = ['.txt', '.md', '.markdown']
 export const TEXT_ATTACHMENT_MIME_TYPES = [
   'text/plain',
   'text/markdown',

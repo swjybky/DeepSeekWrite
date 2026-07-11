@@ -381,7 +381,6 @@ export interface SkillLibraryGroup {
 export function materialLibraryGroupLinks(
   group: MaterialLibraryGroup,
   materials: MaterialSummary[],
-  bookType: BookType,
 ): Record<MaterialKind, string[]> {
   const byId = new Map(materials.map((material) => [material.id, material]))
   const out = emptyLinkedMaterialIdsByKind()
@@ -389,9 +388,7 @@ export function materialLibraryGroupLinks(
     const id = group.members[kind]
     const material = id ? byId.get(id) : undefined
     if (
-      material &&
-      material.material_type === bookType &&
-      materialMatchesKind(material, kind)
+      material && materialMatchesKind(material, kind)
     ) {
       out[kind] = [material.id]
     }
@@ -402,7 +399,6 @@ export function materialLibraryGroupLinks(
 export function skillLibraryGroupLinks(
   group: SkillLibraryGroup,
   skills: SkillSummary[],
-  bookType: BookType,
 ): Record<SkillKind, string[]> {
   const byId = new Map(skills.map((skill) => [skill.id, skill]))
   const out = emptyLinkedSkillIdsByKind()
@@ -410,9 +406,7 @@ export function skillLibraryGroupLinks(
     const id = group.members[kind]
     const skill = id ? byId.get(id) : undefined
     if (
-      skill &&
-      (skill.is_builtin || skill.skill_type === bookType) &&
-      skillMatchesKind(skill, kind)
+      skill && skillMatchesKind(skill, kind)
     ) {
       out[kind] = [skill.id]
     }

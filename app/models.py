@@ -168,6 +168,768 @@ _LONG_DRAFT_STAGE_RE = re.compile(
     r"^draft\.volume-[1-9]\d*\.arc-[1-9]\d*\.chapter-[1-9]\d*$"
 )
 
+LONG_WORKSPACE_SCHEMA_VERSION = 2
+
+LONG_WORLDBUILDING_CATEGORY_DEFAULTS: tuple[tuple[str, str], ...] = (
+    ("rules", "规则"),
+    ("factions", "势力"),
+    ("geography", "地理"),
+    ("history", "历史"),
+    ("terminology", "术语"),
+    ("realms", "境界"),
+    ("items", "物品"),
+)
+
+LONG_CHARACTER_GROUPS: tuple[tuple[str, str], ...] = (
+    ("protagonists", "主角"),
+    ("major_supporting", "主要配角"),
+    ("minor_supporting", "次要配角"),
+    ("passersby", "路人"),
+)
+
+
+def _record_dict(raw: Any) -> dict[str, Any]:
+    return dict(raw) if isinstance(raw, dict) else {}
+
+
+def _record_list(raw: Any) -> list[Any]:
+    if isinstance(raw, list):
+        return list(raw)
+    if isinstance(raw, dict):
+        return list(raw.values())
+    return []
+
+
+def _record_id(raw: Any, prefix: str, seen: set[str]) -> str:
+    candidate = str(raw or "").strip()
+    if not candidate or candidate in seen:
+        candidate = f"{prefix}-{uuid4()}"
+    seen.add(candidate)
+    return candidate
+
+
+def _record_order(raw: Any, fallback: int) -> int:
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        value = fallback
+    return max(0, value)
+
+
+def _record_string_list(raw: Any) -> list[str]:
+    source = raw if isinstance(raw, list) else ([raw] if raw else [])
+    out: list[str] = []
+    seen: set[str] = set()
+    for item in source:
+        value = str(item or "").strip()
+        if not value or value in seen:
+            continue
+        seen.add(value)
+        out.append(value)
+    return out
+
+
+def _default_long_worldbuilding_categories() -> list[dict[str, Any]]:
+    return [
+        {
+            "id": category_id,
+            "name": name,
+            "format": "list",
+            "overview": "",
+            "items": [],
+            "text": "",
+        }
+        for category_id, name in LONG_WORLDBUILDING_CATEGORY_DEFAULTS
+    ]
+
+
+def _default_long_plot() -> dict[str, Any]:
+    return {
+        "book_line": "",
+        "volumes": [
+            {
+                "id": "volume-1",
+                "name": "第一卷",
+                "outline": "",
+                "order": 1,
+            }
+        ],
+        "arcs": [
+            {
+                "id": "arc-1-1",
+                "volume_id": "volume-1",
+                "name": "第一剧情弧",
+                "timeline": "",
+                "order": 1,
+            }
+        ],
+        "chapter_cards": [
+            {
+                "id": "chapter-card-1-1-1",
+                "volume_id": "volume-1",
+                "arc_id": "arc-1-1",
+                "stage_id": "draft.volume-1.arc-1.chapter-1",
+                "title": "第一章",
+                "outline": "",
+                "world_constraints": "",
+                "characters": [],
+                "order": 1,
+            }
+        ],
+        "foreshadowing": [],
+    }
+
+
+def default_long_workspace() -> dict[str, Any]:
+    """长篇独立工作台 v2 的默认结构。"""
+    return {
+        "schema_version": LONG_WORKSPACE_SCHEMA_VERSION,
+        "revision": 0,
+        "worldbuilding": {
+            "categories": _default_long_worldbuilding_categories(),
+        },
+        "characters": {
+            group_id: {"entries": []}
+            for group_id, _label in LONG_CHARACTER_GROUPS
+        },
+        "plot": _default_long_plot(),
+        "chapters": {
+            "draft.volume-1.arc-1.chapter-1": {
+                "title": "第一章",
+                "body": "",
+                "character_state": "",
+                "handoff": "",
+                "committed": False,
+                "committed_at": "",
+                "commit_id": "",
+            }
+        },
+        "ledger": {
+            "committed_through": "",
+            "timeline": [],
+            "faction_states": [],
+            "realm_states": [],
+            "foreshadowing_states": [],
+            "continuity_notes": [],
+        },
+    }
+
+
+def _long_draft_parts(stage_id: str) -> tuple[int, int, int] | None:
+    match = _LONG_DRAFT_STAGE_RE.match(str(stage_id or "").strip())
+    if not match:
+        return None
+    parts = tuple(int(value) for value in match.groups())
+    return parts[0], parts[1], parts[2]
+
+
+def _long_ledger_entry(raw: Any, prefix: str, index: int) -> dict[str, str] | None:
+    if isinstance(raw, str):
+        content = raw.strip()
+        source: dict[str, Any] = {}
+    elif isinstance(raw, dict):
+        source = raw
+        content = str(
+            source.get("content")
+            or source.get("description")
+            or source.get("detail")
+            or source.get("state")
+            or source.get("note")
+            or ""
+        ).strip()
+    else:
+        return None
+    if not content:
+        return None
+    return {
+        "id": str(source.get("id") or f"{prefix}-{index + 1}"),
+        "chapter_stage_id": str(source.get("chapter_stage_id") or ""),
+        "chapter_title": str(source.get("chapter_title") or ""),
+        "content": content,
+        "created_at": str(source.get("created_at") or ""),
+        **(
+            {"commit_id": str(source.get("commit_id") or "")}
+            if source.get("commit_id")
+            else {}
+        ),
+    }
+
+
+def _normalize_long_ledger_entries(raw: Any, prefix: str) -> list[dict[str, str]]:
+    source = raw if isinstance(raw, list) else ([raw] if raw else [])
+    out: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for index, item in enumerate(source):
+        entry = _long_ledger_entry(item, prefix, index)
+        if not entry:
+            continue
+        entry_id = entry["id"]
+        if entry_id in seen:
+            entry["id"] = f"{prefix}-{uuid4()}"
+        seen.add(entry["id"])
+        out.append(entry)
+    return out
+
+
+def normalize_long_workspace_from_storage(
+    raw: Any | None,
+    legacy_stages: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """读取长篇 v2 结构；没有结构化数据时无损迁移旧 stages。"""
+    if not isinstance(raw, dict):
+        return migrate_long_workspace_from_stages(legacy_stages)
+
+    base = default_long_workspace()
+    result: dict[str, Any] = {
+        "schema_version": LONG_WORKSPACE_SCHEMA_VERSION,
+        "revision": _record_order(raw.get("revision"), 0),
+    }
+
+    world_raw = _record_dict(raw.get("worldbuilding"))
+    category_source = (
+        _record_list(world_raw.get("categories"))
+        if "categories" in world_raw
+        else base["worldbuilding"]["categories"]
+    )
+    categories: list[dict[str, Any]] = []
+    seen_category_ids: set[str] = set()
+    for index, item in enumerate(category_source):
+        source = _record_dict(item)
+        category_id = _record_id(source.get("id"), "world-category", seen_category_ids)
+        item_rows: list[dict[str, str]] = []
+        seen_item_ids: set[str] = set()
+        for item_index, raw_item in enumerate(_record_list(source.get("items"))):
+            item_source = _record_dict(raw_item)
+            item_id = _record_id(
+                item_source.get("id"),
+                f"{category_id}-item",
+                seen_item_ids,
+            )
+            item_rows.append(
+                {
+                    "id": item_id,
+                    "name": str(item_source.get("name") or f"未命名条目{item_index + 1}"),
+                    "description": str(item_source.get("description") or ""),
+                    "detail": str(
+                        item_source.get("detail")
+                        or item_source.get("introduction")
+                        or ""
+                    ),
+                }
+            )
+        categories.append(
+            {
+                "id": category_id,
+                "name": str(source.get("name") or f"未命名分类{index + 1}"),
+                "format": "text" if source.get("format") == "text" else "list",
+                "overview": str(source.get("overview") or ""),
+                "items": item_rows,
+                "text": str(source.get("text") or ""),
+            }
+        )
+    result["worldbuilding"] = {"categories": categories}
+
+    characters_raw = _record_dict(raw.get("characters"))
+    characters: dict[str, Any] = {}
+    seen_character_ids: set[str] = set()
+    for group_id, _label in LONG_CHARACTER_GROUPS:
+        group_raw = characters_raw.get(group_id)
+        group_obj = _record_dict(group_raw)
+        entries_raw = (
+            group_obj.get("entries")
+            if isinstance(group_raw, dict)
+            else group_raw
+        )
+        entries: list[dict[str, str]] = []
+        for index, item in enumerate(_record_list(entries_raw)):
+            source = _record_dict(item)
+            character_id = _record_id(
+                source.get("id"),
+                f"character-{group_id}",
+                seen_character_ids,
+            )
+            entries.append(
+                {
+                    "id": character_id,
+                    "name": str(source.get("name") or f"未命名人物{index + 1}"),
+                    "core_profile": str(source.get("core_profile") or ""),
+                    "relationships": str(source.get("relationships") or ""),
+                    "current_state": str(source.get("current_state") or ""),
+                    "history": str(source.get("history") or ""),
+                }
+            )
+        characters[group_id] = {"entries": entries}
+    result["characters"] = characters
+
+    plot_raw = _record_dict(raw.get("plot"))
+    default_plot = base["plot"]
+    volume_source = (
+        _record_list(plot_raw.get("volumes"))
+        if "volumes" in plot_raw
+        else default_plot["volumes"]
+    )
+    volumes: list[dict[str, Any]] = []
+    seen_volume_ids: set[str] = set()
+    for index, item in enumerate(volume_source):
+        source = _record_dict(item)
+        volumes.append(
+            {
+                "id": _record_id(source.get("id"), "volume", seen_volume_ids),
+                "name": str(source.get("name") or f"第{index + 1}卷"),
+                "outline": str(source.get("outline") or ""),
+                "order": _record_order(source.get("order"), index + 1),
+            }
+        )
+    volumes.sort(key=lambda item: (item["order"], item["id"]))
+
+    arc_source = (
+        _record_list(plot_raw.get("arcs"))
+        if "arcs" in plot_raw
+        else default_plot["arcs"]
+    )
+    arcs: list[dict[str, Any]] = []
+    seen_arc_ids: set[str] = set()
+    volume_ids = {str(item["id"]) for item in volumes}
+    for index, item in enumerate(arc_source):
+        source = _record_dict(item)
+        volume_id = str(source.get("volume_id") or "").strip()
+        if volume_id not in volume_ids:
+            if not volumes:
+                recovered = {
+                    "id": volume_id or "volume-recovered",
+                    "name": "恢复的分卷",
+                    "outline": "",
+                    "order": 1,
+                }
+                recovered["id"] = _record_id(
+                    recovered["id"], "volume", seen_volume_ids
+                )
+                volumes.append(recovered)
+                volume_ids.add(str(recovered["id"]))
+            volume_id = str(volumes[0]["id"])
+        arcs.append(
+            {
+                "id": _record_id(source.get("id"), "arc", seen_arc_ids),
+                "volume_id": volume_id,
+                "name": str(source.get("name") or f"剧情弧{index + 1}"),
+                "timeline": str(source.get("timeline") or ""),
+                "order": _record_order(source.get("order"), index + 1),
+            }
+        )
+    arcs.sort(key=lambda item: (item["order"], item["id"]))
+
+    card_source = (
+        _record_list(plot_raw.get("chapter_cards"))
+        if "chapter_cards" in plot_raw
+        else default_plot["chapter_cards"]
+    )
+    raw_chapters = _record_dict(raw.get("chapters"))
+    known_card_stages = {
+        str(_record_dict(item).get("stage_id") or "")
+        for item in card_source
+    }
+    for stage_id in raw_chapters:
+        parts = _long_draft_parts(str(stage_id))
+        if not parts or stage_id in known_card_stages:
+            continue
+        volume_number, arc_number, chapter_number = parts
+        volume_id = f"volume-{volume_number}"
+        arc_id = f"arc-{volume_number}-{arc_number}"
+        if volume_id not in {str(item["id"]) for item in volumes}:
+            volumes.append(
+                {
+                    "id": volume_id,
+                    "name": f"第{volume_number}卷",
+                    "outline": "",
+                    "order": volume_number,
+                }
+            )
+        if arc_id not in {str(item["id"]) for item in arcs}:
+            arcs.append(
+                {
+                    "id": arc_id,
+                    "volume_id": volume_id,
+                    "name": f"剧情弧{arc_number}",
+                    "timeline": "",
+                    "order": arc_number,
+                }
+            )
+        card_source.append(
+            {
+                "id": f"chapter-card-{volume_number}-{arc_number}-{chapter_number}",
+                "volume_id": volume_id,
+                "arc_id": arc_id,
+                "stage_id": stage_id,
+                "title": f"第{chapter_number}章",
+                "outline": "",
+                "world_constraints": "",
+                "characters": [],
+                "order": chapter_number,
+            }
+        )
+        known_card_stages.add(stage_id)
+    volumes.sort(key=lambda item: (item["order"], item["id"]))
+    arcs.sort(key=lambda item: (item["order"], item["id"]))
+    volume_ids = {str(item["id"]) for item in volumes}
+    arc_by_id = {str(item["id"]): item for item in arcs}
+
+    cards: list[dict[str, Any]] = []
+    seen_card_ids: set[str] = set()
+    seen_stage_ids: set[str] = set()
+    for index, item in enumerate(card_source):
+        source = _record_dict(item)
+        arc_id = str(source.get("arc_id") or "").strip()
+        arc = arc_by_id.get(arc_id)
+        if arc is None:
+            if not arcs:
+                volume_id = str(volumes[0]["id"]) if volumes else "volume-recovered"
+                if volume_id not in volume_ids:
+                    volumes.append(
+                        {
+                            "id": volume_id,
+                            "name": "恢复的分卷",
+                            "outline": "",
+                            "order": 1,
+                        }
+                    )
+                    volume_ids.add(volume_id)
+                arc = {
+                    "id": "arc-recovered",
+                    "volume_id": volume_id,
+                    "name": "恢复的剧情弧",
+                    "timeline": "",
+                    "order": 1,
+                }
+                arcs.append(arc)
+                arc_by_id[str(arc["id"])] = arc
+            else:
+                arc = arcs[0]
+            arc_id = str(arc["id"])
+        volume_id = str(arc["volume_id"])
+        stage_id = str(source.get("stage_id") or "").strip()
+        if not _long_draft_parts(stage_id) or stage_id in seen_stage_ids:
+            volume_index = next(
+                (i + 1 for i, row in enumerate(volumes) if row["id"] == volume_id),
+                1,
+            )
+            matching_arcs = [row for row in arcs if row["volume_id"] == volume_id]
+            arc_index = next(
+                (i + 1 for i, row in enumerate(matching_arcs) if row["id"] == arc_id),
+                1,
+            )
+            chapter_number = 1 + sum(
+                1
+                for row in cards
+                if row["volume_id"] == volume_id and row["arc_id"] == arc_id
+            )
+            stage_id = (
+                f"draft.volume-{volume_index}.arc-{arc_index}.chapter-{chapter_number}"
+            )
+            while stage_id in seen_stage_ids:
+                chapter_number += 1
+                stage_id = (
+                    f"draft.volume-{volume_index}.arc-{arc_index}.chapter-{chapter_number}"
+                )
+        seen_stage_ids.add(stage_id)
+        cards.append(
+            {
+                "id": _record_id(source.get("id"), "chapter-card", seen_card_ids),
+                "volume_id": volume_id,
+                "arc_id": arc_id,
+                "stage_id": stage_id,
+                "title": str(source.get("title") or f"第{index + 1}章"),
+                "outline": str(source.get("outline") or ""),
+                "world_constraints": str(source.get("world_constraints") or ""),
+                "characters": _record_string_list(source.get("characters")),
+                "order": _record_order(source.get("order"), index + 1),
+            }
+        )
+    cards.sort(key=lambda item: (item["order"], item["id"]))
+
+    foreshadowing: list[dict[str, str]] = []
+    seen_foreshadow_ids: set[str] = set()
+    for index, item in enumerate(_record_list(plot_raw.get("foreshadowing"))):
+        source = _record_dict(item)
+        foreshadowing.append(
+            {
+                "id": _record_id(source.get("id"), "foreshadowing", seen_foreshadow_ids),
+                "name": str(source.get("name") or f"未命名伏笔{index + 1}"),
+                "description": str(source.get("description") or ""),
+                "content": str(source.get("content") or ""),
+                "status": str(source.get("status") or "open"),
+            }
+        )
+
+    result["plot"] = {
+        "book_line": str(plot_raw.get("book_line") or ""),
+        "volumes": volumes,
+        "arcs": arcs,
+        "chapter_cards": cards,
+        "foreshadowing": foreshadowing,
+    }
+
+    chapters: dict[str, dict[str, Any]] = {}
+    for card in cards:
+        stage_id = str(card["stage_id"])
+        source = _record_dict(raw_chapters.get(stage_id))
+        chapters[stage_id] = {
+            "title": str(source.get("title") or card["title"]),
+            "body": str(source.get("body") or ""),
+            "character_state": str(source.get("character_state") or ""),
+            "handoff": str(source.get("handoff") or source.get("handoff_notes") or ""),
+            "committed": bool(source.get("committed")),
+            "committed_at": str(source.get("committed_at") or ""),
+            "commit_id": str(source.get("commit_id") or ""),
+        }
+    result["chapters"] = chapters
+
+    ledger_raw = _record_dict(raw.get("ledger"))
+    committed_through = str(ledger_raw.get("committed_through") or "")
+    if committed_through not in chapters:
+        committed_through = ""
+    result["ledger"] = {
+        "committed_through": committed_through,
+        "timeline": _normalize_long_ledger_entries(
+            ledger_raw.get("timeline"), "timeline"
+        ),
+        "faction_states": _normalize_long_ledger_entries(
+            ledger_raw.get("faction_states"), "faction-state"
+        ),
+        "realm_states": _normalize_long_ledger_entries(
+            ledger_raw.get("realm_states"), "realm-state"
+        ),
+        "foreshadowing_states": _normalize_long_ledger_entries(
+            ledger_raw.get("foreshadowing_states"), "foreshadowing-state"
+        ),
+        "continuity_notes": _normalize_long_ledger_entries(
+            ledger_raw.get("continuity_notes"), "continuity-note"
+        ),
+    }
+    return result
+
+
+def migrate_long_workspace_from_stages(
+    stages: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """将第一版长篇平面 stages 无损装入 v2 结构。"""
+    source = {str(key): str(value or "") for key, value in (stages or {}).items()}
+    raw = default_long_workspace()
+
+    category_stage_map = {
+        "rules": "worldbuilding.rules",
+        "factions": "worldbuilding.factions",
+        "geography": "worldbuilding.geography",
+        "history": "worldbuilding.history",
+        "terminology": "worldbuilding.terminology",
+        "items": "worldbuilding.items",
+    }
+    for category in raw["worldbuilding"]["categories"]:
+        body = source.get(category_stage_map.get(category["id"], ""), "")
+        if body:
+            category["format"] = "text"
+            category["text"] = body
+
+    character_stage_map = {
+        "protagonists": "character_design.protagonists",
+        "major_supporting": "character_design.major_supporting",
+        "minor_supporting": "character_design.minor_supporting",
+        "passersby": "character_design.passersby",
+    }
+    for group_id, stage_id in character_stage_map.items():
+        body = source.get(stage_id, "")
+        if not body:
+            continue
+        raw["characters"][group_id]["entries"] = [
+            {
+                "id": f"legacy-{group_id}",
+                "name": "旧版人物资料",
+                "core_profile": body,
+                "relationships": "",
+                "current_state": "",
+                "history": "",
+            }
+        ]
+
+    raw["plot"]["book_line"] = source.get("plot_design.book_line", "")
+    raw["plot"]["volumes"][0]["outline"] = source.get("plot_design.volumes", "")
+    raw["plot"]["arcs"][0]["timeline"] = source.get("plot_design.story_arcs", "")
+    raw["plot"]["chapter_cards"][0]["outline"] = source.get(
+        "plot_design.chapter_cards", ""
+    )
+    foreshadowing_body = source.get("plot_design.foreshadowing", "")
+    if foreshadowing_body:
+        raw["plot"]["foreshadowing"] = [
+            {
+                "id": "legacy-foreshadowing",
+                "name": "旧版伏笔资料",
+                "description": "",
+                "content": foreshadowing_body,
+                "status": "open",
+            }
+        ]
+
+    raw_chapters: dict[str, Any] = raw["chapters"]
+    for stage_id, body in source.items():
+        if not _long_draft_parts(stage_id):
+            continue
+        # 第一版默认自带两个空章节；迁移时只保留真正写过的节点，另保留 v2 默认第一章。
+        if not body and stage_id in LONG_STAGE_KEYS and stage_id != "draft.volume-1.arc-1.chapter-1":
+            continue
+        raw_chapters[stage_id] = {
+            "title": "",
+            "body": body,
+            "character_state": "",
+            "handoff": "",
+            "committed": False,
+            "committed_at": "",
+            "commit_id": "",
+        }
+
+    def add_legacy_ledger(target: str, stage_id: str, prefix: str) -> None:
+        body = source.get(stage_id, "").strip()
+        if not body:
+            return
+        raw["ledger"][target].append(
+            {
+                "id": f"legacy-{prefix}",
+                "chapter_stage_id": "",
+                "chapter_title": "旧版状态账本",
+                "content": body,
+                "created_at": "",
+            }
+        )
+
+    add_legacy_ledger("timeline", "continuity_ledger.timeline", "timeline")
+    add_legacy_ledger(
+        "foreshadowing_states",
+        "continuity_ledger.open_foreshadowing",
+        "foreshadowing",
+    )
+    add_legacy_ledger(
+        "continuity_notes",
+        "continuity_ledger.character_states",
+        "character-states",
+    )
+    add_legacy_ledger(
+        "continuity_notes",
+        "continuity_ledger.continuity_notes",
+        "continuity-notes",
+    )
+    return normalize_long_workspace_from_storage(raw)
+
+
+def sync_long_workspace_from_stage_patch(
+    workspace: Any,
+    patch: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """兼容第一版前端：显式 stages patch 同步到 v2 对应内容。"""
+    out = normalize_long_workspace_from_storage(workspace)
+    if not patch:
+        return out
+
+    category_stage_map = {
+        "worldbuilding.rules": "rules",
+        "worldbuilding.factions": "factions",
+        "worldbuilding.geography": "geography",
+        "worldbuilding.history": "history",
+        "worldbuilding.terminology": "terminology",
+        "worldbuilding.items": "items",
+    }
+    categories = out["worldbuilding"]["categories"]
+    for stage_id, category_id in category_stage_map.items():
+        if stage_id not in patch:
+            continue
+        category = next((row for row in categories if row["id"] == category_id), None)
+        if category is not None:
+            category["format"] = "text"
+            category["text"] = str(patch.get(stage_id) or "")
+
+    character_stage_map = {
+        "character_design.protagonists": "protagonists",
+        "character_design.major_supporting": "major_supporting",
+        "character_design.minor_supporting": "minor_supporting",
+        "character_design.passersby": "passersby",
+    }
+    for stage_id, group_id in character_stage_map.items():
+        if stage_id not in patch:
+            continue
+        entries = out["characters"][group_id]["entries"]
+        legacy = next(
+            (row for row in entries if row["id"] == f"legacy-{group_id}"),
+            None,
+        )
+        if legacy is None:
+            legacy = {
+                "id": f"legacy-{group_id}",
+                "name": "旧版人物资料",
+                "core_profile": "",
+                "relationships": "",
+                "current_state": "",
+                "history": "",
+            }
+            entries.append(legacy)
+        legacy["core_profile"] = str(patch.get(stage_id) or "")
+
+    if "plot_design.book_line" in patch:
+        out["plot"]["book_line"] = str(patch.get("plot_design.book_line") or "")
+    if "plot_design.volumes" in patch and out["plot"]["volumes"]:
+        out["plot"]["volumes"][0]["outline"] = str(
+            patch.get("plot_design.volumes") or ""
+        )
+    if "plot_design.story_arcs" in patch and out["plot"]["arcs"]:
+        out["plot"]["arcs"][0]["timeline"] = str(
+            patch.get("plot_design.story_arcs") or ""
+        )
+    if "plot_design.chapter_cards" in patch and out["plot"]["chapter_cards"]:
+        out["plot"]["chapter_cards"][0]["outline"] = str(
+            patch.get("plot_design.chapter_cards") or ""
+        )
+
+    chapters = out["chapters"]
+    for stage_id, value in patch.items():
+        if not _long_draft_parts(str(stage_id)):
+            continue
+        if stage_id not in chapters:
+            chapters[stage_id] = {
+                "title": "",
+                "body": "",
+                "character_state": "",
+                "handoff": "",
+                "committed": False,
+                "committed_at": "",
+                "commit_id": "",
+            }
+        chapters[stage_id]["body"] = str(value or "")
+    return normalize_long_workspace_from_storage(out)
+
+
+def ordered_long_chapter_cards(workspace: Any) -> list[dict[str, Any]]:
+    """按卷、剧情弧、章卡 order 返回权威章节顺序。"""
+    normalized = normalize_long_workspace_from_storage(workspace)
+    plot = normalized["plot"]
+    volume_rank = {
+        str(item["id"]): index
+        for index, item in enumerate(
+            sorted(plot["volumes"], key=lambda row: (row["order"], row["id"]))
+        )
+    }
+    arcs_by_volume: dict[str, list[dict[str, Any]]] = {}
+    for arc in plot["arcs"]:
+        arcs_by_volume.setdefault(str(arc["volume_id"]), []).append(arc)
+    arc_rank: dict[str, int] = {}
+    for rows in arcs_by_volume.values():
+        for index, arc in enumerate(sorted(rows, key=lambda row: (row["order"], row["id"]))):
+            arc_rank[str(arc["id"])] = index
+    return sorted(
+        plot["chapter_cards"],
+        key=lambda row: (
+            volume_rank.get(str(row["volume_id"]), 10**9),
+            arc_rank.get(str(row["arc_id"]), 10**9),
+            row["order"],
+            row["id"],
+        ),
+    )
+
 # 保留旧键用于数据迁移
 LEGACY_QINGGAN_STAGE_KEYS: tuple[str, ...] = (
     "qinggan_character",

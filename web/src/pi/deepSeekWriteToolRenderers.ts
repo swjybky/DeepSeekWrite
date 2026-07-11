@@ -48,6 +48,12 @@ const DEEPSEEKWRITE_TOOL_NAMES = [
   'write_material_editor',
   'read_skill_content',
   'write_skill_editor',
+  'list_skill_entries',
+  'read_skill_entry',
+  'search_skill_entries',
+  'create_skill_entry',
+  'edit_skill_entry',
+  'write_skill_overview',
   'create_draft_sections',
   'create_character_state_sections',
   'initialize_expert_draft',
@@ -240,6 +246,30 @@ function summarizeToolCall(
         mode === 'append' ? '（追加）' : mode === 'replace' ? '（覆盖）' : ''
       return verb('正在写入技能编辑区', '已写入技能编辑区') + modeHint
     }
+    case 'list_skill_entries':
+      return verb('正在列出技能条目', '已列出技能条目')
+    case 'read_skill_entry': {
+      const title = pickString(params, 'title')
+      return title
+        ? verb('正在读取技能条目', '已读取技能条目') + `「${title}」`
+        : verb('正在读取技能条目', '已读取技能条目')
+    }
+    case 'search_skill_entries':
+      return verb('正在搜索技能内容', '已搜索技能内容')
+    case 'create_skill_entry': {
+      const title = pickString(params, 'title')
+      return title
+        ? verb('正在创建技能条目', '已创建技能条目') + `「${title}」`
+        : verb('正在创建技能条目', '已创建技能条目')
+    }
+    case 'edit_skill_entry': {
+      const title = pickString(params, 'title')
+      return title
+        ? verb('正在修改技能条目', '已修改技能条目') + `「${title}」`
+        : verb('正在修改技能条目', '已修改技能条目')
+    }
+    case 'write_skill_overview':
+      return verb('正在写入技能概览', '已写入技能概览')
     case 'create_draft_sections': {
       const sections = params?.sections
       const count = Array.isArray(sections) ? sections.length : 0

@@ -94,7 +94,6 @@ function randomId() {
 function normalizeMockLinkedSkillIdsByKind(
   raw: Partial<Record<SkillKind, string[]>> | null | undefined,
   legacySkillId: string | null | undefined,
-  bookType: Book['book_type'],
 ): Partial<Record<SkillKind, string[]>> {
   const out = normalizeLinkedSkillIdsByKind(raw, legacySkillId)
   const skills = loadMockSkills()
@@ -102,9 +101,7 @@ function normalizeMockLinkedSkillIdsByKind(
     out[kind] = (out[kind] ?? []).filter((id) => {
       const skill = skills.get(id)
       return Boolean(
-        skill &&
-          (skill.is_builtin || skill.skill_type === bookType) &&
-          normalizeSkillKind(skill.skill_kind) === kind,
+        skill && normalizeSkillKind(skill.skill_kind) === kind,
       )
     })
   }
@@ -162,7 +159,6 @@ export async function mockCreateBook(
     ? normalizeMockLinkedSkillIdsByKind(
         linked_skill_ids_by_kind,
         linked_skill_id,
-        bt,
       )
     : {}
   const book: Book = {
@@ -266,7 +262,7 @@ export async function mockSaveBook(
   if (options.linked_skill_id !== undefined) {
     const sid = options.linked_skill_id?.trim() ?? ''
     const linkedSkillsByKind = isWorkspaceBook(next)
-      ? normalizeMockLinkedSkillIdsByKind(null, sid, next.book_type)
+      ? normalizeMockLinkedSkillIdsByKind(null, sid)
       : {}
     next = {
       ...next,
@@ -279,7 +275,6 @@ export async function mockSaveBook(
       ? normalizeMockLinkedSkillIdsByKind(
           options.linked_skill_ids_by_kind,
           null,
-          next.book_type,
         )
       : {}
     next = {

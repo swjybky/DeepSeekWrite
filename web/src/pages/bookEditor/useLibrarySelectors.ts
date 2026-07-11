@@ -89,9 +89,7 @@ export function useLibrarySelectors({
         .map((materialId) => byId.get(materialId) ?? null)
         .filter(
           (material): material is Material =>
-            material !== null &&
-            material.material_type === nextBook.book_type &&
-            materialMatchesKind(material, kind),
+            material !== null && materialMatchesKind(material, kind),
         )
     }
     return {
@@ -207,9 +205,7 @@ export function useLibrarySelectors({
         .map((skillId) => byId.get(skillId) ?? null)
         .filter(
           (skill): skill is Skill =>
-            skill !== null &&
-            (skill.is_builtin || skill.skill_type === nextBook.book_type) &&
-            skillMatchesKind(skill, kind),
+            skill !== null && skillMatchesKind(skill, kind),
         )
     }
     return {

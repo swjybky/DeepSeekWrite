@@ -4,7 +4,6 @@ import type { AppDialogOptions } from './AppDialog'
 import {
   isWorkspaceSupportedAttachment,
   loadWorkspaceAttachment,
-  WORKSPACE_ATTACHMENT_ACCEPTED_TYPES,
   WORKSPACE_ATTACHMENT_SUPPORTED_LABEL,
 } from '../utils/documentText'
 
@@ -169,10 +168,20 @@ function applyWorkspaceAttachmentOptions(
   iface.enableAttachments = true
   iface.requestUpdate?.()
   installWorkspaceAttachmentLoader(editor, showAlert)
-  editor.acceptedTypes = WORKSPACE_ATTACHMENT_ACCEPTED_TYPES
+  // 不让 WKWebView/macOS 使用 accept 做系统级过滤。macOS 对 Markdown
+  // 的 UTI 映射不稳定，即使列出 .md/text/markdown 也会在文件面板中置灰。
+  // 文件选中后仍由 isWorkspaceSupportedAttachment 做严格的业务校验。
+  editor.acceptedTypes = ''
   editor.maxFiles = WORKSPACE_ATTACHMENT_MAX_FILES
   editor.maxFileSize = WORKSPACE_ATTACHMENT_MAX_FILE_SIZE
   editor.requestUpdate?.()
+  // 同步移除真实 input 上的 accept，避免 Lit 更新时序导致旧过滤条件残留。
+  const syncNativeFileInput = () => {
+    const input = editor.querySelector<HTMLInputElement>('input[type="file"]')
+    input?.removeAttribute('accept')
+  }
+  syncNativeFileInput()
+  requestAnimationFrame(syncNativeFileInput)
   return true
 }
 

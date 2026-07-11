@@ -99,7 +99,7 @@ export function MaterialSelectorDialog({
   const groupOptions = groups
     .map((group) => ({
       group,
-      links: materialLibraryGroupLinks(group, summaries, book.book_type),
+      links: materialLibraryGroupLinks(group, summaries),
     }))
     .filter(({ links }) => MATERIAL_KIND_KEYS.some((kind) => links[kind].length > 0))
 
@@ -178,7 +178,7 @@ export function MaterialSelectorDialog({
             <p className="muted workspace-material-empty">加载中…</p>
           ) : bindingMode === 'group' ? (
             groupOptions.length === 0 ? (
-              <p className="muted workspace-material-empty">暂无适用于当前书籍类型的素材分组</p>
+              <p className="muted workspace-material-empty">暂无可关联的素材分组</p>
             ) : (
               groupOptions.map(({ group, links }) => {
                 const selected = linkedIdsEqual(MATERIAL_KIND_KEYS, currentByKind, links)
@@ -214,10 +214,8 @@ export function MaterialSelectorDialog({
             <p className="muted workspace-material-empty">暂无素材库</p>
           ) : (
             MATERIAL_KIND_KEYS.map((kind) => {
-              const candidates = summaries.filter(
-                (material) =>
-                  material.material_type === book.book_type &&
-                  materialMatchesKind(material, kind),
+              const candidates = summaries.filter((material) =>
+                materialMatchesKind(material, kind),
               )
               return (
                 <section key={kind} className="workspace-material-kind-group">
@@ -311,7 +309,7 @@ export function SkillSelectorDialog({
   const groupOptions = groups
     .map((group) => ({
       group,
-      links: skillLibraryGroupLinks(group, summaries, book.book_type),
+      links: skillLibraryGroupLinks(group, summaries),
     }))
     .filter(({ links }) => SKILL_KIND_KEYS.some((kind) => links[kind].length > 0))
 
@@ -426,10 +424,8 @@ export function SkillSelectorDialog({
             <p className="muted workspace-material-empty">暂无技能库</p>
           ) : (
             SKILL_KIND_KEYS.map((kind) => {
-              const candidates = summaries.filter(
-                (skill) =>
-                  (skill.is_builtin || skill.skill_type === book.book_type) &&
-                  skillMatchesKind(skill, kind),
+              const candidates = summaries.filter((skill) =>
+                skillMatchesKind(skill, kind),
               )
               return (
                 <section key={kind} className="workspace-material-kind-group">

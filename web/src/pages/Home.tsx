@@ -2009,50 +2009,44 @@ export function Home() {
     () =>
       MATERIAL_KIND_KEYS.reduce(
         (out, kind) => {
-          out[kind] = materials.filter(
-            (material) =>
-              material.material_type === bookType && materialMatchesKind(material, kind),
-          )
+          out[kind] = materials.filter((material) => materialMatchesKind(material, kind))
           return out
         },
         {} as Record<MaterialKind, MaterialSummary[]>,
       ),
-    [bookType, materials],
+    [materials],
   )
 
   const bookSkillOptionsByKind = useMemo(
     () =>
       SKILL_KIND_KEYS.reduce(
         (out, kind) => {
-          out[kind] = skills.filter(
-            (skill) =>
-              (skill.is_builtin || skill.skill_type === bookType) && skillMatchesKind(skill, kind),
-          )
+          out[kind] = skills.filter((skill) => skillMatchesKind(skill, kind))
           return out
         },
         {} as Record<SkillKind, SkillSummary[]>,
       ),
-    [bookType, skills],
+    [skills],
   )
 
   const bookMaterialGroupOptions = useMemo(
     () =>
       materialGroups.filter((group) =>
         MATERIAL_KIND_KEYS.some(
-          (kind) => materialLibraryGroupLinks(group, materials, bookType)[kind].length > 0,
+          (kind) => materialLibraryGroupLinks(group, materials)[kind].length > 0,
         ),
       ),
-    [bookType, materialGroups, materials],
+    [materialGroups, materials],
   )
 
   const bookSkillGroupOptions = useMemo(
     () =>
       skillGroups.filter((group) =>
         SKILL_KIND_KEYS.some(
-          (kind) => skillLibraryGroupLinks(group, skills, bookType)[kind].length > 0,
+          (kind) => skillLibraryGroupLinks(group, skills)[kind].length > 0,
         ),
       ),
-    [bookType, skillGroups, skills],
+    [skillGroups, skills],
   )
 
   useEffect(() => {
@@ -3009,11 +3003,11 @@ export function Home() {
       const group = materialGroups.find((item) => item.id === groupId)
       setBookLinkedMaterialIdsByKind(
         group
-          ? materialLibraryGroupLinks(group, materials, bookType)
+          ? materialLibraryGroupLinks(group, materials)
           : emptyLinkedMaterialIdsByKind(),
       )
     },
-    [bookType, materialGroups, materials],
+    [materialGroups, materials],
   )
 
   const handleBookLinkedSkillGroupChange = useCallback(
@@ -3022,11 +3016,11 @@ export function Home() {
       const group = skillGroups.find((item) => item.id === groupId)
       setBookLinkedSkillIdsByKind(
         group
-          ? skillLibraryGroupLinks(group, skills, bookType)
+          ? skillLibraryGroupLinks(group, skills)
           : emptyLinkedSkillIdsByKind(),
       )
     },
-    [bookType, skillGroups, skills],
+    [skillGroups, skills],
   )
 
   // ==================== 渲染 ====================

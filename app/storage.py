@@ -1437,8 +1437,6 @@ class BookStore:
         material = self._materials.get(material_id)
         if material is None:
             return False
-        if material.material_type != book_type:
-            return False
         return material.material_kind == "mixed" or material.material_kind == material_kind
 
     def _legacy_material_links_by_kind(
@@ -1449,7 +1447,7 @@ class BookStore:
         out: dict[str, list[str]] = {kind: [] for kind in MATERIAL_KIND_KEYS}
         mid = (material_id or "").strip()
         material = self._materials.get(mid)
-        if not mid or material is None or material.material_type != book_type:
+        if not mid or material is None:
             return out
         if material.material_kind == "mixed":
             for kind in MATERIAL_KIND_KEYS:
@@ -1504,8 +1502,6 @@ class BookStore:
         skill = self._skills.get(skill_id)
         if skill is None:
             return False
-        if not skill.is_builtin and skill.skill_type != book_type:
-            return False
         return skill.skill_kind == skill_kind
 
     def _legacy_skill_links_by_kind(
@@ -1516,7 +1512,7 @@ class BookStore:
         out: dict[str, list[str]] = {kind: [] for kind in SKILL_KIND_KEYS}
         sid = (skill_id or "").strip()
         skill = self._skills.get(sid)
-        if not sid or skill is None or (not skill.is_builtin and skill.skill_type != book_type):
+        if not sid or skill is None:
             return out
         if skill.skill_kind in out:
             out[skill.skill_kind] = [sid]
