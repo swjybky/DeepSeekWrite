@@ -10,7 +10,6 @@ import {
   type BookType,
   type MemoryEntry,
   type MaterialKind,
-  type MaterialLibraryGroup,
   type Material,
   type MaterialStageEntry,
   type MaterialStageId,
@@ -1868,13 +1867,14 @@ export function Home() {
   } = useAppearance()
   const books = useHomeStore((state) => state.books)
   const materials = useHomeStore((state) => state.materials)
+  const materialGroups = useHomeStore((state) => state.materialGroups)
   const skills = useHomeStore((state) => state.skills)
   const skillGroups = useHomeStore((state) => state.skillGroups)
   const bookCovers = useHomeStore((state) => state.bookCovers)
   const cachedWorkspaceRoot = useHomeStore((state) => state.workspaceRoot)
   const cachedAiSettings = useHomeStore((state) => state.aiSettings)
   const setBooks = useHomeStore((state) => state.setBooks)
-  const setMaterials = useHomeStore((state) => state.setMaterials)
+  const setMaterialLibraryData = useHomeStore((state) => state.setMaterialLibraryData)
   const setSkillLibraryData = useHomeStore((state) => state.setSkillLibraryData)
   const setBookCovers = useHomeStore((state) => state.setBookCovers)
   const setWorkspaceRoot = useHomeStore((state) => state.setWorkspaceRoot)
@@ -1952,7 +1952,6 @@ export function Home() {
   const [skillSplitError, setSkillSplitError] = useState<string | null>(null)
 
   // ==================== 素材/技能分组状态 ====================
-  const [materialGroups, setMaterialGroups] = useState<MaterialLibraryGroup[]>([])
   const [showMaterialGroupForm, setShowMaterialGroupForm] = useState(false)
   const [showSkillGroupForm, setShowSkillGroupForm] = useState(false)
   const [materialGroupTitle, setMaterialGroupTitle] = useState('')
@@ -2178,14 +2177,13 @@ export function Home() {
         listMaterials(),
         listMaterialLibraryGroups(),
       ])
-      setMaterials(list)
-      setMaterialGroups(groups)
+      setMaterialLibraryData(list, groups)
     } catch (e) {
       setMaterialError(e instanceof Error ? e.message : '加载素材库失败')
     } finally {
       setLoadingMaterials(false)
     }
-  }, [setMaterials])
+  }, [setMaterialLibraryData])
 
   // ==================== 技能库数据加载 ====================
   const refreshSkills = useCallback(async (options?: RefreshOptions) => {
