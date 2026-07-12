@@ -92,7 +92,11 @@ def read_skill_manager_skills() -> list[dict[str, str]]:
     override = skill_manager_skills_override_path()
     if override.is_file():
         try:
-            return _read_skills_file(override)
+            skills = _read_skills_file(override)
+            # 管理智能体不能在空配置下工作。用户配置为空时继续使用
+            # 随应用发布的“创建技能 / 整理技能”默认定义。
+            if skills:
+                return skills
         except (OSError, ValueError, json.JSONDecodeError):
             pass
     return read_default_skill_manager_skills()

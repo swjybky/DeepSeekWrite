@@ -1467,6 +1467,7 @@ function WorkspaceAiChatInner({
         editMaterialEntry: toolProps.editMaterialEntry,
         writeMaterialOverview: toolProps.writeMaterialOverview,
         skillType: toolProps.skillType,
+        skillManagerSkills: skillManagerSkillsRef.current,
         workspaceType,
         promptKind: toolProps.promptKind,
         stageId: toolProps.stageId,

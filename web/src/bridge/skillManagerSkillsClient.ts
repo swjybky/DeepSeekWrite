@@ -46,10 +46,20 @@ function defaultSkillManagerSkills(): SkillManagerSkill[] {
 
 export async function readSkillManagerSkills(): Promise<SkillManagerSkill[]> {
   const api = await getBridgeApi()
-  if (api?.read_skill_manager_skills) return api.read_skill_manager_skills()
+  if (api?.read_skill_manager_skills) {
+    try {
+      const skills = normalizeSkillManagerSkills(await api.read_skill_manager_skills())
+      // 兼容旧版后端、缺失的用户配置以及意外保存的空列表。
+      // load_skill 必须始终至少能回退到随前端发布的默认管理技能。
+      return skills.length > 0 ? skills : defaultSkillManagerSkills()
+    } catch {
+      return defaultSkillManagerSkills()
+    }
+  }
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
-    return raw ? normalizeSkillManagerSkills(JSON.parse(raw)) : defaultSkillManagerSkills()
+    const skills = raw ? normalizeSkillManagerSkills(JSON.parse(raw)) : []
+    return skills.length > 0 ? skills : defaultSkillManagerSkills()
   } catch {
     return defaultSkillManagerSkills()
   }
