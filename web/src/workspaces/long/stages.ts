@@ -144,6 +144,8 @@ export function buildLongDraftStageId(
 }
 
 export function isLongStageId(id: string): id is LongStageId {
+  // `draft` 是正文管理智能体所在的父节点；具体章节仍使用 draft.volume-*.arc-*.chapter-*。
+  if (id === 'draft') return true
   if (LONG_DEFAULT_CONTENT_STAGE_ID_SET.has(id)) return true
   // 世界观分类允许用户新建，其 stage id 不能被固定枚举限制。
   if (/^worldbuilding\.[^\s.]+$/.test(id)) return true

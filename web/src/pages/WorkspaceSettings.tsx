@@ -43,7 +43,12 @@ import {
   isRequiredWorkspaceStageForAgent as isRequiredScriptWorkspaceStageForAgent,
   normalizeWorkspaceAgentReadAccess as normalizeScriptWorkspaceAgentReadAccess,
 } from '../workspaces/script/stageReadAccess'
-import { LONG_WORKSPACE_CONTENT_STAGES } from '../workspaces/long/stages'
+import {
+  LONG_WORKSPACE_CONTENT_STAGES,
+  LONG_WORKSPACE_STAGES,
+  longRootStageIdForStage,
+  type LongRootStageId,
+} from '../workspaces/long/stages'
 import {
   EXPERT_SECTION_WRITER_AGENT_ID as LONG_SECTION_WRITER_AGENT_ID,
   WORKSPACE_AGENT_IDS as LONG_WORKSPACE_AGENT_IDS,
@@ -163,10 +168,16 @@ function getDefaultReadAccessEntryForType(
 }
 
 function getWorkspaceContentStagesForType(workspaceType: WorkspaceSettingsType) {
-  if (workspaceType === 'long') return LONG_WORKSPACE_CONTENT_STAGES
+  if (workspaceType === 'long') return LONG_WORKSPACE_STAGES
   return workspaceType === 'script'
     ? SCRIPT_WORKSPACE_CONTENT_STAGES
     : SHORT_WORKSPACE_CONTENT_STAGES
+}
+
+function longRootStageIds(rootId: LongRootStageId): StageId[] {
+  return LONG_WORKSPACE_CONTENT_STAGES
+    .filter((stage) => stage.rootId === rootId)
+    .map((stage) => stage.id as StageId)
 }
 
 function normalizeReadAccessForType(
@@ -401,13 +412,19 @@ export function WorkspaceSettings() {
       id: StageId | MaterialKind | SkillKind,
       checked: boolean,
     ) => {
+      const workspaceIds =
+        kind === 'workspace' && workspaceType === 'long'
+          ? longRootStageIds(longRootStageIdForStage(String(id)))
+          : [id as StageId]
       if (
         kind === 'workspace' &&
         !checked &&
-        isRequiredWorkspaceStageForType(
-          workspaceType,
-          activeAgentRef.current,
-          id as StageId,
+        workspaceIds.some((stageId) =>
+          isRequiredWorkspaceStageForType(
+            workspaceType,
+            activeAgentRef.current,
+            stageId,
+          ),
         )
       ) {
         return
@@ -419,8 +436,8 @@ export function WorkspaceSettings() {
           ? {
               ...entry,
               workspace: checked
-                ? [...new Set([...entry.workspace, id as StageId])]
-                : entry.workspace.filter((stageId) => stageId !== id),
+                ? [...new Set([...entry.workspace, ...workspaceIds])]
+                : entry.workspace.filter((stageId) => !workspaceIds.includes(stageId)),
             }
           : kind === 'material'
             ? {
@@ -754,10 +771,18 @@ export function WorkspaceSettings() {
                   <fieldset>
                     <legend>创作空间阶段</legend>
                     {getWorkspaceContentStagesForType(workspaceType).map((stage) => {
-                      const locked = isRequiredWorkspaceStageForType(
-                        workspaceType,
-                        activeAgentId,
-                        stage.id,
+                      const workspaceIds = workspaceType === 'long'
+                        ? longRootStageIds(stage.id as LongRootStageId)
+                        : [stage.id as StageId]
+                      const locked = workspaceIds.some((stageId) =>
+                        isRequiredWorkspaceStageForType(
+                          workspaceType,
+                          activeAgentId,
+                          stageId,
+                        ),
+                      )
+                      const checked = workspaceIds.every((stageId) =>
+                        activeEntry.workspace.includes(stageId),
                       )
                       return (
                         <label
@@ -771,7 +796,7 @@ export function WorkspaceSettings() {
                         >
                           <input
                             type="checkbox"
-                            checked={locked || activeEntry.workspace.includes(stage.id)}
+                            checked={locked || checked}
                             disabled={locked}
                             onChange={(event) =>
                               patchReadAccess(

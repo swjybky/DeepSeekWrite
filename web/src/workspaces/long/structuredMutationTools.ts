@@ -9,6 +9,7 @@ import {
   addLongWorldCategory,
   bumpLongWorkspace,
   newLongWorkspaceId,
+  newLongWorkspaceItemId,
   normalizeLongWorkspace,
   removeLongArc,
   removeLongChapterCard,
@@ -36,6 +37,7 @@ export type LongStructuredMutationContext = {
   longWorkspace?: LongWorkspace | null
   getLongWorkspace?: () => LongWorkspace | null | undefined
   replaceLongWorkspace?: ReplaceLongWorkspace
+  isToolCallStreamed?: (toolCallId: string) => boolean
 }
 
 type MutationResult =
@@ -271,7 +273,7 @@ export function buildWriteWorldbuildingListTool(
         if (resolved.category.items.some((row) => row.name === name)) {
           return { ok: false, error: `「${resolved.category.name}」中已存在条目「${name}」。` }
         }
-        const itemId = newLongWorkspaceId(`${resolved.categoryId}-item`)
+        const itemId = newLongWorkspaceItemId()
         resolved.category.items.push({
           id: itemId,
           name,
@@ -331,12 +333,16 @@ export function buildWriteWorldbuildingTextTool(
     parameters: Type.Object({
       category_id: Type.String(),
       mode: Type.Union([Type.Literal('replace'), Type.Literal('replace_fragment')]),
+      allow_overwrite_existing: Type.Optional(Type.Boolean()),
       text: Type.Optional(Type.String({ maxLength: 500000 })),
       original_text: Type.Optional(Type.String({ maxLength: 50000 })),
       new_text: Type.Optional(Type.String({ maxLength: 50000 })),
-      allow_overwrite_existing: Type.Optional(Type.Boolean()),
     }),
-    execute: async (_toolCallId, params) => runMutation(ctx, 'worldbuilding', (workspace) => {
+    execute: async (toolCallId, params) => {
+      if (ctx.isToolCallStreamed?.(toolCallId)) {
+        return textBlock('已流式更新世界观文本。')
+      }
+      return runMutation(ctx, 'worldbuilding', (workspace) => {
       const resolved = ensureWorldCategory(workspace, params.category_id)
       if ('error' in resolved) return { ok: false, error: resolved.error }
       if (resolved.category.format !== 'text') {
@@ -366,7 +372,8 @@ export function buildWriteWorldbuildingTextTool(
         workspace,
         message: `已更新文本格式世界观「${resolved.category.name}」。`,
       }
-    }),
+      })
+    },
   })
 }
 
@@ -468,12 +475,16 @@ function buildReplaceablePlotTextTool(
     description: '维护全书线（总纲）文本。局部修改优先 replace_fragment；整体覆盖已有总纲需显式确认。',
     parameters: Type.Object({
       mode: Type.Union([Type.Literal('replace'), Type.Literal('replace_fragment')]),
+      allow_overwrite_existing: Type.Optional(Type.Boolean()),
       text: Type.Optional(Type.String({ maxLength: 500000 })),
       original_text: Type.Optional(Type.String({ maxLength: 50000 })),
       new_text: Type.Optional(Type.String({ maxLength: 50000 })),
-      allow_overwrite_existing: Type.Optional(Type.Boolean()),
     }),
-    execute: async (_toolCallId, params) => runMutation(ctx, 'plot_design', (workspace) => {
+    execute: async (toolCallId, params) => {
+      if (ctx.isToolCallStreamed?.(toolCallId)) {
+        return textBlock('已流式更新全书线（总纲）。')
+      }
+      return runMutation(ctx, 'plot_design', (workspace) => {
       if (params.mode === 'replace') {
         const text = String(params.text ?? '')
         if (!text.trim()) return { ok: false, error: 'replace 时 text 不能为空。' }
@@ -491,12 +502,30 @@ function buildReplaceablePlotTextTool(
         workspace.plot.book_line = next.text
       }
       return { ok: true, workspace, message: '已更新全书线（总纲）。' }
-    }),
+      })
+    },
   })
 }
 
 function affectedCardsForVolume(workspace: LongWorkspace, volumeId: string) {
   return workspace.plot.chapter_cards.filter((card) => card.volume_id === volumeId)
+}
+
+function resolveLongVolume(
+  workspace: LongWorkspace,
+  rawVolumeId: unknown,
+  rawName: unknown,
+): { volume: LongWorkspace['plot']['volumes'][number]; usedNameFallback: boolean } | null {
+  const volumeId = cleanId(rawVolumeId)
+  const byId = workspace.plot.volumes.find((row) => row.id === volumeId)
+  if (byId) return { volume: byId, usedNameFallback: false }
+
+  // Long-running chats can retain an ID after import/rebuild regenerated it.
+  // A name is safe as a recovery key only when exactly one current row matches.
+  const name = cleanName(rawName)
+  if (!name) return null
+  const byName = workspace.plot.volumes.filter((row) => row.name.trim() === name)
+  return byName.length === 1 ? { volume: byName[0]!, usedNameFallback: true } : null
 }
 
 function affectedCardsForArc(workspace: LongWorkspace, arcId: string) {
@@ -549,9 +578,11 @@ export function buildManageLongVolumeTool(
         if (params.order) volume.order = Number(params.order)
         return { ok: true, workspace: added.workspace, message: `已新增分卷「${name}」（volume_id=${added.volumeId}）。` }
       }
-      const volumeId = cleanId(params.volume_id)
-      const volume = workspace.plot.volumes.find((row) => row.id === volumeId)
-      if (!volume) return { ok: false, error: `找不到 volume_id=${volumeId || '（空）'} 的分卷。` }
+      const requestedVolumeId = cleanId(params.volume_id)
+      const resolved = resolveLongVolume(workspace, params.volume_id, params.name)
+      if (!resolved) return { ok: false, error: `找不到 volume_id=${requestedVolumeId || '（空）'} 的分卷。` }
+      const { volume } = resolved
+      const volumeId = volume.id
       if (action === 'delete') {
         const blocked = protectChapterDeletion(
           workspace,
@@ -571,7 +602,10 @@ export function buildManageLongVolumeTool(
         }
         if (hasOwn(params, 'outline')) volume.outline = String(params.outline ?? '')
         if (params.order) volume.order = Number(params.order)
-        return { ok: true, workspace, message: `已更新分卷「${volume.name}」。` }
+        const recovered = resolved.usedNameFallback
+          ? `（历史 volume_id=${requestedVolumeId} 已失效，已按唯一卷名匹配当前 volume_id=${volume.id}）`
+          : ''
+        return { ok: true, workspace, message: `已更新分卷「${volume.name}」。${recovered}` }
       }
       return { ok: false, error: `不支持 action=${action}。` }
     }),

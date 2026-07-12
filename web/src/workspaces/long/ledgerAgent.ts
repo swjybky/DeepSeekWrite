@@ -1,27 +1,10 @@
-import { Agent } from '@earendil-works/pi-agent-core'
 import type { ThinkingLevel } from '@earendil-works/pi-agent-core'
 import type { Api, Model } from '@earendil-works/pi-ai'
-import { ApiKeyPromptDialog } from '@earendil-works/pi-web-ui'
 import { Type } from 'typebox'
 
-import {
-  readWorkspaceAgentPromptTemplate,
-  type MemoryEntry,
-} from '../../bridge'
-import {
-  createWorkspaceModelApiKeyResolver,
-  resolveWorkspaceModelApiKey,
-} from '../../pi/resolveWorkspaceChatModel'
-import { convertToLlmWithSkillAsUser } from '../../pi/skillMessageTransform'
-import { createMemoryAwareConvertToLlm } from '../../pi/memoryMessageTransform'
-import { createPiSessionId } from '../../pi/sessionId'
-import { ensurePiAppStorage } from '../../pi/setupPiWorkspace'
-import {
-  getPreferredWorkspaceThinkingLevel,
-  resolvePreferredWorkspaceChatModel,
-} from '../../pi/workspaceChatPreferences'
-import { createWorkspaceStreamFn } from '../../pi/workspaceStreamFn'
+import type { MemoryEntry } from '../../bridge'
 import { defineTool, textBlock } from '../shared/piToolkit'
+import { waitForLongLedgerChatAgent } from './ledgerChatAgentRegistry'
 import {
   orderedLongChapterCards,
   type LongCharacterLedgerUpdate,
@@ -137,13 +120,6 @@ function buildLedgerContext(workspace: LongWorkspace, stageId: string): string {
     .join('\n')
 }
 
-async function ensureModelApiKey(model: Model<Api>): Promise<boolean> {
-  const existing = await resolveWorkspaceModelApiKey(model)
-  if (existing) return true
-  if (!(await ApiKeyPromptDialog.prompt(model.provider))) return false
-  return Boolean(await resolveWorkspaceModelApiKey(model, model.provider))
-}
-
 const characterUpdateSchema = Type.Object({
   character_id: Type.Optional(Type.String()),
   name: Type.Optional(Type.String()),
@@ -170,16 +146,16 @@ export async function runLongLedgerAgent(
     options.onError?.(preflight.error ?? '当前章节无法落盘。')
     return false
   }
-  await ensurePiAppStorage()
-  const model = options.model ?? (await resolvePreferredWorkspaceChatModel())
-  if (!(await ensureModelApiKey(model))) {
-    options.onError?.('章节未落盘：缺少当前模型 API Key。')
+  // 状态账本各叶子节点各自拥有独立 ChatPanel。落盘过程统一显示在
+  // “时间线”会话，不能按 bookId 随机取到最后挂载的隐藏叶子 Agent。
+  const agent = await waitForLongLedgerChatAgent(
+    options.bookId,
+    'continuity_ledger.timeline',
+  )
+  if (!agent) {
+    options.onError?.('状态账本智能体对话尚未就绪，本章未落盘。')
     return false
   }
-  const template = await readWorkspaceAgentPromptTemplate(
-    'continuity_ledger',
-    'long',
-  )
   let committed = false
   const applyTool = defineTool({
     name: 'commit_long_chapter_state',
@@ -237,51 +213,16 @@ export async function runLongLedgerAgent(
     },
   })
 
-  let activeAgent: Agent | null = null
-  const agent: Agent = new Agent({
-    sessionId: createPiSessionId(
-      'long-continuity-ledger',
-      options.bookId,
-      options.stageId,
-      Date.now(),
-    ),
-    convertToLlm: createMemoryAwareConvertToLlm(
-      convertToLlmWithSkillAsUser,
-      () => ({
-        bookTitle: options.bookTitle,
-        bookType: 'long',
-        bookGenre: options.bookGenre,
-        currentLocation: {
-          kind: 'stage',
-          stageLabel: '状态账本',
-          stageDetailLabel: options.stageId,
-        },
-        bookMemories: options.bookMemories,
-        userMemories: options.userMemories,
-      }),
-    ),
-    getApiKey: createWorkspaceModelApiKeyResolver(
-      () => activeAgent?.state.model ?? model,
-    ),
-    streamFn: createWorkspaceStreamFn(),
-    toolExecution: 'sequential',
-    initialState: {
-      systemPrompt: `${template.trim()}\n\n${buildLedgerContext(
-        options.getWorkspace(),
-        options.stageId,
-      )}`,
-      model,
-      thinkingLevel: options.thinkingLevel ?? getPreferredWorkspaceThinkingLevel(),
-      messages: [],
-      tools: [applyTool],
-    },
-  })
-  activeAgent = agent
+  const previousTools = agent.state.tools
+  agent.state.tools = [
+    ...previousTools.filter((tool) => tool.name !== applyTool.name),
+    applyTool,
+  ]
   const abortAgent = () => agent.abort()
   options.signal?.addEventListener('abort', abortAgent, { once: true })
   try {
     await agent.prompt(
-      '请分析本章已经发生的事实，整理人物关系/当前状态/历史变化、时间线、势力、境界、伏笔和连续性更新，然后必须调用 commit_long_chapter_state 完成原子落盘。不要只给文字建议。',
+      `请显式执行本章落盘。分析已经发生的事实，整理人物关系/当前状态/历史变化、时间线、势力、境界、伏笔和连续性更新，然后必须调用 commit_long_chapter_state 完成原子落盘。不要只给文字建议。\n\n${buildLedgerContext(options.getWorkspace(), options.stageId)}`,
     )
     if (!committed && !options.signal?.aborted) {
       await agent.prompt(
@@ -302,6 +243,7 @@ export async function runLongLedgerAgent(
     }
     return false
   } finally {
+    agent.state.tools = previousTools
     options.signal?.removeEventListener('abort', abortAgent)
   }
 }

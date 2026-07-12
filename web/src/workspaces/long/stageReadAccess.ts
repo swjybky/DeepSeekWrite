@@ -85,6 +85,23 @@ const plot = LONG_PLOT_STAGES.map((stage) => stage.id)
 const draft = LONG_DEFAULT_DRAFT_STAGES.map((stage) => stage.id)
 const ledger = LONG_CONTINUITY_STAGES.map((stage) => stage.id)
 
+const ROOT_STAGE_GROUPS: Record<string, readonly LongStageId[]> = {
+  worldbuilding: world,
+  character_design: characters,
+  plot_design: plot,
+  draft,
+  continuity_ledger: ledger,
+}
+
+function expandRootStageAccess(stageIds: readonly string[]): LongStageId[] {
+  const selectedRoots = new Set(
+    stageIds.filter(isLongStageId).map((stageId) => longRootStageIdForStage(stageId)),
+  )
+  return dedupe(
+    [...selectedRoots].flatMap((rootId) => ROOT_STAGE_GROUPS[rootId] ?? []),
+  )
+}
+
 const BUILTIN_READ_ACCESS_MODULES = import.meta.glob(
   '../../../../app/prompt_defaults/long/shared/read_access.json',
   { eager: true, import: 'default' },
@@ -230,7 +247,7 @@ function ensureRequiredWorkspaceStages(
   workspace: readonly string[],
 ): LongStageId[] {
   return dedupe([
-    ...workspace.filter(isLongStageId),
+    ...expandRootStageAccess(workspace),
     ...REQUIRED_WORKSPACE_STAGE_IDS[agentId],
   ])
 }
@@ -306,7 +323,10 @@ export function isRequiredWorkspaceStageForAgent(
 export function resolveWorkspaceAgentIdForStage(
   stageId: LongStageId,
 ): LongWorkspaceAgentId {
-  if (stageId === EXPERT_SECTION_WRITER_AGENT_ID) {
+  if (
+    stageId === EXPERT_SECTION_WRITER_AGENT_ID ||
+    /^draft\.volume-\d+\.arc-\d+\.chapter-\d+$/.test(stageId)
+  ) {
     return EXPERT_SECTION_WRITER_AGENT_ID
   }
   return longRootStageIdForStage(stageId)

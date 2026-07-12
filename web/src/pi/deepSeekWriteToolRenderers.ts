@@ -23,7 +23,13 @@ import {
   SKILL_STAGE_LABELS,
 } from '../bridge/libraryDomain'
 import { LEARNING_STAGE_LABELS } from '../bridge/learningImitationClient'
-import { LONG_STAGE_LABELS } from '../workspaces/long/stages'
+import {
+  LONG_WORLD_CATEGORY_DEFAULTS,
+} from '../workspaces/long/longWorkspace'
+import {
+  LONG_STAGE_LABELS,
+  longStageLabel,
+} from '../workspaces/long/stages'
 import { SCRIPT_STAGE_LABELS } from '../workspaces/script/stages'
 import { SHORT_STAGE_LABELS } from '../workspaces/short/stages'
 
@@ -132,7 +138,103 @@ function resolveStageLabel(stageId: string): string {
   for (const map of maps) {
     if (stageId in map) return map[stageId as keyof typeof map]
   }
+  if (
+    stageId === 'worldbuilding'
+    || stageId === 'character_design'
+    || stageId === 'plot_design'
+    || stageId === 'draft'
+    || stageId === 'continuity_ledger'
+    || stageId.startsWith('worldbuilding.')
+    || stageId.startsWith('character_design.')
+    || stageId.startsWith('plot_design.')
+    || stageId.startsWith('draft.')
+    || stageId.startsWith('continuity_ledger.')
+  ) {
+    const label = longStageLabel(stageId)
+    if (label !== stageId) return label
+    if (stageId.startsWith('worldbuilding.')) return '世界观'
+  }
   return stageId
+}
+
+const STAGE_ID_DISPLAY_KEYS = new Set([
+  'stage_id',
+  'stage_ids',
+  'target_stage_id',
+  'chapter_stage_id',
+])
+
+const WORLD_CATEGORY_DISPLAY_KEYS = new Set([
+  'category_id',
+  'category_name',
+])
+
+const WORLD_CATEGORY_LABELS: Record<string, string> = Object.fromEntries(
+  LONG_WORLD_CATEGORY_DEFAULTS.map((category) => [category.id, category.name]),
+)
+
+function isInternalWorldCategoryId(value: string): boolean {
+  return value.startsWith('world-category-')
+}
+
+function resolveWorldCategoryLabel(value: string): string {
+  const normalized = value.startsWith('worldbuilding.')
+    ? value.slice('worldbuilding.'.length)
+    : value
+  return WORLD_CATEGORY_LABELS[normalized] ?? value
+}
+
+function worldCategoryLabelFromOutput(output: string): string {
+  const headingMatch = output.match(/^【\s*([^】/]+?)(?:\s*\/|\s*】)/m)
+  if (headingMatch?.[1]) return headingMatch[1].trim()
+
+  const quotedMatches = [...output.matchAll(/「([^」]+)」/g)]
+  for (const match of quotedMatches) {
+    const candidate = match[1]?.trim() ?? ''
+    if (!candidate || isInternalWorldCategoryId(candidate)) continue
+    return candidate.split(/\s*\/\s*/, 1)[0]?.trim() ?? ''
+  }
+  return ''
+}
+
+function displayWorldCategory(
+  value: string,
+  output = '',
+): string {
+  const resolved = resolveWorldCategoryLabel(value)
+  if (resolved !== value || !isInternalWorldCategoryId(value)) return resolved
+  return worldCategoryLabelFromOutput(output)
+}
+
+function localizeStageIdsForDisplay(value: unknown, key = ''): unknown {
+  if (typeof value === 'string') {
+    if (WORLD_CATEGORY_DISPLAY_KEYS.has(key)) {
+      return resolveWorldCategoryLabel(value)
+    }
+    return STAGE_ID_DISPLAY_KEYS.has(key)
+      ? resolveStageLabel(value)
+      : localizeStageIdsInText(value)
+  }
+  if (Array.isArray(value)) {
+    return value.map((item) => localizeStageIdsForDisplay(item, key))
+  }
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value).map(([childKey, childValue]) => [
+        childKey,
+        localizeStageIdsForDisplay(childValue, childKey),
+      ]),
+    )
+  }
+  return value
+}
+
+function localizeStageIdsInText(text: string): string {
+  return text.replace(
+    /\b(stage_id|target_stage_id|chapter_stage_id)(\s*[=:：]\s*)([\w.-]+)/g,
+    (_match, key: string, separator: string, stageId: string) =>
+      `${key}${separator}${resolveStageLabel(stageId)}`,
+  )
 }
 
 function truncate(text: string, max = 48): string {
@@ -144,6 +246,7 @@ function summarizeToolCall(
   toolName: DeepSeekWriteToolName,
   params: Record<string, unknown> | undefined,
   done: boolean,
+  output = '',
 ): string {
   const verb = (pending: string, finished: string) => (done ? finished : pending)
 
@@ -170,13 +273,19 @@ function summarizeToolCall(
     case 'list_worldbuilding':
       return verb('正在列出世界观分类', '已列出世界观分类')
     case 'query_worldbuilding': {
-      const category = pickString(params, 'category_name')
+      const category = displayWorldCategory(
+        pickString(params, 'category_name'),
+        output,
+      )
       return category
         ? verb('正在查询世界观概述', '已查询世界观概述') + `「${category}」`
         : verb('正在查询世界观概述', '已查询世界观概述')
     }
     case 'query_worldbuilding_item': {
-      const category = pickString(params, 'category_name')
+      const category = displayWorldCategory(
+        pickString(params, 'category_name'),
+        output,
+      )
       const item = pickString(params, 'item_name')
       const target = [category, item].filter(Boolean).join(' / ')
       return target
@@ -184,7 +293,10 @@ function summarizeToolCall(
         : verb('正在查询世界观条目', '已查询世界观条目')
     }
     case 'query_worldbuilding_text': {
-      const category = pickString(params, 'category_name')
+      const category = displayWorldCategory(
+        pickString(params, 'category_name'),
+        output,
+      )
       return category
         ? verb('正在读取世界观文本', '已读取世界观文本') + `「${category}」`
         : verb('正在读取世界观文本', '已读取世界观文本')
@@ -208,19 +320,28 @@ function summarizeToolCall(
     case 'find_next_long_chapter':
       return verb('正在判断下一章节', '已判断下一章节')
     case 'manage_worldbuilding_category': {
-      const target = pickString(params, 'name', 'category_id')
+      const rawTarget = pickString(params, 'name', 'category_id')
+      const target = displayWorldCategory(rawTarget, output)
       return target
         ? verb('正在维护世界观分类', '已维护世界观分类') + `「${truncate(target)}」`
         : verb('正在维护世界观分类', '已维护世界观分类')
     }
     case 'write_worldbuilding_list': {
-      const target = pickString(params, 'name', 'item_id', 'category_id')
+      const rawTarget = pickString(params, 'category_id')
+      const target = displayWorldCategory(rawTarget, output)
       return target
         ? verb('正在更新世界观列表', '已更新世界观列表') + `「${truncate(target)}」`
         : verb('正在更新世界观列表', '已更新世界观列表')
     }
-    case 'write_worldbuilding_text':
-      return verb('正在更新世界观文本', '已更新世界观文本')
+    case 'write_worldbuilding_text': {
+      const target = displayWorldCategory(
+        pickString(params, 'category_id'),
+        output,
+      )
+      return target
+        ? verb('正在更新世界观文本', '已更新世界观文本') + `「${truncate(target)}」`
+        : verb('正在更新世界观文本', '已更新世界观文本')
+    }
     case 'manage_long_character': {
       const target = pickString(params, 'name', 'character_id')
       return target
@@ -509,13 +630,13 @@ function formatParamsJson(params: unknown): string {
   if (params == null) return ''
   if (typeof params === 'string') {
     try {
-      return JSON.stringify(JSON.parse(params), null, 2)
+      return JSON.stringify(localizeStageIdsForDisplay(JSON.parse(params)), null, 2)
     } catch {
-      return params
+      return localizeStageIdsInText(params)
     }
   }
   try {
-    return JSON.stringify(params, null, 2)
+    return JSON.stringify(localizeStageIdsForDisplay(params), null, 2)
   } catch {
     return String(params)
   }
@@ -535,11 +656,11 @@ function formatOutputBlock(text: string): { code: string; language: string } {
   if (!text) return { code: '（无输出）', language: 'text' }
   try {
     return {
-      code: JSON.stringify(JSON.parse(text), null, 2),
+      code: JSON.stringify(localizeStageIdsForDisplay(JSON.parse(text)), null, 2),
       language: 'json',
     }
   } catch {
-    return { code: text, language: 'text' }
+    return { code: localizeStageIdsInText(text), language: 'text' }
   }
 }
 
@@ -547,7 +668,18 @@ function resolveRenderState(
   result: ToolResultMessage | undefined,
   isStreaming: boolean | undefined,
 ): ToolRenderState {
-  if (result) return result.isError ? 'error' : 'complete'
+  if (result) {
+    if (result.isError) return 'error'
+    const output = getTextOutput(result).trim()
+    if (
+      /^(未写入|写入失败|保存失败|更新失败|创建失败|删除失败|修改失败|操作失败)[：:]/.test(
+        output,
+      )
+    ) {
+      return 'error'
+    }
+    return 'complete'
+  }
   if (isStreaming) return 'inprogress'
   return 'complete'
 }
@@ -694,7 +826,12 @@ class DeepSeekWriteToolRenderer implements ToolRenderer {
   ) {
     const state = resolveRenderState(result, isStreaming)
     const done = state !== 'inprogress'
-    const summary = summarizeToolCall(this.toolName, params, done)
+    const output = getTextOutput(result)
+    const normalSummary = summarizeToolCall(this.toolName, params, done, output)
+    const summary =
+      state === 'error'
+        ? `操作未完成：${summarizeToolCall(this.toolName, params, false, output).replace(/^正在/, '')}`
+        : normalSummary
 
     if (state === 'inprogress') {
       return {

@@ -200,6 +200,8 @@ function LearningAiChat({
 
       const agent = new Agent({
         sessionId: createPiSessionId('learning-imitation', 'shared'),
+        // 学习智能体也包含结果写入工具；多工具同轮执行时保持确定顺序。
+        toolExecution: 'sequential',
         convertToLlm: convertToLlmWithSkillAsUser,
         getApiKey: createWorkspaceModelApiKeyResolver(
           () => agentRef.current?.state.model ?? initialModel,

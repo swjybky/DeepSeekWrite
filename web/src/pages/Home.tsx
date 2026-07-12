@@ -2335,10 +2335,6 @@ export function Home() {
   // ==================== 书籍操作 ====================
   const handleCreateBook = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (bookType === 'long') {
-      setBookError('长篇创作空间正在开发中，暂不支持创建')
-      return
-    }
     const ws = workspaceRoot?.trim()
     if (!ws) {
       setBookError('请先在上方选择工作文件夹')
@@ -3777,9 +3773,15 @@ export function Home() {
                   type="radio"
                   name="bookType"
                   checked={bookType === 'long'}
-                  disabled
+                  onChange={() => {
+                    setBookType('long')
+                    setBookLinkedSkillIdsByKind(emptyLinkedSkillIdsByKind())
+                    setBookLinkedMaterialIdsByKind(emptyLinkedMaterialIdsByKind())
+                    setBookLinkedSkillGroupId('')
+                    setBookLinkedMaterialGroupId('')
+                  }}
                 />
-                <span>长篇 <span className="development-badge">正在开发中</span></span>
+                长篇
               </label>
             </div>
           </fieldset>

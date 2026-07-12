@@ -14,8 +14,21 @@
 .long-detail-textarea:focus,
 .long-field textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 2px color-mix(in oklab, var(--accent) 12%, transparent); }
 .long-field { display: flex; min-height: 0; flex-direction: column; gap: .3rem; }
+.long-field--fill { flex: 1 1 auto; }
+.long-field--fill textarea { min-height: 0; flex: 1 1 auto; }
+.long-field--resizable textarea { resize: vertical; }
 .long-field > span { color: var(--ink-soft); font-size: .76rem; font-weight: 600; }
 .long-field select { padding: .5rem; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); color: var(--ink); }
+.long-worldbuilding-list-layout { min-height: 0; flex: 1 1 auto; display: flex; flex-direction: column; overflow: hidden; }
+.long-worldbuilding-overview { flex: 0 0 auto; min-height: 0; overflow: hidden; }
+.long-worldbuilding-overview .long-field { height: 100%; }
+.long-worldbuilding-overview .long-field textarea { min-height: 0; flex: 1 1 auto; }
+.long-horizontal-resizer { position: relative; flex: 0 0 11px; cursor: row-resize; touch-action: none; user-select: none; outline: none; }
+.long-horizontal-resizer::before { content: ''; position: absolute; inset: 4px 0; border-radius: 99px; background: var(--border); transition: background .15s ease, inset .15s ease; }
+.long-horizontal-resizer span { position: absolute; z-index: 1; top: 50%; left: 50%; width: 34px; height: 3px; border-radius: 99px; background: var(--ink-faint); opacity: .65; transform: translate(-50%, -50%); }
+.long-horizontal-resizer:hover::before,
+.long-horizontal-resizer:focus-visible::before { inset: 3px 0; background: color-mix(in oklab, var(--accent) 32%, var(--border)); }
+.long-horizontal-resizer:focus-visible { box-shadow: 0 0 0 2px color-mix(in oklab, var(--accent) 20%, transparent); }
 .long-structured-split { min-height: 0; flex: 1 1 auto; display: grid; grid-template-columns: minmax(170px, 28%) minmax(0, 1fr); gap: .75rem; overflow: hidden; }
 .long-record-list { min-height: 0; overflow: auto; padding: .35rem; border: 1px solid var(--border); border-radius: 7px; background: color-mix(in oklab, var(--surface) 80%, transparent); display: flex; flex-direction: column; gap: .28rem; }
 .long-record-list button { width: 100%; border: 1px solid transparent; border-radius: 6px; padding: .5rem .55rem; text-align: left; background: transparent; color: var(--ink); display: flex; flex-direction: column; gap: .15rem; }
@@ -44,6 +57,9 @@
 .long-hierarchy-list button { border: 0; border-radius: 5px; padding: .42rem .5rem; text-align: left; background: transparent; color: var(--ink); }
 .long-hierarchy-list button.is-active { background: color-mix(in oklab, var(--accent) 10%, var(--paper-elevated)); color: var(--accent); font-weight: 600; }
 .long-field-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .65rem; }
+.long-field-grid--fill { min-height: 0; flex: 1 1 auto; }
+.long-field-grid--fill .long-field { height: 100%; }
+.long-field-grid--fill textarea { min-height: 0; flex: 1 1 auto; }
 .long-feedback { margin: 0; padding: .45rem .6rem; border-radius: 6px; font-size: .78rem; }
 .long-feedback.is-ok { background: #f0fdf4; color: #166534; }
 .long-feedback.is-error { background: #fef2f2; color: #b91c1c; }
@@ -67,4 +83,37 @@
   .long-field-grid { grid-template-columns: 1fr; max-height: none; }
   .long-editor-heading { align-items: flex-start; }
   .long-editor-heading-actions { flex-wrap: wrap; }
+}
+.long-draft-structure-list {
+  min-height: 0;
+  overflow: auto;
+  padding: 18px 22px 28px;
+}
+
+.long-draft-structure-volume {
+  margin-bottom: 22px;
+}
+
+.long-draft-structure-volume h3,
+.long-draft-structure-arc h4 {
+  margin: 0 0 10px;
+}
+
+.long-draft-structure-arc {
+  margin: 0 0 16px 18px;
+}
+
+.long-draft-structure-arc ol {
+  display: grid;
+  gap: 7px;
+  margin: 0;
+  padding-left: 28px;
+}
+
+.long-draft-structure-arc li {
+  display: flex;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border-color, rgba(128, 112, 82, 0.18));
 }

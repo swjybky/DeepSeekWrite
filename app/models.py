@@ -1231,6 +1231,9 @@ def is_long_stage_key(stage_id: str) -> bool:
     key = str(stage_id or "").strip()
     if key in LONG_STAGE_KEYS:
         return True
+    if key.startswith("worldbuilding."):
+        category_id = key.removeprefix("worldbuilding.")
+        return _long_worldbuilding_stage_id(category_id) == key
     if _LONG_DRAFT_STAGE_RE.match(key):
         return True
     return False

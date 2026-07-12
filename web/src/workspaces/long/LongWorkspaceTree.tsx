@@ -78,7 +78,14 @@ export function LongWorkspaceTree({
           type="button"
           className={activeClass('workspace-tree-stage workspace-tree-stage--branch', activeRootId === stage.id)}
           aria-expanded={open}
-          onClick={() => toggle(stage.id, activeRootId === stage.id)}
+          onClick={() => {
+            if (stage.id === 'draft') {
+              onStageSelect('draft')
+              if (!open) toggle(stage.id, activeRootId === stage.id)
+              return
+            }
+            toggle(stage.id, activeRootId === stage.id)
+          }}
         >
           <span className="workspace-tree-stage-dot" aria-hidden />
           {stage.label}

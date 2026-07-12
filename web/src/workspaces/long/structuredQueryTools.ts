@@ -157,6 +157,18 @@ function formatWorldItemIndex(items: readonly LongWorldbuildingItem[]): string {
     .join('\n')
 }
 
+function worldCategoryParameterSchema(
+  categories: readonly LongWorldbuildingCategory[],
+  description: string,
+) {
+  const values = [...new Set(
+    categories.flatMap((category) => [category.name, category.id]).filter(Boolean),
+  )]
+  if (values.length === 0) return Type.String({ description })
+  if (values.length === 1) return Type.Literal(values[0]!, { description })
+  return Type.Union(values.map((value) => Type.Literal(value)), { description })
+}
+
 export function buildListWorldbuildingTool(
   ctx: LongStructuredQueryContext,
 ): AgentTool {
@@ -185,16 +197,21 @@ export function buildListWorldbuildingTool(
 
 export function buildQueryWorldbuildingTool(
   ctx: LongStructuredQueryContext,
+  readableCategories: readonly LongWorldbuildingCategory[] = [],
 ): AgentTool {
+  const readableHint = readableCategories.length > 0
+    ? `当前可读取的列表格式分类：${readableCategories.map((category) => category.name).join('、')}。`
+    : ''
   return defineTool({
     name: 'query_worldbuilding',
     label: '查询世界观列表概述',
     description:
-      '只查询“列表格式”世界观分类的总概述以及所有条目的名称和描述，不返回条目详细介绍。',
+      `查看“列表格式”世界观分类的总概述以及所有条目的名称和描述，不返回条目详细介绍。${readableHint}`,
     parameters: Type.Object({
-      category_name: Type.String({
-        description: '世界观分类名称或 id，例如“规则”“势力”“境界”。',
-      }),
+      category_name: worldCategoryParameterSchema(
+        readableCategories,
+        '要查看概述的列表格式世界观分类名称或 id。',
+      ),
     }),
     execute: async (_toolCallId, params) => {
       const resolved = requireWorkspace(ctx, '查询世界观列表概述', ['worldbuilding'])
@@ -220,13 +237,20 @@ export function buildQueryWorldbuildingTool(
 
 export function buildQueryWorldbuildingItemTool(
   ctx: LongStructuredQueryContext,
+  readableCategories: readonly LongWorldbuildingCategory[] = [],
 ): AgentTool {
+  const readableHint = readableCategories.length > 0
+    ? `当前可按条目查询的列表格式分类：${readableCategories.map((category) => category.name).join('、')}。`
+    : ''
   return defineTool({
     name: 'query_worldbuilding_item',
     label: '查询世界观条目全文',
-    description: '只在“列表格式”世界观分类中按条目名称读取名称、描述和完整详细介绍。',
+    description: `在“列表格式”世界观分类中按条目名称读取名称、描述和完整详细介绍。${readableHint}`,
     parameters: Type.Object({
-      category_name: Type.String({ description: '世界观分类名称或 id。' }),
+      category_name: worldCategoryParameterSchema(
+        readableCategories,
+        '要查询条目的列表格式世界观分类名称或 id。',
+      ),
       item_name: Type.String({ description: '条目名称或 id，必须尽量精确。' }),
     }),
     execute: async (_toolCallId, params) => {
@@ -262,13 +286,20 @@ export function buildQueryWorldbuildingItemTool(
 
 export function buildQueryWorldbuildingTextTool(
   ctx: LongStructuredQueryContext,
+  readableCategories: readonly LongWorldbuildingCategory[] = [],
 ): AgentTool {
+  const readableHint = readableCategories.length > 0
+    ? `当前可直接查看全部正文的文本格式分类：${readableCategories.map((category) => category.name).join('、')}。`
+    : ''
   return defineTool({
     name: 'query_worldbuilding_text',
-    label: '查询世界观文本全文',
-    description: '只读取“文本格式”世界观分类的完整正文。列表格式必须改用 query_worldbuilding。',
+    label: '查看世界观全部文本',
+    description: `一次读取“文本格式”世界观分类的全部正文。该格式没有概述或单条查询；列表格式必须改用 query_worldbuilding。${readableHint}`,
     parameters: Type.Object({
-      category_name: Type.String({ description: '世界观分类名称或 id。' }),
+      category_name: worldCategoryParameterSchema(
+        readableCategories,
+        '要查看全部正文的文本格式世界观分类名称或 id。',
+      ),
     }),
     execute: async (_toolCallId, params) => {
       const resolved = requireWorkspace(ctx, '查询世界观文本', ['worldbuilding'])
@@ -673,11 +704,44 @@ export function buildFindNextLongChapterTool(
 export function buildLongStructuredQueryTools(
   ctx: LongStructuredQueryContext,
 ): AgentTool[] {
+  const roots = readableRoots(ctx)
+  const workspace = ctx.getLongWorkspace?.() ?? ctx.longWorkspace
+  const canReadWorldbuilding = roots.has('worldbuilding')
+  const listWorldbuildingCategories = canReadWorldbuilding
+    ? workspace?.worldbuilding.categories.filter((category) => category.format === 'list') ?? []
+    : []
+  const textWorldbuildingCategories = canReadWorldbuilding
+    ? workspace?.worldbuilding.categories.filter((category) => category.format === 'text') ?? []
+    : []
+  // 数据尚未装载时保留两种查询工具作为兼容兜底；一旦结构化数据可用，
+  // 就只向所有阶段暴露当前实际存在的格式工具，避免文本分类被误走列表查询。
+  const worldbuildingTools = canReadWorldbuilding
+    ? [
+        buildListWorldbuildingTool(ctx),
+        ...(!workspace || listWorldbuildingCategories.length > 0
+          ? [
+              buildQueryWorldbuildingTool(
+                ctx,
+                listWorldbuildingCategories,
+              ),
+              buildQueryWorldbuildingItemTool(
+                ctx,
+                listWorldbuildingCategories,
+              ),
+            ]
+          : []),
+        ...(!workspace || textWorldbuildingCategories.length > 0
+          ? [
+              buildQueryWorldbuildingTextTool(
+                ctx,
+                textWorldbuildingCategories,
+              ),
+            ]
+          : []),
+      ]
+    : []
   return [
-    buildListWorldbuildingTool(ctx),
-    buildQueryWorldbuildingTool(ctx),
-    buildQueryWorldbuildingItemTool(ctx),
-    buildQueryWorldbuildingTextTool(ctx),
+    ...worldbuildingTools,
     buildListLongCharactersTool(ctx),
     buildQueryLongCharacterTool(ctx),
     buildQueryLongPlotStructureTool(ctx),

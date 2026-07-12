@@ -24,6 +24,7 @@ import {
 import { buildQueryLinkedMaterialEntriesTool } from '../shared/linkedMaterialQueryTools'
 import { buildLoadSkillTool } from '../short/loadSkill'
 import {
+  bumpLongWorkspace,
   orderedLongArcs,
   orderedLongChapterCards,
   orderedLongVolumes,
@@ -576,6 +577,55 @@ export function buildStartLongWritingTool(
   })
 }
 
+function buildChapterChatWritingTools(
+  ctx: LongWorkspaceStageAgentContext,
+): AgentTool[] {
+  const workspace = ctx.getLongWorkspace?.() ?? ctx.longWorkspace
+  if (!workspace?.chapters[ctx.stageId] || !ctx.replaceLongWorkspace) return []
+
+  const writeFieldTool = (
+    name: string,
+    label: string,
+    description: string,
+    field: 'body' | 'character_state' | 'handoff',
+  ): AgentTool => defineTool({
+    name,
+    label,
+    description,
+    parameters: Type.Object({
+      text: Type.String({ minLength: 1, description: '完整、可直接保存的内容。' }),
+    }),
+    execute: async (_toolCallId, params) => {
+      const latest = ctx.getLongWorkspace?.() ?? ctx.longWorkspace
+      const current = latest?.chapters[ctx.stageId]
+      if (!latest || !current) return textBlock('未写入：当前章节不存在。')
+      if (current.committed) return textBlock('未写入：当前章节已经落盘，不能继续修改。')
+      const value = String(params.text ?? '').trim()
+      if (!value) return textBlock('未写入：内容为空。')
+      await ctx.replaceLongWorkspace?.(bumpLongWorkspace({
+        ...latest,
+        chapters: {
+          ...latest.chapters,
+          [ctx.stageId]: {
+            ...current,
+            [field]: value,
+            committed: false,
+            committed_at: '',
+            commit_id: '',
+          },
+        },
+      }))
+      return textBlock(`已写入当前章节的“${label}”区块。`)
+    },
+  })
+
+  return [
+    writeFieldTool('write_long_chapter_body', '正文', '将完整章节正文写入当前章节正文区块。', 'body'),
+    writeFieldTool('write_long_chapter_character_state', '章末人物状态', '记录本章结束时人物的位置、心理、信息、物品、伤病和关系变化。', 'character_state'),
+    writeFieldTool('write_long_chapter_handoff', '交接注意', '记录下一章需要承接的场景、时间、视角、悬念与连续性信息。', 'handoff'),
+  ]
+}
+
 export function buildLongWorkspaceAdditionalTools(
   ctx: LongWorkspaceStageAgentContext,
 ): AgentTool[] {
@@ -589,10 +639,12 @@ export function buildLongWorkspaceAdditionalTools(
     currentStageId: ctx.stageId,
   })
   const rootAgentId = longRootStageIdForStage(ctx.stageId)
+  const isChapterChat =
+    rootAgentId === 'draft' && ctx.stageId.startsWith('draft.volume-')
   const structuredQueryTools = buildLongStructuredQueryTools(ctx)
   const structuredMutationTools = buildLongStructuredMutationTools(ctx)
   const writingTools =
-    rootAgentId === 'draft' && ctx.stageId !== 'expert_section_writer'
+    rootAgentId === 'draft' && !isChapterChat && ctx.stageId !== 'expert_section_writer'
       ? [buildStartLongWritingTool(ctx)]
       : []
   return [
@@ -602,6 +654,7 @@ export function buildLongWorkspaceAdditionalTools(
     ...materialTools,
     loadSkill,
     ...structuredMutationTools,
+    ...(isChapterChat ? buildChapterChatWritingTools(ctx) : []),
     ...writingTools,
   ]
 }

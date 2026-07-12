@@ -269,6 +269,13 @@ export function newLongWorkspaceId(prefix: string): string {
   return uuid ? `${prefix}-${uuid}` : `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2)}`
 }
 
+/** 世界观列表条目的 item_id：仅保留 8 位，旧版长 ID 仍可正常读取。 */
+export function newLongWorkspaceItemId(): string {
+  const uuid = globalThis.crypto?.randomUUID?.().replaceAll('-', '')
+  if (uuid) return uuid.slice(0, 8)
+  return Math.random().toString(36).slice(2, 10).padEnd(8, '0')
+}
+
 export function longWorldbuildingStageId(categoryId: string): LongStageId {
   return `worldbuilding.${categoryId}`
 }
@@ -844,6 +851,21 @@ export function longWorkspaceToFlatStages(
   for (const card of workspace.plot.chapter_cards) {
     out[card.stage_id] = workspace.chapters[card.stage_id]?.body ?? ''
   }
+  out.draft = orderedLongVolumes(workspace).flatMap((volume) => [
+    `# ${volume.name || '未命名卷'}`,
+    ...orderedLongArcs(workspace, volume.id).flatMap((arc) => [
+      `## ${arc.name || '未命名剧情弧'}`,
+      ...orderedLongChapterCards(workspace, arc.id).map((card) => {
+        const chapter = workspace.chapters[card.stage_id]
+        const status = chapter?.committed
+          ? '已落盘'
+          : chapter?.body.trim()
+            ? '已写未落盘'
+            : '待写'
+        return `- ${card.title || '未命名章节'}（${status}）`
+      }),
+    ]),
+  ]).join('\n')
   out['continuity_ledger.timeline'] = ledgerAsText(workspace.ledger.timeline)
   out['continuity_ledger.character_states'] = LONG_CHARACTER_GROUPS.flatMap(
     (group) => workspace.characters[group.id].entries,
@@ -1055,7 +1077,7 @@ export function setLongWorldbuildingFormat(
       ? nextCategory.overview
       : summary || '原文本内容已转换为列表条目。'
     nextCategory.items = [{
-      id: newLongWorkspaceId(`${categoryId}-item`),
+      id: newLongWorkspaceItemId(),
       name: '原文本内容',
       description: summary,
       detail: nextCategory.text,

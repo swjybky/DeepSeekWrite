@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from 'react'
+import { useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
 import {
   addLongArc,
   addLongChapterCard,
@@ -8,6 +8,7 @@ import {
   longCharacterGroupId,
   longWorldbuildingCategoryId,
   newLongWorkspaceId,
+  newLongWorkspaceItemId,
   normalizeLongWorkspace,
   orderedLongArcs,
   orderedLongChapterCards,
@@ -90,6 +91,8 @@ function Field({
   rows = 5,
   placeholder,
   disabled = false,
+  fill = false,
+  resizable = false,
 }: {
   label: string
   value: string
@@ -97,9 +100,11 @@ function Field({
   rows?: number
   placeholder?: string
   disabled?: boolean
+  fill?: boolean
+  resizable?: boolean
 }) {
   return (
-    <label className="long-field">
+    <label className={`long-field${fill ? ' long-field--fill' : ''}${resizable ? ' long-field--resizable' : ''}`}>
       <span>{label}</span>
       <textarea
         value={value}
@@ -115,6 +120,84 @@ function Field({
 
 function Empty({ children }: { children: ReactNode }) {
   return <div className="long-editor-empty">{children}</div>
+}
+
+const WORLD_OVERVIEW_DEFAULT_HEIGHT = 135
+const WORLD_OVERVIEW_MIN_HEIGHT = 84
+const WORLD_ITEM_AREA_MIN_HEIGHT = 180
+const WORLD_RESIZE_HANDLE_HEIGHT = 11
+
+function ResizableWorldbuildingList({
+  overview,
+  items,
+}: {
+  overview: ReactNode
+  items: ReactNode
+}) {
+  const containerRef = useRef<HTMLDivElement>(null)
+  const dragRef = useRef<{ startY: number; startHeight: number } | null>(null)
+  const [overviewHeight, setOverviewHeight] = useState(WORLD_OVERVIEW_DEFAULT_HEIGHT)
+
+  const clampOverviewHeight = (height: number) => {
+    const containerHeight = containerRef.current?.getBoundingClientRect().height ?? 0
+    const maxHeight = Math.max(
+      WORLD_OVERVIEW_MIN_HEIGHT,
+      containerHeight - WORLD_ITEM_AREA_MIN_HEIGHT - WORLD_RESIZE_HANDLE_HEIGHT,
+    )
+    return Math.min(Math.max(height, WORLD_OVERVIEW_MIN_HEIGHT), maxHeight)
+  }
+
+  const startResize = (event: ReactPointerEvent<HTMLDivElement>) => {
+    event.preventDefault()
+    event.currentTarget.setPointerCapture(event.pointerId)
+    dragRef.current = { startY: event.clientY, startHeight: overviewHeight }
+  }
+
+  const resize = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const drag = dragRef.current
+    if (!drag) return
+    setOverviewHeight(clampOverviewHeight(drag.startHeight + event.clientY - drag.startY))
+  }
+
+  const stopResize = (event: ReactPointerEvent<HTMLDivElement>) => {
+    dragRef.current = null
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId)
+    }
+  }
+
+  return (
+    <div ref={containerRef} className="long-worldbuilding-list-layout">
+      <div className="long-worldbuilding-overview" style={{ height: overviewHeight }}>
+        {overview}
+      </div>
+      <div
+        className="long-horizontal-resizer"
+        role="separator"
+        aria-label="调整列表概述和条目列表的高度"
+        aria-orientation="horizontal"
+        aria-valuemin={WORLD_OVERVIEW_MIN_HEIGHT}
+        aria-valuenow={Math.round(overviewHeight)}
+        tabIndex={0}
+        onDoubleClick={() => setOverviewHeight(clampOverviewHeight(WORLD_OVERVIEW_DEFAULT_HEIGHT))}
+        onKeyDown={(event) => {
+          if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown') return
+          event.preventDefault()
+          const step = event.shiftKey ? 40 : 10
+          setOverviewHeight((height) => clampOverviewHeight(
+            height + (event.key === 'ArrowDown' ? step : -step),
+          ))
+        }}
+        onPointerDown={startResize}
+        onPointerMove={resize}
+        onPointerUp={stopResize}
+        onPointerCancel={stopResize}
+      >
+        <span />
+      </div>
+      {items}
+    </div>
+  )
 }
 
 export function LongWorkspaceEditor({
@@ -140,6 +223,45 @@ export function LongWorkspaceEditor({
     onChange(bumpLongWorkspace(next))
   }
 
+  if (activeStage === 'draft') {
+    const volumes = orderedLongVolumes(workspace)
+    return (
+      <div className="long-editor long-draft-structure">
+        <EditorHeading
+          title="本书当前章节结构"
+          subtitle="这里由正文管理智能体统筹；点击左侧具体章节后进入分章写手。"
+          layoutControls={layoutControls}
+        />
+        <div className="long-draft-structure-list">
+          {volumes.map((volume) => (
+            <section key={volume.id} className="long-draft-structure-volume">
+              <h3>{volume.name || '未命名卷'}</h3>
+              {orderedLongArcs(workspace, volume.id).map((arc) => (
+                <div key={arc.id} className="long-draft-structure-arc">
+                  <h4>{arc.name || '未命名剧情弧'}</h4>
+                  <ol>
+                    {orderedLongChapterCards(workspace, arc.id).map((card) => {
+                      const chapter = workspace.chapters[card.stage_id]
+                      return (
+                        <li key={card.id}>
+                          <span>{card.title || '未命名章节'}</span>
+                          <span className="muted">
+                            {chapter?.committed ? '已落盘' : chapter?.body.trim() ? '已写未落盘' : '待写'}
+                          </span>
+                        </li>
+                      )
+                    })}
+                  </ol>
+                </div>
+              ))}
+            </section>
+          ))}
+          {volumes.length === 0 ? <Empty>当前还没有分卷和章节，请先在剧情阶段创建章卡。</Empty> : null}
+        </div>
+      </div>
+    )
+  }
+
   const worldCategoryId = longWorldbuildingCategoryId(activeStage)
   if (worldCategoryId) {
     const category = workspace.worldbuilding.categories.find(
@@ -160,7 +282,7 @@ export function LongWorkspaceEditor({
       })
     }
     const addItem = () => {
-      const id = newLongWorkspaceId(`${category.id}-item`)
+      const id = newLongWorkspaceItemId()
       edit((next) => {
         const target = next.worldbuilding.categories.find((item) => item.id === category.id)
         target?.items.push({ id, name: '新建条目', description: '', detail: '' })
@@ -204,53 +326,59 @@ export function LongWorkspaceEditor({
           actions={<button className="long-primary-action" type="button" onClick={addItem}>新增{category.name}条目</button>}
           layoutControls={layoutControls}
         />
-        <Field
-          label={`所有${category.name}列表概述`}
-          value={category.overview}
-          rows={3}
-          onChange={(overview) => updateCategory({ overview })}
+        <ResizableWorldbuildingList
+          overview={(
+            <Field
+              label={`所有${category.name}列表概述`}
+              value={category.overview}
+              rows={3}
+              onChange={(overview) => updateCategory({ overview })}
+            />
+          )}
+          items={(
+            <div className="long-structured-split">
+              <aside className="long-record-list">
+                {category.items.map((item) => (
+                  <button
+                    key={item.id}
+                    type="button"
+                    className={selected?.id === item.id ? 'is-active' : ''}
+                    onClick={() => setSelectedWorldItem((current) => ({ ...current, [category.id]: item.id }))}
+                  >
+                    <strong>{item.name || '未命名条目'}</strong>
+                    <span>{item.description || '暂无描述'}</span>
+                  </button>
+                ))}
+              </aside>
+              <section className="long-record-detail">
+                {selected ? (
+                  <>
+                    <div className="long-inline-head">
+                      <input
+                        value={selected.name}
+                        aria-label={`${category.name}名称`}
+                        onChange={(event) => edit((next) => {
+                          const target = next.worldbuilding.categories.find((item) => item.id === category.id)
+                          const row = target?.items.find((item) => item.id === selected.id)
+                          if (row) row.name = event.target.value
+                        })}
+                      />
+                      <button type="button" className="long-danger-action" onClick={deleteItem}>删除</button>
+                    </div>
+                    <Field label={`${category.name}描述`} value={selected.description} resizable onChange={(description) => edit((next) => {
+                      const row = next.worldbuilding.categories.find((item) => item.id === category.id)?.items.find((item) => item.id === selected.id)
+                      if (row) row.description = description
+                    })} />
+                    <Field label={`${category.name}介绍`} value={selected.detail} rows={10} fill resizable onChange={(detail) => edit((next) => {
+                      const row = next.worldbuilding.categories.find((item) => item.id === category.id)?.items.find((item) => item.id === selected.id)
+                      if (row) row.detail = detail
+                    })} />
+                  </>
+                ) : <Empty>暂无条目，请新增。</Empty>}
+              </section>
+            </div>
+          )}
         />
-        <div className="long-structured-split">
-          <aside className="long-record-list">
-            {category.items.map((item) => (
-              <button
-                key={item.id}
-                type="button"
-                className={selected?.id === item.id ? 'is-active' : ''}
-                onClick={() => setSelectedWorldItem((current) => ({ ...current, [category.id]: item.id }))}
-              >
-                <strong>{item.name || '未命名条目'}</strong>
-                <span>{item.description || '暂无描述'}</span>
-              </button>
-            ))}
-          </aside>
-          <section className="long-record-detail">
-            {selected ? (
-              <>
-                <div className="long-inline-head">
-                  <input
-                    value={selected.name}
-                    aria-label={`${category.name}名称`}
-                    onChange={(event) => edit((next) => {
-                      const target = next.worldbuilding.categories.find((item) => item.id === category.id)
-                      const row = target?.items.find((item) => item.id === selected.id)
-                      if (row) row.name = event.target.value
-                    })}
-                  />
-                  <button type="button" className="long-danger-action" onClick={deleteItem}>删除</button>
-                </div>
-                <Field label={`${category.name}描述`} value={selected.description} onChange={(description) => edit((next) => {
-                  const row = next.worldbuilding.categories.find((item) => item.id === category.id)?.items.find((item) => item.id === selected.id)
-                  if (row) row.description = description
-                })} />
-                <Field label={`${category.name}介绍`} value={selected.detail} rows={10} onChange={(detail) => edit((next) => {
-                  const row = next.worldbuilding.categories.find((item) => item.id === category.id)?.items.find((item) => item.id === selected.id)
-                  if (row) row.detail = detail
-                })} />
-              </>
-            ) : <Empty>暂无条目，请新增。</Empty>}
-          </section>
-        </div>
       </div>
     )
   }
@@ -472,7 +600,7 @@ function renderPlotEditor(input: {
       input.onChange(removeLongVolume(workspace, volume.id))
       input.setSelectedVolumeId('')
     }
-    return <div className="long-editor-view"><EditorHeading title="分卷（卷纲）" actions={<button type="button" className="long-primary-action" onClick={add}>新建卷</button>} layoutControls={input.layoutControls} /><div className="long-structured-split"><aside className="long-record-list">{volumes.map((item) => <button key={item.id} type="button" className={volume?.id === item.id ? 'is-active' : ''} onClick={() => input.setSelectedVolumeId(item.id)}><strong>{item.name}</strong><span>{item.outline || '暂无卷纲'}</span></button>)}</aside><section className="long-record-detail">{volume ? <><div className="long-inline-head"><input value={volume.name} onChange={(event) => edit((next) => { const row = next.plot.volumes.find((item) => item.id === volume.id); if (row) row.name = event.target.value })} /><button type="button" className="long-danger-action" onClick={remove}>删除本卷</button></div><Field label="卷纲" value={volume.outline} rows={14} onChange={(outline) => edit((next) => { const row = next.plot.volumes.find((item) => item.id === volume.id); if (row) row.outline = outline })} /></> : <Empty>暂无分卷。</Empty>}</section></div></div>
+    return <div className="long-editor-view"><EditorHeading title="分卷（卷纲）" actions={<button type="button" className="long-primary-action" onClick={add}>新建卷</button>} layoutControls={input.layoutControls} /><div className="long-structured-split"><aside className="long-record-list">{volumes.map((item) => <button key={item.id} type="button" className={volume?.id === item.id ? 'is-active' : ''} onClick={() => input.setSelectedVolumeId(item.id)}><strong>{item.name}</strong><span>{item.outline || '暂无卷纲'}</span></button>)}</aside><section className="long-record-detail">{volume ? <><div className="long-inline-head"><input value={volume.name} onChange={(event) => edit((next) => { const row = next.plot.volumes.find((item) => item.id === volume.id); if (row) row.name = event.target.value })} /><button type="button" className="long-danger-action" onClick={remove}>删除本卷</button></div><Field label="卷纲" value={volume.outline} rows={14} fill onChange={(outline) => edit((next) => { const row = next.plot.volumes.find((item) => item.id === volume.id); if (row) row.outline = outline })} /></> : <Empty>暂无分卷。</Empty>}</section></div></div>
   }
   const arcs = volume ? orderedLongArcs(workspace, volume.id) : []
   const arc = arcs.find((item) => item.id === input.selectedArcId) ?? arcs[0]
@@ -491,7 +619,7 @@ function renderPlotEditor(input: {
       input.onChange(removeLongArc(workspace, arc.id))
       input.setSelectedArcId('')
     }
-    return <div className="long-editor-view"><EditorHeading title="剧情弧" actions={<button type="button" className="long-primary-action" disabled={!volume} onClick={add}>新建剧情弧</button>} layoutControls={input.layoutControls} /><div className="long-hierarchy-columns"><HierarchyList title="分卷" rows={volumes} selectedId={volume?.id} onSelect={input.setSelectedVolumeId} /><HierarchyList title="卷内剧情弧" rows={arcs} selectedId={arc?.id} onSelect={input.setSelectedArcId} /></div>{arc ? <section className="long-record-detail long-record-detail--below"><div className="long-inline-head"><input value={arc.name} onChange={(event) => edit((next) => { const row = next.plot.arcs.find((item) => item.id === arc.id); if (row) row.name = event.target.value })} /><button type="button" className="long-danger-action" onClick={remove}>删除剧情弧</button></div><Field label="剧情弧时间线安排" value={arc.timeline} rows={12} onChange={(timeline) => edit((next) => { const row = next.plot.arcs.find((item) => item.id === arc.id); if (row) row.timeline = timeline })} /></section> : <Empty>请先选择分卷并新建剧情弧。</Empty>}</div>
+    return <div className="long-editor-view"><EditorHeading title="剧情弧" actions={<button type="button" className="long-primary-action" disabled={!volume} onClick={add}>新建剧情弧</button>} layoutControls={input.layoutControls} /><div className="long-hierarchy-columns"><HierarchyList title="分卷" rows={volumes} selectedId={volume?.id} onSelect={input.setSelectedVolumeId} /><HierarchyList title="卷内剧情弧" rows={arcs} selectedId={arc?.id} onSelect={input.setSelectedArcId} /></div>{arc ? <section className="long-record-detail long-record-detail--below"><div className="long-inline-head"><input value={arc.name} onChange={(event) => edit((next) => { const row = next.plot.arcs.find((item) => item.id === arc.id); if (row) row.name = event.target.value })} /><button type="button" className="long-danger-action" onClick={remove}>删除剧情弧</button></div><Field label="剧情弧时间线安排" value={arc.timeline} rows={12} fill onChange={(timeline) => edit((next) => { const row = next.plot.arcs.find((item) => item.id === arc.id); if (row) row.timeline = timeline })} /></section> : <Empty>请先选择分卷并新建剧情弧。</Empty>}</div>
   }
   const cards = arc ? orderedLongChapterCards(workspace, arc.id) : []
   const card = cards.find((item) => item.id === input.selectedCardId) ?? cards[0]
@@ -541,7 +669,7 @@ function renderPlotEditor(input: {
               />
               <button type="button" className="long-danger-action" disabled={cardCommitted} onClick={remove}>删除章卡</button>
             </div>
-            <div className="long-field-grid">
+            <div className="long-field-grid long-field-grid--fill">
               <Field label="章纲" value={card.outline} rows={8} disabled={cardCommitted} onChange={(outline) => patchCard(edit, card.id, { outline })} />
               <Field label="世界观带来的强约束" value={card.world_constraints} rows={8} disabled={cardCommitted} onChange={(world_constraints) => patchCard(edit, card.id, { world_constraints })} />
             </div>
@@ -564,7 +692,7 @@ function renderPlotEditor(input: {
   const add = () => { const id = newLongWorkspaceId('foreshadowing'); edit((next) => next.plot.foreshadowing.push({ id, name: '新建伏笔', description: '', content: '', status: 'open' })); input.setSelectedForeshadowId(id) }
   const remove = () => { if (!selected || !window.confirm(`删除伏笔「${selected.name}」？`)) return; edit((next) => { next.plot.foreshadowing = next.plot.foreshadowing.filter((item) => item.id !== selected.id) }); input.setSelectedForeshadowId('') }
   const patch = (value: Partial<LongForeshadowing>) => edit((next) => { const row = next.plot.foreshadowing.find((item) => item.id === selected?.id); if (row) Object.assign(row, value) })
-  return <div className="long-editor-view"><EditorHeading title="伏笔" actions={<button type="button" className="long-primary-action" onClick={add}>新增伏笔</button>} layoutControls={input.layoutControls} /><div className="long-structured-split"><aside className="long-record-list">{rows.map((item) => <button key={item.id} type="button" className={selected?.id === item.id ? 'is-active' : ''} onClick={() => input.setSelectedForeshadowId(item.id)}><strong>{item.name}</strong><span>{item.description || '暂无概述'}</span></button>)}</aside><section className="long-record-detail">{selected ? <><div className="long-inline-head"><input value={selected.name} onChange={(event) => patch({ name: event.target.value })} /><button type="button" className="long-danger-action" onClick={remove}>删除</button></div><Field label="伏笔描述" value={selected.description} onChange={(description) => patch({ description })} /><Field label="伏笔内容" value={selected.content} rows={10} onChange={(content) => patch({ content })} /><label className="long-field"><span>状态</span><select value={selected.status} onChange={(event) => patch({ status: event.target.value })}><option value="open">未回收</option><option value="progressing">推进中</option><option value="resolved">已回收</option></select></label></> : <Empty>暂无伏笔。</Empty>}</section></div></div>
+  return <div className="long-editor-view"><EditorHeading title="伏笔" actions={<button type="button" className="long-primary-action" onClick={add}>新增伏笔</button>} layoutControls={input.layoutControls} /><div className="long-structured-split"><aside className="long-record-list">{rows.map((item) => <button key={item.id} type="button" className={selected?.id === item.id ? 'is-active' : ''} onClick={() => input.setSelectedForeshadowId(item.id)}><strong>{item.name}</strong><span>{item.description || '暂无概述'}</span></button>)}</aside><section className="long-record-detail">{selected ? <><div className="long-inline-head"><input value={selected.name} onChange={(event) => patch({ name: event.target.value })} /><button type="button" className="long-danger-action" onClick={remove}>删除</button></div><Field label="伏笔描述" value={selected.description} onChange={(description) => patch({ description })} /><Field label="伏笔内容" value={selected.content} rows={10} fill onChange={(content) => patch({ content })} /><label className="long-field"><span>状态</span><select value={selected.status} onChange={(event) => patch({ status: event.target.value })}><option value="open">未回收</option><option value="progressing">推进中</option><option value="resolved">已回收</option></select></label></> : <Empty>暂无伏笔。</Empty>}</section></div></div>
 }
 
 function HierarchyList({ title, rows, selectedId, onSelect }: { title: string; rows: Array<{ id: string; name: string }>; selectedId?: string; onSelect: (id: string) => void }) {

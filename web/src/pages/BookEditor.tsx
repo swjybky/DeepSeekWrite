@@ -596,6 +596,8 @@ export function BookEditor() {
     commitLongChapterForBook,
     replaceLongWorkspaceForBook,
     startLongWritingForBook,
+    getLongChapterWriterAgent,
+    writerAgentRevision,
   } = useLongWorkspaceRuntime({
     bookRef,
     workspaceSessionsRef,
@@ -1264,6 +1266,8 @@ export function BookEditor() {
           startLongWriting={(request) =>
             startLongWritingForBook(book.id, request)
           }
+          getLongChapterWriterAgent={getLongChapterWriterAgent}
+          writerAgentRevision={writerAgentRevision}
           getRenderedExpertDraftSectionContent={
             getRenderedExpertDraftSectionContent
           }

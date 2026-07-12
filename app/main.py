@@ -31,6 +31,7 @@ _LLM_PROXY_UPSTREAM: dict[str, str] = {
     "moonshotai": "https://api.moonshot.ai/v1",
     "anthropic": "https://api.anthropic.com/v1",
     "openai": "https://api.openai.com/v1",
+    "opencode": "https://opencode.ai/zen",
 }
 _LLM_PROXY_SKIP_REQUEST_HEADERS = frozenset(
     {

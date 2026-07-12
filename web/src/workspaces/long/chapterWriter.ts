@@ -391,7 +391,6 @@ export async function runLongChapterWriter(
       options.linkedSkillsByKind,
       options.readAccess.skill as SkillKind[] | undefined,
     )
-    let currentAgent: Agent | null = null
     let activeTitle = ''
     let activeStageId = ''
     let activeIndex = 0
@@ -420,8 +419,8 @@ export async function runLongChapterWriter(
         options.getWorkspace(),
         stageId,
       )}`
-      if (!currentAgent) {
-        currentAgent = new Agent({
+      let agent!: Agent
+      agent = new Agent({
           sessionId: createPiSessionId(
             'long-chapter-writer',
             options.bookId,
@@ -445,7 +444,7 @@ export async function runLongChapterWriter(
             }),
           ),
           getApiKey: createWorkspaceModelApiKeyResolver(
-            () => currentAgent?.state.model ?? model,
+            () => agent?.state.model ?? model,
           ),
           streamFn: createWorkspaceStreamFn(),
           toolExecution: 'sequential',
@@ -458,11 +457,6 @@ export async function runLongChapterWriter(
             tools,
           },
         })
-      } else {
-        currentAgent.state.systemPrompt = systemPrompt
-        currentAgent.state.tools = tools
-      }
-      const agent = currentAgent
       const abortAgent = () => agent.abort()
       options.signal?.addEventListener('abort', abortAgent, { once: true })
       try {

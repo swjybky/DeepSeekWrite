@@ -14,6 +14,7 @@ const CORS_PROXY_ALIASES = new Set([
   'moonshotai',
   'anthropic',
   'openai',
+  'opencode',
 ])
 
 export function isWorkspaceHttpShell(): boolean {

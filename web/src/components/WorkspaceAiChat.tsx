@@ -51,6 +51,7 @@ import {
   getWorkspaceStageAdditionalTools,
 } from '../pi/workspaceStageAgents'
 import type { StartLongWriting } from '../workspaces/long/stageAgents'
+import { registerLongLedgerChatAgent } from '../workspaces/long/ledgerChatAgentRegistry'
 import {
   bindWorkspaceChatPreferences,
   getPreferredWorkspaceThinkingLevel,
@@ -94,6 +95,10 @@ import {
   longRootStageIdForStage,
   longStageLabel,
 } from '../workspaces/long/stages'
+import {
+  bumpLongWorkspace,
+  normalizeLongWorkspace,
+} from '../workspaces/long/longWorkspace'
 import {
   configureWorkspaceAttachmentOptions,
   getWorkspaceAgentInterface as getAgentInterface,
@@ -427,6 +432,8 @@ type Props = {
   allStages: Partial<Record<StageId | MaterialStageId | SkillStageId, string>>
   /** 长篇 v2 权威结构，仅供长篇智能体只读查询工具使用。 */
   longWorkspace?: LongWorkspace | null
+  /** 直接读取书籍会话中的最新长篇结构，避免连续工具调用使用过期 props。 */
+  getLongWorkspaceForBook?: (bookId: string) => LongWorkspace | null | undefined
   /** 将结构化长篇变更写回对应书籍会话。 */
   replaceLongWorkspaceForBook?: (
     bookId: string,
@@ -434,6 +441,9 @@ type Props = {
   ) => boolean | void | Promise<boolean | void>
   /** 长篇正文管理智能体的自动写作调度回调。 */
   startLongWriting?: StartLongWriting
+  /** 正文管理智能体启动的当前章节写手；绑定后实时展示同一个 Agent 的执行过程。 */
+  externalAgent?: Agent
+  externalAgentRevision?: number
   bookMemories?: MemoryEntry[]
   userMemories?: MemoryEntry[]
   bookMemoryAutoCaptureEnabled?: boolean
@@ -531,6 +541,16 @@ type StreamingWriteState = {
   originalStageBodies: Record<string, string>
 }
 
+type LongStructuredStreamingWriteState = {
+  toolCallId: string
+  toolName: 'write_worldbuilding_text' | 'write_long_book_line'
+  accumulatedText: string
+  hasWritten: boolean
+  originalText?: string
+  targetKey?: string
+  latestWorkspace?: LongWorkspace
+}
+
 function targetStageIdFromArgs(args: unknown): WritableStageId | undefined {
   if (!args || typeof args !== 'object') return undefined
   const raw = (args as Record<string, unknown>).target_stage_id
@@ -568,6 +588,8 @@ function WorkspaceAiChatInner({
   const streamedToolCallIdsRef = useRef<Set<string>>(new Set())
   /** 当前正在流式写入编辑器的 tool call 状态 */
   const streamingWriteRef = useRef<StreamingWriteState | null>(null)
+  const longStructuredStreamingWriteRef =
+    useRef<LongStructuredStreamingWriteState | null>(null)
   const pendingPlotChildStageRef = useRef<StageId | null>(null)
 
   const resolveDefaultStreamingWriteTargetStageId = (): WritableStageId => {
@@ -618,6 +640,66 @@ function WorkspaceAiChatInner({
     )
   }
 
+  const streamLongStructuredText = (
+    state: LongStructuredStreamingWriteState,
+    args: Record<string, unknown>,
+  ) => {
+    if (args.mode !== 'replace' || !Object.prototype.hasOwnProperty.call(args, 'text')) {
+      return
+    }
+    const p = propsLatestRef.current
+    if (p.bookType !== 'long' || !p.replaceLongWorkspaceForBook) return
+    const current =
+      state.latestWorkspace ??
+      p.getLongWorkspaceForBook?.(p.sessionBookId) ??
+      p.longWorkspace
+    if (!current) return
+
+    const targetKey = state.toolName === 'write_long_book_line'
+      ? 'plot_design.book_line'
+      : String(args.category_id ?? '').trim()
+    if (!targetKey) return
+
+    const next = normalizeLongWorkspace(current)
+    let existing: string
+    if (state.toolName === 'write_long_book_line') {
+      existing = next.plot.book_line
+    } else {
+      const category = next.worldbuilding.categories.find(
+        (row) => row.id === targetKey,
+      )
+      if (!category || category.format !== 'text') return
+      existing = category.text
+    }
+
+    if (state.targetKey !== targetKey) {
+      state.targetKey = targetKey
+      state.originalText = existing
+      state.accumulatedText = ''
+      state.latestWorkspace = undefined
+    }
+    const originalText = state.originalText ?? existing
+    state.originalText = originalText
+    if (originalText.trim() && args.allow_overwrite_existing !== true) return
+
+    const text = String(args.text ?? '')
+    if (text === state.accumulatedText && state.hasWritten) return
+    if (state.toolName === 'write_long_book_line') {
+      next.plot.book_line = text
+    } else {
+      const category = next.worldbuilding.categories.find(
+        (row) => row.id === targetKey,
+      )
+      if (!category) return
+      category.text = text
+    }
+    const updated = bumpLongWorkspace(next)
+    state.accumulatedText = text
+    state.hasWritten = true
+    state.latestWorkspace = updated
+    p.replaceLongWorkspaceForBook(p.sessionBookId, updated)
+  }
+
   const restoreStreamingStageBody = (
     state: StreamingWriteState,
     stageId: WritableStageId | undefined,
@@ -666,6 +748,27 @@ function WorkspaceAiChatInner({
   useEffect(() => {
     isPausedRef.current = isPaused
   }, [isPaused])
+
+  useEffect(() => {
+    const externalAgent = props.externalAgent
+    const chatPanel = chatPanelRef.current
+    if (!externalAgent || !chatPanel || !chatReady) return
+    void chatPanel.setAgent(externalAgent, {
+      onApiKeyRequired: async (provider: string) =>
+        ApiKeyPromptDialog.prompt(provider),
+      onModelSelect: async () => {
+        const selectModel = (model: typeof externalAgent.state.model) => {
+          externalAgent.state.model = model
+          chatPanel.requestUpdate?.()
+        }
+        const handled = await openWorkspaceConfiguredModelSelector(
+          externalAgent.state.model,
+          selectModel,
+        )
+        if (!handled) ModelSelector.open(externalAgent.state.model, selectModel)
+      },
+    }).then(() => refreshChatPanelTranscript(chatPanel, externalAgent))
+  }, [chatReady, props.externalAgent, props.externalAgentRevision])
 
   const debouncedBody = useDebounced(props.stageBody, 600)
   const externalPromptRequest = props.externalPromptRequest
@@ -811,6 +914,7 @@ function WorkspaceAiChatInner({
     let cancelled = false
     let unsubscribeMessagesRefresh: (() => void) | undefined
     let unsubscribePreferences: (() => void) | undefined
+    let unregisterLedgerChatAgent: (() => void) | undefined
     let postAgentEndRaf = 0
 
     let resizeObserver: ResizeObserver | undefined
@@ -938,7 +1042,13 @@ function WorkspaceAiChatInner({
           },
           allStages: mergeLiveStagesFromProps(latest),
           longWorkspace: latest.longWorkspace,
-          getLongWorkspace: () => propsLatestRef.current.longWorkspace,
+          getLongWorkspace: () => {
+            const live = propsLatestRef.current
+            return (
+              live.getLongWorkspaceForBook?.(live.sessionBookId) ??
+              live.longWorkspace
+            )
+          },
           replaceLongWorkspace: latest.replaceLongWorkspaceForBook
             ? (workspace) =>
                 latest.replaceLongWorkspaceForBook?.(
@@ -1052,6 +1162,9 @@ function WorkspaceAiChatInner({
 
       const agent = new Agent({
         sessionId,
+        // 工作台工具包含“读取最新状态 -> 整体写回”的变更工具。
+        // 同一轮并行执行会让它们基于同一旧快照互相覆盖，因此统一串行。
+        toolExecution: 'sequential',
         convertToLlm: createMemoryAwareConvertToLlm(
           convertToLlmWithSkillAsUser,
           () => {
@@ -1082,6 +1195,16 @@ function WorkspaceAiChatInner({
         },
       })
       agentRef.current = agent
+      if (
+        props.bookType === 'long' &&
+        longRootStageIdForStage(String(props.stageId)) === 'continuity_ledger'
+      ) {
+        unregisterLedgerChatAgent = registerLongLedgerChatAgent(
+          props.sessionBookId,
+          String(props.stageId),
+          agent,
+        )
+      }
       unsubscribePreferences = bindWorkspaceChatPreferences(agent, () => {
         nudgePiLayout()
         chatPanel.requestUpdate?.()
@@ -1103,6 +1226,7 @@ function WorkspaceAiChatInner({
           if (ev.message.role === 'assistant') {
             streamedToolCallIdsRef.current.clear()
             streamingWriteRef.current = null
+            longStructuredStreamingWriteRef.current = null
           }
         }
 
@@ -1132,11 +1256,32 @@ function WorkspaceAiChatInner({
                   originalStageBodies: {},
                 }
               }
+              if (
+                block.name === 'write_worldbuilding_text' ||
+                block.name === 'write_long_book_line'
+              ) {
+                longStructuredStreamingWriteRef.current = {
+                  toolCallId: block.id,
+                  toolName: block.name,
+                  accumulatedText: '',
+                  hasWritten: false,
+                }
+              }
             }
           }
 
           if (ame.type === 'toolcall_delta') {
             const block = ame.partial.content[ame.contentIndex]
+            if (
+              block?.type === 'toolCall' &&
+              longStructuredStreamingWriteRef.current &&
+              block.id === longStructuredStreamingWriteRef.current.toolCallId
+            ) {
+              streamLongStructuredText(
+                longStructuredStreamingWriteRef.current,
+                (block.arguments || {}) as Record<string, unknown>,
+              )
+            }
             if (
               block?.type === 'toolCall' &&
               streamingWriteRef.current &&
@@ -1208,6 +1353,22 @@ function WorkspaceAiChatInner({
             const tc = ame.toolCall
             if (
               tc &&
+              longStructuredStreamingWriteRef.current &&
+              tc.id === longStructuredStreamingWriteRef.current.toolCallId
+            ) {
+              const state = longStructuredStreamingWriteRef.current
+              const finalArgs = (tc as { arguments?: unknown }).arguments
+              if (finalArgs && typeof finalArgs === 'object') {
+                streamLongStructuredText(
+                  state,
+                  finalArgs as Record<string, unknown>,
+                )
+              }
+              if (state.hasWritten) streamedToolCallIdsRef.current.add(tc.id)
+              longStructuredStreamingWriteRef.current = null
+            }
+            if (
+              tc &&
               streamingWriteRef.current &&
               tc.id === streamingWriteRef.current.toolCallId
             ) {
@@ -1255,6 +1416,14 @@ function WorkspaceAiChatInner({
                 targetStageId,
               })
             }
+          }
+          if (longStructuredStreamingWriteRef.current) {
+            if (longStructuredStreamingWriteRef.current.hasWritten) {
+              streamedToolCallIdsRef.current.add(
+                longStructuredStreamingWriteRef.current.toolCallId,
+              )
+            }
+            longStructuredStreamingWriteRef.current = null
           }
           agent.state.messages = agent.state.messages.slice()
         }
@@ -1340,6 +1509,7 @@ function WorkspaceAiChatInner({
       setHistoryDisabled(false)
       unsubscribeMessagesRefresh?.()
       unsubscribePreferences?.()
+      unregisterLedgerChatAgent?.()
       agentRef.current = null
       disposeQuickSkillInput(chatPanelRef.current)
       chatPanelRef.current?.remove()
@@ -1353,6 +1523,7 @@ function WorkspaceAiChatInner({
         })
         streamingWriteRef.current = null
       }
+      longStructuredStreamingWriteRef.current = null
       streamedIdsSnapshot.clear()
     }
 
@@ -1497,7 +1668,13 @@ function WorkspaceAiChatInner({
         },
         allStages: latestAllStages,
         longWorkspace: toolProps.longWorkspace,
-        getLongWorkspace: () => propsLatestRef.current.longWorkspace,
+        getLongWorkspace: () => {
+          const live = propsLatestRef.current
+          return (
+            live.getLongWorkspaceForBook?.(live.sessionBookId) ??
+            live.longWorkspace
+          )
+        },
         replaceLongWorkspace: toolProps.replaceLongWorkspaceForBook
           ? (workspace) =>
               toolProps.replaceLongWorkspaceForBook?.(
@@ -1676,8 +1853,11 @@ export const WorkspaceAiChat = memo(WorkspaceAiChatInner, (prev, next) => {
 
   // 长篇结构变化时必须刷新只读查询工具闭包；只比较 flat stages 会漏掉列表/页签字段。
   if (prev.longWorkspace !== next.longWorkspace) return false
+  if (prev.getLongWorkspaceForBook !== next.getLongWorkspaceForBook) return false
   if (prev.replaceLongWorkspaceForBook !== next.replaceLongWorkspaceForBook) return false
   if (prev.startLongWriting !== next.startLongWriting) return false
+  if (prev.externalAgent !== next.externalAgent) return false
+  if (prev.externalAgentRevision !== next.externalAgentRevision) return false
 
   if (prev.linkedMaterial?.id !== next.linkedMaterial?.id) return false
   if (prev.linkedMaterial?.updated_at !== next.linkedMaterial?.updated_at) return false

@@ -1,4 +1,5 @@
-import { useId, type MutableRefObject } from 'react'
+import { useCallback, useId, type MutableRefObject } from 'react'
+import type { Agent } from '@earendil-works/pi-agent-core'
 import type {
   Book,
   ExpertDraft,
@@ -80,6 +81,9 @@ function workspaceAgentTitle(
     if (rootStage === 'worldbuilding') return '世界观智能体'
     if (rootStage === 'character_design') return '人物智能体'
     if (rootStage === 'plot_design') return '剧情总控智能体'
+    if (rootStage === 'draft' && activeStage.startsWith('draft.volume-')) {
+      return '分章写手智能体'
+    }
     if (rootStage === 'draft') return '正文智能体'
     if (rootStage === 'continuity_ledger') return '状态账本智能体'
   }
@@ -110,6 +114,7 @@ function workspaceAgentTip(
     if (rootStage === 'worldbuilding') return '输入“帮我细化当前世界观节点”开始'
     if (rootStage === 'character_design') return '输入“帮我维护当前人物分组”开始'
     if (rootStage === 'plot_design') return '输入“帮我规划当前剧情节点”开始'
+    if (rootStage === 'draft' && activeStage.startsWith('draft.volume-')) return ''
     if (rootStage === 'draft') return '输入“根据当前章卡写这一章”开始'
     if (rootStage === 'continuity_ledger') return '输入“帮我整理本章状态变化”开始'
   }
@@ -166,6 +171,8 @@ type Props = {
     workspace: LongWorkspace,
   ) => boolean | void | Promise<boolean | void>
   startLongWriting?: StartLongWriting
+  getLongChapterWriterAgent?: (bookId: string, stageId: string) => Agent | undefined
+  writerAgentRevision?: number
   getRenderedExpertDraftSectionContent: GetExpertDraftSectionContent
   syncExpertDraftSectionField?: (
     sectionId: string,
@@ -210,6 +217,8 @@ export function WorkspaceAiPanel({
   startExpertWritingForBook,
   replaceLongWorkspaceForBook,
   startLongWriting,
+  getLongChapterWriterAgent,
+  writerAgentRevision = 0,
   getRenderedExpertDraftSectionContent,
   syncExpertDraftSectionField,
   onBookMemoriesCaptured,
@@ -223,6 +232,10 @@ export function WorkspaceAiPanel({
   onToggleRightPanel,
 }: Props) {
   const historyPortalTargetId = useId()
+  const getLongWorkspaceForBook = useCallback(
+    (bookId: string) => workspaceSessionsRef.current[bookId]?.longWorkspace,
+    [workspaceSessionsRef],
+  )
   const activeExpertSectionForHeader = expertDraftActive
     ? activeExpertDraftSectionId
     : ''
@@ -285,7 +298,12 @@ export function WorkspaceAiPanel({
                 bumpActiveExpertChatEpoch()
                 return
               }
-              bumpActiveStageChatEpoch(activeStage)
+              bumpActiveStageChatEpoch(
+                book.book_type === 'long' &&
+                  longRootStageIdForStage(activeStage) === 'continuity_ledger'
+                  ? ('continuity_ledger.timeline' as StageId)
+                  : activeStage,
+              )
             }}
           >
             新建对话
@@ -340,10 +358,30 @@ export function WorkspaceAiPanel({
               : ShortExpertDraftAiChat
           const stageLayers = sessionStages
             .filter((s) => supportsExpertDraft ? s.id !== 'draft' : true)
+            // 状态账本的各叶子节点只是同一份账本的不同数据视图，
+            // 右侧只挂载一个共享 ChatPanel，避免切换叶子时创建新对话。
+            .filter((s, index, rows) => {
+              if (
+                session.book.book_type !== 'long' ||
+                longRootStageIdForStage(s.id) !== 'continuity_ledger'
+              ) {
+                return true
+              }
+              return !rows.slice(0, index).some(
+                (row) =>
+                  longRootStageIdForStage(row.id) === 'continuity_ledger',
+              )
+            })
             .map((s) => {
+              const isSharedLongLedger =
+                session.book.book_type === 'long' &&
+                longRootStageIdForStage(s.id) === 'continuity_ledger'
               const epoch = session.aiChatEpochByStage[s.id] ?? 0
               const activeContentStageForLayer =
-                s.id === PLOT_STAGE_ID
+                isSharedLongLedger &&
+                longRootStageIdForStage(session.activeStage) === 'continuity_ledger'
+                  ? session.activeStage
+                  : s.id === PLOT_STAGE_ID
                   ? session.activePlotChildStage || PLOT_STAGE_ID
                   : s.id
               const layerKey =
@@ -352,7 +390,10 @@ export function WorkspaceAiPanel({
                   : `${session.book.id}-shared-${s.id}`
               const isActive =
                 isVisibleBook &&
-                session.activeStage === s.id &&
+                (isSharedLongLedger
+                  ? longRootStageIdForStage(session.activeStage) ===
+                    'continuity_ledger'
+                  : session.activeStage === s.id) &&
                 !sessionExpertActive
               return (
                 <div
@@ -392,8 +433,15 @@ export function WorkspaceAiPanel({
                     }}
                     allStages={session.stages}
                     longWorkspace={session.longWorkspace}
+                    getLongWorkspaceForBook={getLongWorkspaceForBook}
                     replaceLongWorkspaceForBook={replaceLongWorkspaceForBook}
                     startLongWriting={startLongWriting}
+                    externalAgent={
+                      session.book.book_type === 'long' && s.id.startsWith('draft.volume-')
+                        ? getLongChapterWriterAgent?.(session.book.id, s.id)
+                        : undefined
+                    }
+                    externalAgentRevision={writerAgentRevision}
                     bookMemories={session.book.memories ?? []}
                     userMemories={userMemories}
                     bookMemoryAutoCaptureEnabled={

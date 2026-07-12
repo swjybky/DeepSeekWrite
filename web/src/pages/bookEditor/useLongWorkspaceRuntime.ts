@@ -1,4 +1,5 @@
-import { useCallback, useRef } from 'react'
+import { useCallback, useRef, useState } from 'react'
+import type { Agent } from '@earendil-works/pi-agent-core'
 import type { MutableRefObject } from 'react'
 
 import {
@@ -86,6 +87,8 @@ export function useLongWorkspaceRuntime({
 }: UseLongWorkspaceRuntimeInput) {
   const writerAbortByBookRef = useRef<Record<string, AbortController | null>>({})
   const writerPromiseByBookRef = useRef<Record<string, Promise<void> | null>>({})
+  const writerAgentByBookStageRef = useRef<Record<string, Agent>>({})
+  const [writerAgentRevision, setWriterAgentRevision] = useState(0)
   const ledgerAbortByBookRef = useRef<Record<string, AbortController | null>>({})
   const ledgerPromiseByBookRef = useRef<Record<string, Promise<boolean> | null>>({})
 
@@ -174,6 +177,12 @@ export function useLongWorkspaceRuntime({
           EXPERT_SECTION_WRITER_AGENT_ID,
         ),
         signal: ac.signal,
+        callbacks: {
+          onChapterStart: ({ agent, stageId }) => {
+            writerAgentByBookStageRef.current[`${bookId}:${stageId}`] = agent
+            setWriterAgentRevision((value) => value + 1)
+          },
+        },
         onError: setError,
       })
         .then(async (completed) => {
@@ -232,6 +241,14 @@ export function useLongWorkspaceRuntime({
       }
       const ac = new AbortController()
       ledgerAbortByBookRef.current[bookId] = ac
+      // 落盘由状态账本智能体负责。点击落盘后显式切到状态账本，
+      // 让本次校验、状态流转和最终提交在其所属工作区中可见。
+      commitWorkspaceSession(bookId, (latest) => ({
+        ...latest,
+        activeStage: 'continuity_ledger.timeline' as StageId,
+        activePlotChildStage: '',
+        activeExpertDraftSectionId: '',
+      }))
       setError(null)
       setMessage('状态账本智能体正在校验并落盘本章')
       const run = runLongLedgerAgent({
@@ -304,5 +321,8 @@ export function useLongWorkspaceRuntime({
     startLongWritingForBook,
     stopLongWritingForBook,
     updateLongWorkspaceForBook,
+    getLongChapterWriterAgent: (bookId: string, stageId: string) =>
+      writerAgentByBookStageRef.current[`${bookId}:${stageId}`],
+    writerAgentRevision,
   }
 }
