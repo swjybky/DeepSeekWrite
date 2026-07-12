@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from app.runtime_paths import data_root
+from app.data_file_lock import data_file_lock
 
 ISO_FMT = "%Y-%m-%dT%H:%M:%SZ"
 HISTORY_FILE_NAME = "ai_chat_history.json"
@@ -21,6 +22,12 @@ VALID_OWNER_TYPES = {"book", "material", "skill"}
 
 @contextmanager
 def _data_file_lock():
+    # Share one process-wide lock with storage.py. On Windows, independently
+    # locking the same byte from concurrent threads can raise EDEADLK.
+    with data_file_lock():
+        yield
+    return
+
     data_dir = data_root()
     data_dir.mkdir(parents=True, exist_ok=True)
     lock_path = data_dir / ".deepseekwrite.lock"

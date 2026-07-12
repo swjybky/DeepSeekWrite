@@ -12,6 +12,7 @@ from typing import Any
 from uuid import uuid4
 
 from app.runtime_paths import bundle_root, data_root, is_frozen
+from app.data_file_lock import data_file_lock
 from app.common_skill_store import read_common_skills
 
 from app.models import (
@@ -86,6 +87,12 @@ SKILL_LIBRARY_GROUPS_PREF_KEY = "skill_library_groups"
 
 @contextmanager
 def _data_file_lock():
+    # All data modules must share the same in-process lock before taking the
+    # cross-process file lock; otherwise Windows may raise EDEADLK.
+    with data_file_lock():
+        yield
+    return
+
     """跨进程串行化用户数据目录 `.data` 下 JSON 的读改写。
 
     JSON 写入本身已经是 os.replace 原子替换；这里额外锁住读改写窗口，避免两个

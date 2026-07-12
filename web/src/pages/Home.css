@@ -614,6 +614,21 @@
   accent-color: var(--accent);
 }
 
+.radio:has(input:disabled) {
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+
+.development-badge {
+  margin-left: 0.25rem;
+  padding: 0.1rem 0.4rem;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  color: var(--accent);
+  font-size: 0.75rem;
+  white-space: nowrap;
+}
+
 .create-form-checkbox {
   align-items: flex-start;
   margin: 0 0 0.85rem;

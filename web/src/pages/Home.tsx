@@ -2335,6 +2335,10 @@ export function Home() {
   // ==================== 书籍操作 ====================
   const handleCreateBook = async (e: React.FormEvent) => {
     e.preventDefault()
+    if (bookType === 'long') {
+      setBookError('长篇创作空间正在开发中，暂不支持创建')
+      return
+    }
     const ws = workspaceRoot?.trim()
     if (!ws) {
       setBookError('请先在上方选择工作文件夹')
@@ -3773,15 +3777,9 @@ export function Home() {
                   type="radio"
                   name="bookType"
                   checked={bookType === 'long'}
-                  onChange={() => {
-                    setBookType('long')
-                    setBookLinkedSkillIdsByKind(emptyLinkedSkillIdsByKind())
-                    setBookLinkedMaterialIdsByKind(emptyLinkedMaterialIdsByKind())
-                    setBookLinkedSkillGroupId('')
-                    setBookLinkedMaterialGroupId('')
-                  }}
+                  disabled
                 />
-                长篇
+                <span>长篇 <span className="development-badge">正在开发中</span></span>
               </label>
             </div>
           </fieldset>
@@ -4484,6 +4482,7 @@ export function Home() {
         <LearningImitationDialog
           visible={learningImitationOpen}
           workspaceRoot={workspaceRoot}
+          materials={materials}
           skills={skills}
           onClose={() => {
             setLearningImitationOpen(false)
@@ -4496,6 +4495,7 @@ export function Home() {
           onBackgroundFinished={() => {
             setLearningImitationBackground(false)
           }}
+          onRefreshMaterials={() => refreshMaterials({ showLoading: false })}
           onRefreshSkills={() => refreshSkills({ showLoading: false })}
         />
       )}
