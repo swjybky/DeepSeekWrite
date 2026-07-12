@@ -18,6 +18,8 @@ import {
   WorkspaceLayoutControls,
   type WorkspaceLayoutCollapsed,
 } from '../../components/WorkspaceLayoutControls'
+import { LongWorkspaceEditor } from '../../workspaces/long/LongWorkspaceEditor'
+import type { LongWorkspace } from '../../workspaces/long/longWorkspace'
 
 type ExpertDraftEditorProps = {
   draft: ExpertDraft
@@ -43,6 +45,9 @@ type ExpertDraftEditorProps = {
 
 type Props = {
   expertDraftActive: boolean
+  longWorkspace: LongWorkspace | null
+  onLongWorkspaceChange: (workspace: LongWorkspace) => void
+  onCommitLongChapter?: (stageId: string) => Promise<boolean>
   ActiveExpertDraftEditor: ComponentType<ExpertDraftEditorProps>
   expertDraft: ExpertDraft
   stageBody: string
@@ -113,6 +118,9 @@ function StageHeadingActions({
 
 export function WorkspaceEditorPane({
   expertDraftActive,
+  longWorkspace,
+  onLongWorkspaceChange,
+  onCommitLongChapter,
   ActiveExpertDraftEditor,
   expertDraft,
   stageBody,
@@ -166,7 +174,15 @@ export function WorkspaceEditorPane({
 
   return (
     <div className="workspace-editor-pane workspace-editor-pane--primary">
-      {expertDraftActive ? (
+      {longWorkspace ? (
+        <LongWorkspaceEditor
+          workspace={longWorkspace}
+          activeStage={activeStage}
+          onChange={onLongWorkspaceChange}
+          onCommitChapter={onCommitLongChapter}
+          layoutControls={layoutControls}
+        />
+      ) : expertDraftActive ? (
         <ActiveExpertDraftEditor
           draft={expertDraft}
           stageBody={stageBody}

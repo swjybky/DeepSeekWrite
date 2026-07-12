@@ -112,8 +112,14 @@ function formatExistingMemories(memories: MemoryEntry[]): string {
 }
 
 function buildCapturePrompt(input: CaptureInput, userText: string): string {
+  const bookTypeLabel =
+    input.bookType === 'script'
+      ? '剧本'
+      : input.bookType === 'long'
+        ? '长篇'
+        : '短篇'
   return `当前书籍：${input.bookTitle || '未命名'}
-书籍类型：${input.bookType === 'script' ? '剧本' : '短篇'}
+书籍类型：${bookTypeLabel}
 
 用户本轮消息：
 ${userText}

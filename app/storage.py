@@ -9,6 +9,7 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 from app.runtime_paths import bundle_root, data_root, is_frozen
 from app.common_skill_store import read_common_skills
@@ -61,6 +62,12 @@ from app.models import (
     first_linked_material_id,
     normalize_linked_skill_ids_by_kind,
     first_linked_skill_id,
+    default_long_workspace,
+    long_workspace_combined_draft,
+    long_workspace_to_stages,
+    normalize_long_workspace_from_storage,
+    ordered_long_chapter_cards,
+    sync_long_workspace_from_stage_patch,
     normalize_skill_stages_from_storage,
     long_stage_keys_from_stages,
 )
@@ -128,6 +135,290 @@ def _unique_child_dir(parent: Path, base_name: str) -> Path:
         n += 1
 
 
+def _write_text_file_atomic(path: Path, text: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(
+        dir=str(path.parent),
+        prefix=f".{path.name}.",
+        suffix=".tmp",
+    )
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(text)
+        os.replace(tmp, path)
+    except Exception:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+
+def _long_output_leaf(value: Any, fallback: str) -> str:
+    cleaned = _sanitize_book_folder_name(str(value or "").strip() or fallback)
+    return cleaned[:80] or fallback
+
+
+def _populate_long_chapter_tree(target: Path, normalized: dict[str, Any]) -> None:
+    """在全新的受控目录中生成长篇章节文件树。"""
+    plot = normalized["plot"]
+    volumes = {
+        str(row["id"]): row
+        for row in plot["volumes"]
+        if isinstance(row, dict)
+    }
+    arcs = {
+        str(row["id"]): row
+        for row in plot["arcs"]
+        if isinstance(row, dict)
+    }
+    volume_order = {
+        str(row["id"]): index
+        for index, row in enumerate(
+            sorted(plot["volumes"], key=lambda item: (item["order"], item["id"])),
+            start=1,
+        )
+    }
+    arcs_by_volume: dict[str, list[dict[str, Any]]] = {}
+    for row in plot["arcs"]:
+        arcs_by_volume.setdefault(str(row["volume_id"]), []).append(row)
+    arc_order: dict[str, int] = {}
+    for rows in arcs_by_volume.values():
+        for index, row in enumerate(
+            sorted(rows, key=lambda item: (item["order"], item["id"])),
+            start=1,
+        ):
+            arc_order[str(row["id"])] = index
+
+    chapters = normalized["chapters"]
+    chapter_counter: dict[str, int] = {}
+    for card in ordered_long_chapter_cards(normalized):
+        volume_id = str(card["volume_id"])
+        arc_id = str(card["arc_id"])
+        chapter_counter[arc_id] = chapter_counter.get(arc_id, 0) + 1
+        volume = volumes.get(volume_id, {})
+        arc = arcs.get(arc_id, {})
+        volume_dir = (
+            f"{volume_order.get(volume_id, 0):03d}-"
+            f"{_long_output_leaf(volume.get('name'), '未命名卷')}"
+        )
+        arc_dir = (
+            f"{arc_order.get(arc_id, 0):03d}-"
+            f"{_long_output_leaf(arc.get('name'), '未命名剧情弧')}"
+        )
+        chapter = chapters.get(str(card["stage_id"]), {})
+        chapter_name = (
+            f"{chapter_counter[arc_id]:04d}-"
+            f"{_long_output_leaf(chapter.get('title') or card.get('title'), '未命名章节')}"
+        )
+        chapter_root = target / volume_dir / arc_dir
+        _write_text_file_atomic(
+            chapter_root / f"{chapter_name}.txt",
+            str(chapter.get("body") or ""),
+        )
+        _write_text_file_atomic(
+            chapter_root / f"{chapter_name}-人物状态.txt",
+            str(chapter.get("character_state") or ""),
+        )
+        _write_text_file_atomic(
+            chapter_root / f"{chapter_name}-交接注意.txt",
+            str(chapter.get("handoff") or ""),
+        )
+
+
+def _replace_long_chapter_tree(root: Path, normalized: dict[str, Any]) -> None:
+    """原子替换应用受控的 ``长篇正文`` 目录，不触碰输出根目录的其他文件。"""
+    target = root / "长篇正文"
+    if target.is_symlink() or (target.exists() and not target.is_dir()):
+        raise OSError("长篇正文输出路径不是应用可安全管理的普通目录")
+
+    temp = Path(tempfile.mkdtemp(dir=str(root), prefix=".长篇正文.", suffix=".tmp"))
+    backup = root / f".长篇正文.{uuid4().hex}.backup"
+    moved_old = False
+    installed_new = False
+    try:
+        _populate_long_chapter_tree(temp, normalized)
+        if target.exists():
+            os.replace(target, backup)
+            moved_old = True
+        try:
+            os.replace(temp, target)
+            installed_new = True
+        except Exception:
+            if moved_old and backup.exists() and not target.exists():
+                os.replace(backup, target)
+                moved_old = False
+            raise
+        if moved_old and backup.exists():
+            shutil.rmtree(backup)
+            moved_old = False
+    finally:
+        if not installed_new and temp.exists():
+            shutil.rmtree(temp, ignore_errors=True)
+        # 安装新目录后若旧目录清理失败，保留 backup 比误删用户文件更安全；
+        # 下次导出会使用新的唯一 backup 名，不会覆盖该目录。
+
+
+def _write_long_workspace_to_disk(root: Path, workspace: Any) -> None:
+    normalized = normalize_long_workspace_from_storage(workspace)
+    _replace_long_chapter_tree(root, normalized)
+    _write_text_file_atomic(
+        root / "long_workspace.json",
+        json.dumps(normalized, ensure_ascii=False, indent=2),
+    )
+
+
+def _long_workspace_rows_by_commit_id(
+    workspace: dict[str, Any],
+) -> dict[str, dict[tuple[str, str], dict[str, Any]]]:
+    out: dict[str, dict[tuple[str, str], dict[str, Any]]] = {}
+    ledger = workspace["ledger"]
+    for bucket in (
+        "timeline",
+        "faction_states",
+        "realm_states",
+        "foreshadowing_states",
+        "continuity_notes",
+    ):
+        for row in ledger[bucket]:
+            if not isinstance(row, dict):
+                continue
+            commit_id = str(row.get("commit_id") or "").strip()
+            if not commit_id:
+                continue
+            row_id = str(row.get("id") or "")
+            out.setdefault(commit_id, {})[(bucket, row_id)] = row
+    return out
+
+
+def _long_committed_through_expected(workspace: dict[str, Any]) -> str:
+    expected = ""
+    saw_uncommitted = False
+    for card in ordered_long_chapter_cards(workspace):
+        stage_id = str(card.get("stage_id") or "")
+        chapter = workspace["chapters"].get(stage_id)
+        committed = isinstance(chapter, dict) and bool(chapter.get("committed"))
+        if not committed:
+            saw_uncommitted = True
+            continue
+        if saw_uncommitted:
+            raise ValueError("长篇章节落盘顺序不一致，请先恢复已落盘章节的原有顺序")
+        expected = stage_id
+    return expected
+
+
+def _assert_long_workspace_save_preserves_commits(
+    current: dict[str, Any],
+    candidate: dict[str, Any],
+) -> None:
+    """阻止普通保存用旧快照覆盖只能由章节落盘产生的事实。"""
+    current_cards = {
+        str(card.get("stage_id") or ""): card
+        for card in current["plot"]["chapter_cards"]
+        if isinstance(card, dict)
+    }
+    candidate_cards = {
+        str(card.get("stage_id") or ""): card
+        for card in candidate["plot"]["chapter_cards"]
+        if isinstance(card, dict)
+    }
+    current_arcs = {
+        str(arc.get("id") or ""): arc
+        for arc in current["plot"]["arcs"]
+        if isinstance(arc, dict)
+    }
+    candidate_arcs = {
+        str(arc.get("id") or ""): arc
+        for arc in candidate["plot"]["arcs"]
+        if isinstance(arc, dict)
+    }
+    current_volumes = {
+        str(volume.get("id") or ""): volume
+        for volume in current["plot"]["volumes"]
+        if isinstance(volume, dict)
+    }
+    candidate_volumes = {
+        str(volume.get("id") or ""): volume
+        for volume in candidate["plot"]["volumes"]
+        if isinstance(volume, dict)
+    }
+
+    protected_stage_ids: set[str] = set()
+    for stage_id, chapter in current["chapters"].items():
+        if not isinstance(chapter, dict) or not chapter.get("committed"):
+            continue
+        protected_stage_ids.add(str(stage_id))
+        candidate_chapter = candidate["chapters"].get(stage_id)
+        if not isinstance(candidate_chapter, dict):
+            raise ValueError(f"已落盘章节「{stage_id}」不能被删除")
+        if not candidate_chapter.get("committed"):
+            raise ValueError(f"已落盘章节「{stage_id}」不能取消落盘状态")
+        if str(candidate_chapter.get("commit_id") or "") != str(
+            chapter.get("commit_id") or ""
+        ):
+            raise ValueError(f"已落盘章节「{stage_id}」的落盘标识不能修改")
+        for field, label in (
+            ("title", "标题"),
+            ("body", "正文"),
+            ("character_state", "人物状态"),
+            ("handoff", "交接注意文档"),
+            ("committed_at", "落盘时间"),
+        ):
+            if candidate_chapter.get(field) != chapter.get(field):
+                raise ValueError(
+                    f"已落盘章节「{stage_id}」的{label}不能通过普通保存修改"
+                )
+
+        current_card = current_cards.get(str(stage_id))
+        candidate_card = candidate_cards.get(str(stage_id))
+        if current_card is None or candidate_card is None:
+            raise ValueError(f"已落盘章节「{stage_id}」的章卡不能被删除")
+        if candidate_card != current_card:
+            raise ValueError(f"已落盘章节「{stage_id}」的章卡信息不能修改")
+
+        arc_id = str(current_card.get("arc_id") or "")
+        current_arc = current_arcs.get(arc_id)
+        candidate_arc = candidate_arcs.get(arc_id)
+        if current_arc is None or candidate_arc is None:
+            raise ValueError(f"已落盘章节「{stage_id}」所属剧情弧不能被删除")
+        if (
+            candidate_arc.get("volume_id") != current_arc.get("volume_id")
+            or candidate_arc.get("order") != current_arc.get("order")
+        ):
+            raise ValueError(f"已落盘章节「{stage_id}」所属剧情弧关系不能修改")
+
+        volume_id = str(current_card.get("volume_id") or "")
+        current_volume = current_volumes.get(volume_id)
+        candidate_volume = candidate_volumes.get(volume_id)
+        if current_volume is None or candidate_volume is None:
+            raise ValueError(f"已落盘章节「{stage_id}」所属分卷不能被删除")
+        if candidate_volume.get("order") != current_volume.get("order"):
+            raise ValueError(f"已落盘章节「{stage_id}」所属分卷顺序不能修改")
+
+    for stage_id, chapter in candidate["chapters"].items():
+        if (
+            isinstance(chapter, dict)
+            and chapter.get("committed")
+            and str(stage_id) not in protected_stage_ids
+        ):
+            raise ValueError("普通保存不能新增已落盘章节，请使用章节的“落盘”按钮")
+
+    current_rows = _long_workspace_rows_by_commit_id(current)
+    candidate_rows = _long_workspace_rows_by_commit_id(candidate)
+    for commit_id, rows in current_rows.items():
+        if candidate_rows.get(commit_id) != rows:
+            raise ValueError(f"落盘标识「{commit_id}」对应的状态账本记录不能丢失或修改")
+    if set(candidate_rows) - set(current_rows):
+        raise ValueError("普通保存不能新增带落盘标识的状态账本记录")
+
+    current_through = str(current["ledger"].get("committed_through") or "")
+    candidate_through = str(candidate["ledger"].get("committed_through") or "")
+    if candidate_through != current_through:
+        raise ValueError("状态账本的已落盘进度不能通过普通保存回退或修改")
+    if candidate_through != _long_committed_through_expected(candidate):
+        raise ValueError("状态账本的已落盘进度与章节落盘顺序不一致")
+
+
 def _write_stages_to_disk(book: Book) -> None:
     """
     将各阶段内容写入书籍输出目录
@@ -149,8 +440,13 @@ def _write_stages_to_disk(book: Book) -> None:
     for key in keys:
         text = str(book.stages.get(key, "") or "")
         try:
-            (root / f"{key}.txt").write_text(text, encoding="utf-8")
+            _write_text_file_atomic(root / f"{key}.txt", text)
         except OSError:
+            pass
+    if book.book_type == "long" and book.long_workspace:
+        try:
+            _write_long_workspace_to_disk(root, book.long_workspace)
+        except (OSError, TypeError, ValueError):
             pass
 
 
@@ -638,6 +934,7 @@ _READ_ACCESS_DEFAULT_AGENT_IDS: dict[str, tuple[str, ...]] = {
         "character_design",
         "plot_design",
         "draft",
+        "expert_section_writer",
         "continuity_ledger",
     ),
 }
@@ -662,6 +959,7 @@ _READ_ACCESS_REQUIRED_WORKSPACE_STAGES: dict[str, dict[str, tuple[str, ...]]] = 
         "character_design": ("character_design.protagonists",),
         "plot_design": ("plot_design.book_line",),
         "draft": ("draft.volume-1.arc-1.chapter-1",),
+        "expert_section_writer": ("draft.volume-1.arc-1.chapter-1",),
         "continuity_ledger": ("continuity_ledger.timeline",),
     },
 }
@@ -1663,6 +1961,7 @@ class BookStore:
                         "无法在选定工作文件夹下创建书本目录，请检查路径是否有效、磁盘空间与写入权限。",
                     )
             bid = new_book_id()
+            long_workspace = default_long_workspace() if bt == "long" else {}
             b = Book(
                 id=bid,
                 title=title.strip() or "未命名",
@@ -1674,7 +1973,12 @@ class BookStore:
                 linked_material_ids_by_kind=linked_by_kind,
                 linked_skill_id=linked_sid,
                 linked_skill_ids_by_kind=linked_skill_by_kind,
-                stages=default_stages(bt),
+                stages=(
+                    long_workspace_to_stages(long_workspace)
+                    if bt == "long"
+                    else default_stages(bt)
+                ),
+                long_workspace=long_workspace,
                 expert_draft=normalize_expert_draft_from_storage(None, bt),
                 created_at=now,
                 updated_at=now,
@@ -1700,6 +2004,8 @@ class BookStore:
         linked_skill_ids_by_kind: dict[str, Any] | None = None,
         memory_auto_capture_enabled: bool | None = None,
         linked_material_ids_by_kind: dict[str, Any] | None = None,
+        long_workspace: dict[str, Any] | None = None,
+        allow_long_commit_import: bool = False,
     ) -> dict[str, Any] | None:
         with _data_file_lock():
             self._reload_all_unlocked()
@@ -1740,10 +2046,57 @@ class BookStore:
                     b.linked_skill_ids_by_kind,
                 )
             self._normalize_book_skill_links_unlocked(b)
-            if stages is not None:
+            if b.book_type == "long" and long_workspace is not None:
+                current = normalize_long_workspace_from_storage(
+                    b.long_workspace,
+                    b.stages,
+                )
+                normalized_workspace = normalize_long_workspace_from_storage(
+                    long_workspace,
+                    b.stages,
+                )
+                if not allow_long_commit_import:
+                    _assert_long_workspace_save_preserves_commits(
+                        current,
+                        normalized_workspace,
+                    )
+                normalized_workspace["revision"] = int(current.get("revision") or 0) + 1
+                b.long_workspace = normalized_workspace
+                b.stages = long_workspace_to_stages(normalized_workspace)
+                b.content = long_workspace_combined_draft(normalized_workspace)
+            elif stages is not None:
                 b.stages = apply_stage_patch(b.stages, stages, b.book_type)
-                dk = primary_draft_stage_key(b)
-                b.content = str(b.stages.get(dk, "") or "")
+                if b.book_type == "long":
+                    current = normalize_long_workspace_from_storage(
+                        b.long_workspace,
+                        b.stages,
+                    )
+                    current_projection = long_workspace_to_stages(current)
+                    effective_patch = {
+                        str(stage_id): value
+                        for stage_id, value in stages.items()
+                        if str(current_projection.get(str(stage_id), ""))
+                        != str(value or "")
+                    }
+                    normalized_workspace = (
+                        sync_long_workspace_from_stage_patch(current, effective_patch)
+                        if effective_patch
+                        else current
+                    )
+                    _assert_long_workspace_save_preserves_commits(
+                        current,
+                        normalized_workspace,
+                    )
+                    if effective_patch:
+                        normalized_workspace["revision"] = (
+                            int(current.get("revision") or 0) + 1
+                        )
+                    b.long_workspace = normalized_workspace
+                    b.stages = long_workspace_to_stages(normalized_workspace)
+                    b.content = long_workspace_combined_draft(normalized_workspace)
+                else:
+                    dk = primary_draft_stage_key(b)
+                    b.content = str(b.stages.get(dk, "") or "")
             elif content is not None:
                 b.content = content
             if expert_draft is not None:
@@ -1755,6 +2108,224 @@ class BookStore:
             if memory_auto_capture_enabled is not None:
                 b.memory_auto_capture_enabled = bool(memory_auto_capture_enabled)
             b.updated_at = _utc_now_iso()
+            save_books_atomic(self._path, self._books)
+            self._mark_books_saved_unlocked()
+            _write_stages_to_disk(b)
+            return b.to_dict()
+
+    def commit_long_chapter(
+        self,
+        book_id: str,
+        chapter_stage_id: str,
+        ledger_updates: dict[str, Any] | None = None,
+    ) -> dict[str, Any] | None:
+        """按章卡顺序原子落盘长篇章节，并应用状态账本智能体给出的结构化更新。"""
+        with _data_file_lock():
+            self._reload_books_unlocked()
+            b = self._books.get((book_id or "").strip())
+            if b is None:
+                return None
+            if b.book_type != "long":
+                raise ValueError("仅长篇创作空间支持章节落盘")
+
+            workspace = normalize_long_workspace_from_storage(
+                b.long_workspace,
+                b.stages,
+            )
+            stage_id = str(chapter_stage_id or "").strip()
+            ordered_cards = ordered_long_chapter_cards(workspace)
+            target_index = next(
+                (
+                    index
+                    for index, card in enumerate(ordered_cards)
+                    if str(card.get("stage_id") or "") == stage_id
+                ),
+                -1,
+            )
+            if target_index < 0:
+                raise ValueError("当前章节没有对应章卡，无法开始写作或落盘")
+
+            chapters = workspace["chapters"]
+            chapter = chapters.get(stage_id)
+            if not isinstance(chapter, dict):
+                raise ValueError("当前章节正文数据不存在")
+            if chapter.get("committed"):
+                return b.to_dict()
+
+            for previous_card in ordered_cards[:target_index]:
+                previous_stage_id = str(previous_card.get("stage_id") or "")
+                previous = chapters.get(previous_stage_id)
+                if not isinstance(previous, dict) or not previous.get("committed"):
+                    previous_title = str(previous_card.get("title") or previous_stage_id)
+                    raise ValueError(
+                        f"前置章节「{previous_title}」尚未落盘，请按章节顺序落盘"
+                    )
+
+            required_fields = (
+                ("body", "正文"),
+                ("character_state", "人物状态"),
+                ("handoff", "交接注意文档"),
+            )
+            missing = [
+                label
+                for field, label in required_fields
+                if not str(chapter.get(field) or "").strip()
+            ]
+            if missing:
+                raise ValueError(f"本章缺少{'、'.join(missing)}，补齐三个区块后才能落盘")
+
+            now = _utc_now_iso()
+            commit_id = str(uuid4())
+            chapter_title = str(
+                chapter.get("title")
+                or ordered_cards[target_index].get("title")
+                or stage_id
+            )
+            updates = ledger_updates if isinstance(ledger_updates, dict) else {}
+            ledger = workspace["ledger"]
+
+            def append_ledger_rows(target: str) -> None:
+                raw_rows = updates.get(target)
+                source = raw_rows if isinstance(raw_rows, list) else [raw_rows] if raw_rows else []
+                for raw_row in source:
+                    if isinstance(raw_row, str):
+                        content = raw_row.strip()
+                        row: dict[str, Any] = {}
+                    elif isinstance(raw_row, dict):
+                        row = raw_row
+                        content = str(
+                            row.get("content")
+                            or row.get("description")
+                            or row.get("detail")
+                            or row.get("state")
+                            or row.get("note")
+                            or ""
+                        ).strip()
+                    else:
+                        continue
+                    if not content:
+                        continue
+                    ledger[target].append(
+                        {
+                            "id": str(row.get("id") or f"{target}-{uuid4()}"),
+                            "chapter_stage_id": stage_id,
+                            "chapter_title": chapter_title,
+                            "content": content,
+                            "created_at": now,
+                            "commit_id": commit_id,
+                        }
+                    )
+
+            for target in (
+                "timeline",
+                "faction_states",
+                "realm_states",
+                "foreshadowing_states",
+                "continuity_notes",
+            ):
+                append_ledger_rows(target)
+
+            if not any(
+                str(row.get("commit_id") or "") == commit_id
+                for row in ledger["timeline"]
+                if isinstance(row, dict)
+            ):
+                ledger["timeline"].append(
+                    {
+                        "id": f"timeline-{uuid4()}",
+                        "chapter_stage_id": stage_id,
+                        "chapter_title": chapter_title,
+                        "content": f"《{chapter_title}》已完成落盘。",
+                        "created_at": now,
+                        "commit_id": commit_id,
+                    }
+                )
+
+            character_updates = updates.get("character_updates")
+            character_rows = (
+                character_updates
+                if isinstance(character_updates, list)
+                else [character_updates]
+                if isinstance(character_updates, dict)
+                else []
+            )
+            all_characters = [
+                entry
+                for group in workspace["characters"].values()
+                for entry in group.get("entries", [])
+                if isinstance(entry, dict)
+            ]
+            for raw_update in character_rows:
+                if not isinstance(raw_update, dict):
+                    continue
+                character_id = str(raw_update.get("character_id") or raw_update.get("id") or "")
+                character_name = str(raw_update.get("name") or "")
+                target_character = next(
+                    (
+                        entry
+                        for entry in all_characters
+                        if (character_id and str(entry.get("id") or "") == character_id)
+                        or (character_name and str(entry.get("name") or "") == character_name)
+                    ),
+                    None,
+                )
+                if target_character is None:
+                    continue
+                if "relationships" in raw_update:
+                    target_character["relationships"] = str(
+                        raw_update.get("relationships") or ""
+                    )
+                if "current_state" in raw_update:
+                    target_character["current_state"] = str(
+                        raw_update.get("current_state") or ""
+                    )
+                if "history" in raw_update:
+                    target_character["history"] = str(raw_update.get("history") or "")
+                history_append = str(raw_update.get("history_append") or "").strip()
+                if history_append:
+                    previous_history = str(target_character.get("history") or "").strip()
+                    target_character["history"] = "\n\n".join(
+                        value for value in (previous_history, history_append) if value
+                    )
+
+            foreshadowing_updates = updates.get("foreshadowing_updates")
+            foreshadowing_rows = (
+                foreshadowing_updates
+                if isinstance(foreshadowing_updates, list)
+                else [foreshadowing_updates]
+                if isinstance(foreshadowing_updates, dict)
+                else []
+            )
+            foreshadowing = workspace["plot"]["foreshadowing"]
+            for raw_update in foreshadowing_rows:
+                if not isinstance(raw_update, dict):
+                    continue
+                target_id = str(raw_update.get("foreshadowing_id") or raw_update.get("id") or "")
+                target_name = str(raw_update.get("name") or "")
+                target_row = next(
+                    (
+                        row
+                        for row in foreshadowing
+                        if (target_id and str(row.get("id") or "") == target_id)
+                        or (target_name and str(row.get("name") or "") == target_name)
+                    ),
+                    None,
+                )
+                if target_row is None:
+                    continue
+                for field in ("name", "description", "content", "status"):
+                    if field in raw_update:
+                        target_row[field] = str(raw_update.get(field) or "")
+
+            chapter["committed"] = True
+            chapter["committed_at"] = now
+            chapter["commit_id"] = commit_id
+            ledger["committed_through"] = stage_id
+            workspace["revision"] = int(workspace.get("revision") or 0) + 1
+            b.long_workspace = normalize_long_workspace_from_storage(workspace)
+            b.stages = long_workspace_to_stages(b.long_workspace)
+            b.content = long_workspace_combined_draft(b.long_workspace)
+            b.updated_at = now
             save_books_atomic(self._path, self._books)
             self._mark_books_saved_unlocked()
             _write_stages_to_disk(b)

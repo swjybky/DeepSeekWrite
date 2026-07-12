@@ -41,6 +41,7 @@ LONG_WORKSPACE_AGENT_IDS: tuple[str, ...] = (
     "character_design",
     "plot_design",
     "draft",
+    "expert_section_writer",
     "continuity_ledger",
 )
 

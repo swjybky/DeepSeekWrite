@@ -6,6 +6,10 @@ import type {
   MemoryEntry,
 } from '../domain/workspaceCore'
 import type {
+  LongLedgerUpdates,
+  LongWorkspace,
+} from '../workspaces/long/longWorkspace'
+import type {
   AiModelDefaults,
   AiModelSettings,
   AppearanceStyle,
@@ -58,6 +62,12 @@ declare global {
           linked_skill_ids_by_kind?: Partial<Record<SkillKind, string[]>> | null,
           memory_auto_capture_enabled?: boolean | null,
           linked_material_ids_by_kind?: Partial<Record<MaterialKind, string[]>> | null,
+          long_workspace?: LongWorkspace | null,
+        ): Promise<Book | null>
+        commit_long_chapter(
+          book_id: string,
+          chapter_stage_id: string,
+          ledger_updates?: LongLedgerUpdates | null,
         ): Promise<Book | null>
         delete_book(book_id: string): Promise<boolean>
         get_book_memories(book_id: string): Promise<MemoryEntry[]>

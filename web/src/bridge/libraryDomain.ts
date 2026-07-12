@@ -5,6 +5,7 @@ import type {
   BookType,
 } from '../domain/workspaceCore'
 import { normalizeMemoryEntries } from '../domain/workspaceCore'
+import { normalizeLongWorkspace } from '../workspaces/long/longWorkspace'
 
 // ==================== 素材提示词类型 ====================
 export const MATERIAL_MANAGER_AGENT_ID = 'material_manager' as const
@@ -954,6 +955,10 @@ export function normalizeBook(raw: Partial<Book> & { id: string }): Book {
     ...summary,
     content: typeof raw.content === 'string' ? raw.content : '',
     stages: raw.stages,
+    long_workspace:
+      summary.book_type === 'long'
+        ? normalizeLongWorkspace(raw.long_workspace, raw.stages)
+        : undefined,
     expert_draft: raw.expert_draft,
     memories: normalizeMemoryEntries(raw.memories),
     memory_auto_capture_enabled: normalizeBooleanFlag(

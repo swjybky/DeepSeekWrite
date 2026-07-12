@@ -14,6 +14,11 @@ import {
   resolveWorkspaceContentStagesForBook,
 } from '../../domain/workspace'
 import { PLOT_STAGE_ID } from '../../workspaces/short/stages'
+import {
+  longWorkspaceCombinedDraft,
+  longWorkspaceToFlatStages,
+  normalizeLongWorkspace,
+} from '../../workspaces/long/longWorkspace'
 import type {
   BookPersistedSnapshot,
   BookWorkspaceSessionState,
@@ -51,9 +56,20 @@ export function createBookPersistedSnapshot(
     book.book_type,
   )
   const normalizedStages = normalizeStagesForWorkspaceBook(book, book.stages)
+  const longWorkspace =
+    book.book_type === 'long'
+      ? normalizeLongWorkspace(book.long_workspace, normalizedStages)
+      : null
   return {
-    stages: normalizedStages,
+    stages:
+      longWorkspace == null
+        ? normalizedStages
+        : normalizeStagesForWorkspaceBook(
+            book,
+            longWorkspaceToFlatStages(longWorkspace, normalizedStages),
+          ),
     expertDraft: normalizedExpertDraft,
+    longWorkspace,
   }
 }
 
@@ -95,6 +111,8 @@ export function bookSessionHasUnsavedChanges(
     }
   }
   return (
+    JSON.stringify(session.longWorkspace) !==
+      JSON.stringify(snapshot.longWorkspace) ||
     expertDraftPersistedFingerprint(session.expertDraft) !==
     expertDraftPersistedFingerprint(snapshot.expertDraft)
   )
@@ -109,6 +127,7 @@ export function workspaceSessionContentFingerprint(
       session.stages[stageId] ?? '',
     ]),
     expertDraft: expertDraftPersistedFingerprint(session.expertDraft),
+    longWorkspace: session.longWorkspace,
   })
 }
 
@@ -157,10 +176,20 @@ export function createBookWorkspaceSession(input: {
   resetExpertRuntime: boolean
   previous?: BookWorkspaceSessionState
 }): BookWorkspaceSessionState {
-  const normalizedStages = normalizeStagesForWorkspaceBook(
+  let normalizedStages = normalizeStagesForWorkspaceBook(
     input.book,
     input.book.stages,
   )
+  const longWorkspace =
+    input.book.book_type === 'long'
+      ? normalizeLongWorkspace(input.book.long_workspace, normalizedStages)
+      : null
+  if (longWorkspace) {
+    normalizedStages = normalizeStagesForWorkspaceBook(
+      input.book,
+      longWorkspaceToFlatStages(longWorkspace, normalizedStages),
+    )
+  }
   const normalizedExpertDraft = normalizeExpertDraft(
     input.book.expert_draft,
     input.resetExpertRuntime,
@@ -181,7 +210,10 @@ export function createBookWorkspaceSession(input: {
   const book = {
     ...input.book,
     stages,
-    content: stages.draft ?? input.book.content,
+    content: longWorkspace
+      ? longWorkspaceCombinedDraft(longWorkspace)
+      : stages.draft ?? input.book.content,
+    long_workspace: longWorkspace ?? undefined,
     expert_draft: expertDraft,
   }
   const persistedSnapshot =
@@ -197,6 +229,7 @@ export function createBookWorkspaceSession(input: {
     book,
     stages,
     expertDraft,
+    longWorkspace,
     persistedSnapshot,
     activeStage: input.activeStage,
     activePlotChildStage,

@@ -17,6 +17,7 @@ export type {
   ExpertDraftSection,
   MemoryEntry,
   MemoryTag,
+  LongWorkspace,
   LongStageId,
   ScriptStageId,
   ShortStageId,

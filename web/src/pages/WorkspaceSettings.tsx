@@ -31,8 +31,7 @@ import { SCRIPT_WORKSPACE_CONTENT_STAGES } from '../workspaces/script/stages'
 import {
   EXPERT_DRAFT_COORDINATOR_AGENT_ID,
   EXPERT_SECTION_WRITER_AGENT_ID,
-  WORKSPACE_STANDARD_AGENT_IDS,
-  WORKSPACE_AGENT_IDS,
+  WORKSPACE_AGENT_IDS as SHORT_WORKSPACE_AGENT_IDS,
   getDefaultWorkspaceAgentReadAccess,
   getDefaultWorkspaceAgentReadAccessEntry,
   isRequiredWorkspaceStageForAgent,
@@ -44,6 +43,16 @@ import {
   isRequiredWorkspaceStageForAgent as isRequiredScriptWorkspaceStageForAgent,
   normalizeWorkspaceAgentReadAccess as normalizeScriptWorkspaceAgentReadAccess,
 } from '../workspaces/script/stageReadAccess'
+import { LONG_WORKSPACE_CONTENT_STAGES } from '../workspaces/long/stages'
+import {
+  EXPERT_SECTION_WRITER_AGENT_ID as LONG_SECTION_WRITER_AGENT_ID,
+  WORKSPACE_AGENT_IDS as LONG_WORKSPACE_AGENT_IDS,
+  getDefaultWorkspaceAgentReadAccess as getDefaultLongWorkspaceAgentReadAccess,
+  getDefaultWorkspaceAgentReadAccessEntry as getDefaultLongWorkspaceAgentReadAccessEntry,
+  isRequiredWorkspaceStageForAgent as isRequiredLongWorkspaceStageForAgent,
+  normalizeWorkspaceAgentReadAccess as normalizeLongWorkspaceAgentReadAccess,
+  type LongWorkspaceAgentId,
+} from '../workspaces/long/stageReadAccess'
 import {
   autoSaveStatusLabel,
   useKeyedAutoSave,
@@ -53,11 +62,12 @@ import { useAppDialog } from '../components/useAppDialog'
 import './WorkspaceSettings.css'
 
 type SaveStatus = 'idle' | 'saving' | 'saved' | 'error'
-type PromptDrafts = Record<WorkspaceAgentId, string>
-type WorkspaceSettingsType = Extract<BookType, 'short' | 'script'>
-const WORKSPACE_SETTING_TYPES: WorkspaceSettingsType[] = ['short', 'script']
+type SettingsAgentId = WorkspaceAgentId | LongWorkspaceAgentId
+type PromptDrafts = Record<string, string>
+type WorkspaceSettingsType = Extract<BookType, 'short' | 'long' | 'script'>
+const WORKSPACE_SETTING_TYPES: WorkspaceSettingsType[] = ['short', 'long', 'script']
 
-const AGENT_LABELS: Record<WorkspaceAgentId, string> = {
+const STANDARD_AGENT_LABELS: Record<WorkspaceAgentId, string> = {
   character_design: '人物',
   plot_design: '剧情',
   outline: '大纲',
@@ -65,13 +75,74 @@ const AGENT_LABELS: Record<WorkspaceAgentId, string> = {
   expert_section_writer: '分节写手智能体',
 }
 
-const EMPTY_PROMPTS = Object.fromEntries(
-  WORKSPACE_AGENT_IDS.map((agentId) => [agentId, '']),
-) as PromptDrafts
+const LONG_AGENT_LABELS: Record<LongWorkspaceAgentId, string> = {
+  worldbuilding: '世界观管理智能体',
+  character_design: '人物管理智能体',
+  plot_design: '剧情管理智能体',
+  draft: '正文管理智能体',
+  expert_section_writer: '写手智能体',
+  continuity_ledger: '状态账本智能体（后台）',
+}
+
+function agentIdsForType(
+  workspaceType: WorkspaceSettingsType,
+): readonly SettingsAgentId[] {
+  return workspaceType === 'long'
+    ? LONG_WORKSPACE_AGENT_IDS
+    : SHORT_WORKSPACE_AGENT_IDS
+}
+
+function emptyPromptsForType(workspaceType: WorkspaceSettingsType): PromptDrafts {
+  return Object.fromEntries(
+    agentIdsForType(workspaceType).map((agentId) => [agentId, '']),
+  )
+}
+
+function agentLabel(
+  workspaceType: WorkspaceSettingsType,
+  agentId: SettingsAgentId,
+): string {
+  return workspaceType === 'long'
+    ? LONG_AGENT_LABELS[agentId as LongWorkspaceAgentId]
+    : STANDARD_AGENT_LABELS[agentId as WorkspaceAgentId]
+}
+
+function agentGroupsForType(workspaceType: WorkspaceSettingsType) {
+  if (workspaceType === 'long') {
+    return [
+      {
+        title: '前置阶段',
+        ids: ['worldbuilding', 'character_design', 'plot_design'] as const,
+      },
+      {
+        title: '正文编写',
+        ids: ['draft', LONG_SECTION_WRITER_AGENT_ID] as const,
+      },
+      {
+        title: '后台流转',
+        ids: ['continuity_ledger'] as const,
+      },
+    ]
+  }
+  return [
+    {
+      title: '前置阶段',
+      ids: ['character_design', 'plot_design', 'outline'] as const,
+    },
+    {
+      title: '正文编写',
+      ids: [
+        EXPERT_DRAFT_COORDINATOR_AGENT_ID,
+        EXPERT_SECTION_WRITER_AGENT_ID,
+      ] as const,
+    },
+  ]
+}
 
 function getDefaultReadAccessForType(
   workspaceType: WorkspaceSettingsType,
 ): WorkspaceAgentReadAccessConfig {
+  if (workspaceType === 'long') return getDefaultLongWorkspaceAgentReadAccess()
   return workspaceType === 'script'
     ? getDefaultScriptWorkspaceAgentReadAccess()
     : getDefaultWorkspaceAgentReadAccess()
@@ -79,14 +150,20 @@ function getDefaultReadAccessForType(
 
 function getDefaultReadAccessEntryForType(
   workspaceType: WorkspaceSettingsType,
-  agentId: WorkspaceAgentId,
+  agentId: SettingsAgentId,
 ) {
+  if (workspaceType === 'long') {
+    return getDefaultLongWorkspaceAgentReadAccessEntry(
+      agentId as LongWorkspaceAgentId,
+    )
+  }
   return workspaceType === 'script'
-    ? getDefaultScriptWorkspaceAgentReadAccessEntry(agentId)
-    : getDefaultWorkspaceAgentReadAccessEntry(agentId)
+    ? getDefaultScriptWorkspaceAgentReadAccessEntry(agentId as WorkspaceAgentId)
+    : getDefaultWorkspaceAgentReadAccessEntry(agentId as WorkspaceAgentId)
 }
 
 function getWorkspaceContentStagesForType(workspaceType: WorkspaceSettingsType) {
+  if (workspaceType === 'long') return LONG_WORKSPACE_CONTENT_STAGES
   return workspaceType === 'script'
     ? SCRIPT_WORKSPACE_CONTENT_STAGES
     : SHORT_WORKSPACE_CONTENT_STAGES
@@ -96,6 +173,7 @@ function normalizeReadAccessForType(
   workspaceType: WorkspaceSettingsType,
   config: WorkspaceAgentReadAccessConfig,
 ): WorkspaceAgentReadAccessConfig {
+  if (workspaceType === 'long') return normalizeLongWorkspaceAgentReadAccess(config)
   return workspaceType === 'script'
     ? normalizeScriptWorkspaceAgentReadAccess(config)
     : normalizeWorkspaceAgentReadAccess(config)
@@ -103,12 +181,18 @@ function normalizeReadAccessForType(
 
 function isRequiredWorkspaceStageForType(
   workspaceType: WorkspaceSettingsType,
-  agentId: WorkspaceAgentId,
+  agentId: SettingsAgentId,
   stageId: StageId,
 ): boolean {
+  if (workspaceType === 'long') {
+    return isRequiredLongWorkspaceStageForAgent(
+      agentId as LongWorkspaceAgentId,
+      stageId,
+    )
+  }
   return workspaceType === 'script'
-    ? isRequiredScriptWorkspaceStageForAgent(agentId, stageId)
-    : isRequiredWorkspaceStageForAgent(agentId, stageId)
+    ? isRequiredScriptWorkspaceStageForAgent(agentId as WorkspaceAgentId, stageId)
+    : isRequiredWorkspaceStageForAgent(agentId as WorkspaceAgentId, stageId)
 }
 
 export function WorkspaceSettings() {
@@ -117,8 +201,10 @@ export function WorkspaceSettings() {
   const [workspaceType, setWorkspaceType] =
     useState<WorkspaceSettingsType>('short')
   const [activeAgentId, setActiveAgentId] =
-    useState<WorkspaceAgentId>('character_design')
-  const [promptDrafts, setPromptDrafts] = useState<PromptDrafts>(EMPTY_PROMPTS)
+    useState<SettingsAgentId>('character_design')
+  const [promptDrafts, setPromptDrafts] = useState<PromptDrafts>(() =>
+    emptyPromptsForType('short'),
+  )
   const [readAccess, setReadAccess] = useState<WorkspaceAgentReadAccessConfig>(
     () => getDefaultWorkspaceAgentReadAccess(),
   )
@@ -128,7 +214,7 @@ export function WorkspaceSettings() {
 
   const activeAgentRef = useRef(activeAgentId)
   const promptDraftsRef = useRef(promptDrafts)
-  const savedPromptsRef = useRef<PromptDrafts>(EMPTY_PROMPTS)
+  const savedPromptsRef = useRef<PromptDrafts>(emptyPromptsForType('short'))
   const promptValuesByKeyRef = useRef<Record<string, string>>({})
   const readAccessRef = useRef(readAccess)
   const saveQueueRef = useRef<Promise<void>>(Promise.resolve())
@@ -141,7 +227,7 @@ export function WorkspaceSettings() {
     saveSnapshot: async (key, value) => {
       const [targetType, agentId] = key.split(':') as [
         WorkspaceSettingsType,
-        WorkspaceAgentId,
+        SettingsAgentId,
       ]
       try {
         await saveWorkspaceAgentPromptOverride(agentId, value, targetType)
@@ -200,14 +286,14 @@ export function WorkspaceSettings() {
   )
 
   const flushPrompt = useCallback(
-    (agentId: WorkspaceAgentId): Promise<void> => {
+    (agentId: SettingsAgentId): Promise<void> => {
       return flushWorkspacePrompt(`${workspaceType}:${agentId}`).then(() => undefined)
     },
     [flushWorkspacePrompt, workspaceType],
   )
 
   const schedulePromptSave = useCallback(
-    (agentId: WorkspaceAgentId) => {
+    (agentId: SettingsAgentId) => {
       scheduleWorkspacePromptSave(`${workspaceType}:${agentId}`)
     },
     [scheduleWorkspacePromptSave, workspaceType],
@@ -219,9 +305,10 @@ export function WorkspaceSettings() {
       setLoading(true)
       setError(null)
       try {
+        const workspaceAgentIds = agentIdsForType(workspaceType)
         const [prompts, config] = await Promise.all([
           Promise.all(
-            WORKSPACE_AGENT_IDS.map(async (agentId) => [
+            workspaceAgentIds.map(async (agentId) => [
               agentId,
               await readWorkspaceAgentPromptTemplate(agentId, workspaceType),
             ] as const),
@@ -235,7 +322,7 @@ export function WorkspaceSettings() {
         readAccessRef.current = config
         setPromptDrafts(nextPrompts)
         setReadAccess(config)
-        for (const agentId of WORKSPACE_AGENT_IDS) {
+        for (const agentId of workspaceAgentIds) {
           const key = `${workspaceType}:${agentId}`
           promptValuesByKeyRef.current[key] = nextPrompts[agentId]
           textHistory.clear(`workspace-settings:${key}`, nextPrompts[agentId])
@@ -251,7 +338,7 @@ export function WorkspaceSettings() {
     })()
     return () => {
       cancelled = true
-      for (const agentId of WORKSPACE_AGENT_IDS) {
+      for (const agentId of agentIdsForType(workspaceType)) {
         if (
           promptDraftsRef.current[agentId] !==
           savedPromptsRef.current[agentId]
@@ -267,14 +354,17 @@ export function WorkspaceSettings() {
     workspaceType,
   ])
 
-  const activeEntry = readAccess[activeAgentId]
-  const activeLabel = AGENT_LABELS[activeAgentId]
-  const activeIsExpert =
-    activeAgentId === EXPERT_DRAFT_COORDINATOR_AGENT_ID ||
-    activeAgentId === EXPERT_SECTION_WRITER_AGENT_ID
+  const activeEntry =
+    readAccess[activeAgentId] ??
+    getDefaultReadAccessEntryForType(workspaceType, activeAgentId)
+  const activeLabel = agentLabel(workspaceType, activeAgentId)
+  const activeSectionLabel =
+    agentGroupsForType(workspaceType).find((group) =>
+      (group.ids as readonly string[]).includes(activeAgentId),
+    )?.title ?? '智能体配置'
 
   const switchAgent = useCallback(
-    async (next: WorkspaceAgentId) => {
+    async (next: SettingsAgentId) => {
       if (next === activeAgentRef.current) return
       await flushPrompt(activeAgentRef.current).catch(() => undefined)
       setActiveAgentId(next)
@@ -286,9 +376,11 @@ export function WorkspaceSettings() {
     async (next: WorkspaceSettingsType) => {
       if (next === workspaceType) return
       await flushPrompt(activeAgentRef.current).catch(() => undefined)
+      const nextAgentId = agentIdsForType(next)[0] ?? 'character_design'
       setWorkspaceType(next)
       setReadAccess(getDefaultReadAccessForType(next))
-      setPromptDrafts(EMPTY_PROMPTS)
+      setActiveAgentId(nextAgentId)
+      setPromptDrafts(emptyPromptsForType(next))
     },
     [flushPrompt, workspaceType],
   )
@@ -360,7 +452,7 @@ export function WorkspaceSettings() {
     const agentId = activeAgentRef.current
     const ok = await confirm({
       title: '恢复默认提示词',
-      message: `恢复「${AGENT_LABELS[agentId]}」的内置默认提示词？当前提示词覆盖会被清除。`,
+      message: `恢复「${agentLabel(workspaceType, agentId)}」的内置默认提示词？当前提示词覆盖会被清除。`,
       confirmText: '恢复默认',
       variant: 'warning',
     })
@@ -397,7 +489,7 @@ export function WorkspaceSettings() {
     const agentId = activeAgentRef.current
     const ok = await confirm({
       title: '恢复默认读取范围',
-      message: `恢复「${AGENT_LABELS[agentId]}」的默认读取范围？`,
+      message: `恢复「${agentLabel(workspaceType, agentId)}」的默认读取范围？`,
       confirmText: '恢复默认',
       variant: 'warning',
     })
@@ -427,8 +519,11 @@ export function WorkspaceSettings() {
       return
     }
 
+    const workspaceAgentIds = agentIdsForType(workspaceType)
     await Promise.all(
-      WORKSPACE_AGENT_IDS.map((agentId) => flushPrompt(agentId).catch(() => undefined)),
+      workspaceAgentIds.map((agentId) =>
+        flushPrompt(agentId).catch(() => undefined),
+      ),
     )
 
     setSaveStatus('saving')
@@ -437,7 +532,7 @@ export function WorkspaceSettings() {
       await resetAllWorkspaceSettings(workspaceType)
       const [prompts, config] = await Promise.all([
         Promise.all(
-          WORKSPACE_AGENT_IDS.map(async (agentId) => [
+          workspaceAgentIds.map(async (agentId) => [
             agentId,
             await readWorkspaceAgentPromptTemplate(agentId, workspaceType),
           ] as const),
@@ -451,7 +546,7 @@ export function WorkspaceSettings() {
       readAccessRef.current = config
       setPromptDrafts(nextPrompts)
       setReadAccess(config)
-      for (const agentId of WORKSPACE_AGENT_IDS) {
+      for (const agentId of workspaceAgentIds) {
         const key = `${workspaceType}:${agentId}`
         promptValuesByKeyRef.current[key] = nextPrompts[agentId]
         textHistory.record(
@@ -483,7 +578,7 @@ export function WorkspaceSettings() {
     setError(null)
     try {
       await Promise.all(
-        WORKSPACE_AGENT_IDS.map((agentId) => flushPrompt(agentId)),
+        agentIdsForType(workspaceType).map((agentId) => flushPrompt(agentId)),
       )
       await saveQueueRef.current
       await saveWorkspaceAgentReadAccess(readAccessRef.current, workspaceType)
@@ -497,7 +592,7 @@ export function WorkspaceSettings() {
 
   const activePromptKey = `${workspaceType}:${activeAgentId}`
   const activePromptHistoryKey = `workspace-settings:${activePromptKey}`
-  const activePrompt = promptDrafts[activeAgentId]
+  const activePrompt = promptDrafts[activeAgentId] ?? ''
   const promptStatus = workspacePromptStatus(activePromptKey)
   const headerStatus =
     saveStatus === 'saving' || saveStatus === 'error' ? saveStatus : promptStatus
@@ -521,7 +616,7 @@ export function WorkspaceSettings() {
         </button>
         <div className="workspace-settings-title-block">
           <h1>创作空间设置</h1>
-          <p>短篇与剧本分别保存智能体提示词、读取范围与关联技能分类。</p>
+          <p>短篇、长篇与剧本分别保存智能体提示词、素材读取范围和技能加载范围。</p>
           <span
             className={`workspace-settings-save-state workspace-settings-save-state--${headerStatus}`}
             aria-live="polite"
@@ -566,43 +661,25 @@ export function WorkspaceSettings() {
 
       <main className="workspace-settings-layout">
         <aside className="workspace-settings-nav" aria-label="智能体配置项">
-          <section>
-            <h2>前置阶段</h2>
-            {WORKSPACE_STANDARD_AGENT_IDS.map((stageId) => (
-              <button
-                key={stageId}
-                type="button"
-                className={
-                  activeAgentId === stageId
-                    ? 'workspace-settings-nav-item workspace-settings-nav-item--active'
-                    : 'workspace-settings-nav-item'
-                }
-                onClick={() => void switchAgent(stageId)}
-              >
-                {AGENT_LABELS[stageId]}
-              </button>
-            ))}
-          </section>
-          <section>
-            <h2>正文编写</h2>
-            {[
-              EXPERT_DRAFT_COORDINATOR_AGENT_ID,
-              EXPERT_SECTION_WRITER_AGENT_ID,
-            ].map((agentId) => (
-              <button
-                key={agentId}
-                type="button"
-                className={
-                  activeAgentId === agentId
-                    ? 'workspace-settings-nav-item workspace-settings-nav-item--active'
-                    : 'workspace-settings-nav-item'
-                }
-                onClick={() => void switchAgent(agentId)}
-              >
-                {AGENT_LABELS[agentId]}
-              </button>
-            ))}
-          </section>
+          {agentGroupsForType(workspaceType).map((group) => (
+            <section key={group.title}>
+              <h2>{group.title}</h2>
+              {group.ids.map((agentId) => (
+                <button
+                  key={agentId}
+                  type="button"
+                  className={
+                    activeAgentId === agentId
+                      ? 'workspace-settings-nav-item workspace-settings-nav-item--active'
+                      : 'workspace-settings-nav-item'
+                  }
+                  onClick={() => void switchAgent(agentId)}
+                >
+                  {agentLabel(workspaceType, agentId)}
+                </button>
+              ))}
+            </section>
+          ))}
         </aside>
 
         <section className="workspace-settings-content">
@@ -612,7 +689,7 @@ export function WorkspaceSettings() {
             <>
               <div className="workspace-settings-content-head">
                 <div>
-                  <span>{activeIsExpert ? '正文编写' : '前置阶段'}</span>
+                  <span>{activeSectionLabel}</span>
                   <h2>
                     {bookTypeLabel(workspaceType)} · {activeLabel}
                   </h2>
@@ -711,7 +788,7 @@ export function WorkspaceSettings() {
                   </fieldset>
 
                   <fieldset>
-                    <legend>关联素材库部门</legend>
+                    <legend>素材库读取范围</legend>
                     {MATERIAL_KIND_KEYS.map((materialKind) => (
                       <label key={materialKind}>
                         <input
@@ -731,7 +808,7 @@ export function WorkspaceSettings() {
                   </fieldset>
 
                   <fieldset>
-                    <legend>关联技能分类</legend>
+                    <legend>技能库加载范围</legend>
                     {SKILL_KIND_KEYS.map((skillKind) => (
                       <label key={skillKind}>
                         <input

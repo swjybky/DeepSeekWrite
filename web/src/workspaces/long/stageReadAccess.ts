@@ -1,14 +1,12 @@
-import type { MaterialKind, MaterialStageId } from '../../bridge'
+import type { MaterialKind, MaterialStageId, SkillKind } from '../../bridge'
 import {
   LONG_CHARACTER_STAGES,
   LONG_CONTINUITY_STAGES,
   LONG_DEFAULT_DRAFT_STAGES,
   LONG_PLOT_STAGES,
-  LONG_ROOT_STAGE_IDS,
   LONG_WORLDBUILDING_STAGES,
   isLongStageId,
   longRootStageIdForStage,
-  type LongRootStageId,
   type LongStageId,
 } from './stages'
 import type {
@@ -21,9 +19,22 @@ export type {
   WorkspaceAgentReadAccessEntry,
 } from '../shared/readAccess'
 
-export const WORKSPACE_AGENT_IDS = LONG_ROOT_STAGE_IDS
+export const EXPERT_SECTION_WRITER_AGENT_ID = 'expert_section_writer' as const
 
-export type LongWorkspaceAgentId = LongRootStageId
+/**
+ * 长篇由五个主智能体负责创作，状态账本智能体在章节落盘时于后台运行。
+ * `continuity_ledger` 仍保留独立配置，便于维护其系统提示词和最小读取范围。
+ */
+export const WORKSPACE_AGENT_IDS = [
+  'worldbuilding',
+  'character_design',
+  'plot_design',
+  'draft',
+  EXPERT_SECTION_WRITER_AGENT_ID,
+  'continuity_ledger',
+] as const
+
+export type LongWorkspaceAgentId = (typeof WORKSPACE_AGENT_IDS)[number]
 
 export const ALL_WORKSPACE_CONTENT_STAGE_IDS = [
   ...LONG_WORLDBUILDING_STAGES,
@@ -48,6 +59,13 @@ export const ALL_MATERIAL_KIND_IDS: MaterialKind[] = [
   'gimmick',
   'plot',
   'draft',
+  'other',
+]
+
+export const ALL_SKILL_KIND_IDS: SkillKind[] = [
+  'general',
+  'plot',
+  'style',
   'other',
 ]
 
@@ -79,21 +97,28 @@ const FALLBACK_DEFAULTS: WorkspaceAgentReadAccessConfig = {
       'plot_design.book_line',
       'plot_design.foreshadowing',
       'continuity_ledger.timeline',
+      'continuity_ledger.faction_states',
+      'continuity_ledger.realm_states',
       'continuity_ledger.continuity_notes',
     ],
     material: ['gimmick', 'plot', 'other'],
+    skill: ['general', 'plot', 'other'],
   },
   character_design: {
     workspace: [
       ...characters,
       'worldbuilding.rules',
       'worldbuilding.factions',
+      'worldbuilding.realms',
       'plot_design.book_line',
       'plot_design.story_arcs',
       'continuity_ledger.timeline',
       'continuity_ledger.character_states',
+      'continuity_ledger.faction_states',
+      'continuity_ledger.realm_states',
     ],
     material: ['character', 'other'],
+    skill: ['general', 'plot', 'other'],
   },
   plot_design: {
     workspace: [
@@ -103,10 +128,14 @@ const FALLBACK_DEFAULTS: WorkspaceAgentReadAccessConfig = {
       'worldbuilding.factions',
       'worldbuilding.geography',
       'worldbuilding.history',
+      'worldbuilding.realms',
       'continuity_ledger.timeline',
+      'continuity_ledger.faction_states',
+      'continuity_ledger.realm_states',
       'continuity_ledger.open_foreshadowing',
     ],
     material: ['gimmick', 'character', 'plot', 'other'],
+    skill: ['general', 'plot', 'other'],
   },
   draft: {
     workspace: [
@@ -116,10 +145,27 @@ const FALLBACK_DEFAULTS: WorkspaceAgentReadAccessConfig = {
       'plot_design.foreshadowing',
       ...characters,
       'worldbuilding.rules',
+      'worldbuilding.realms',
       'worldbuilding.items',
       ...ledger,
     ],
-    material: ['draft', 'other'],
+    material: ['character', 'plot', 'draft', 'other'],
+    skill: ['general', 'plot', 'style', 'other'],
+  },
+  expert_section_writer: {
+    workspace: [
+      ...draft,
+      'plot_design.chapter_cards',
+      'plot_design.story_arcs',
+      'plot_design.foreshadowing',
+      ...characters,
+      'worldbuilding.rules',
+      'worldbuilding.realms',
+      'worldbuilding.items',
+      ...ledger,
+    ],
+    material: ['character', 'plot', 'draft', 'other'],
+    skill: ['general', 'style', 'other'],
   },
   continuity_ledger: {
     workspace: [
@@ -130,8 +176,11 @@ const FALLBACK_DEFAULTS: WorkspaceAgentReadAccessConfig = {
       'character_design.protagonists',
       'character_design.major_supporting',
       'worldbuilding.rules',
+      'worldbuilding.factions',
+      'worldbuilding.realms',
     ],
     material: [],
+    skill: [],
   },
 }
 
@@ -143,6 +192,7 @@ const REQUIRED_WORKSPACE_STAGE_IDS: Record<
   character_design: ['character_design.protagonists'],
   plot_design: ['plot_design.book_line'],
   draft: ['draft.volume-1.arc-1.chapter-1'],
+  expert_section_writer: ['draft.volume-1.arc-1.chapter-1'],
   continuity_ledger: ['continuity_ledger.timeline'],
 }
 
@@ -152,6 +202,10 @@ function isMaterialStageId(id: string): id is MaterialStageId {
 
 function isMaterialKindId(id: string): id is MaterialKind {
   return ALL_MATERIAL_KIND_IDS.includes(id as MaterialKind)
+}
+
+function isSkillKindId(id: string): id is SkillKind {
+  return ALL_SKILL_KIND_IDS.includes(id as SkillKind)
 }
 
 function normalizeMaterialAccessIds(raw: readonly string[]): MaterialKind[] {
@@ -197,9 +251,13 @@ function loadBuiltinDefaults(): WorkspaceAgentReadAccessConfig {
     const material = Array.isArray(entry.material)
       ? normalizeMaterialAccessIds(entry.material.map(String))
       : FALLBACK_DEFAULTS[agentId].material
+    const skill = Array.isArray(entry.skill)
+      ? entry.skill.map(String).filter(isSkillKindId)
+      : FALLBACK_DEFAULTS[agentId].skill
     result[agentId] = {
       workspace: ensureRequiredWorkspaceStages(agentId, workspace),
       material,
+      skill: dedupe(skill ?? []),
     }
   }
   return result
@@ -248,6 +306,9 @@ export function isRequiredWorkspaceStageForAgent(
 export function resolveWorkspaceAgentIdForStage(
   stageId: LongStageId,
 ): LongWorkspaceAgentId {
+  if (stageId === EXPERT_SECTION_WRITER_AGENT_ID) {
+    return EXPERT_SECTION_WRITER_AGENT_ID
+  }
   return longRootStageIdForStage(stageId)
 }
 
@@ -260,6 +321,7 @@ function normalizeEntry(
   const obj = raw as Record<string, unknown>
   const workspaceRaw = Array.isArray(obj.workspace) ? obj.workspace : null
   const materialRaw = Array.isArray(obj.material) ? obj.material : null
+  const skillRaw = Array.isArray(obj.skill) ? obj.skill : null
   const workspace =
     workspaceRaw === null
       ? fallback.workspace
@@ -268,9 +330,14 @@ function normalizeEntry(
     materialRaw === null
       ? fallback.material
       : normalizeMaterialAccessIds(materialRaw.map(String))
+  const skill =
+    skillRaw === null
+      ? fallback.skill
+      : dedupe(skillRaw.map(String).filter(isSkillKindId))
   return {
     workspace: ensureRequiredWorkspaceStages(agentId, workspace),
     material,
+    skill,
   }
 }
 
@@ -293,6 +360,6 @@ export function resolveWorkspaceAgentReadAccess(
   const normalized = normalizeWorkspaceAgentReadAccess(config)
   const normalizedAgent = isWorkspaceAgentId(agentId)
     ? agentId
-    : longRootStageIdForStage(agentId)
+    : longRootStageIdForStage(agentId) as LongWorkspaceAgentId
   return normalized[normalizedAgent] ?? defaultEntryForAgent('draft')
 }

@@ -23,6 +23,7 @@ import {
   SKILL_STAGE_LABELS,
 } from '../bridge/libraryDomain'
 import { LEARNING_STAGE_LABELS } from '../bridge/learningImitationClient'
+import { LONG_STAGE_LABELS } from '../workspaces/long/stages'
 import { SCRIPT_STAGE_LABELS } from '../workspaces/script/stages'
 import { SHORT_STAGE_LABELS } from '../workspaces/short/stages'
 
@@ -30,6 +31,25 @@ const DEEPSEEKWRITE_TOOL_NAMES = [
   'load_skill',
   'read_workspace_content',
   'search_workspace_text',
+  'list_worldbuilding',
+  'query_worldbuilding',
+  'query_worldbuilding_item',
+  'query_worldbuilding_text',
+  'list_long_characters',
+  'query_long_character',
+  'query_long_plot_structure',
+  'query_long_chapter_card',
+  'find_next_long_chapter',
+  'manage_worldbuilding_category',
+  'write_worldbuilding_list',
+  'write_worldbuilding_text',
+  'manage_long_character',
+  'write_long_book_line',
+  'manage_long_volume',
+  'manage_long_arc',
+  'manage_long_chapter_card',
+  'manage_long_foreshadowing',
+  'start_long_writing',
   'query_linked_material_entries',
   'search_linked_materials',
   'read_linked_material_content',
@@ -38,6 +58,7 @@ const DEEPSEEKWRITE_TOOL_NAMES = [
   'global_text_replace',
   'replace_current_stage_text',
   'write_workspace_editor',
+  'update_long_story_ledger',
   'list_material_entries',
   'read_material_entry',
   'search_material_entries',
@@ -103,6 +124,7 @@ function resolveStageLabel(stageId: string): string {
   const maps: Record<string, string>[] = [
     SHORT_STAGE_LABELS,
     SCRIPT_STAGE_LABELS,
+    LONG_STAGE_LABELS,
     MATERIAL_STAGE_LABELS,
     SKILL_STAGE_LABELS,
     LEARNING_STAGE_LABELS,
@@ -144,6 +166,106 @@ function summarizeToolCall(
       return query
         ? verb('正在搜索', '已搜索') + `「${truncate(query)}」`
         : verb('正在搜索创作文本', '已搜索创作文本')
+    }
+    case 'list_worldbuilding':
+      return verb('正在列出世界观分类', '已列出世界观分类')
+    case 'query_worldbuilding': {
+      const category = pickString(params, 'category_name')
+      return category
+        ? verb('正在查询世界观概述', '已查询世界观概述') + `「${category}」`
+        : verb('正在查询世界观概述', '已查询世界观概述')
+    }
+    case 'query_worldbuilding_item': {
+      const category = pickString(params, 'category_name')
+      const item = pickString(params, 'item_name')
+      const target = [category, item].filter(Boolean).join(' / ')
+      return target
+        ? verb('正在查询世界观条目', '已查询世界观条目') + `「${target}」`
+        : verb('正在查询世界观条目', '已查询世界观条目')
+    }
+    case 'query_worldbuilding_text': {
+      const category = pickString(params, 'category_name')
+      return category
+        ? verb('正在读取世界观文本', '已读取世界观文本') + `「${category}」`
+        : verb('正在读取世界观文本', '已读取世界观文本')
+    }
+    case 'list_long_characters':
+      return verb('正在列出长篇人物', '已列出长篇人物')
+    case 'query_long_character': {
+      const character = pickString(params, 'character_name')
+      return character
+        ? verb('正在查询人物档案', '已查询人物档案') + `「${character}」`
+        : verb('正在查询人物档案', '已查询人物档案')
+    }
+    case 'query_long_plot_structure':
+      return verb('正在查询长篇剧情结构', '已查询长篇剧情结构')
+    case 'query_long_chapter_card': {
+      const chapter = pickString(params, 'chapter_name')
+      return chapter
+        ? verb('正在查询章卡', '已查询章卡') + `「${chapter}」`
+        : verb('正在查询章卡', '已查询章卡')
+    }
+    case 'find_next_long_chapter':
+      return verb('正在判断下一章节', '已判断下一章节')
+    case 'manage_worldbuilding_category': {
+      const target = pickString(params, 'name', 'category_id')
+      return target
+        ? verb('正在维护世界观分类', '已维护世界观分类') + `「${truncate(target)}」`
+        : verb('正在维护世界观分类', '已维护世界观分类')
+    }
+    case 'write_worldbuilding_list': {
+      const target = pickString(params, 'name', 'item_id', 'category_id')
+      return target
+        ? verb('正在更新世界观列表', '已更新世界观列表') + `「${truncate(target)}」`
+        : verb('正在更新世界观列表', '已更新世界观列表')
+    }
+    case 'write_worldbuilding_text':
+      return verb('正在更新世界观文本', '已更新世界观文本')
+    case 'manage_long_character': {
+      const target = pickString(params, 'name', 'character_id')
+      return target
+        ? verb('正在维护人物档案', '已维护人物档案') + `「${truncate(target)}」`
+        : verb('正在维护人物档案', '已维护人物档案')
+    }
+    case 'write_long_book_line':
+      return verb('正在更新全书线', '已更新全书线')
+    case 'manage_long_volume': {
+      const target = pickString(params, 'name', 'volume_id')
+      return target
+        ? verb('正在维护分卷', '已维护分卷') + `「${truncate(target)}」`
+        : verb('正在维护分卷', '已维护分卷')
+    }
+    case 'manage_long_arc': {
+      const target = pickString(params, 'name', 'arc_id')
+      return target
+        ? verb('正在维护剧情弧', '已维护剧情弧') + `「${truncate(target)}」`
+        : verb('正在维护剧情弧', '已维护剧情弧')
+    }
+    case 'manage_long_chapter_card': {
+      const target = pickString(params, 'title', 'card_id')
+      return target
+        ? verb('正在维护章卡', '已维护章卡') + `「${truncate(target)}」`
+        : verb('正在维护章卡', '已维护章卡')
+    }
+    case 'manage_long_foreshadowing': {
+      const target = pickString(params, 'name', 'foreshadowing_id')
+      return target
+        ? verb('正在维护伏笔', '已维护伏笔') + `「${truncate(target)}」`
+        : verb('正在维护伏笔', '已维护伏笔')
+    }
+    case 'start_long_writing': {
+      const scope = pickString(params, 'scope')
+      const target = pickString(
+        params,
+        'chapter_stage_id',
+        'arc_id',
+        'volume_id',
+      )
+      const scopeLabel =
+        scope === 'chapter' ? '单章' : scope === 'arc' ? '剧情弧' : '分卷'
+      return target
+        ? verb('正在启动长篇写作', '已启动长篇写作') + `「${scopeLabel} · ${target}」`
+        : verb('正在启动长篇写作', '已启动长篇写作')
     }
     case 'query_linked_material_entries': {
       const mode = pickString(params, 'mode')
@@ -199,7 +321,13 @@ function summarizeToolCall(
         mode === 'append' ? '（追加）' : mode === 'replace' ? '（覆盖）' : ''
       return label
         ? verb('正在写入', '已写入') + `「${label}」编辑区${modeHint}`
-        : verb('正在写入编辑区', '已写入编辑区') + modeHint
+          : verb('正在写入编辑区', '已写入编辑区') + modeHint
+    }
+    case 'update_long_story_ledger': {
+      const source = pickString(params, 'source_label')
+      return source
+        ? verb('正在更新长篇状态账本', '已更新长篇状态账本') + `「${source}」`
+        : verb('正在更新长篇状态账本', '已更新长篇状态账本')
     }
     case 'list_material_entries':
       return verb('正在列出素材条目', '已列出素材条目')

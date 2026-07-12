@@ -2,6 +2,8 @@ import type {
   BookStatus,
   ExpertDraft,
 } from '../domain/workspaceCore'
+import type { LongWorkspace } from '../workspaces/long/longWorkspace'
+export type { LongLedgerUpdates } from '../workspaces/long/longWorkspace'
 import type {
   SkillStageEntry,
   SkillStageId,
@@ -15,6 +17,7 @@ import type {
 export type SaveBookOptions = {
   content?: string | null
   stages?: Record<string, string> | null
+  long_workspace?: LongWorkspace | null
   linked_material_id?: string | null
   linked_material_ids_by_kind?: Partial<Record<MaterialKind, string[]>> | null
   linked_skill_id?: string | null

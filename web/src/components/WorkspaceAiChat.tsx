@@ -13,6 +13,7 @@ import type {
   MaterialKindWithMixed,
   MaterialStageEntry,
   BookType,
+  LongWorkspace,
   MemoryEntry,
   StageId,
   MaterialStageId,
@@ -49,6 +50,7 @@ import {
   type ApplyToStageEditorPayload,
   getWorkspaceStageAdditionalTools,
 } from '../pi/workspaceStageAgents'
+import type { StartLongWriting } from '../workspaces/long/stageAgents'
 import {
   bindWorkspaceChatPreferences,
   getPreferredWorkspaceThinkingLevel,
@@ -87,7 +89,11 @@ import {
   SCRIPT_WORKSPACE_CONTENT_STAGES,
   SCRIPT_WORKSPACE_STAGES,
 } from '../workspaces/script/stages'
-import { isLongStageId } from '../workspaces/long/stages'
+import {
+  isLongStageId,
+  longRootStageIdForStage,
+  longStageLabel,
+} from '../workspaces/long/stages'
 import {
   configureWorkspaceAttachmentOptions,
   getWorkspaceAgentInterface as getAgentInterface,
@@ -122,6 +128,24 @@ function isBookContentStageTarget(
 function resolveBookRuntimeLocation(
   props: Pick<Props, 'bookType' | 'stageId' | 'activeStageContentId'>,
 ): WorkspaceRuntimeLocation | undefined {
+  if (props.bookType === 'long') {
+    const rootId = longRootStageIdForStage(props.stageId)
+    const rootLabel =
+      rootId === 'worldbuilding'
+        ? '世界观'
+        : rootId === 'character_design'
+          ? '人物'
+          : rootId === 'plot_design'
+            ? '剧情'
+            : rootId === 'continuity_ledger'
+              ? '状态账本'
+              : '正文'
+    return {
+      kind: 'stage',
+      stageLabel: rootLabel,
+      stageDetailLabel: longStageLabel(props.stageId),
+    }
+  }
   if (props.bookType !== 'short' && props.bookType !== 'script') return undefined
   const visibleStages =
     props.bookType === 'script' ? SCRIPT_WORKSPACE_STAGES : SHORT_WORKSPACE_STAGES
@@ -401,6 +425,15 @@ type Props = {
   ) => string | undefined
   /** 各阶段全文，用于提示词中的交叉参考 */
   allStages: Partial<Record<StageId | MaterialStageId | SkillStageId, string>>
+  /** 长篇 v2 权威结构，仅供长篇智能体只读查询工具使用。 */
+  longWorkspace?: LongWorkspace | null
+  /** 将结构化长篇变更写回对应书籍会话。 */
+  replaceLongWorkspaceForBook?: (
+    bookId: string,
+    workspace: LongWorkspace,
+  ) => boolean | void | Promise<boolean | void>
+  /** 长篇正文管理智能体的自动写作调度回调。 */
+  startLongWriting?: StartLongWriting
   bookMemories?: MemoryEntry[]
   userMemories?: MemoryEntry[]
   bookMemoryAutoCaptureEnabled?: boolean
@@ -472,7 +505,6 @@ function resolveQuickLoadableSkills(
       ),
     )
   }
-  if (props.bookType === 'long') return []
   const agentId = (props.stageId === 'draft'
     ? EXPERT_DRAFT_COORDINATOR_AGENT_ID
     : props.stageId) as WorkspaceAgentId
@@ -697,7 +729,7 @@ function WorkspaceAiChatInner({
     const p = propsLatestRef.current
     if (
       workspaceType !== 'book' ||
-      (p.bookType !== 'short' && p.bookType !== 'script') ||
+      (p.bookType !== 'short' && p.bookType !== 'script' && p.bookType !== 'long') ||
       !p.bookMemoryAutoCaptureEnabled ||
       !p.onBookMemoriesCaptured
     ) {
@@ -905,6 +937,16 @@ function WorkspaceAiChatInner({
             return (p.activeStageContentId ?? p.stageId) as StageId
           },
           allStages: mergeLiveStagesFromProps(latest),
+          longWorkspace: latest.longWorkspace,
+          getLongWorkspace: () => propsLatestRef.current.longWorkspace,
+          replaceLongWorkspace: latest.replaceLongWorkspaceForBook
+            ? (workspace) =>
+                latest.replaceLongWorkspaceForBook?.(
+                  latest.sessionBookId,
+                  workspace,
+                )
+            : undefined,
+          startLongWriting: latest.startLongWriting,
           linkedMaterial: latest.linkedMaterial,
           linkedMaterialsByKind: latest.linkedMaterialsByKind,
           linkedSkill: latest.linkedSkill,
@@ -1453,6 +1495,16 @@ function WorkspaceAiChatInner({
           return (live.activeStageContentId ?? live.stageId) as StageId
         },
         allStages: latestAllStages,
+        longWorkspace: toolProps.longWorkspace,
+        getLongWorkspace: () => propsLatestRef.current.longWorkspace,
+        replaceLongWorkspace: toolProps.replaceLongWorkspaceForBook
+          ? (workspace) =>
+              toolProps.replaceLongWorkspaceForBook?.(
+                toolProps.sessionBookId,
+                workspace,
+              )
+          : undefined,
+        startLongWriting: toolProps.startLongWriting,
         linkedMaterial: toolProps.linkedMaterial,
         linkedMaterialsByKind: toolProps.linkedMaterialsByKind,
         linkedSkill: toolProps.linkedSkill,
@@ -1503,6 +1555,9 @@ function WorkspaceAiChatInner({
     props.activeStageContentId,
     debouncedBody,
     props.allStages,
+    props.longWorkspace,
+    props.replaceLongWorkspaceForBook,
+    props.startLongWriting,
     props.linkedMaterial,
     props.linkedMaterialsByKind,
     props.linkedSkill,
@@ -1617,6 +1672,11 @@ export const WorkspaceAiChat = memo(WorkspaceAiChatInner, (prev, next) => {
 
   // workspaceType 变化需要更新
   if (prev.workspaceType !== next.workspaceType) return false
+
+  // 长篇结构变化时必须刷新只读查询工具闭包；只比较 flat stages 会漏掉列表/页签字段。
+  if (prev.longWorkspace !== next.longWorkspace) return false
+  if (prev.replaceLongWorkspaceForBook !== next.replaceLongWorkspaceForBook) return false
+  if (prev.startLongWriting !== next.startLongWriting) return false
 
   if (prev.linkedMaterial?.id !== next.linkedMaterial?.id) return false
   if (prev.linkedMaterial?.updated_at !== next.linkedMaterial?.updated_at) return false

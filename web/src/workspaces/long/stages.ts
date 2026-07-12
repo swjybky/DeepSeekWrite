@@ -58,6 +58,7 @@ export const LONG_WORLDBUILDING_STAGES = [
   { id: 'worldbuilding.geography', label: '地理', rootId: 'worldbuilding' },
   { id: 'worldbuilding.history', label: '历史', rootId: 'worldbuilding' },
   { id: 'worldbuilding.terminology', label: '术语', rootId: 'worldbuilding' },
+  { id: 'worldbuilding.realms', label: '境界', rootId: 'worldbuilding' },
   { id: 'worldbuilding.items', label: '物品', rootId: 'worldbuilding' },
 ] as const satisfies readonly LongStageDefinition[]
 
@@ -78,12 +79,13 @@ export const LONG_PLOT_STAGES = [
 
 export const LONG_DEFAULT_DRAFT_STAGES = [
   { id: 'draft.volume-1.arc-1.chapter-1', label: '第一章', rootId: 'draft' },
-  { id: 'draft.volume-2.arc-1.chapter-1', label: '第一章', rootId: 'draft' },
 ] as const satisfies readonly LongStageDefinition[]
 
 export const LONG_CONTINUITY_STAGES = [
   { id: 'continuity_ledger.timeline', label: '时间线', rootId: 'continuity_ledger' },
   { id: 'continuity_ledger.character_states', label: '人物状态', rootId: 'continuity_ledger' },
+  { id: 'continuity_ledger.faction_states', label: '势力状态', rootId: 'continuity_ledger' },
+  { id: 'continuity_ledger.realm_states', label: '境界状态', rootId: 'continuity_ledger' },
   { id: 'continuity_ledger.open_foreshadowing', label: '未回收伏笔', rootId: 'continuity_ledger' },
   { id: 'continuity_ledger.continuity_notes', label: '连续性记录', rootId: 'continuity_ledger' },
 ] as const satisfies readonly LongStageDefinition[]
@@ -111,7 +113,8 @@ const LONG_DEFAULT_CONTENT_STAGE_ID_SET = new Set<string>(
   LONG_DEFAULT_CONTENT_STAGE_IDS,
 )
 const LONG_ROOT_STAGE_ID_SET = new Set<string>(LONG_ROOT_STAGE_IDS)
-const LONG_DRAFT_STAGE_RE = /^draft\.volume-(\d+)\.arc-(\d+)\.chapter-(\d+)$/
+const LONG_DRAFT_STAGE_RE =
+  /^draft\.volume-([1-9]\d*)\.arc-([1-9]\d*)\.chapter-([1-9]\d*)$/
 
 export function isLongRootStageId(id: string): id is LongRootStageId {
   return LONG_ROOT_STAGE_ID_SET.has(id)
@@ -142,6 +145,8 @@ export function buildLongDraftStageId(
 
 export function isLongStageId(id: string): id is LongStageId {
   if (LONG_DEFAULT_CONTENT_STAGE_ID_SET.has(id)) return true
+  // 世界观分类允许用户新建，其 stage id 不能被固定枚举限制。
+  if (/^worldbuilding\.[^\s.]+$/.test(id)) return true
   if (parseLongDraftStageId(id)) return true
   return false
 }
@@ -188,7 +193,7 @@ export function longDraftVolumeLabel(volumeNumber: number): string {
 }
 
 export function longDraftArcLabel(arcNumber: number): string {
-  return `剧情弧线${chineseNumber(arcNumber)}`
+  return `第${chineseNumber(arcNumber)}剧情弧线`
 }
 
 export function longDraftChapterLabel(chapterNumber: number): string {

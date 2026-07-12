@@ -29,6 +29,7 @@ type Props = {
   onOpenMaterialSelector: () => void
   onOpenSkillSelector: () => void
   onOpenExpertWritingPrompt: () => void
+  onOpenWorldbuildingFormat: () => void
   onOpenMemoryManager: () => void
   onToggleStatus: () => void
   memoryUnread?: boolean
@@ -59,6 +60,7 @@ export function WorkspaceBookHeader({
   onOpenMaterialSelector,
   onOpenSkillSelector,
   onOpenExpertWritingPrompt,
+  onOpenWorldbuildingFormat,
   onOpenMemoryManager,
   onToggleStatus,
   memoryUnread = false,
@@ -181,13 +183,24 @@ export function WorkspaceBookHeader({
         >
           技能库选择
         </button>
-        <button
-          type="button"
-          className="btn-book-memory"
-          onClick={onOpenExpertWritingPrompt}
-        >
-          自动写作提示词
-        </button>
+        {book.book_type !== 'long' ? (
+          <button
+            type="button"
+            className="btn-book-memory"
+            onClick={onOpenExpertWritingPrompt}
+          >
+            自动写作提示词
+          </button>
+        ) : null}
+        {book.book_type === 'long' ? (
+          <button
+            type="button"
+            className="btn-book-memory"
+            onClick={onOpenWorldbuildingFormat}
+          >
+            世界观格式管理
+          </button>
+        ) : null}
         <button
           type="button"
           className={

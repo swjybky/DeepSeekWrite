@@ -1,0 +1,56 @@
+.long-format-dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 22000;
+  display: grid;
+  place-items: center;
+  padding: 1rem;
+  background: rgb(15 23 42 / 0.46);
+  backdrop-filter: blur(3px);
+}
+
+.long-format-dialog {
+  width: min(760px, 100%);
+  max-height: min(760px, calc(100vh - 2rem));
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--paper-elevated);
+  box-shadow: 0 24px 70px rgb(15 23 42 / 0.28);
+}
+
+.long-format-dialog-head,
+.long-format-dialog-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1rem 1.1rem;
+}
+
+.long-format-dialog-head { border-bottom: 1px solid var(--border); }
+.long-format-dialog-foot { border-top: 1px solid var(--border); }
+.long-format-dialog-head h2 { margin: 0; font-size: 1.05rem; }
+.long-format-dialog-head p { margin: 0.2rem 0 0; color: var(--ink-faint); font-size: 0.8rem; }
+.long-format-dialog-head > button { border: 0; background: transparent; font-size: 1.5rem; color: var(--ink-faint); }
+.long-format-dialog-body { min-height: 0; overflow: auto; padding: 1rem 1.1rem; }
+.long-format-category-list { display: flex; flex-direction: column; gap: 0.65rem; }
+.long-format-category-row { display: grid; grid-template-columns: minmax(130px, 1fr) auto auto; gap: 0.65rem; align-items: center; }
+.long-format-category-row input { width: 100%; padding: 0.5rem 0.6rem; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); color: var(--ink); }
+.long-format-mode-switch { display: inline-flex; padding: 0.15rem; border: 1px solid var(--border); border-radius: 7px; background: var(--surface); }
+.long-format-mode-switch button { border: 0; border-radius: 5px; padding: 0.38rem 0.62rem; background: transparent; color: var(--ink-soft); }
+.long-format-mode-switch button.is-active { background: var(--accent); color: #fff; }
+.long-format-delete { border: 1px solid color-mix(in oklab, #dc2626 35%, var(--border)); background: transparent; color: #dc2626; border-radius: 6px; padding: 0.43rem 0.65rem; }
+.long-format-add,
+.long-format-done { border-radius: 7px; padding: 0.5rem 0.85rem; font-weight: 600; }
+.long-format-add { border: 1px solid var(--border); background: var(--surface); color: var(--ink); }
+.long-format-done { margin-left: auto; border: 1px solid var(--accent); background: var(--accent); color: #fff; }
+.long-format-empty { color: var(--ink-faint); text-align: center; }
+
+@media (max-width: 640px) {
+  .long-format-category-row { grid-template-columns: 1fr; }
+  .long-format-mode-switch { width: 100%; }
+  .long-format-mode-switch button { flex: 1; }
+}

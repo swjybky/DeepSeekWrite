@@ -40,6 +40,15 @@ function isLoadableSkillStageId(raw: string): raw is SkillStageId {
 
 function resolveLoadableSkillStageId(raw: string): SkillStageId | null {
   if (raw === 'expert_draft_coordinator') return 'draft'
+  if (raw === 'worldbuilding' || raw.startsWith('worldbuilding.')) {
+    return 'plot_design'
+  }
+  if (raw.startsWith('character_design.')) return 'character_design'
+  if (raw.startsWith('plot_design.')) return 'plot_design'
+  if (raw.startsWith('draft.')) return 'draft'
+  if (raw === 'continuity_ledger' || raw.startsWith('continuity_ledger.')) {
+    return 'plot_design'
+  }
   if (raw === 'intro_design' || raw === 'plot_refine') return 'plot_design'
   if (isLoadableSkillStageId(raw)) return raw
   return null

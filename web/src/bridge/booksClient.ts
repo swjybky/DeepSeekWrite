@@ -7,13 +7,14 @@ import type {
   BookSummary,
   BookType,
 } from '../domain/workspaceCore'
-import type { SaveBookOptions } from './apiTypes'
+import type { LongLedgerUpdates, SaveBookOptions } from './apiTypes'
 import type { MaterialKind, SkillKind } from './libraryDomain'
 import { deleteAiChatSessionsForOwner } from './aiChatHistoryClient'
 import { getBridgeApi, resetBridgeApiCache } from './runtime'
 import type { BridgeApi } from './runtime'
 import {
   mockCreateBook,
+  mockCommitLongChapter,
   mockDeleteBook,
   mockGetBook,
   mockListBooks,
@@ -143,10 +144,29 @@ export async function saveBook(
       opts.linked_skill_ids_by_kind ?? undefined,
       opts.memory_auto_capture_enabled ?? undefined,
       opts.linked_material_ids_by_kind ?? undefined,
+      opts.long_workspace ?? undefined,
     ),
   )
   if (raw === undefined) {
     return mockSaveBook(book_id, opts)
+  }
+  return raw ? normalizeBook(raw) : null
+}
+
+export async function commitLongChapter(
+  book_id: string,
+  chapter_stage_id: string,
+  ledger_updates?: LongLedgerUpdates | null,
+): Promise<Book | null> {
+  const raw = await callApiMethod('commit_long_chapter', (api) =>
+    api.commit_long_chapter(
+      book_id,
+      chapter_stage_id,
+      ledger_updates ?? null,
+    ),
+  )
+  if (raw === undefined) {
+    return mockCommitLongChapter(book_id, chapter_stage_id, ledger_updates)
   }
   return raw ? normalizeBook(raw) : null
 }

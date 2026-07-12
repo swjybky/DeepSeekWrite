@@ -36,6 +36,8 @@ import {
   longRootStageIdForStage,
   longStageLabel,
 } from '../../workspaces/long/stages'
+import type { StartLongWriting } from '../../workspaces/long/stageAgents'
+import type { LongWorkspace } from '../../workspaces/long/longWorkspace'
 import { PLOT_STAGE_ID } from '../../workspaces/short/stages'
 import type { BookWorkspaceSessionState } from '../../stores/workspaceStore'
 import { resolveLiveWorkspaceStageBody } from './liveStageBody'
@@ -159,6 +161,11 @@ type Props = {
     updater: (current: ExpertDraft) => ExpertDraft,
   ) => void
   startExpertWritingForBook: StartExpertWriting
+  replaceLongWorkspaceForBook: (
+    bookId: string,
+    workspace: LongWorkspace,
+  ) => boolean | void | Promise<boolean | void>
+  startLongWriting?: StartLongWriting
   getRenderedExpertDraftSectionContent: GetExpertDraftSectionContent
   syncExpertDraftSectionField?: (
     sectionId: string,
@@ -201,6 +208,8 @@ export function WorkspaceAiPanel({
   saveBookSession,
   updateExpertDraftForBook,
   startExpertWritingForBook,
+  replaceLongWorkspaceForBook,
+  startLongWriting,
   getRenderedExpertDraftSectionContent,
   syncExpertDraftSectionField,
   onBookMemoriesCaptured,
@@ -382,6 +391,9 @@ export function WorkspaceAiPanel({
                       })
                     }}
                     allStages={session.stages}
+                    longWorkspace={session.longWorkspace}
+                    replaceLongWorkspaceForBook={replaceLongWorkspaceForBook}
+                    startLongWriting={startLongWriting}
                     bookMemories={session.book.memories ?? []}
                     userMemories={userMemories}
                     bookMemoryAutoCaptureEnabled={

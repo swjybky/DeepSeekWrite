@@ -14,6 +14,17 @@ import type {
   MemoryEntry,
   StageId,
 } from '../domain/workspaceCore'
+import type {
+  LongLedgerUpdates,
+  LongWorkspace,
+} from '../workspaces/long/longWorkspace'
+import {
+  commitLongChapter as commitLongChapterLocally,
+  defaultLongWorkspace,
+  longWorkspaceCombinedDraft,
+  longWorkspaceToFlatStages,
+  normalizeLongWorkspace,
+} from '../workspaces/long/longWorkspace'
 import type { SaveSkillOptions } from './apiTypes'
 import {
   SCRIPT_MATERIAL_GENRES,
@@ -161,6 +172,7 @@ export async function mockCreateBook(
         linked_skill_id,
       )
     : {}
+  const longWorkspace = bt === 'long' ? defaultLongWorkspace() : undefined
   const book: Book = {
     id: randomId(),
     title: title.trim() || '未命名',
@@ -173,7 +185,11 @@ export async function mockCreateBook(
     linked_material_ids_by_kind: isWsBook ? linkedByKind : {},
     linked_skill_id: isWsBook ? firstLinkedSkillId(linkedSkillsByKind) : '',
     linked_skill_ids_by_kind: linkedSkillsByKind,
-    stages: normalizeStagesForWorkspaceBook({ book_type: bt }, {}),
+    stages: normalizeStagesForWorkspaceBook(
+      { book_type: bt },
+      longWorkspace ? longWorkspaceToFlatStages(longWorkspace) : {},
+    ),
+    long_workspace: longWorkspace,
     expert_draft: defaultExpertDraft(bt),
     memories: [],
     memory_auto_capture_enabled: true,
@@ -188,10 +204,20 @@ export async function mockCreateBook(
 export async function mockGetBook(book_id: string): Promise<Book | null> {
   const book = loadMock().get(book_id) ?? null
   if (!book) return null
+  const longWorkspace =
+    book.book_type === 'long'
+      ? normalizeLongWorkspace(book.long_workspace, book.stages)
+      : undefined
   return {
     ...book,
     status: normalizeBookStatus(book.status),
-    stages: normalizeStagesForWorkspaceBook(book, book.stages),
+    stages: normalizeStagesForWorkspaceBook(
+      book,
+      longWorkspace
+        ? longWorkspaceToFlatStages(longWorkspace, book.stages)
+        : book.stages,
+    ),
+    long_workspace: longWorkspace,
     expert_draft: normalizeExpertDraft(book.expert_draft, false, book.book_type),
   }
 }
@@ -201,6 +227,7 @@ export async function mockSaveBook(
   options: {
     content?: string | null
     stages?: Record<string, string> | null
+    long_workspace?: LongWorkspace | null
     linked_material_id?: string | null
     linked_material_ids_by_kind?: Partial<Record<MaterialKind, string[]>> | null
     linked_skill_id?: string | null
@@ -228,6 +255,22 @@ export async function mockSaveBook(
     next = { ...next, stages: merged, content: merged[primaryDraftStageId(next)] ?? '' }
   } else if (options.content != null) {
     next = { ...next, content: options.content }
+  }
+  if (options.long_workspace != null && next.book_type === 'long') {
+    const longWorkspace = normalizeLongWorkspace(
+      options.long_workspace,
+      options.stages ?? next.stages,
+    )
+    const projectedStages = normalizeStagesForWorkspaceBook(
+      next,
+      longWorkspaceToFlatStages(longWorkspace, next.stages),
+    )
+    next = {
+      ...next,
+      long_workspace: longWorkspace,
+      stages: projectedStages,
+      content: longWorkspaceCombinedDraft(longWorkspace),
+    }
   }
   if (options.linked_material_id !== undefined) {
     const mid = options.linked_material_id?.trim() ?? ''
@@ -301,6 +344,40 @@ export async function mockSaveBook(
       ...next,
       memory_auto_capture_enabled: Boolean(options.memory_auto_capture_enabled),
     }
+  }
+  map.set(book_id, next)
+  saveMock(map)
+  return next
+}
+
+export async function mockCommitLongChapter(
+  book_id: string,
+  chapter_stage_id: string,
+  ledger_updates?: LongLedgerUpdates | null,
+): Promise<Book | null> {
+  const map = loadMock()
+  const book = map.get(book_id)
+  if (!book) return null
+  if (book.book_type !== 'long') {
+    throw new Error('仅长篇创作空间支持章节落盘')
+  }
+  const workspace = normalizeLongWorkspace(book.long_workspace, book.stages)
+  const result = commitLongChapterLocally(
+    workspace,
+    chapter_stage_id,
+    ledger_updates ?? {},
+  )
+  if (!result.ok) throw new Error(result.error ?? '章节落盘失败')
+  const stages = normalizeStagesForWorkspaceBook(
+    book,
+    longWorkspaceToFlatStages(result.workspace, book.stages),
+  )
+  const next: Book = {
+    ...book,
+    long_workspace: result.workspace,
+    stages,
+    content: longWorkspaceCombinedDraft(result.workspace),
+    updated_at: new Date().toISOString().replace(/\.\d{3}Z$/, 'Z'),
   }
   map.set(book_id, next)
   saveMock(map)

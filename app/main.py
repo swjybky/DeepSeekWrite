@@ -219,7 +219,13 @@ from app.prompt_store import (
     save_expert_writing_task_prompt as _save_expert_writing_task_prompt,
     sync_workspace_prompt_defaults as _sync_workspace_prompt_defaults,
 )
-from app.models import SCRIPT_STAGE_KEYS, SHORT_STAGE_KEYS, long_stage_keys_from_stages
+from app.models import (
+    SCRIPT_STAGE_KEYS,
+    SHORT_STAGE_KEYS,
+    long_stage_keys_from_stages,
+    normalize_long_workspace_from_storage,
+    ordered_long_chapter_cards,
+)
 from app.skill_manager_skill_store import (
     read_skill_manager_skills as _read_skill_manager_skills,
     reset_skill_manager_skills as _reset_skill_manager_skills,
@@ -1255,6 +1261,7 @@ class Api:
         linked_skill_ids_by_kind: dict | None = None,
         memory_auto_capture_enabled: bool | None = None,
         linked_material_ids_by_kind: dict | None = None,
+        long_workspace: dict | None = None,
     ) -> dict | None:
         return self._store.save_book(
             book_id,
@@ -1268,6 +1275,19 @@ class Api:
             linked_skill_ids_by_kind=linked_skill_ids_by_kind,
             memory_auto_capture_enabled=memory_auto_capture_enabled,
             linked_material_ids_by_kind=linked_material_ids_by_kind,
+            long_workspace=long_workspace,
+        )
+
+    def commit_long_chapter(
+        self,
+        book_id: str,
+        chapter_stage_id: str,
+        ledger_updates: dict | None = None,
+    ) -> dict | None:
+        return self._store.commit_long_chapter(
+            book_id,
+            chapter_stage_id,
+            ledger_updates,
         )
 
     def get_book_memories(self, book_id: str) -> list[dict]:
@@ -1880,6 +1900,61 @@ class Api:
                         str(stages.get(stage_id, "") or ""),
                     )
 
+                if book_type == "long":
+                    long_workspace = normalize_long_workspace_from_storage(
+                        book.get("long_workspace"),
+                        stages,
+                    )
+                    zf.writestr(
+                        "long_workspace.json",
+                        json.dumps(long_workspace, ensure_ascii=False, indent=2),
+                    )
+                    plot = long_workspace["plot"]
+                    chapters = long_workspace["chapters"]
+                    volume_by_id = {
+                        str(row["id"]): row
+                        for row in plot["volumes"]
+                        if isinstance(row, dict)
+                    }
+                    arc_by_id = {
+                        str(row["id"]): row
+                        for row in plot["arcs"]
+                        if isinstance(row, dict)
+                    }
+                    chapter_counts: dict[str, int] = {}
+                    for card in ordered_long_chapter_cards(long_workspace):
+                        volume_id = str(card["volume_id"])
+                        arc_id = str(card["arc_id"])
+                        chapter_counts[arc_id] = chapter_counts.get(arc_id, 0) + 1
+                        volume = volume_by_id.get(volume_id, {})
+                        arc = arc_by_id.get(arc_id, {})
+                        chapter = chapters.get(str(card["stage_id"]), {})
+                        volume_name = _safe_zip_leaf(
+                            str(volume.get("name") or "未命名卷"),
+                            "未命名卷",
+                        )
+                        arc_name = _safe_zip_leaf(
+                            str(arc.get("name") or "未命名剧情弧"),
+                            "未命名剧情弧",
+                        )
+                        chapter_name = _safe_zip_leaf(
+                            str(chapter.get("title") or card.get("title") or "未命名章节"),
+                            "未命名章节",
+                        )
+                        prefix = (
+                            f"long_chapters/{volume_name}/{arc_name}/"
+                            f"{chapter_counts[arc_id]:04d}-{chapter_name}"
+                        )
+                        zf.writestr(f"{prefix}.txt", str(chapter.get("body") or ""))
+                        zf.writestr(
+                            f"{prefix}-人物状态.txt",
+                            str(chapter.get("character_state") or ""),
+                        )
+                        zf.writestr(
+                            f"{prefix}-交接注意.txt",
+                            str(chapter.get("handoff") or ""),
+                        )
+
                 expert_draft = book.get("expert_draft")
                 if isinstance(expert_draft, dict):
                     zf.writestr(
@@ -1955,6 +2030,13 @@ class Api:
 
                 title = str(book_data.get("title") or "导入书籍")
                 book_type = str(book_data.get("book_type") or "short")
+                if book_type == "long" and not isinstance(
+                    book_data.get("long_workspace"),
+                    dict,
+                ):
+                    long_workspace_data = _read_zip_json(zf, ["long_workspace.json"])
+                    if isinstance(long_workspace_data, dict):
+                        book_data["long_workspace"] = long_workspace_data
                 raw_categories = book_data.get("categories")
                 categories = [
                     str(item)
@@ -1973,6 +2055,11 @@ class Api:
                         if isinstance(book_data.get("linked_material_ids_by_kind"), dict)
                         else None
                     ),
+                    (
+                        book_data.get("linked_skill_ids_by_kind")
+                        if isinstance(book_data.get("linked_skill_ids_by_kind"), dict)
+                        else None
+                    ),
                 )
 
                 stages = book_data.get("stages")
@@ -1986,6 +2073,11 @@ class Api:
                     title=title,
                     status=str(book_data.get("status") or "editing"),
                     linked_skill_id=str(book_data.get("linked_skill_id") or ""),
+                    linked_skill_ids_by_kind=(
+                        book_data.get("linked_skill_ids_by_kind")
+                        if isinstance(book_data.get("linked_skill_ids_by_kind"), dict)
+                        else None
+                    ),
                     memory_auto_capture_enabled=(
                         bool(book_data.get("memory_auto_capture_enabled"))
                         if "memory_auto_capture_enabled" in book_data
@@ -1996,6 +2088,14 @@ class Api:
                         if isinstance(book_data.get("linked_material_ids_by_kind"), dict)
                         else None
                     ),
+                    long_workspace=(
+                        book_data.get("long_workspace")
+                        if isinstance(book_data.get("long_workspace"), dict)
+                        else None
+                    ),
+                    # 导入书籍包需要恢复包内既有落盘事实；普通前端 save_book
+                    # 不暴露这个仅存储层的旁路参数。
+                    allow_long_commit_import=True,
                 )
                 if isinstance(book_data.get("memories"), list):
                     self._store.set_book_memories(created["id"], book_data.get("memories"))

@@ -146,6 +146,7 @@ LONG_STAGE_KEYS: tuple[str, ...] = (
     "worldbuilding.geography",
     "worldbuilding.history",
     "worldbuilding.terminology",
+    "worldbuilding.realms",
     "worldbuilding.items",
     "character_design.protagonists",
     "character_design.major_supporting",
@@ -157,15 +158,20 @@ LONG_STAGE_KEYS: tuple[str, ...] = (
     "plot_design.chapter_cards",
     "plot_design.foreshadowing",
     "draft.volume-1.arc-1.chapter-1",
-    "draft.volume-2.arc-1.chapter-1",
     "continuity_ledger.timeline",
     "continuity_ledger.character_states",
+    "continuity_ledger.faction_states",
+    "continuity_ledger.realm_states",
+    "continuity_ledger.foreshadowing_states",
     "continuity_ledger.open_foreshadowing",
     "continuity_ledger.continuity_notes",
 )
 
 _LONG_DRAFT_STAGE_RE = re.compile(
-    r"^draft\.volume-[1-9]\d*\.arc-[1-9]\d*\.chapter-[1-9]\d*$"
+    r"^draft\.volume-([1-9]\d*)\.arc-([1-9]\d*)\.chapter-([1-9]\d*)$"
+)
+_LEGACY_LONG_DRAFT_STAGE_RE = re.compile(
+    r"^draft\.volume-(\d+)\.arc-(\d+)\.chapter-(\d+)$"
 )
 
 LONG_WORKSPACE_SCHEMA_VERSION = 2
@@ -229,6 +235,14 @@ def _record_string_list(raw: Any) -> list[str]:
     return out
 
 
+def _long_worldbuilding_stage_id(category_id: Any) -> str | None:
+    """Return the flat-stage id for a valid dynamic worldbuilding category."""
+    value = str(category_id or "").strip()
+    if not value or "." in value or any(char.isspace() for char in value):
+        return None
+    return f"worldbuilding.{value}"
+
+
 def _default_long_worldbuilding_categories() -> list[dict[str, Any]]:
     return [
         {
@@ -258,7 +272,7 @@ def _default_long_plot() -> dict[str, Any]:
             {
                 "id": "arc-1-1",
                 "volume_id": "volume-1",
-                "name": "第一剧情弧",
+                "name": "第一剧情弧线",
                 "timeline": "",
                 "order": 1,
             }
@@ -317,6 +331,15 @@ def default_long_workspace() -> dict[str, Any]:
 
 def _long_draft_parts(stage_id: str) -> tuple[int, int, int] | None:
     match = _LONG_DRAFT_STAGE_RE.match(str(stage_id or "").strip())
+    if not match:
+        return None
+    parts = tuple(int(value) for value in match.groups())
+    return parts[0], parts[1], parts[2]
+
+
+def _legacy_long_draft_parts(stage_id: str) -> tuple[int, int, int] | None:
+    """Parse an old numeric stage id, including the formerly accepted zero form."""
+    match = _LEGACY_LONG_DRAFT_STAGE_RE.match(str(stage_id or "").strip())
     if not match:
         return None
     parts = tuple(int(value) for value in match.groups())
@@ -529,10 +552,14 @@ def normalize_long_workspace_from_storage(
         for item in card_source
     }
     for stage_id in raw_chapters:
-        parts = _long_draft_parts(str(stage_id))
+        parts = _long_draft_parts(str(stage_id)) or _legacy_long_draft_parts(
+            str(stage_id)
+        )
         if not parts or stage_id in known_card_stages:
             continue
-        volume_number, arc_number, chapter_number = parts
+        volume_number, arc_number, chapter_number = (
+            max(1, int(value)) for value in parts
+        )
         volume_id = f"volume-{volume_number}"
         arc_id = f"arc-{volume_number}-{arc_number}"
         if volume_id not in {str(item["id"]) for item in volumes}:
@@ -576,6 +603,8 @@ def normalize_long_workspace_from_storage(
     cards: list[dict[str, Any]] = []
     seen_card_ids: set[str] = set()
     seen_stage_ids: set[str] = set()
+    chapter_source_stage_by_normalized: dict[str, str] = {}
+    normalized_stage_by_source: dict[str, str] = {}
     for index, item in enumerate(card_source):
         source = _record_dict(item)
         arc_id = str(source.get("arc_id") or "").strip()
@@ -606,7 +635,8 @@ def normalize_long_workspace_from_storage(
                 arc = arcs[0]
             arc_id = str(arc["id"])
         volume_id = str(arc["volume_id"])
-        stage_id = str(source.get("stage_id") or "").strip()
+        source_stage_id = str(source.get("stage_id") or "").strip()
+        stage_id = source_stage_id
         if not _long_draft_parts(stage_id) or stage_id in seen_stage_ids:
             volume_index = next(
                 (i + 1 for i, row in enumerate(volumes) if row["id"] == volume_id),
@@ -631,6 +661,11 @@ def normalize_long_workspace_from_storage(
                     f"draft.volume-{volume_index}.arc-{arc_index}.chapter-{chapter_number}"
                 )
         seen_stage_ids.add(stage_id)
+        chapter_source_stage_by_normalized[stage_id] = (
+            source_stage_id if source_stage_id in raw_chapters else stage_id
+        )
+        if source_stage_id and source_stage_id not in normalized_stage_by_source:
+            normalized_stage_by_source[source_stage_id] = stage_id
         cards.append(
             {
                 "id": _record_id(source.get("id"), "chapter-card", seen_card_ids),
@@ -671,7 +706,8 @@ def normalize_long_workspace_from_storage(
     chapters: dict[str, dict[str, Any]] = {}
     for card in cards:
         stage_id = str(card["stage_id"])
-        source = _record_dict(raw_chapters.get(stage_id))
+        source_stage_id = chapter_source_stage_by_normalized.get(stage_id, stage_id)
+        source = _record_dict(raw_chapters.get(source_stage_id))
         chapters[stage_id] = {
             "title": str(source.get("title") or card["title"]),
             "body": str(source.get("body") or ""),
@@ -686,23 +722,28 @@ def normalize_long_workspace_from_storage(
     ledger_raw = _record_dict(raw.get("ledger"))
     committed_through = str(ledger_raw.get("committed_through") or "")
     if committed_through not in chapters:
-        committed_through = ""
+        committed_through = normalized_stage_by_source.get(committed_through, "")
+
+    def normalized_ledger_rows(key: str, prefix: str) -> list[dict[str, str]]:
+        rows = _normalize_long_ledger_entries(ledger_raw.get(key), prefix)
+        for row in rows:
+            source_stage_id = str(row.get("chapter_stage_id") or "")
+            if source_stage_id in normalized_stage_by_source:
+                row["chapter_stage_id"] = normalized_stage_by_source[source_stage_id]
+        return rows
+
     result["ledger"] = {
         "committed_through": committed_through,
-        "timeline": _normalize_long_ledger_entries(
-            ledger_raw.get("timeline"), "timeline"
+        "timeline": normalized_ledger_rows("timeline", "timeline"),
+        "faction_states": normalized_ledger_rows(
+            "faction_states", "faction-state"
         ),
-        "faction_states": _normalize_long_ledger_entries(
-            ledger_raw.get("faction_states"), "faction-state"
+        "realm_states": normalized_ledger_rows("realm_states", "realm-state"),
+        "foreshadowing_states": normalized_ledger_rows(
+            "foreshadowing_states", "foreshadowing-state"
         ),
-        "realm_states": _normalize_long_ledger_entries(
-            ledger_raw.get("realm_states"), "realm-state"
-        ),
-        "foreshadowing_states": _normalize_long_ledger_entries(
-            ledger_raw.get("foreshadowing_states"), "foreshadowing-state"
-        ),
-        "continuity_notes": _normalize_long_ledger_entries(
-            ledger_raw.get("continuity_notes"), "continuity-note"
+        "continuity_notes": normalized_ledger_rows(
+            "continuity_notes", "continuity-note"
         ),
     }
     return result
@@ -721,6 +762,7 @@ def migrate_long_workspace_from_stages(
         "geography": "worldbuilding.geography",
         "history": "worldbuilding.history",
         "terminology": "worldbuilding.terminology",
+        "realms": "worldbuilding.realms",
         "items": "worldbuilding.items",
     }
     for category in raw["worldbuilding"]["categories"]:
@@ -728,6 +770,33 @@ def migrate_long_workspace_from_stages(
         if body:
             category["format"] = "text"
             category["text"] = body
+
+    # 新版允许用户新增世界观分类。若只有旧平面 stages，也要恢复这些动态分类，
+    # 否则首次升级为 v2 时会静默丢掉自定义世界观文本。
+    known_category_ids = {
+        str(category.get("id") or "")
+        for category in raw["worldbuilding"]["categories"]
+    }
+    for stage_id, body in source.items():
+        if not stage_id.startswith("worldbuilding."):
+            continue
+        category_id = stage_id.removeprefix("worldbuilding.")
+        if (
+            category_id in known_category_ids
+            or _long_worldbuilding_stage_id(category_id) != stage_id
+        ):
+            continue
+        raw["worldbuilding"]["categories"].append(
+            {
+                "id": category_id,
+                "name": category_id,
+                "format": "text",
+                "overview": "",
+                "items": [],
+                "text": body,
+            }
+        )
+        known_category_ids.add(category_id)
 
     character_stage_map = {
         "protagonists": "character_design.protagonists",
@@ -769,12 +838,19 @@ def migrate_long_workspace_from_stages(
         ]
 
     raw_chapters: dict[str, Any] = raw["chapters"]
-    for stage_id, body in source.items():
-        if not _long_draft_parts(stage_id):
-            continue
-        # 第一版默认自带两个空章节；迁移时只保留真正写过的节点，另保留 v2 默认第一章。
-        if not body and stage_id in LONG_STAGE_KEYS and stage_id != "draft.volume-1.arc-1.chapter-1":
-            continue
+    legacy_chapter_rows = [
+        (stage_id, body)
+        for stage_id, body in source.items()
+        if (
+            _long_draft_parts(stage_id) or _legacy_long_draft_parts(stage_id)
+        )
+        # 平面模型的默认第一章空槽位不代表用户真实创建的结构；动态空章仍需保留。
+        and (body or stage_id != "draft.volume-1.arc-1.chapter-1")
+    ]
+    if legacy_chapter_rows:
+        raw["plot"]["chapter_cards"] = []
+        raw_chapters.clear()
+    for stage_id, body in legacy_chapter_rows:
         raw_chapters[stage_id] = {
             "title": "",
             "body": body,
@@ -800,6 +876,21 @@ def migrate_long_workspace_from_stages(
         )
 
     add_legacy_ledger("timeline", "continuity_ledger.timeline", "timeline")
+    add_legacy_ledger(
+        "faction_states",
+        "continuity_ledger.faction_states",
+        "faction-states",
+    )
+    add_legacy_ledger(
+        "realm_states",
+        "continuity_ledger.realm_states",
+        "realm-states",
+    )
+    add_legacy_ledger(
+        "foreshadowing_states",
+        "continuity_ledger.foreshadowing_states",
+        "foreshadowing-states",
+    )
     add_legacy_ledger(
         "foreshadowing_states",
         "continuity_ledger.open_foreshadowing",
@@ -827,22 +918,33 @@ def sync_long_workspace_from_stage_patch(
     if not patch:
         return out
 
-    category_stage_map = {
-        "worldbuilding.rules": "rules",
-        "worldbuilding.factions": "factions",
-        "worldbuilding.geography": "geography",
-        "worldbuilding.history": "history",
-        "worldbuilding.terminology": "terminology",
-        "worldbuilding.items": "items",
-    }
     categories = out["worldbuilding"]["categories"]
-    for stage_id, category_id in category_stage_map.items():
-        if stage_id not in patch:
+    categories_by_id = {
+        str(category.get("id") or ""): category
+        for category in categories
+        if isinstance(category, dict)
+    }
+    for stage_id, value in patch.items():
+        stage_id = str(stage_id)
+        if not stage_id.startswith("worldbuilding."):
             continue
-        category = next((row for row in categories if row["id"] == category_id), None)
-        if category is not None:
-            category["format"] = "text"
-            category["text"] = str(patch.get(stage_id) or "")
+        category_id = stage_id.removeprefix("worldbuilding.")
+        if _long_worldbuilding_stage_id(category_id) != stage_id:
+            continue
+        category = categories_by_id.get(category_id)
+        if category is None:
+            category = {
+                "id": category_id,
+                "name": category_id,
+                "format": "text",
+                "overview": "",
+                "items": [],
+                "text": "",
+            }
+            categories.append(category)
+            categories_by_id[category_id] = category
+        category["format"] = "text"
+        category["text"] = str(value or "")
 
     character_stage_map = {
         "character_design.protagonists": "protagonists",
@@ -900,6 +1002,32 @@ def sync_long_workspace_from_stage_patch(
                 "commit_id": "",
             }
         chapters[stage_id]["body"] = str(value or "")
+
+    ledger_stage_map = {
+        "continuity_ledger.timeline": "timeline",
+        "continuity_ledger.faction_states": "faction_states",
+        "continuity_ledger.realm_states": "realm_states",
+        "continuity_ledger.foreshadowing_states": "foreshadowing_states",
+        "continuity_ledger.open_foreshadowing": "foreshadowing_states",
+        "continuity_ledger.continuity_notes": "continuity_notes",
+    }
+    for stage_id, target in ledger_stage_map.items():
+        if stage_id not in patch:
+            continue
+        legacy_id = f"legacy-flat-{stage_id.replace('.', '-')}"
+        rows = out["ledger"][target]
+        rows[:] = [row for row in rows if str(row.get("id") or "") != legacy_id]
+        content = str(patch.get(stage_id) or "").strip()
+        if content:
+            rows.append(
+                {
+                    "id": legacy_id,
+                    "chapter_stage_id": "",
+                    "chapter_title": "旧版状态账本",
+                    "content": content,
+                    "created_at": "",
+                }
+            )
     return normalize_long_workspace_from_storage(out)
 
 
@@ -929,6 +1057,150 @@ def ordered_long_chapter_cards(workspace: Any) -> list[dict[str, Any]]:
             row["id"],
         ),
     )
+
+
+def _long_named_text_blocks(
+    rows: list[dict[str, Any]],
+    fields: tuple[tuple[str, str], ...],
+) -> str:
+    """把结构化列表生成为旧版 stages 可读投影，不作为权威存储。"""
+    blocks: list[str] = []
+    for row in rows:
+        name = str(row.get("name") or row.get("title") or "未命名").strip()
+        lines = [f"## {name}"]
+        for field, label in fields:
+            raw_value = row.get(field)
+            value = (
+                "、".join(str(item).strip() for item in raw_value if str(item).strip())
+                if isinstance(raw_value, list)
+                else str(raw_value or "").strip()
+            )
+            if value:
+                lines.extend((f"### {label}", value))
+        blocks.append("\n".join(lines))
+    return "\n\n".join(blocks)
+
+
+def long_workspace_to_stages(workspace: Any) -> dict[str, str]:
+    """生成兼容旧前端/提示词的平面 stages；v2 结构始终是权威数据。"""
+    normalized = normalize_long_workspace_from_storage(workspace)
+    stages = {
+        key: ""
+        for key in LONG_STAGE_KEYS
+        if _long_draft_parts(key) is None
+    }
+
+    for category in normalized["worldbuilding"]["categories"]:
+        stage_id = _long_worldbuilding_stage_id(category.get("id"))
+        if not stage_id:
+            continue
+        if category.get("format") == "text":
+            stages[stage_id] = str(category.get("text") or "")
+            continue
+        overview = str(category.get("overview") or "").strip()
+        items = _long_named_text_blocks(
+            _record_list(category.get("items")),
+            (("description", "描述"), ("detail", "介绍")),
+        )
+        stages[stage_id] = "\n\n".join(
+            value
+            for value in (
+                f"# 所有{category.get('name') or '分类'}列表概述\n{overview}" if overview else "",
+                items,
+            )
+            if value
+        )
+
+    character_stage_map = {
+        "protagonists": "character_design.protagonists",
+        "major_supporting": "character_design.major_supporting",
+        "minor_supporting": "character_design.minor_supporting",
+        "passersby": "character_design.passersby",
+    }
+    for group_id, stage_id in character_stage_map.items():
+        entries = _record_list(normalized["characters"][group_id].get("entries"))
+        stages[stage_id] = _long_named_text_blocks(
+            entries,
+            (
+                ("core_profile", "核心人设"),
+                ("relationships", "人物关系"),
+                ("current_state", "当前状态"),
+                ("history", "历史状态变化"),
+            ),
+        )
+
+    plot = normalized["plot"]
+    stages["plot_design.book_line"] = str(plot.get("book_line") or "")
+    stages["plot_design.volumes"] = _long_named_text_blocks(
+        _record_list(plot.get("volumes")),
+        (("outline", "卷纲"),),
+    )
+    stages["plot_design.story_arcs"] = _long_named_text_blocks(
+        _record_list(plot.get("arcs")),
+        (("timeline", "剧情弧时间线安排"),),
+    )
+    stages["plot_design.chapter_cards"] = _long_named_text_blocks(
+        _record_list(plot.get("chapter_cards")),
+        (
+            ("outline", "章纲"),
+            ("world_constraints", "世界观强约束"),
+            ("characters", "出场人物"),
+        ),
+    )
+    stages["plot_design.foreshadowing"] = _long_named_text_blocks(
+        _record_list(plot.get("foreshadowing")),
+        (
+            ("description", "伏笔描述"),
+            ("content", "伏笔内容"),
+            ("status", "状态"),
+        ),
+    )
+
+    for stage_id, chapter in normalized["chapters"].items():
+        stages[str(stage_id)] = str(_record_dict(chapter).get("body") or "")
+
+    ledger = normalized["ledger"]
+
+    def ledger_text(*keys: str) -> str:
+        rows: list[dict[str, Any]] = []
+        for key in keys:
+            rows.extend(_record_list(ledger.get(key)))
+        return _long_named_text_blocks(rows, (("content", "内容"),))
+
+    stages["continuity_ledger.timeline"] = ledger_text("timeline")
+    stages["continuity_ledger.character_states"] = _long_named_text_blocks(
+        [
+            entry
+            for group in normalized["characters"].values()
+            for entry in _record_list(_record_dict(group).get("entries"))
+        ],
+        (("current_state", "当前状态"), ("history", "历史状态变化")),
+    )
+    stages["continuity_ledger.open_foreshadowing"] = ledger_text(
+        "foreshadowing_states"
+    )
+    stages["continuity_ledger.faction_states"] = ledger_text("faction_states")
+    stages["continuity_ledger.realm_states"] = ledger_text("realm_states")
+    stages["continuity_ledger.foreshadowing_states"] = ledger_text(
+        "foreshadowing_states"
+    )
+    stages["continuity_ledger.continuity_notes"] = ledger_text("continuity_notes")
+    return stages
+
+
+def long_workspace_combined_draft(workspace: Any) -> str:
+    """按章卡权威顺序拼接长篇正文，供 Book.content 与导出兼容使用。"""
+    normalized = normalize_long_workspace_from_storage(workspace)
+    chapters = normalized["chapters"]
+    blocks: list[str] = []
+    for card in ordered_long_chapter_cards(normalized):
+        chapter = _record_dict(chapters.get(str(card["stage_id"])))
+        body = str(chapter.get("body") or "").strip()
+        if not body:
+            continue
+        title = str(chapter.get("title") or card.get("title") or "").strip()
+        blocks.append(f"{title}\n\n{body}" if title else body)
+    return "\n\n".join(blocks)
 
 # 保留旧键用于数据迁移
 LEGACY_QINGGAN_STAGE_KEYS: tuple[str, ...] = (
@@ -965,11 +1237,15 @@ def is_long_stage_key(stage_id: str) -> bool:
 
 
 def long_stage_keys_from_stages(stages: dict[str, Any] | None) -> tuple[str, ...]:
-    """导出/落盘时使用：默认键在前，动态长篇键随后稳定排序。"""
-    keys = list(LONG_STAGE_KEYS)
-    for key in sorted(str(k) for k in (stages or {}).keys()):
-        if key not in keys and is_long_stage_key(key):
-            keys.append(key)
+    """导出/落盘时使用：固定节点在前，正文只跟随真实章卡稳定排序。"""
+    keys = [key for key in LONG_STAGE_KEYS if _long_draft_parts(key) is None]
+    draft_keys = [
+        str(key)
+        for key in (stages or {})
+        if _long_draft_parts(str(key)) is not None
+    ]
+    draft_keys.sort(key=lambda key: _long_draft_parts(key) or (10**9, 10**9, 10**9))
+    keys.extend(key for key in draft_keys if key not in keys)
     return tuple(keys)
 
 
@@ -1425,6 +1701,7 @@ class Book:
     )
     status: BookStatus = "editing"
     stages: dict[str, str] = field(default_factory=default_stages)
+    long_workspace: dict[str, Any] = field(default_factory=dict)
     expert_draft: dict[str, Any] = field(default_factory=default_expert_draft)
     memories: list[dict[str, str]] = field(default_factory=list)
     memory_auto_capture_enabled: bool = True
@@ -1440,6 +1717,14 @@ class Book:
         # 从存储加载时执行迁移
         raw_stages = data.get("stages")
         migrated_stages = normalize_stages_from_storage(raw_stages, bt)
+        long_workspace: dict[str, Any] = {}
+        if bt == "long":
+            raw_long_workspace = data.get("long_workspace")
+            long_workspace = normalize_long_workspace_from_storage(
+                raw_long_workspace if isinstance(raw_long_workspace, dict) and raw_long_workspace else None,
+                migrated_stages,
+            )
+            migrated_stages = long_workspace_to_stages(long_workspace)
         linked_material_id = str(data.get("linked_material_id") or "")
         linked_material_ids_by_kind = normalize_linked_material_ids_by_kind(
             data.get("linked_material_ids_by_kind"),
@@ -1460,7 +1745,11 @@ class Book:
             title=str(data["title"]),
             book_type=bt,  # type: ignore[arg-type]
             categories=list(data.get("categories") or []),
-            content=str(data.get("content") or ""),
+            content=(
+                long_workspace_combined_draft(long_workspace)
+                if bt == "long"
+                else str(data.get("content") or "")
+            ),
             output_dir=str(data.get("output_dir") or ""),
             linked_material_id=linked_material_id,
             linked_material_ids_by_kind=linked_material_ids_by_kind,
@@ -1468,6 +1757,7 @@ class Book:
             linked_skill_ids_by_kind=linked_skill_ids_by_kind,
             status=normalize_book_status(data.get("status")),
             stages=migrated_stages,
+            long_workspace=long_workspace,
             expert_draft=normalize_expert_draft_from_storage(
                 data.get("expert_draft"), bt
             ),

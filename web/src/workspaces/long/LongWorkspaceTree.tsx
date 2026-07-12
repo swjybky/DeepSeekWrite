@@ -1,26 +1,27 @@
-import { useMemo, useState } from 'react'
+import { useState } from 'react'
 import type { KeyboardEvent, ReactNode } from 'react'
-
 import {
   LONG_CHARACTER_STAGES,
   LONG_CONTINUITY_STAGES,
   LONG_PLOT_STAGES,
-  LONG_WORLDBUILDING_STAGES,
   LONG_WORKSPACE_STAGES,
-  collectLongDraftTree,
   longRootStageIdForStage,
   type LongRootStageId,
   type LongStageId,
 } from './stages'
+import {
+  longWorldbuildingStageId,
+  orderedLongArcs,
+  orderedLongChapterCards,
+  orderedLongVolumes,
+  type LongWorkspace,
+} from './longWorkspace'
 
 type Props = {
   rootLabel: string
-  stages: Partial<Record<string, string>>
+  workspace: LongWorkspace
   activeStageId: LongStageId
   onStageSelect: (stageId: LongStageId) => void
-  onCreateDraftVolume: () => void
-  onCreateDraftArc: (volumeNumber: number) => void
-  onCreateDraftChapter: (volumeNumber: number, arcNumber: number) => void
   editingTitle?: boolean
   titleDraft?: string
   onTitleDraftChange?: (value: string) => void
@@ -31,28 +32,15 @@ type Props = {
   onTitleInputKeyDown?: (event: KeyboardEvent<HTMLInputElement>) => void
 }
 
-const STATIC_CHILDREN: Record<
-  Exclude<LongRootStageId, 'draft'>,
-  readonly { id: LongStageId; label: string }[]
-> = {
-  worldbuilding: LONG_WORLDBUILDING_STAGES,
-  character_design: LONG_CHARACTER_STAGES,
-  plot_design: LONG_PLOT_STAGES,
-  continuity_ledger: LONG_CONTINUITY_STAGES,
-}
-
-function buttonClass(base: string, active: boolean) {
+function activeClass(base: string, active: boolean) {
   return active ? `${base} ${base}--active` : base
 }
 
 export function LongWorkspaceTree({
   rootLabel,
-  stages,
+  workspace,
   activeStageId,
   onStageSelect,
-  onCreateDraftVolume,
-  onCreateDraftArc,
-  onCreateDraftChapter,
   editingTitle = false,
   titleDraft = '',
   onTitleDraftChange,
@@ -63,32 +51,33 @@ export function LongWorkspaceTree({
   onTitleInputKeyDown,
 }: Props) {
   const activeRootId = longRootStageIdForStage(activeStageId)
-  const draftTree = useMemo(() => collectLongDraftTree(stages), [stages])
   const [rootExpanded, setRootExpanded] = useState(true)
   const [expanded, setExpanded] = useState<Record<string, boolean>>({})
-
-  const isExpanded = (id: string, defaultValue = true) =>
-    expanded[id] ?? defaultValue
-  const toggle = (id: string, defaultValue = true) => {
-    setExpanded((prev) => ({
-      ...prev,
-      [id]: !(prev[id] ?? defaultValue),
-    }))
+  const isExpanded = (id: string, fallback = true) => expanded[id] ?? fallback
+  const toggle = (id: string, fallback = true) => {
+    setExpanded((current) => ({ ...current, [id]: !(current[id] ?? fallback) }))
   }
 
-  const renderRootRow = (stage: (typeof LONG_WORKSPACE_STAGES)[number]) => {
-    const stageExpanded = isExpanded(stage.id, activeRootId === stage.id)
-    const active = activeRootId === stage.id
+  const childrenForRoot = (rootId: Exclude<LongRootStageId, 'draft'>) => {
+    if (rootId === 'worldbuilding') {
+      return workspace.worldbuilding.categories.map((category) => ({
+        id: longWorldbuildingStageId(category.id),
+        label: category.name || '未命名分类',
+      }))
+    }
+    if (rootId === 'character_design') return LONG_CHARACTER_STAGES
+    if (rootId === 'plot_design') return LONG_PLOT_STAGES
+    return LONG_CONTINUITY_STAGES
+  }
+
+  const rootRow = (stage: (typeof LONG_WORKSPACE_STAGES)[number]) => {
+    const open = isExpanded(stage.id, activeRootId === stage.id)
     return (
       <div className="workspace-tree-stage-row">
         <button
           type="button"
-          className={
-            active
-              ? 'workspace-tree-stage workspace-tree-stage--active workspace-tree-stage--branch'
-              : 'workspace-tree-stage workspace-tree-stage--branch'
-          }
-          aria-expanded={stageExpanded}
+          className={activeClass('workspace-tree-stage workspace-tree-stage--branch', activeRootId === stage.id)}
+          aria-expanded={open}
           onClick={() => toggle(stage.id, activeRootId === stage.id)}
         >
           <span className="workspace-tree-stage-dot" aria-hidden />
@@ -97,36 +86,29 @@ export function LongWorkspaceTree({
         <button
           type="button"
           className="workspace-tree-toggle workspace-tree-stage-toggle"
-          aria-expanded={stageExpanded}
-          aria-label={stageExpanded ? `收起${stage.label}` : `展开${stage.label}`}
+          aria-expanded={open}
+          aria-label={open ? `收起${stage.label}` : `展开${stage.label}`}
           onClick={() => toggle(stage.id, activeRootId === stage.id)}
         >
-          <span className="workspace-tree-chevron" aria-hidden>
-            {stageExpanded ? '▾' : '▸'}
-          </span>
+          <span className="workspace-tree-chevron" aria-hidden>{open ? '▾' : '▸'}</span>
         </button>
       </div>
     )
   }
 
-  const renderStaticGroup = (
-    stage: (typeof LONG_WORKSPACE_STAGES)[number],
-    children: readonly { id: LongStageId; label: string }[],
-  ) => {
-    const stageExpanded = isExpanded(stage.id, activeRootId === stage.id)
+  const staticGroup = (stage: Exclude<(typeof LONG_WORKSPACE_STAGES)[number], { id: 'draft' }>) => {
+    const open = isExpanded(stage.id, activeRootId === stage.id)
+    const children = childrenForRoot(stage.id)
     return (
       <li key={stage.id} className="workspace-tree-stage-item">
-        {renderRootRow(stage)}
-        {stageExpanded ? (
+        {rootRow(stage)}
+        {open ? (
           <ul className="workspace-tree-stage-children">
             {children.map((child) => (
               <li key={child.id}>
                 <button
                   type="button"
-                  className={buttonClass(
-                    'workspace-tree-stage-child',
-                    activeStageId === child.id,
-                  )}
+                  className={activeClass('workspace-tree-stage-child', activeStageId === child.id)}
                   onClick={() => onStageSelect(child.id)}
                   title={child.label}
                 >
@@ -134,127 +116,76 @@ export function LongWorkspaceTree({
                 </button>
               </li>
             ))}
+            {children.length === 0 ? <li className="workspace-tree-empty muted">暂无分类</li> : null}
           </ul>
         ) : null}
       </li>
     )
   }
 
-  const renderDraftGroup = (stage: (typeof LONG_WORKSPACE_STAGES)[number]) => {
-    const stageExpanded = isExpanded(stage.id, activeRootId === stage.id)
+  const draftStage = LONG_WORKSPACE_STAGES.find((stage) => stage.id === 'draft')!
+  const renderDraft = () => {
+    const open = isExpanded('draft', activeRootId === 'draft')
+    const volumes = orderedLongVolumes(workspace)
     return (
-      <li key={stage.id} className="workspace-tree-stage-item">
-        {renderRootRow(stage)}
-        {stageExpanded ? (
+      <li key="draft" className="workspace-tree-stage-item">
+        {rootRow(draftStage)}
+        {open ? (
           <ul className="workspace-tree-stage-children workspace-tree-stage-children--nested">
-            {draftTree.map((volume) => {
-              const volumeExpanded = isExpanded(volume.id, activeRootId === 'draft')
+            {volumes.map((volume) => {
+              const volumeOpen = isExpanded(`draft:${volume.id}`, activeRootId === 'draft')
               return (
                 <li key={volume.id} className="workspace-tree-stage-child-node">
                   <div className="workspace-tree-stage-child-row">
-                    <button
-                      type="button"
-                      className="workspace-tree-stage-child workspace-tree-stage-child--branch"
-                      onClick={() => toggle(volume.id, activeRootId === 'draft')}
-                    >
-                      {volume.label}
+                    <button type="button" className="workspace-tree-stage-child workspace-tree-stage-child--branch" onClick={() => toggle(`draft:${volume.id}`, activeRootId === 'draft')}>
+                      {volume.name}
                     </button>
-                    <button
-                      type="button"
-                      className="workspace-tree-toggle workspace-tree-stage-toggle"
-                      aria-expanded={volumeExpanded}
-                      aria-label={volumeExpanded ? `收起${volume.label}` : `展开${volume.label}`}
-                      onClick={() => toggle(volume.id, activeRootId === 'draft')}
-                    >
-                      <span className="workspace-tree-chevron" aria-hidden>
-                        {volumeExpanded ? '▾' : '▸'}
-                      </span>
+                    <button type="button" className="workspace-tree-toggle workspace-tree-stage-toggle" aria-expanded={volumeOpen} onClick={() => toggle(`draft:${volume.id}`, activeRootId === 'draft')}>
+                      <span className="workspace-tree-chevron" aria-hidden>{volumeOpen ? '▾' : '▸'}</span>
                     </button>
                   </div>
-                  {volumeExpanded ? (
+                  {volumeOpen ? (
                     <ul className="workspace-tree-stage-children workspace-tree-stage-children--nested">
-                      {volume.arcs.map((arc) => {
-                        const arcExpanded = isExpanded(arc.id, activeRootId === 'draft')
+                      {orderedLongArcs(workspace, volume.id).map((arc) => {
+                        const arcOpen = isExpanded(`draft:${arc.id}`, activeRootId === 'draft')
                         return (
                           <li key={arc.id} className="workspace-tree-stage-child-node">
                             <div className="workspace-tree-stage-child-row">
-                              <button
-                                type="button"
-                                className="workspace-tree-stage-child workspace-tree-stage-child--branch"
-                                onClick={() => toggle(arc.id, activeRootId === 'draft')}
-                              >
-                                {arc.label}
+                              <button type="button" className="workspace-tree-stage-child workspace-tree-stage-child--branch" onClick={() => toggle(`draft:${arc.id}`, activeRootId === 'draft')}>
+                                {arc.name}
                               </button>
-                              <button
-                                type="button"
-                                className="workspace-tree-toggle workspace-tree-stage-toggle"
-                                aria-expanded={arcExpanded}
-                                aria-label={arcExpanded ? `收起${arc.label}` : `展开${arc.label}`}
-                                onClick={() => toggle(arc.id, activeRootId === 'draft')}
-                              >
-                                <span className="workspace-tree-chevron" aria-hidden>
-                                  {arcExpanded ? '▾' : '▸'}
-                                </span>
+                              <button type="button" className="workspace-tree-toggle workspace-tree-stage-toggle" aria-expanded={arcOpen} onClick={() => toggle(`draft:${arc.id}`, activeRootId === 'draft')}>
+                                <span className="workspace-tree-chevron" aria-hidden>{arcOpen ? '▾' : '▸'}</span>
                               </button>
                             </div>
-                            {arcExpanded ? (
+                            {arcOpen ? (
                               <ul className="workspace-tree-stage-children workspace-tree-stage-children--nested">
-                                {arc.chapters.map((chapter) => (
-                                  <li key={chapter.id}>
-                                    <button
-                                      type="button"
-                                      className={buttonClass(
-                                        'workspace-tree-stage-child',
-                                        activeStageId === chapter.id,
-                                      )}
-                                      onClick={() => onStageSelect(chapter.id)}
-                                    >
-                                      {chapter.label}
-                                    </button>
-                                  </li>
-                                ))}
-                                <li>
-                                  <button
-                                    type="button"
-                                    className="workspace-tree-stage-child workspace-tree-stage-child--create"
-                                    onClick={() =>
-                                      onCreateDraftChapter(
-                                        volume.volumeNumber,
-                                        arc.arcNumber,
-                                      )
-                                    }
-                                  >
-                                    新建章节
-                                  </button>
-                                </li>
+                                {orderedLongChapterCards(workspace, arc.id).map((card) => {
+                                  const committed = workspace.chapters[card.stage_id]?.committed
+                                  return (
+                                    <li key={card.id}>
+                                      <button
+                                        type="button"
+                                        className={activeClass('workspace-tree-stage-child long-draft-tree-chapter', activeStageId === card.stage_id)}
+                                        onClick={() => onStageSelect(card.stage_id)}
+                                      >
+                                        <span>{card.title}</span>
+                                        {committed ? <span className="long-draft-tree-status">已落盘</span> : null}
+                                      </button>
+                                    </li>
+                                  )
+                                })}
                               </ul>
                             ) : null}
                           </li>
                         )
                       })}
-                      <li>
-                        <button
-                          type="button"
-                          className="workspace-tree-stage-child workspace-tree-stage-child--create"
-                          onClick={() => onCreateDraftArc(volume.volumeNumber)}
-                        >
-                          新建剧情弧线
-                        </button>
-                      </li>
                     </ul>
                   ) : null}
                 </li>
               )
             })}
-            <li>
-              <button
-                type="button"
-                className="workspace-tree-stage-child workspace-tree-stage-child--create"
-                onClick={onCreateDraftVolume}
-              >
-                新建卷
-              </button>
-            </li>
+            {volumes.length === 0 ? <li className="workspace-tree-empty muted">请先在剧情阶段创建分卷和章卡</li> : null}
           </ul>
         ) : null}
       </li>
@@ -264,16 +195,8 @@ export function LongWorkspaceTree({
   return (
     <nav className="workspace-tree workspace-tree--long" aria-label="长篇项目结构">
       <div className="workspace-tree-root">
-        <button
-          type="button"
-          className="workspace-tree-toggle"
-          aria-expanded={rootExpanded}
-          aria-label={rootExpanded ? '收起阶段列表' : '展开阶段列表'}
-          onClick={() => setRootExpanded((v) => !v)}
-        >
-          <span className="workspace-tree-chevron" aria-hidden>
-            {rootExpanded ? '▾' : '▸'}
-          </span>
+        <button type="button" className="workspace-tree-toggle" aria-expanded={rootExpanded} onClick={() => setRootExpanded((value) => !value)}>
+          <span className="workspace-tree-chevron" aria-hidden>{rootExpanded ? '▾' : '▸'}</span>
         </button>
         {editingTitle ? (
           <div className="workspace-tree-title-editor">
@@ -281,38 +204,24 @@ export function LongWorkspaceTree({
             <input
               className="workspace-tree-title-input"
               value={titleDraft}
-              onChange={(e) => onTitleDraftChange?.(e.target.value)}
+              onChange={(event) => onTitleDraftChange?.(event.target.value)}
               onBlur={() => onTitleEditEnd?.()}
-              onKeyDown={(e) => {
-                onTitleInputKeyDown?.(e)
-                if (e.defaultPrevented) return
-                if (e.key === 'Enter') {
-                  e.currentTarget.blur()
-                } else if (e.key === 'Escape') {
-                  onTitleEditCancel?.()
-                }
+              onKeyDown={(event) => {
+                onTitleInputKeyDown?.(event)
+                if (event.defaultPrevented) return
+                if (event.key === 'Enter') event.currentTarget.blur()
+                else if (event.key === 'Escape') onTitleEditCancel?.()
               }}
               autoFocus
             />
           </div>
         ) : (
-          <button
-            type="button"
-            className="workspace-tree-book"
-            title="双击编辑名称"
-            onDoubleClick={() => onTitleEditStart?.()}
-          >
-            {rootLabel || '未命名'}
-          </button>
+          <button type="button" className="workspace-tree-book" title="双击编辑名称" onDoubleClick={() => onTitleEditStart?.()}>{rootLabel || '未命名'}</button>
         )}
       </div>
       {rootExpanded ? (
         <ul className="workspace-tree-stages">
-          {LONG_WORKSPACE_STAGES.map((stage) =>
-            stage.id === 'draft'
-              ? renderDraftGroup(stage)
-              : renderStaticGroup(stage, STATIC_CHILDREN[stage.id]),
-          )}
+          {LONG_WORKSPACE_STAGES.map((stage) => stage.id === 'draft' ? renderDraft() : staticGroup(stage as Exclude<typeof stage, { id: 'draft' }>))}
         </ul>
       ) : null}
     </nav>

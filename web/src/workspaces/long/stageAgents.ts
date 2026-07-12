@@ -1,7 +1,15 @@
 import type { AgentTool } from '@earendil-works/pi-agent-core'
 import { Type } from 'typebox'
 
+import type {
+  Material,
+  MaterialKind,
+  Skill,
+  SkillKind,
+} from '../../bridge'
+
 import {
+  LONG_WORKSPACE_CONTENT_STAGES,
   isLongStageId,
   longContentStageRowsFromStages,
   longRootStageIdForStage,
@@ -13,6 +21,34 @@ import {
   defineTool,
   textBlock,
 } from '../shared/piToolkit'
+import { buildQueryLinkedMaterialEntriesTool } from '../shared/linkedMaterialQueryTools'
+import { buildLoadSkillTool } from '../short/loadSkill'
+import {
+  orderedLongArcs,
+  orderedLongChapterCards,
+  orderedLongVolumes,
+  type LongChapterCard,
+  type LongWorkspace,
+} from './longWorkspace'
+import { buildLongStructuredQueryTools } from './structuredQueryTools'
+import {
+  buildLongStructuredMutationTools,
+  type ReplaceLongWorkspace,
+} from './structuredMutationTools'
+
+export type { ReplaceLongWorkspace } from './structuredMutationTools'
+
+export type StartLongWritingRequest = {
+  scope: 'chapter' | 'arc' | 'volume'
+  chapterStageId?: string
+  arcId?: string
+  volumeId?: string
+  userWritingPrompt?: string
+}
+
+export type StartLongWriting = (
+  request: StartLongWritingRequest,
+) => boolean | Promise<boolean>
 
 export type LongWorkspaceStageAgentContext = {
   bookTitle: string
@@ -20,7 +56,17 @@ export type LongWorkspaceStageAgentContext = {
   stageBody: string
   getCurrentStageBody?: (stageId: LongStageId) => string | undefined
   allStages: Partial<Record<LongStageId, string>>
+  longWorkspace?: LongWorkspace | null
+  getLongWorkspace?: () => LongWorkspace | null | undefined
+  replaceLongWorkspace?: ReplaceLongWorkspace
+  startLongWriting?: StartLongWriting
+  linkedMaterial?: Material | null
+  linkedMaterialsByKind?: Partial<Record<MaterialKind, Material[]>>
+  linkedSkill?: Skill | null
+  linkedSkillsByKind?: Partial<Record<SkillKind, Skill[]>>
   allowedWorkspaceStages?: readonly LongStageId[]
+  allowedMaterialKinds?: readonly MaterialKind[]
+  allowedSkillKinds?: readonly SkillKind[]
   applyToStageEditor?: (payload: {
     mode: 'replace' | 'append' | 'append_token' | 'streaming_end'
     text: string
@@ -50,6 +96,10 @@ function dedupe<T>(items: readonly T[]): T[] {
   return [...new Set(items)]
 }
 
+const STATIC_LONG_STAGE_IDS = new Set<string>(
+  LONG_WORKSPACE_CONTENT_STAGES.map((stage) => stage.id),
+)
+
 function allKnownStageIds(ctx: LongWorkspaceStageAgentContext): LongStageId[] {
   return longContentStageRowsFromStages(ctx.allStages).map((stage) => stage.id)
 }
@@ -61,8 +111,10 @@ function allowedWorkspaceStages(
   const allowedRoots = new Set(
     [...allowed, ctx.stageId].map((stageId) => longRootStageIdForStage(stageId)),
   )
-  const dynamicAllowed = allKnownStageIds(ctx).filter((stageId) =>
-    allowedRoots.has(longRootStageIdForStage(stageId)),
+  const dynamicAllowed = allKnownStageIds(ctx).filter(
+    (stageId) =>
+      !STATIC_LONG_STAGE_IDS.has(stageId) &&
+      allowedRoots.has(longRootStageIdForStage(stageId)),
   )
   return dedupe([...allowed, ...dynamicAllowed, ctx.stageId])
 }
@@ -82,7 +134,13 @@ function longStageIdSchema(allowedStageIds: readonly LongStageId[]) {
 }
 
 function writableStageIds(ctx: LongWorkspaceStageAgentContext): readonly LongStageId[] {
-  return dedupe([...allKnownStageIds(ctx), ctx.stageId])
+  const writableRoot = longRootStageIdForStage(ctx.stageId)
+  return dedupe([
+    ...allKnownStageIds(ctx).filter(
+      (stageId) => longRootStageIdForStage(stageId) === writableRoot,
+    ),
+    ctx.stageId,
+  ])
 }
 
 function writableStageIdSchema(ctx: LongWorkspaceStageAgentContext) {
@@ -117,7 +175,7 @@ export function buildReadWorkspaceContentTool(
     name: 'read_workspace_content',
     label: '读取长篇工作区内容',
     description:
-      `读取本书长篇创作空间某一阶段的当前内容。当前仅允许读取：${description || '（无）'}。每次调用只返回一个 stage_id。`,
+      `读取本书长篇创作空间某一阶段的当前内容。当前仅允许读取：${description || '（无）'}。每次调用只返回一个 stage_id。世界观结构化详情必须改用 list_worldbuilding 与格式对应的 query_worldbuilding 工具。`,
     parameters: Type.Object({
       stage_id: schema,
     }),
@@ -125,6 +183,11 @@ export function buildReadWorkspaceContentTool(
       const stageId = params.stage_id as LongStageId
       if (!allowedSet.has(stageId)) {
         return textBlock(`当前不允许读取「${stageLabel(stageId)}」。`)
+      }
+      if (longRootStageIdForStage(stageId) === 'worldbuilding') {
+        return textBlock(
+          '世界观结构化详情不通过 read_workspace_content 返回。请先调用 list_worldbuilding；列表格式调用 query_worldbuilding / query_worldbuilding_item，文本格式调用 query_worldbuilding_text。',
+        )
       }
       const raw = readWorkspaceStageBody(ctx, stageId).trim()
       const header = `书名：《${ctx.bookTitle}》\n【${stageLabel(stageId)}】（${stageId}）`
@@ -157,12 +220,15 @@ export function buildSearchWorkspaceTextTool(
   ctx: LongWorkspaceStageAgentContext,
 ): AgentTool {
   const allowed = allowedWorkspaceStages(ctx)
+  const searchable = allowed.filter(
+    (stageId) => longRootStageIdForStage(stageId) !== 'worldbuilding',
+  )
   const { schema, description } = longStageIdSchema(allowed)
   return defineTool({
     name: 'search_workspace_text',
     label: '搜索长篇文本',
     description:
-      `在长篇创作空间里搜索文本，只返回命中位置和少量上下文。当前仅允许搜索：${description || '（无）'}。不传 stage_id 时搜索所有允许阶段。`,
+      `在长篇创作空间里搜索文本，只返回命中位置和少量上下文。当前仅允许搜索：${description || '（无）'}。不传 stage_id 时搜索所有允许阶段，但会跳过世界观结构化节点；世界观必须使用专用查询工具。`,
     parameters: Type.Object({
       query: Type.String({
         maxLength: 600,
@@ -178,9 +244,17 @@ export function buildSearchWorkspaceTextTool(
       const maxMatches = Math.max(1, Math.min(100, Number(params.max_matches ?? 20)))
       const contextChars = Math.max(10, Math.min(500, Number(params.context_chars ?? 80)))
       const requested = String(params.stage_id ?? '').trim()
+      if (
+        isLongStageId(requested) &&
+        longRootStageIdForStage(requested) === 'worldbuilding'
+      ) {
+        return textBlock(
+          '世界观结构化节点不允许通过 search_workspace_text 搜索全文。请先调用 list_worldbuilding，再按格式使用 query_worldbuilding / query_worldbuilding_item 或 query_worldbuilding_text。',
+        )
+      }
       const targets = isLongStageId(requested)
-        ? allowed.filter((id) => id === requested)
-        : allowed
+        ? searchable.filter((id) => id === requested)
+        : searchable
       const results: string[] = []
       for (const stageId of targets) {
         const body = readWorkspaceStageBody(ctx, stageId)
@@ -196,7 +270,11 @@ export function buildSearchWorkspaceTextTool(
         }
         if (results.length >= maxMatches) break
       }
-      if (results.length === 0) return textBlock(`未找到：${query}`)
+      if (results.length === 0) {
+        return textBlock(
+          `未找到：${query}\n（已跳过世界观结构化节点；查询世界观请使用专用格式工具。）`,
+        )
+      }
       return textBlock(`已返回 ${results.length} 处匹配。\n\n${results.join('\n\n')}`)
     },
   })
@@ -361,14 +439,169 @@ export function buildUpdateLongStoryLedgerTool(
   })
 }
 
+export function buildStartLongWritingTool(
+  ctx: LongWorkspaceStageAgentContext,
+): AgentTool {
+  return defineTool({
+    name: 'start_long_writing',
+    label: '启动长篇自动写作',
+    description:
+      '由长篇正文管理智能体启动自动写作。只允许 scope=chapter（单章）、arc（整个剧情弧）或 volume（整个卷），按章卡顺序串行执行；禁止整本书写作。',
+    parameters: Type.Object({
+      scope: Type.Union([
+        Type.Literal('chapter'),
+        Type.Literal('arc'),
+        Type.Literal('volume'),
+      ], {
+        description: 'chapter=单章；arc=整个剧情弧；volume=整个卷。不存在 book 选项。',
+      }),
+      chapter_stage_id: Type.Optional(Type.String({
+        description: 'scope=chapter 时必填，必须是章卡的 stage_id。',
+      })),
+      arc_id: Type.Optional(Type.String({
+        description: 'scope=arc 时必填，必须是剧情弧 id。',
+      })),
+      volume_id: Type.Optional(Type.String({
+        description: 'scope=volume 时必填，必须是分卷 id。',
+      })),
+      user_writing_prompt: Type.Optional(Type.String({
+        maxLength: 12000,
+        description: '用户本次附加的正文要求；没有额外要求时可省略。',
+      })),
+    }),
+    execute: async (_toolCallId, params) => {
+      const scope = String(params.scope ?? '')
+      if (scope !== 'chapter' && scope !== 'arc' && scope !== 'volume') {
+        return textBlock('未启动：scope 只允许 chapter、arc 或 volume，禁止整本书自动写作。')
+      }
+      const chapterStageId = String(params.chapter_stage_id ?? '').trim()
+      const arcId = String(params.arc_id ?? '').trim()
+      const volumeId = String(params.volume_id ?? '').trim()
+      const providedIds = [chapterStageId, arcId, volumeId].filter(Boolean)
+      if (providedIds.length !== 1) {
+        return textBlock(
+          '未启动：必须且只能提供当前 scope 对应的一个目标参数：chapter_stage_id、arc_id 或 volume_id。',
+        )
+      }
+      if (
+        (scope === 'chapter' && (!chapterStageId || arcId || volumeId)) ||
+        (scope === 'arc' && (!arcId || chapterStageId || volumeId)) ||
+        (scope === 'volume' && (!volumeId || chapterStageId || arcId))
+      ) {
+        return textBlock(
+          `未启动：scope=${scope} 的目标参数不匹配。chapter 只传 chapter_stage_id，arc 只传 arc_id，volume 只传 volume_id。`,
+        )
+      }
+      const workspace = ctx.getLongWorkspace?.() ?? ctx.longWorkspace
+      if (!workspace) {
+        return textBlock('未启动：当前书籍尚未加载结构化长篇数据。请先保存或重新打开书籍。')
+      }
+
+      let targetLabel: string
+      let targetCards: LongChapterCard[]
+      if (scope === 'chapter') {
+        const card = orderedLongChapterCards(workspace).find(
+          (row) => row.stage_id === chapterStageId,
+        )
+        if (!card) {
+          return textBlock(`未启动：找不到 stage_id=${chapterStageId} 的章卡。没有章卡不得写正文。`)
+        }
+        if (workspace.chapters[chapterStageId]?.committed) {
+          return textBlock(`未启动：章节「${card.title}」已经落盘，不允许重新自动编写。`)
+        }
+        targetLabel = card.title
+        targetCards = [card]
+      } else if (scope === 'arc') {
+        const arc = orderedLongArcs(workspace).find((row) => row.id === arcId)
+        if (!arc) return textBlock(`未启动：找不到 arc_id=${arcId} 的剧情弧。`)
+        const cards = orderedLongChapterCards(workspace, arc.id)
+        if (cards.length === 0) {
+          return textBlock(`未启动：剧情弧「${arc.name}」下面没有章卡。`)
+        }
+        targetLabel = `${arc.name}（${cards.length} 章）`
+        targetCards = cards
+      } else {
+        const volume = orderedLongVolumes(workspace).find((row) => row.id === volumeId)
+        if (!volume) return textBlock(`未启动：找不到 volume_id=${volumeId} 的分卷。`)
+        const cards = orderedLongChapterCards(workspace).filter(
+          (row) => row.volume_id === volume.id,
+        )
+        if (cards.length === 0) {
+          return textBlock(`未启动：分卷「${volume.name}」下面没有章卡。`)
+        }
+        targetLabel = `${volume.name}（${cards.length} 章）`
+        targetCards = cards
+      }
+
+      if (targetCards.every((card) => workspace.chapters[card.stage_id]?.committed)) {
+        return textBlock(`未启动：「${targetLabel}」对应章节均已落盘。`)
+      }
+      const orderedCards = orderedLongChapterCards(workspace)
+      const firstTargetIndex = orderedCards.findIndex(
+        (card) => card.stage_id === targetCards[0]?.stage_id,
+      )
+      const previousUncommitted = orderedCards
+        .slice(0, Math.max(0, firstTargetIndex))
+        .find((card) => !workspace.chapters[card.stage_id]?.committed)
+      if (previousUncommitted) {
+        return textBlock(
+          `未启动：目标前面的章节「${previousUncommitted.title}」尚未落盘。请先完成并落盘前序章节。`,
+        )
+      }
+
+      if (!ctx.startLongWriting) {
+        return textBlock('未启动：当前界面尚未连接长篇自动写作调度器。')
+      }
+      try {
+        const started = await ctx.startLongWriting({
+          scope,
+          ...(chapterStageId ? { chapterStageId } : {}),
+          ...(arcId ? { arcId } : {}),
+          ...(volumeId ? { volumeId } : {}),
+          ...(String(params.user_writing_prompt ?? '').trim()
+            ? { userWritingPrompt: String(params.user_writing_prompt).trim() }
+            : {}),
+        })
+        return textBlock(
+          started
+            ? `已启动「${targetLabel}」长篇自动写作，将严格按章卡顺序串行执行。`
+            : `未启动「${targetLabel}」：当前已有写作任务运行，或目标章节不满足写作条件。`,
+        )
+      } catch (error) {
+        return textBlock(
+          `启动失败：${error instanceof Error ? error.message : String(error)}`,
+        )
+      }
+    },
+  })
+}
+
 export function buildLongWorkspaceAdditionalTools(
   ctx: LongWorkspaceStageAgentContext,
 ): AgentTool[] {
+  const materialTools = ctx.allowedMaterialKinds?.length
+    ? [buildQueryLinkedMaterialEntriesTool(ctx, ctx.allowedMaterialKinds)]
+    : []
+  const loadSkill = buildLoadSkillTool({
+    linkedSkill: ctx.linkedSkill,
+    linkedSkillsByKind: ctx.linkedSkillsByKind,
+    allowedSkillKinds: ctx.allowedSkillKinds,
+    currentStageId: ctx.stageId,
+  })
+  const rootAgentId = longRootStageIdForStage(ctx.stageId)
+  const structuredQueryTools = buildLongStructuredQueryTools(ctx)
+  const structuredMutationTools = buildLongStructuredMutationTools(ctx)
+  const writingTools =
+    rootAgentId === 'draft' && ctx.stageId !== 'expert_section_writer'
+      ? [buildStartLongWritingTool(ctx)]
+      : []
   return [
     buildReadWorkspaceContentTool(ctx),
     buildSearchWorkspaceTextTool(ctx),
-    buildWriteWorkspaceEditorTool(ctx),
-    buildReplaceCurrentStageTextTool(ctx),
-    buildUpdateLongStoryLedgerTool(ctx),
+    ...structuredQueryTools,
+    ...materialTools,
+    loadSkill,
+    ...structuredMutationTools,
+    ...writingTools,
   ]
 }

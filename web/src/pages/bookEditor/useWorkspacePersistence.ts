@@ -28,6 +28,7 @@ import {
   type WorkspaceAgentReadAccessConfig,
 } from '../../bridge'
 import { coerceLongStageId } from '../../workspaces/long/stages'
+import { longWorkspaceCombinedDraft } from '../../workspaces/long/longWorkspace'
 import type {
   BookPersistedSnapshot,
   BookWorkspaceSessionState,
@@ -311,7 +312,10 @@ export function useWorkspacePersistence({
                 cachedStages,
                 nextCached.book,
               ),
-              content: cachedStages.draft,
+              content: nextCached.longWorkspace
+                ? longWorkspaceCombinedDraft(nextCached.longWorkspace)
+                : cachedStages.draft,
+              long_workspace: nextCached.longWorkspace ?? undefined,
               expert_draft: nextCached.expertDraft,
             },
             persistedSnapshot: createBookPersistedSnapshot(
@@ -322,7 +326,10 @@ export function useWorkspacePersistence({
                   cachedStages,
                   nextCached.book,
                 ),
-                content: cachedStages.draft,
+                content: nextCached.longWorkspace
+                  ? longWorkspaceCombinedDraft(nextCached.longWorkspace)
+                  : cachedStages.draft,
+                long_workspace: nextCached.longWorkspace ?? undefined,
                 expert_draft: nextCached.expertDraft,
               },
               nextCached.expertDraft,
@@ -452,6 +459,7 @@ export function useWorkspacePersistence({
             {
               ...beforeSave.book,
               stages: beforeSave.stages,
+              long_workspace: beforeSave.longWorkspace ?? undefined,
               expert_draft: beforeSave.expertDraft,
             },
             beforeSave.expertDraft,
@@ -464,6 +472,7 @@ export function useWorkspacePersistence({
         )
         const next = await saveBook(bookId, {
           stages: merged,
+          long_workspace: snapshotForSave.longWorkspace,
           expert_draft: snapshotForSave.expertDraft,
           status: options.status,
           memory_auto_capture_enabled: options.memory_auto_capture_enabled,
@@ -484,11 +493,15 @@ export function useWorkspacePersistence({
           book: {
             ...next,
             stages: nextBookStages,
+            long_workspace: latest.longWorkspace ?? undefined,
             expert_draft: latest.expertDraft,
-            content: latestStages.draft,
+            content: latest.longWorkspace
+              ? longWorkspaceCombinedDraft(latest.longWorkspace)
+              : latestStages.draft,
           },
           stages: latestStages,
           expertDraft: latest.expertDraft,
+          longWorkspace: latest.longWorkspace,
           // 只把这次请求实际提交的快照标记为已保存。请求期间产生的
           // 新输入继续保持 dirty，随后由自动保存队列再次提交。
           persistedSnapshot: snapshotForSave,

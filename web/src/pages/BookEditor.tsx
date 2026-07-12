@@ -28,11 +28,9 @@ import {
   getDefaultWorkspaceAgentReadAccess,
 } from '../workspaces/short/stageReadAccess'
 import {
-  longStageLabel,
-  nextLongDraftArcStageId,
-  nextLongDraftChapterStageId,
-  nextLongDraftVolumeStageId,
-} from '../workspaces/long/stages'
+  longWorldbuildingCategoryId,
+  type LongWorkspace,
+} from '../workspaces/long/longWorkspace'
 import { PLOT_STAGE_ID } from '../workspaces/short/stages'
 import {
   MaterialSelectorDialog,
@@ -68,6 +66,7 @@ import { useWorkspaceStreaming } from './bookEditor/useWorkspaceStreaming'
 import { useWorkspaceTitleEditing } from './bookEditor/useWorkspaceTitleEditing'
 import { useWorkspaceTreeNavigation } from './bookEditor/useWorkspaceTreeNavigation'
 import { useWorkspaceViewModel } from './bookEditor/useWorkspaceViewModel'
+import { useLongWorkspaceRuntime } from './bookEditor/useLongWorkspaceRuntime'
 import { WorkspaceAiPanel } from './bookEditor/WorkspaceAiPanel'
 import { WorkspaceCoverDialogs } from './bookEditor/WorkspaceCoverDialogs'
 import { WorkspaceEditorPane } from './bookEditor/WorkspaceEditorPane'
@@ -84,6 +83,7 @@ import { useTextHistory } from '../hooks/useTextHistory'
 import { useAppDialog } from '../components/useAppDialog'
 import { MemoryManagerDialog } from '../components/MemoryManagerDialog'
 import { ExpertWritingPromptDialog } from '../components/ExpertWritingPromptDialog'
+import { WorldbuildingFormatDialog } from '../workspaces/long/WorldbuildingFormatDialog'
 import './BookEditor.css'
 
 export function BookEditor() {
@@ -135,6 +135,7 @@ export function BookEditor() {
   const [expertAiChatEpoch, setExpertAiChatEpoch] = useState(0)
   const [coverData, setCoverData] = useState<string | null>(null)
   const [bookMemoryOpen, setBookMemoryOpen] = useState(false)
+  const [worldbuildingFormatOpen, setWorldbuildingFormatOpen] = useState(false)
   const [expertWritingPromptOpen, setExpertWritingPromptOpen] = useState(false)
   const [bookMemories, setBookMemories] = useState<MemoryEntry[]>([])
   const [workspaceUserMemories, setWorkspaceUserMemories] = useState<MemoryEntry[]>([])
@@ -591,6 +592,66 @@ export function BookEditor() {
     flushAllTokenBuffersForBook,
   })
 
+  const {
+    commitLongChapterForBook,
+    replaceLongWorkspaceForBook,
+    startLongWritingForBook,
+  } = useLongWorkspaceRuntime({
+    bookRef,
+    workspaceSessionsRef,
+    workspaceAgentReadAccess,
+    userMemories: workspaceUserMemories,
+    commitWorkspaceSession,
+    saveBookSession,
+    waitForSaveIdle,
+    setError,
+    setMessage,
+  })
+
+  const replaceLongWorkspaceAndRepairStage = useCallback(
+    (bookId: string, nextWorkspace: LongWorkspace): boolean => {
+      const currentSession = workspaceSessionsRef.current[bookId]
+      if (!currentSession || currentSession.book.book_type !== 'long') return false
+      const previousActiveStage = currentSession.activeStage
+      replaceLongWorkspaceForBook(bookId, nextWorkspace)
+      const categoryId = longWorldbuildingCategoryId(previousActiveStage)
+      if (
+        categoryId &&
+        !nextWorkspace.worldbuilding.categories.some(
+          (category) => category.id === categoryId,
+        )
+      ) {
+        const fallback = nextWorkspace.worldbuilding.categories[0]
+        const fallbackStage = (
+          fallback ? `worldbuilding.${fallback.id}` : 'character_design.protagonists'
+        ) as StageId
+        if (bookRef.current?.id === bookId) activeStageRef.current = fallbackStage
+        commitWorkspaceSession(bookId, (session) => ({
+          ...session,
+          activeStage: fallbackStage,
+          activePlotChildStage: '',
+        }))
+      }
+      return true
+    },
+    [
+      activeStageRef,
+      bookRef,
+      commitWorkspaceSession,
+      replaceLongWorkspaceForBook,
+      workspaceSessionsRef,
+    ],
+  )
+
+  const handleLongWorkspaceChange = useCallback(
+    (nextWorkspace: LongWorkspace) => {
+      const currentBook = bookRef.current
+      if (!currentBook || currentBook.book_type !== 'long') return
+      replaceLongWorkspaceAndRepairStage(currentBook.id, nextWorkspace)
+    },
+    [bookRef, replaceLongWorkspaceAndRepairStage],
+  )
+
   const workspaceAutoSave = useKeyedAutoSave<BookPersistedSnapshot>({
     getSnapshot: (bookId) => {
       const session = workspaceSessionsRef.current[bookId]
@@ -599,6 +660,7 @@ export function BookEditor() {
         {
           ...session.book,
           stages: session.stages,
+          long_workspace: session.longWorkspace ?? undefined,
           expert_draft: session.expertDraft,
         },
         session.expertDraft,
@@ -774,87 +836,6 @@ export function BookEditor() {
     textareaRefsRef,
   })
 
-  const createLongDraftStage = useCallback(
-    (stageId: StageId) => {
-      const currentBookId = bookRef.current?.id
-      if (!currentBookId) return
-      const created = commitWorkspaceSession(currentBookId, (session) => {
-        if (session.book.book_type !== 'long') return session
-        const nextStages = {
-          ...session.stages,
-          [stageId]: session.stages[stageId] ?? '',
-        }
-        return {
-          ...session,
-          stages: nextStages,
-          activeStage: stageId,
-          activePlotChildStage: '',
-          book: {
-            ...session.book,
-            stages: mergeStagePatchIntoAll(
-              session.book.stages,
-              nextStages,
-              session.book,
-            ),
-            content: session.book.content,
-          },
-        }
-      })
-      if (!created) return
-      activeStageRef.current = stageId
-      setActiveStage(stageId)
-      activePlotChildStageRef.current = ''
-      setActivePlotChildStage('')
-      textHistory.clear(`workspace:${currentBookId}:stage:${stageId}`, '')
-      setMessage(`已创建${longStageLabel(stageId)}`)
-    },
-    [
-      activePlotChildStageRef,
-      activeStageRef,
-      bookRef,
-      commitWorkspaceSession,
-      setActivePlotChildStage,
-      setActiveStage,
-      setMessage,
-      textHistory,
-    ],
-  )
-
-  const handleLongDraftVolumeCreate = useCallback(() => {
-    void (async () => {
-      await flushActiveWorkspaceBook()
-      createLongDraftStage(nextLongDraftVolumeStageId(stagesRef.current))
-    })()
-  }, [createLongDraftStage, flushActiveWorkspaceBook, stagesRef])
-
-  const handleLongDraftArcCreate = useCallback(
-    (volumeNumber: number) => {
-      void (async () => {
-        await flushActiveWorkspaceBook()
-        createLongDraftStage(
-          nextLongDraftArcStageId(stagesRef.current, volumeNumber),
-        )
-      })()
-    },
-    [createLongDraftStage, flushActiveWorkspaceBook, stagesRef],
-  )
-
-  const handleLongDraftChapterCreate = useCallback(
-    (volumeNumber: number, arcNumber: number) => {
-      void (async () => {
-        await flushActiveWorkspaceBook()
-        createLongDraftStage(
-          nextLongDraftChapterStageId(
-            stagesRef.current,
-            volumeNumber,
-            arcNumber,
-          ),
-        )
-      })()
-    },
-    [createLongDraftStage, flushActiveWorkspaceBook, stagesRef],
-  )
-
   const confirmResetExpertDraft = useCallback(
     () =>
       confirm({
@@ -1025,6 +1006,10 @@ export function BookEditor() {
     activePlotChildStage,
     stages,
   })
+  const activeLongWorkspace =
+    book?.book_type === 'long'
+      ? workspaceSessions[book.id]?.longWorkspace ?? book.long_workspace ?? null
+      : null
 
   if (!id) {
     return (
@@ -1124,6 +1109,7 @@ export function BookEditor() {
           onOpenMaterialSelector={() => void openMaterialSelector()}
           onOpenSkillSelector={() => void openSkillSelector()}
           onOpenExpertWritingPrompt={() => setExpertWritingPromptOpen(true)}
+          onOpenWorldbuildingFormat={() => setWorldbuildingFormatOpen(true)}
           onOpenMemoryManager={openBookMemoryManager}
           onToggleStatus={() => void handleToggleBookStatus()}
           memoryUnread={bookMemoryUnread}
@@ -1135,6 +1121,13 @@ export function BookEditor() {
           key={book.book_type}
           workspaceType={book.book_type}
           onClose={() => setExpertWritingPromptOpen(false)}
+        />
+      ) : null}
+      {worldbuildingFormatOpen && activeLongWorkspace ? (
+        <WorldbuildingFormatDialog
+          workspace={activeLongWorkspace}
+          onChange={handleLongWorkspaceChange}
+          onClose={() => setWorldbuildingFormatOpen(false)}
         />
       ) : null}
       {bookMemoryOpen ? (
@@ -1197,6 +1190,7 @@ export function BookEditor() {
               workspaceTreeStages={workspaceTreeStages}
               workspaceTreeBooks={workspaceTreeBooks}
               stages={stages}
+              longWorkspace={activeLongWorkspace}
               activeStage={activeStage}
               activePlotChildStage={activePlotChildStage}
               activeExpertDraftSectionId={activeExpertDraftSectionId}
@@ -1235,9 +1229,6 @@ export function BookEditor() {
                 void handleTreeBookStageChildSelect(bookId, stageId, childId)
               }
               onTreeBookStageChildCreate={handleTreeBookStageChildCreate}
-              onLongDraftVolumeCreate={handleLongDraftVolumeCreate}
-              onLongDraftArcCreate={handleLongDraftArcCreate}
-              onLongDraftChapterCreate={handleLongDraftChapterCreate}
             />
 
             <WorkspaceRailSplitter
@@ -1269,6 +1260,10 @@ export function BookEditor() {
           saveBookSession={saveBookSession}
           updateExpertDraftForBook={updateExpertDraftForBook}
           startExpertWritingForBook={startExpertWritingForBook}
+          replaceLongWorkspaceForBook={replaceLongWorkspaceAndRepairStage}
+          startLongWriting={(request) =>
+            startLongWritingForBook(book.id, request)
+          }
           getRenderedExpertDraftSectionContent={
             getRenderedExpertDraftSectionContent
           }
@@ -1297,6 +1292,11 @@ export function BookEditor() {
 
             <WorkspaceEditorPane
               expertDraftActive={expertDraftActive}
+              longWorkspace={activeLongWorkspace}
+              onLongWorkspaceChange={handleLongWorkspaceChange}
+              onCommitLongChapter={(stageId) =>
+                commitLongChapterForBook(book.id, stageId)
+              }
               ActiveExpertDraftEditor={ActiveExpertDraftEditor}
               expertDraft={expertDraft}
               stageBody={stageBody}

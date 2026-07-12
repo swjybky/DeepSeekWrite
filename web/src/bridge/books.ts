@@ -1,5 +1,6 @@
 export {
   bookTypeLabel,
+  commitLongChapter,
   createBook,
   deleteBook,
   getBook,
@@ -26,6 +27,7 @@ export type {
   ExpertDraft,
   ExpertDraftCharacterState,
   ExpertDraftSection,
+  LongLedgerUpdates,
   SaveBookOptions,
   ScriptStageId,
   ShortStageId,

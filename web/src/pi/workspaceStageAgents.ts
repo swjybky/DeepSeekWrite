@@ -5,6 +5,7 @@ import type {
   MaterialKind,
   MaterialKindWithMixed,
   MaterialStageEntry,
+  LongWorkspace,
   BookType,
   MaterialType,
   StageId,
@@ -43,6 +44,8 @@ import {
 import type { LongStageId } from '../workspaces/long/stages'
 import {
   buildLongWorkspaceAdditionalTools,
+  type ReplaceLongWorkspace,
+  type StartLongWriting,
   type LongWorkspaceStageAgentContext,
 } from '../workspaces/long/stageAgents'
 import {
@@ -134,6 +137,10 @@ export type WorkspaceStageAgentContext = {
   /** 剧情等父阶段：解析当前应写入的子槽位（运行时读取，避免快照过期） */
   getDefaultWriteStageId?: () => StageId
   allStages: Partial<Record<StageId | MaterialStageId | SkillStageId, string>>
+  longWorkspace?: LongWorkspace | null
+  getLongWorkspace?: () => LongWorkspace | null | undefined
+  replaceLongWorkspace?: ReplaceLongWorkspace
+  startLongWriting?: StartLongWriting
   linkedMaterial?: Material | null
   linkedMaterialsByKind?: Partial<Record<MaterialKind, Material[]>>
   linkedSkill?: Skill | null
@@ -269,7 +276,17 @@ export function getWorkspaceStageAdditionalTools(
       stageBody: ctx.stageBody,
       getCurrentStageBody: (stageId) => ctx.getCurrentStageBody?.(stageId),
       allStages: ctx.allStages as Partial<Record<LongStageId, string>>,
+      longWorkspace: ctx.longWorkspace,
+      getLongWorkspace: ctx.getLongWorkspace,
+      replaceLongWorkspace: ctx.replaceLongWorkspace,
+      startLongWriting: ctx.startLongWriting,
+      linkedMaterial: ctx.linkedMaterial,
+      linkedMaterialsByKind: ctx.linkedMaterialsByKind,
+      linkedSkill: ctx.linkedSkill,
+      linkedSkillsByKind: ctx.linkedSkillsByKind,
       allowedWorkspaceStages: readAccess?.workspace as readonly LongStageId[] | undefined,
+      allowedMaterialKinds: readAccess?.material as readonly MaterialKind[] | undefined,
+      allowedSkillKinds: readAccess?.skill as readonly SkillKind[] | undefined,
       applyToStageEditor: ctx.applyToStageEditor
         ? (payload) => ctx.applyToStageEditor?.(payload)
         : undefined,

@@ -2,6 +2,10 @@ import { WorkspaceTreeNav } from '../../components/WorkspaceTreeNav'
 import type { Book, StageId } from '../../domain/workspace'
 import { LongWorkspaceTree } from '../../workspaces/long/LongWorkspaceTree'
 import type { LongStageId } from '../../workspaces/long/stages'
+import {
+  normalizeLongWorkspace,
+  type LongWorkspace,
+} from '../../workspaces/long/longWorkspace'
 import { PLOT_STAGE_ID } from '../../workspaces/short/stages'
 import type { PlotChildStageId } from './workspaceTypes'
 import { isPlotChildStageId } from './stageEditing'
@@ -28,6 +32,7 @@ type Props = {
   workspaceTreeStages: TreeStage[]
   workspaceTreeBooks: TreeBook[]
   stages: Record<StageId, string>
+  longWorkspace: LongWorkspace | null
   activeStage: StageId
   activePlotChildStage: PlotChildStageId | ''
   activeExpertDraftSectionId: string
@@ -51,9 +56,6 @@ type Props = {
     childId: string,
   ) => void
   onTreeBookStageChildCreate: (bookId: string, stageId: StageId) => void
-  onLongDraftVolumeCreate: () => void
-  onLongDraftArcCreate: (volumeNumber: number) => void
-  onLongDraftChapterCreate: (volumeNumber: number, arcNumber: number) => void
 }
 
 function activeStageChildId(
@@ -71,6 +73,7 @@ export function WorkspaceRailPanel({
   workspaceTreeStages,
   workspaceTreeBooks,
   stages,
+  longWorkspace,
   activeStage,
   activePlotChildStage,
   activeExpertDraftSectionId,
@@ -90,9 +93,6 @@ export function WorkspaceRailPanel({
   onTreeBookStageSelect,
   onTreeBookStageChildSelect,
   onTreeBookStageChildCreate,
-  onLongDraftVolumeCreate,
-  onLongDraftArcCreate,
-  onLongDraftChapterCreate,
 }: Props) {
   const childId = activeStageChildId(
     activeStage,
@@ -105,12 +105,9 @@ export function WorkspaceRailPanel({
       <aside className="workspace-rail workspace-rail--tree">
         <LongWorkspaceTree
           rootLabel={book.title}
-          stages={stages}
+          workspace={longWorkspace ?? normalizeLongWorkspace(book.long_workspace, stages)}
           activeStageId={activeStage as LongStageId}
           onStageSelect={(stageId) => onActiveStageSelect(stageId as StageId)}
-          onCreateDraftVolume={onLongDraftVolumeCreate}
-          onCreateDraftArc={onLongDraftArcCreate}
-          onCreateDraftChapter={onLongDraftChapterCreate}
           editingTitle={editingTitle}
           titleDraft={titleDraft}
           onTitleDraftChange={onTitleDraftChange}

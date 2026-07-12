@@ -18,6 +18,7 @@ import {
   normalizeLongStages,
   type LongStageId,
 } from '../workspaces/long/stages'
+import type { LongWorkspace } from '../workspaces/long/longWorkspace'
 import { isWorkspaceTypeEnabled } from '../workspaces/registry'
 
 export type BookType = 'short' | 'long' | 'script'
@@ -78,7 +79,7 @@ export function normalizeMemoryEntries(raw: unknown): MemoryEntry[] {
   return out
 }
 
-export type { ShortStageId, ScriptStageId, LongStageId }
+export type { ShortStageId, ScriptStageId, LongStageId, LongWorkspace }
 
 type BookWorkspaceSlice = {
   book_type: BookType
@@ -369,6 +370,8 @@ export interface BookSummary {
 export interface Book extends BookSummary {
   content: string
   stages?: Partial<Record<StageId, string>>
+  /** 长篇 v2 结构化工作台数据；平面 stages 仅作 AI/旧版兼容投影。 */
+  long_workspace?: LongWorkspace
   expert_draft?: ExpertDraft
   memories: MemoryEntry[]
   memory_auto_capture_enabled: boolean

@@ -8,6 +8,7 @@ import type {
   SkillKind,
   StageId,
 } from '../domain/workspace'
+import type { LongWorkspace } from '../workspaces/long/longWorkspace'
 import type { PlotChildStageId as ScriptPlotChildStageId } from '../workspaces/script/stages'
 import type { PlotChildStageId as ShortPlotChildStageId } from '../workspaces/short/stages'
 
@@ -16,12 +17,14 @@ type WorkspacePlotChildStageId = ShortPlotChildStageId | ScriptPlotChildStageId
 export type BookPersistedSnapshot = {
   stages: Record<StageId, string>
   expertDraft: ExpertDraft
+  longWorkspace: LongWorkspace | null
 }
 
 export type WorkspaceSession = {
   book: Book
   stages: Record<StageId, string>
   expertDraft: ExpertDraft
+  longWorkspace: LongWorkspace | null
   linkedMaterial: Material | null
   linkedMaterialsByKind: Partial<Record<MaterialKind, Material[]>>
   linkedSkill: Skill | null
