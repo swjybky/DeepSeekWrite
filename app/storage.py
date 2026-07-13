@@ -77,6 +77,7 @@ ISO_FMT = "%Y-%m-%dT%H:%M:%SZ"
 
 _WIN_INVALID = '<>:"/\\|?*\n\r\t'
 AI_MODEL_CONFIG_PREF_KEY = "ai_model_config"
+LEGACY_BUILTIN_FREE_TEXT_MODEL_IDS = {"deppseekwrite-free"}
 APPEARANCE_STYLE_PREF_KEY = "appearance_style"
 APPEARANCE_STYLES = {"classic", "modern", "night"}
 TEXT_DISPLAY_MODE_PREF_KEY = "text_display_mode"
@@ -1238,6 +1239,8 @@ def normalize_ai_model_config(raw: Any) -> dict[str, Any]:
         normalized = _normalize_ai_model_entry(item)
         if not normalized:
             continue
+        if normalized["id"] in LEGACY_BUILTIN_FREE_TEXT_MODEL_IDS:
+            continue
         base_id = normalized["id"]
         config_id = base_id
         suffix = 2
@@ -1276,58 +1279,6 @@ def _ai_model_config_has_values(config: dict[str, Any]) -> bool:
     return bool(models) or config.get("image") is not None
 
 
-def _apply_builtin_text_default(config: dict[str, Any]) -> dict[str, Any]:
-    text = config.get("text")
-    from app.ai_env import load_text_model_defaults
-
-    text_defaults = load_text_model_defaults()
-    builtin_models = [
-        normalized
-        for item in text_defaults["models"]
-        if (normalized := _normalize_ai_model_entry(item))
-    ]
-    if not builtin_models:
-        return config
-
-    models = list(text.get("models", [])) if isinstance(text, dict) else []
-    default_model_id = _read_string(text.get("default_model_id")) if isinstance(text, dict) else ""
-
-    for builtin in reversed(builtin_models):
-        index = next(
-            (i for i, model in enumerate(models) if model.get("id") == builtin["id"]),
-            -1,
-        )
-        if index >= 0:
-            models[index] = {**models[index], **builtin}
-        else:
-            models.insert(0, dict(builtin))
-
-    model_ids = {model.get("id") for model in models}
-    selected = next(
-        (model for model in models if model.get("id") == default_model_id),
-        None,
-    )
-    builtin_default_id = _normalize_config_id(text_defaults["default_model_id"])
-    if (
-        not default_model_id
-        or default_model_id not in model_ids
-        or not _read_string(selected.get("api_key") if isinstance(selected, dict) else "")
-    ):
-        default_model_id = (
-            builtin_default_id
-            if builtin_default_id in model_ids
-            else _read_string(models[0].get("id")) if models else ""
-        )
-
-    return {
-        **config,
-        "text": {
-            "models": models,
-            "default_model_id": default_model_id,
-        },
-    }
-
-
 def _apply_builtin_image_default(config: dict[str, Any]) -> dict[str, Any]:
     if config.get("image") is not None:
         return config
@@ -1340,7 +1291,7 @@ def _apply_builtin_image_default(config: dict[str, Any]) -> dict[str, Any]:
 
 
 def _apply_builtin_defaults(config: dict[str, Any]) -> dict[str, Any]:
-    return _apply_builtin_image_default(_apply_builtin_text_default(config))
+    return _apply_builtin_image_default(config)
 
 
 def read_ai_model_config() -> dict[str, Any]:
@@ -1348,7 +1299,11 @@ def read_ai_model_config() -> dict[str, Any]:
         prefs = _load_preferences_unlocked()
         raw = prefs.get(AI_MODEL_CONFIG_PREF_KEY)
         if isinstance(raw, dict):
-            return _apply_builtin_defaults(normalize_ai_model_config(raw))
+            normalized = _apply_builtin_defaults(normalize_ai_model_config(raw))
+            if normalized != raw:
+                prefs[AI_MODEL_CONFIG_PREF_KEY] = normalized
+                _save_preferences_atomic_unlocked(prefs)
+            return normalized
 
         from app.ai_env import load_ai_model_settings_from_env
 

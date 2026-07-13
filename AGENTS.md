@@ -237,7 +237,7 @@ DeepWrite/
 - **`ai_env.py`**：
   - 按优先级读取 `.env`、`.deepseek.env`、`.kimi.env`（先 `writable_root()`，再模块目录，再 `app/` 目录）；冻结版优先读取可执行文件旁的配置。
   - 支持旧配置迁移：`model_name_main`（或旧键 `model_name`）、`model_name_flash`、`model_api_key`、`model_source`。
-  - 内置默认文字模型（`DeepWrite Free`）和内置图像模型配置，用于新用户零配置体验。
+  - 文字模型由用户自行配置，不提供内置免费文字模型；图像模型仍保留内置默认配置。
   - 支持 `models_type=owner` 自定义多模型列表，以及 `models_type=pi` 走 Pi 原生模型选择。
 
 - **`prompt_store.py`**：

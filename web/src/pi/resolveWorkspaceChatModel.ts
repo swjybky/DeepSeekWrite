@@ -297,6 +297,24 @@ let configuredModelsCache: ConfiguredModelsPayload | null | undefined
 let configuredModelsInflight: Promise<ConfiguredModelsPayload | null> | null =
   null
 let syncedModelConfigFingerprint = ''
+let legacyFreeModelCleanup: Promise<void> | null = null
+
+function cleanupLegacyFreeModelStorage(): Promise<void> {
+  if (!legacyFreeModelCleanup) {
+    legacyFreeModelCleanup = withPiStorageLock(() =>
+      withIndexedDbRetry(async () => {
+        const storage = getAppStorage()
+        await storage.providerKeys.delete('deppseekwrite-free')
+        await storage.customProviders.delete(
+          'deepseekwrite-owner-deppseekwrite-free',
+        )
+      }),
+    ).catch((error: unknown) => {
+      console.warn('[DeepWrite] 清理历史免费模型缓存失败:', error)
+    })
+  }
+  return legacyFreeModelCleanup
+}
 
 function fingerprintModelDefaults(defaults: AiModelDefaults): string {
   return JSON.stringify({
@@ -398,6 +416,7 @@ async function buildConfiguredModels(
 }
 
 async function loadConfiguredModels(): Promise<ConfiguredModelsPayload | null> {
+  await cleanupLegacyFreeModelStorage()
   if (configuredModelsCache !== undefined) {
     return configuredModelsCache
   }

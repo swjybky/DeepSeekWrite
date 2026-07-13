@@ -12,24 +12,6 @@ BUILTIN_IMAGE_MODEL_DEFAULTS: dict[str, str] = {
     "base_url": "https://sucloud.vip",
 }
 
-# 项目内置文字模型（Deepseek V4 Flash Free，新用户未配置时自动使用）
-BUILTIN_FREE_TEXT_MODEL: dict[str, str] = {
-    "id": "deppseekwrite-free",
-    "label": "Deepseek V4 Flash Free",
-    "provider": "deepseek",
-    "model_id": "deepseek-v4-flash",
-    "api_key": "sk-5852a9a14b0a47af9e23a1b86c561a84",
-    "base_url": "https://api.deepseek.com",
-    "api": "openai-completions",
-    "reasoning": "true",
-}
-
-BUILTIN_TEXT_MODEL_DEFAULTS: dict[str, Any] = {
-    "models": [BUILTIN_FREE_TEXT_MODEL],
-    "default_model_id": BUILTIN_FREE_TEXT_MODEL["id"],
-}
-
-
 def _parse_env_file(path: Path) -> dict[str, str]:
     out: dict[str, str] = {}
     if not path.is_file():
@@ -323,14 +305,6 @@ def load_ai_model_defaults() -> dict[str, Any] | None:
         "api_key": api_key,
     }
     return out
-
-
-def load_text_model_defaults() -> dict[str, Any]:
-    """读取文字模型默认配置；未单独配置时返回项目内置免费模型。"""
-    return {
-        "models": [dict(item) for item in BUILTIN_TEXT_MODEL_DEFAULTS["models"]],
-        "default_model_id": BUILTIN_TEXT_MODEL_DEFAULTS["default_model_id"],
-    }
 
 
 def load_image_model_defaults() -> dict[str, str]:

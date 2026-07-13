@@ -54,60 +54,15 @@ const BUILTIN_IMAGE_MODEL_DEFAULTS: ImageModelConfig = {
   base_url: 'https://sucloud.vip',
 }
 
-/** 项目内置文字模型（与 app/ai_env.py 保持一致） */
-export const BUILTIN_FREE_TEXT_MODEL_ID = 'deppseekwrite-free'
-
-const BUILTIN_FREE_TEXT_MODEL: AiModelConfig = {
-  id: BUILTIN_FREE_TEXT_MODEL_ID,
-  label: 'Deepseek V4 Flash Free',
-  provider: 'deepseek',
-  model_id: 'deepseek-v4-flash',
-  api_key: 'sk-5852a9a14b0a47af9e23a1b86c561a84',
-  base_url: 'https://api.deepseek.com',
-  api: 'openai-completions',
-  reasoning: true,
-}
-
-const BUILTIN_TEXT_MODEL_DEFAULTS: AiModelSettings['text'] = {
-  models: [BUILTIN_FREE_TEXT_MODEL],
-  default_model_id: BUILTIN_FREE_TEXT_MODEL.id,
-}
+const LEGACY_BUILTIN_FREE_TEXT_MODEL_IDS = new Set(['deppseekwrite-free'])
 
 /** 文字模型 API Key 输入框占位提示 */
 export const TEXT_MODEL_API_KEY_PLACEHOLDER =
-  'deepseek官方key无需配置此项；内置免费模型已自动配置；自定义模型请填写对应 Key'
+  '请填写该模型对应的 API Key'
 const AI_MODEL_CONFIG_STORAGE_KEY = 'deepseekwrite:ai_model_config'
 
-function mergeBuiltinTextDefaults(
-  text: AiModelSettings['text'],
-): AiModelSettings['text'] {
-  const models = text.models.map((model) => ({ ...model }))
-  for (const builtin of [...BUILTIN_TEXT_MODEL_DEFAULTS.models].reverse()) {
-    const existingIndex = models.findIndex((model) => model.id === builtin.id)
-    if (existingIndex >= 0) {
-      models[existingIndex] = { ...models[existingIndex], ...builtin }
-    } else {
-      models.unshift({ ...builtin })
-    }
-  }
-
-  const modelIds = new Set(models.map((model) => model.id))
-  const selected = models.find((model) => model.id === text.default_model_id)
-  const default_model_id =
-    !text.default_model_id || !modelIds.has(text.default_model_id) || !selected?.api_key.trim()
-      ? modelIds.has(BUILTIN_TEXT_MODEL_DEFAULTS.default_model_id)
-        ? BUILTIN_TEXT_MODEL_DEFAULTS.default_model_id
-        : models[0]?.id ?? ''
-      : text.default_model_id
-
-  return { models, default_model_id }
-}
-
-function applyBuiltinDefaults(settings: AiModelSettings): AiModelSettings {
-  let result = {
-    ...settings,
-    text: mergeBuiltinTextDefaults(settings.text),
-  }
+function applyBuiltinImageDefault(settings: AiModelSettings): AiModelSettings {
+  let result = settings
   if (!result.image) {
     result = { ...result, image: { ...BUILTIN_IMAGE_MODEL_DEFAULTS } }
   }
@@ -126,10 +81,6 @@ function normalizeConfigId(raw: string): string {
     .toLowerCase()
     .replace(/[^a-z0-9-]+/g, '_')
     .replace(/^[-_]+|[-_]+$/g, '')
-}
-
-export function isBuiltinFreeTextModel(model: Pick<AiModelConfig, 'id'>): boolean {
-  return normalizeConfigId(model.id) === BUILTIN_FREE_TEXT_MODEL_ID
 }
 
 function coerceAiBoolean(value: unknown): boolean | undefined {
@@ -199,6 +150,7 @@ export function normalizeAiModelSettings(raw: unknown): AiModelSettings {
   for (const item of modelsRaw) {
     const normalized = normalizeAiModelEntry(item)
     if (!normalized) continue
+    if (LEGACY_BUILTIN_FREE_TEXT_MODEL_IDS.has(normalized.id)) continue
     const baseId = normalized.id
     let id = baseId
     let suffix = 2
@@ -231,13 +183,15 @@ function storedAiModelConfig(): AiModelSettings {
   try {
     const raw = localStorage.getItem(AI_MODEL_CONFIG_STORAGE_KEY)
     if (!raw?.trim()) {
-      return applyBuiltinDefaults(normalizeAiModelSettings(null))
+      return applyBuiltinImageDefault(normalizeAiModelSettings(null))
     }
-    return applyBuiltinDefaults(
+    const normalized = applyBuiltinImageDefault(
       normalizeAiModelSettings(JSON.parse(raw) as unknown),
     )
+    setStoredAiModelConfig(normalized)
+    return normalized
   } catch {
-    return applyBuiltinDefaults(normalizeAiModelSettings(null))
+    return applyBuiltinImageDefault(normalizeAiModelSettings(null))
   }
 }
 
@@ -255,7 +209,7 @@ export async function getAiModelConfig(): Promise<AiModelSettings> {
   const api = await getBridgeApi()
   if (api?.get_ai_model_config) {
     try {
-      const normalized = applyBuiltinDefaults(
+      const normalized = applyBuiltinImageDefault(
         normalizeAiModelSettings(await api.get_ai_model_config()),
       )
       setStoredAiModelConfig(normalized)
@@ -273,13 +227,13 @@ export async function saveAiModelConfig(
   const normalized = normalizeAiModelSettings(config)
   const api = await getBridgeApi()
   if (api?.save_ai_model_config) {
-    const saved = applyBuiltinDefaults(
+    const saved = applyBuiltinImageDefault(
       normalizeAiModelSettings(await api.save_ai_model_config(normalized)),
     )
     setStoredAiModelConfig(saved)
     return saved
   }
-  const saved = applyBuiltinDefaults(normalized)
+  const saved = applyBuiltinImageDefault(normalized)
   setStoredAiModelConfig(saved)
   return saved
 }

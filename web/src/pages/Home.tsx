@@ -32,7 +32,6 @@ import {
   getBookCovers,
   getAiModelConfig,
   getStoredWorkspaceRoot,
-  isBuiltinFreeTextModel,
   isPywebviewDesktopBundle,
   listBooks,
   listSkills,
@@ -920,20 +919,12 @@ function ModelConfigDialog({
               ) : (
                 <div className="model-config-list">
                   {draft.text.models.map((model, index) => {
-                    const builtinFreeModel = isBuiltinFreeTextModel(model)
                     const officialPreset = getOfficialTextModelPreset(model)
                     const testKey = `model-${index}`
                     const testResult = modelTestResults[testKey]
                     const testingConnection = testResult?.status === 'testing'
                     return (
-                      <article
-                        className={
-                          builtinFreeModel
-                            ? 'model-config-item model-config-item--locked'
-                            : 'model-config-item'
-                        }
-                        key={`model-config-${index}`}
-                      >
+                      <article className="model-config-item" key={`model-config-${index}`}>
                         <div className="model-config-item-head">
                           <label className="model-config-default">
                             <input
@@ -960,27 +951,18 @@ function ModelConfigDialog({
                             >
                               {testingConnection ? '测试中…' : '测试联通'}
                             </button>
-                            {builtinFreeModel ? (
-                              <span className="model-config-lock-tag">内置</span>
-                            ) : (
-                              <button
-                                type="button"
-                                className="btn-secondary btn-small"
-                                disabled={saving}
-                                onClick={() => removeModel(index)}
-                              >
-                                删除
-                              </button>
-                            )}
+                            <button
+                              type="button"
+                              className="btn-secondary btn-small"
+                              disabled={saving}
+                              onClick={() => removeModel(index)}
+                            >
+                              删除
+                            </button>
                           </div>
                         </div>
 
-                        {builtinFreeModel ? (
-                          <div className="model-config-locked-summary">
-                            <strong>{model.label || 'DeepWrite Free'}</strong>
-                            <span>{model.model_id}</span>
-                          </div>
-                        ) : officialPreset ? (
+                        {officialPreset ? (
                           <div className="model-config-official">
                             <div className="model-config-official-title">
                               <strong>{officialPreset.label}</strong>
