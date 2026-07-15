@@ -1,0 +1,102 @@
+.memory-import-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 10030;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.25rem;
+  background: rgb(42 36 28 / 40%);
+  -webkit-backdrop-filter: blur(4px);
+  backdrop-filter: blur(4px);
+}
+
+.memory-import-dialog {
+  width: min(480px, 100%);
+  overflow: hidden;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  background: var(--paper-elevated);
+  color: var(--text-h);
+  box-shadow: var(--shadow-soft), 0 18px 52px rgb(42 36 28 / 18%);
+}
+
+.memory-import-head,
+.memory-import-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 0.9rem 1rem;
+}
+
+.memory-import-head {
+  border-bottom: 1px solid var(--border);
+}
+
+.memory-import-head h2 {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 1.05rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+}
+
+.memory-import-close {
+  width: 32px;
+  height: 32px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--paper);
+  color: var(--ink-soft);
+  font-size: 22px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.memory-import-body {
+  display: grid;
+  gap: 16px;
+  padding: 1rem;
+}
+
+.memory-import-warning {
+  margin: 0;
+  padding: 0.7rem 0.8rem;
+  border: 1px solid color-mix(in oklab, var(--danger) 24%, var(--border));
+  border-radius: var(--radius-sm);
+  background: color-mix(in oklab, var(--danger) 7%, var(--paper-elevated));
+  color: var(--danger);
+  font-size: 13px;
+  line-height: 1.65;
+}
+
+.memory-import-field {
+  display: grid;
+  gap: 8px;
+  color: var(--ink-soft);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.memory-import-field select {
+  width: 100%;
+  min-height: 38px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--paper);
+  color: var(--ink);
+  padding: 0 10px;
+  font: inherit;
+}
+
+.memory-import-empty {
+  margin: 12px 0;
+  color: var(--ink-faint);
+  text-align: center;
+}
+
+.memory-import-foot {
+  justify-content: flex-end;
+  border-top: 1px solid var(--border);
+}

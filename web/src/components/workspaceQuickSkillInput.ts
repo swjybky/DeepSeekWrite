@@ -1,4 +1,9 @@
 import type { ChatPanel, Attachment } from '@earendil-works/pi-web-ui'
+import {
+  disposeMessageEditorAutosize,
+  installMessageEditorAutosize,
+  refreshMessageEditorAutosize,
+} from './messageEditorAutosize'
 
 export type QuickLoadableSkill = {
   id: string
@@ -378,6 +383,7 @@ function installSendWrapper(chatPanel: ChatPanel, state: QuickSkillInputState) {
         : input
     const beforeCount = readMessageCount(iface)
     await originalSendMessage(nextInput, attachments)
+    refreshMessageEditorAutosize(chatPanel)
     if (shouldWrap && readMessageCount(iface) > beforeCount) {
       state.selectedSkill = null
       state.selectedMarker = ''
@@ -392,6 +398,7 @@ export function configureQuickSkillInput(
   config: QuickSkillInputConfig,
 ) {
   if (!chatPanel) return
+  installMessageEditorAutosize(chatPanel)
 
   const state = stateByChatPanel.get(chatPanel) ?? {
     ...config,
@@ -420,6 +427,7 @@ export function configureQuickSkillInput(
 
 export function disposeQuickSkillInput(chatPanel: ChatPanel | null) {
   if (!chatPanel) return
+  disposeMessageEditorAutosize(chatPanel)
   const state = stateByChatPanel.get(chatPanel)
   if (!state) return
   hideMenu(state)

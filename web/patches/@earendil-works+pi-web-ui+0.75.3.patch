@@ -1,0 +1,142 @@
+diff --git a/node_modules/@earendil-works/pi-web-ui/dist/components/MessageEditor.d.ts b/node_modules/@earendil-works/pi-web-ui/dist/components/MessageEditor.d.ts
+index 5ff379c..09b02d9 100644
+--- a/node_modules/@earendil-works/pi-web-ui/dist/components/MessageEditor.d.ts
++++ b/node_modules/@earendil-works/pi-web-ui/dist/components/MessageEditor.d.ts
+@@ -18,7 +18,7 @@ export declare class MessageEditor extends LitElement {
+     onSend?: (input: string, attachments: Attachment[]) => void;
+     onAbort?: () => void;
+     onModelSelect?: () => void;
+-    onThinkingChange?: (level: "off" | "minimal" | "low" | "medium" | "high") => void;
++    onThinkingChange?: (level: "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max") => void;
+     onFilesChange?: (files: Attachment[]) => void;
+     attachments: Attachment[];
+     maxFiles: number;
+diff --git a/node_modules/@earendil-works/pi-web-ui/dist/components/MessageEditor.js b/node_modules/@earendil-works/pi-web-ui/dist/components/MessageEditor.js
+index 1ebecad..a9d5523 100644
+--- a/node_modules/@earendil-works/pi-web-ui/dist/components/MessageEditor.js
++++ b/node_modules/@earendil-works/pi-web-ui/dist/components/MessageEditor.js
+@@ -206,6 +206,18 @@ let MessageEditor = class MessageEditor extends LitElement {
+         // Check if current model supports thinking/reasoning
+         const model = this.currentModel;
+         const supportsThinking = model?.reasoning === true; // Models with reasoning:true support thinking
++        const configuredProvider = String(model?.__deepSeekWriteProvider ?? model?.provider ?? "")
++            .trim()
++            .toLowerCase();
++        const isDeepSeekProvider = configuredProvider === "deepseek";
++        const supportsOpenAiExtendedThinking = typeof model?.thinkingLevelMap?.max === "string";
++        const selectedThinkingLevel = isDeepSeekProvider
++            ? this.thinkingLevel === "off"
++                ? "off"
++                : this.thinkingLevel === "xhigh" || this.thinkingLevel === "max"
++                    ? "xhigh"
++                    : "high"
++            : this.thinkingLevel;
+         return html `
+ 			<div
+ 				class="bg-card rounded-xl border shadow-sm relative ${this.isDragging ? "border-primary border-2 bg-primary/5" : "border-border"}"
+@@ -283,15 +295,27 @@ let MessageEditor = class MessageEditor extends LitElement {
+ 						${supportsThinking && this.showThinkingSelector
+             ? html `
+ 									${Select({
+-                value: this.thinkingLevel,
++                value: selectedThinkingLevel,
+                 placeholder: i18n("Off"),
+-                options: [
++                options: isDeepSeekProvider
++                    ? [
++                        { value: "off", label: i18n("Off"), icon: icon(Brain, "sm") },
++                        { value: "high", label: i18n("High"), icon: icon(Brain, "sm") },
++                        { value: "xhigh", label: "Max", icon: icon(Brain, "sm") },
++                    ]
++                    : [
+                     { value: "off", label: i18n("Off"), icon: icon(Brain, "sm") },
+                     { value: "minimal", label: i18n("Minimal"), icon: icon(Brain, "sm") },
+                     { value: "low", label: i18n("Low"), icon: icon(Brain, "sm") },
+                     { value: "medium", label: i18n("Medium"), icon: icon(Brain, "sm") },
+                     { value: "high", label: i18n("High"), icon: icon(Brain, "sm") },
+-                ],
++                    ...(supportsOpenAiExtendedThinking
++                        ? [
++                            { value: "xhigh", label: "XHigh", icon: icon(Brain, "sm") },
++                            { value: "max", label: "Max", icon: icon(Brain, "sm") },
++                        ]
++                        : []),
++                    ],
+                 onChange: (value) => {
+                     const level = value;
+                     this.thinkingLevel = level;
+diff --git a/node_modules/@earendil-works/pi-web-ui/src/components/AgentInterface.ts b/node_modules/@earendil-works/pi-web-ui/src/components/AgentInterface.ts
+index 0a536e9..90fe352 100644
+--- a/node_modules/@earendil-works/pi-web-ui/src/components/AgentInterface.ts
++++ b/node_modules/@earendil-works/pi-web-ui/src/components/AgentInterface.ts
+@@ -383,7 +383,7 @@ export class AgentInterface extends LitElement {
+ 							}}
+ 							.onThinkingChange=${
+ 								this.enableThinkingSelector
+-									? (level: "off" | "minimal" | "low" | "medium" | "high") => {
++									? (level: "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max") => {
+ 											session.state.thinkingLevel = level;
+ 										}
+ 									: undefined
+diff --git a/node_modules/@earendil-works/pi-web-ui/src/components/MessageEditor.ts b/node_modules/@earendil-works/pi-web-ui/src/components/MessageEditor.ts
+index e50d940..f0c74a6 100644
+--- a/node_modules/@earendil-works/pi-web-ui/src/components/MessageEditor.ts
++++ b/node_modules/@earendil-works/pi-web-ui/src/components/MessageEditor.ts
+@@ -37,7 +37,9 @@ export class MessageEditor extends LitElement {
+ 	@property() onSend?: (input: string, attachments: Attachment[]) => void;
+ 	@property() onAbort?: () => void;
+ 	@property() onModelSelect?: () => void;
+-	@property() onThinkingChange?: (level: "off" | "minimal" | "low" | "medium" | "high") => void;
++	@property() onThinkingChange?: (
++		level: "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max",
++	) => void;
+ 	@property() onFilesChange?: (files: Attachment[]) => void;
+ 	@property() attachments: Attachment[] = [];
+ 	@property() maxFiles = 10;
+@@ -239,6 +241,20 @@ export class MessageEditor extends LitElement {
+ 		// Check if current model supports thinking/reasoning
+ 		const model = this.currentModel;
+ 		const supportsThinking = model?.reasoning === true; // Models with reasoning:true support thinking
++		const configuredProvider = String(
++			(model as (typeof model & { __deepSeekWriteProvider?: string }) | null)
++				?.__deepSeekWriteProvider ?? model?.provider ?? "",
++		)
++			.trim()
++			.toLowerCase();
++		const isDeepSeekProvider = configuredProvider === "deepseek";
++		const selectedThinkingLevel = isDeepSeekProvider
++			? this.thinkingLevel === "off"
++				? "off"
++				: this.thinkingLevel === "xhigh" || this.thinkingLevel === "max"
++					? "xhigh"
++					: "high"
++			: this.thinkingLevel;
+ 
+ 		return html`
+ 			<div
+@@ -326,17 +342,21 @@ export class MessageEditor extends LitElement {
+ 							supportsThinking && this.showThinkingSelector
+ 								? html`
+ 									${Select({
+-										value: this.thinkingLevel,
++										value: selectedThinkingLevel,
+ 										placeholder: i18n("Off"),
+-										options: [
++										options: (isDeepSeekProvider ? [
++											{ value: "off", label: i18n("Off"), icon: icon(Brain, "sm") },
++											{ value: "high", label: i18n("High"), icon: icon(Brain, "sm") },
++											{ value: "xhigh", label: "Max", icon: icon(Brain, "sm") },
++										] : [
+ 											{ value: "off", label: i18n("Off"), icon: icon(Brain, "sm") },
+ 											{ value: "minimal", label: i18n("Minimal"), icon: icon(Brain, "sm") },
+ 											{ value: "low", label: i18n("Low"), icon: icon(Brain, "sm") },
+ 											{ value: "medium", label: i18n("Medium"), icon: icon(Brain, "sm") },
+ 											{ value: "high", label: i18n("High"), icon: icon(Brain, "sm") },
+-										] as SelectOption[],
++										]) as SelectOption[],
+ 										onChange: (value: string) => {
+-											const level = value as "off" | "minimal" | "low" | "medium" | "high";
++											const level = value as "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
+ 											this.thinkingLevel = level;
+ 											this.onThinkingChange?.(level);
+ 										},

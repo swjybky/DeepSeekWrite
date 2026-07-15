@@ -129,17 +129,30 @@ export function useExpertDraftRuntime({
 
   const selectExpertDraftSectionForBook = useCallback(
     (bookId: string, sectionId: string) => {
-      updateExpertDraftForBook(bookId, (draft) => {
-        if (!draft.sections.some((section) => section.id === sectionId)) {
-          return draft
+      const current = workspaceSessionsRef.current[bookId]
+      if (
+        !current ||
+        current.expertDraft.active_section_id === sectionId ||
+        !current.expertDraft.sections.some((section) => section.id === sectionId)
+      ) {
+        return
+      }
+      commitWorkspaceSession(bookId, (session) => {
+        const nextExpertDraft = {
+          ...session.expertDraft,
+          active_section_id: sectionId,
         }
         return {
-          ...draft,
-          active_section_id: sectionId,
+          ...session,
+          expertDraft: nextExpertDraft,
+          book: {
+            ...session.book,
+            expert_draft: nextExpertDraft,
+          },
         }
       })
     },
-    [updateExpertDraftForBook],
+    [commitWorkspaceSession, workspaceSessionsRef],
   )
 
   const createExpertDraftSectionForBook = useCallback(

@@ -35,6 +35,11 @@ import {
   buildLearningTools,
   type LearningWritePayload,
 } from './learningAgentTools'
+import {
+  disposeMessageEditorAutosize,
+  installMessageEditorAutosize,
+  refreshMessageEditorAutosize,
+} from '../../components/messageEditorAutosize'
 
 type Props = {
   activeStage: LearningStageId
@@ -219,6 +224,7 @@ function LearningAiChat({
       unsubscribeAgent = agent.subscribe((event) => {
         if (event.type === 'agent_start') {
           onRunStateChangeRef.current?.(true)
+          refreshMessageEditorAutosize(chatPanelRef.current)
         } else if (event.type === 'agent_end') {
           onRunStateChangeRef.current?.(false)
         }
@@ -238,6 +244,7 @@ function LearningAiChat({
         onModelSelect: openModelSelector,
         toolsFactory: () => buildToolsWithArtifacts(activeStage),
       })
+      installMessageEditorAutosize(chatPanel)
       syncWorkspaceModelButtonLabel(chatPanel, agent.state.model)
       notifyModelLabel(agent.state.model)
       requestAnimationFrame(() => {
@@ -253,6 +260,7 @@ function LearningAiChat({
       unsubscribePreferences?.()
       agentRef.current?.abort()
       agentRef.current = null
+      disposeMessageEditorAutosize(chatPanelRef.current)
       chatPanelRef.current?.remove()
       chatPanelRef.current = null
     }

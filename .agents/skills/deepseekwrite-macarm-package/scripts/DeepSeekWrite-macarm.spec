@@ -94,7 +94,7 @@ exe = EXE(
     a.scripts,
     [],
     exclude_binaries=True,
-    name="DeepSeekWrite",
+    name="DeepWrite",
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -115,17 +115,17 @@ coll = COLLECT(
     strip=False,
     upx=False,
     upx_exclude=[],
-    name="DeepSeekWrite",
+    name="DeepWrite",
 )
 
 app = BUNDLE(
     coll,
-    name="DeepSeekWrite.app",
+    name="DeepWrite.app",
     icon=str(icns_path) if icns_path.is_file() else None,
     bundle_identifier="com.openwrite.deepseekwrite",
     info_plist={
-        "CFBundleName": "DeepSeekWrite",
-        "CFBundleDisplayName": "DeepSeekWrite",
+        "CFBundleName": "DeepWrite",
+        "CFBundleDisplayName": "DeepWrite",
         "CFBundleShortVersionString": app_version,
         "CFBundleVersion": app_version,
         "LSMinimumSystemVersion": "11.0",

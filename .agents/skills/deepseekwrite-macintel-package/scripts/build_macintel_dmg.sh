@@ -38,7 +38,7 @@ ROOT="${1:-$PWD}"
 ROOT="$(cd "$ROOT" && pwd)"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-[[ "$(uname -s)" == "Darwin" ]] || fail "DeepSeekWrite-intel.dmg must be built on macOS."
+[[ "$(uname -s)" == "Darwin" ]] || fail "DeepWrite-intel.dmg must be built on macOS."
 arch -x86_64 /usr/bin/true >/dev/null 2>&1 || fail "x86_64 execution is unavailable. On Apple Silicon, install Rosetta first: softwareupdate --install-rosetta"
 
 for cmd in node npm sips iconutil hdiutil ditto codesign file; do
@@ -55,9 +55,9 @@ INTEL_PYTHON_DIR="$ROOT/.macintel-python"
 INTEL_PYTHON="$INTEL_PYTHON_DIR/$PYTHON_BUILD/bin/python3.12"
 VENV_DIR="$ROOT/.venv-macintel-build"
 DIST_DIR="$ROOT/dist"
-APP_PATH="$DIST_DIR/DeepSeekWrite.app"
-APP_EXE="$APP_PATH/Contents/MacOS/DeepSeekWrite"
-DMG_PATH="$DIST_DIR/DeepSeekWrite-intel.dmg"
+APP_PATH="$DIST_DIR/DeepWrite.app"
+APP_EXE="$APP_PATH/Contents/MacOS/DeepWrite"
+DMG_PATH="$DIST_DIR/DeepWrite-intel.dmg"
 DMG_ROOT="$BUILD_DIR/dmgroot"
 SPEC_FILE="$SCRIPT_DIR/DeepSeekWrite-macintel.spec"
 ICON_PNG="$ROOT/app/assets/app-icon.png"
@@ -134,8 +134,8 @@ else
   ICON_ICNS=""
 fi
 
-log "Building DeepSeekWrite.app with PyInstaller"
-rm -rf "$APP_PATH" "$DIST_DIR/DeepSeekWrite" "$DMG_PATH"
+log "Building DeepWrite.app with PyInstaller"
+rm -rf "$APP_PATH" "$DIST_DIR/DeepWrite" "$DMG_PATH"
 env DEEPSEEKWRITE_PROJECT_ROOT="$ROOT" \
   DEEPSEEKWRITE_MAC_ICON="$ICON_ICNS" \
   arch -x86_64 "$PYTHON_BIN" -m PyInstaller \
@@ -157,10 +157,10 @@ codesign --verify --deep --strict "$APP_PATH"
 log "Creating DMG"
 rm -rf "$DMG_ROOT"
 mkdir -p "$DMG_ROOT"
-ditto "$APP_PATH" "$DMG_ROOT/DeepSeekWrite.app"
+ditto "$APP_PATH" "$DMG_ROOT/DeepWrite.app"
 ln -s /Applications "$DMG_ROOT/Applications"
 hdiutil create \
-  -volname "DeepSeekWrite Intel" \
+  -volname "DeepWrite Intel" \
   -srcfolder "$DMG_ROOT" \
   -ov \
   -format UDZO \

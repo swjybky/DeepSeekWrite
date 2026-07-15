@@ -82,6 +82,7 @@ import { useKeyedAutoSave } from '../hooks/useKeyedAutoSave'
 import { useTextHistory } from '../hooks/useTextHistory'
 import { useAppDialog } from '../components/useAppDialog'
 import { MemoryManagerDialog } from '../components/MemoryManagerDialog'
+import { BookMemoryImportDialog } from '../components/BookMemoryImportDialog'
 import { ExpertWritingPromptDialog } from '../components/ExpertWritingPromptDialog'
 import { WorldbuildingFormatDialog } from '../workspaces/long/WorldbuildingFormatDialog'
 import './BookEditor.css'
@@ -140,6 +141,9 @@ export function BookEditor() {
   const [bookMemories, setBookMemories] = useState<MemoryEntry[]>([])
   const [workspaceUserMemories, setWorkspaceUserMemories] = useState<MemoryEntry[]>([])
   const [bookMemorySaving, setBookMemorySaving] = useState(false)
+  const [bookMemoryImportOpen, setBookMemoryImportOpen] = useState(false)
+  const [bookMemoryImporting, setBookMemoryImporting] = useState(false)
+  const [bookMemoryResetKey, setBookMemoryResetKey] = useState(0)
   const [bookMemoryError, setBookMemoryError] = useState<string | null>(null)
   const [bookMemoryUnread, setBookMemoryUnread] = useState(false)
   const workspaceSessions = useWorkspaceStore((state) => state.sessions)
@@ -376,6 +380,40 @@ export function BookEditor() {
       }
     },
     [bookRef, showAlert, workspaceUserMemories],
+  )
+
+  const handleImportBookMemories = useCallback(
+    async (sourceBook: BookSummary) => {
+      const currentBook = bookRef.current
+      if (!currentBook || sourceBook.id === currentBook.id) return
+
+      setBookMemoryImporting(true)
+      setBookMemoryError(null)
+      try {
+        const sourceMemories = await getBookMemories(sourceBook.id)
+        const ok = await confirm({
+          title: '确认加载书籍记忆',
+          message: `将删除当前书籍的全部记忆，并把「${sourceBook.title || '未命名书籍'}」的书籍记忆完整同步到本书。此操作会覆盖当前记忆，是否继续？`,
+          confirmText: '确认加载',
+          variant: 'danger',
+        })
+        if (!ok) return
+
+        setBookMemorySaving(true)
+        const saved = await saveBookMemories(currentBook.id, sourceMemories)
+        updateBookMemoriesInState(currentBook.id, saved)
+        setBookMemoryResetKey((key) => key + 1)
+        setBookMemoryUnread(false)
+        setBookMemoryImportOpen(false)
+        setMessage('已加载其他书籍记忆')
+      } catch (err) {
+        setBookMemoryError(err instanceof Error ? err.message : '加载书籍记忆失败')
+      } finally {
+        setBookMemorySaving(false)
+        setBookMemoryImporting(false)
+      }
+    },
+    [bookRef, confirm, updateBookMemoriesInState],
   )
 
   const handleBookMemoriesCaptured = useCallback(
@@ -1138,29 +1176,51 @@ export function BookEditor() {
           memories={bookMemories}
           saving={bookMemorySaving}
           error={bookMemoryError}
+          resetKey={bookMemoryResetKey}
           titleActions={
-            <label
-              className="memory-auto-capture-toggle"
-              title="开启后，模型会自动地帮你总结记忆。"
-            >
-              <input
-                type="checkbox"
-                checked={Boolean(book.memory_auto_capture_enabled)}
-                disabled={saving || bookMemorySaving}
-                aria-label="主动录入书籍记忆"
-                onChange={(event) =>
-                  void handleToggleBookMemoryAutoCapture(event.target.checked)
-                }
-              />
-              <span className="memory-auto-capture-switch" aria-hidden />
-              <span>主动录入</span>
-            </label>
+            <>
+              <label
+                className="memory-auto-capture-toggle"
+                title="开启后，模型会自动地帮你总结记忆。"
+              >
+                <input
+                  type="checkbox"
+                  checked={Boolean(book.memory_auto_capture_enabled)}
+                  disabled={saving || bookMemorySaving}
+                  aria-label="主动录入书籍记忆"
+                  onChange={(event) =>
+                    void handleToggleBookMemoryAutoCapture(event.target.checked)
+                  }
+                />
+                <span className="memory-auto-capture-switch" aria-hidden />
+                <span>主动录入</span>
+              </label>
+              <button
+                type="button"
+                className="memory-import-button"
+                disabled={saving || bookMemorySaving || bookMemoryImporting}
+                onClick={() => setBookMemoryImportOpen(true)}
+              >
+                加载其他书籍记忆
+              </button>
+            </>
           }
           onClose={() => {
             if (!bookMemorySaving) setBookMemoryOpen(false)
           }}
           onSave={handleSaveBookMemories}
           onSyncMemory={handleSyncBookMemoryToUser}
+        />
+      ) : null}
+      {bookMemoryImportOpen && book ? (
+        <BookMemoryImportDialog
+          currentBookId={book.id}
+          books={workspaceBooks}
+          importing={bookMemoryImporting}
+          onClose={() => {
+            if (!bookMemoryImporting) setBookMemoryImportOpen(false)
+          }}
+          onImport={handleImportBookMemories}
         />
       ) : null}
 

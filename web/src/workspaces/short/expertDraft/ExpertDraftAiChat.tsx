@@ -242,6 +242,7 @@ export function ExpertDraftAiChat(props: Props) {
   const switchToSectionWriterRef = useRef<
     ((sectionId: string) => Promise<void>) | null
   >(null)
+  const panelSwitchSeqRef = useRef(0)
   const backgroundWriterActiveRef = useRef(false)
   const activePanelKindRef = useRef<'coordinator' | 'section-writer'>(
     'coordinator',
@@ -462,7 +463,7 @@ export function ExpertDraftAiChat(props: Props) {
       }
     }
 
-    unsubscribeMessagesRefreshRef.current = agent.subscribe(async (ev) => {
+    const unsubscribe = agent.subscribe(async (ev) => {
       const historyKind =
         agent === coordinatorAgentRef.current ? 'coordinator' : 'section-writer'
       if (ev.type === 'agent_start') {
@@ -490,6 +491,11 @@ export function ExpertDraftAiChat(props: Props) {
         })
       }
     })
+    unsubscribeMessagesRefreshRef.current = () => {
+      unsubscribe()
+      cancelAnimationFrame(postAgentEndRaf)
+      postAgentEndRaf = 0
+    }
   }, [])
 
   const showSelectedPanel = useCallback(async () => {
@@ -497,11 +503,15 @@ export function ExpertDraftAiChat(props: Props) {
     if (sectionId) {
       const runningAgent = sectionWriterAgentRef.current
       if (backgroundWriterActiveRef.current && runningAgent) {
+        panelSwitchSeqRef.current += 1
         activePanelKindRef.current = 'section-writer'
-        bindActiveAgentUi(runningAgent)
-        await setPanelAgentRef.current?.(runningAgent, () =>
-          stripArtifacts(runningAgent.state.tools),
-        )
+        setActivePanelKind('section-writer')
+        if (chatPanelRef.current?.agent !== runningAgent) {
+          bindActiveAgentUi(runningAgent)
+          await setPanelAgentRef.current?.(runningAgent, () =>
+            stripArtifacts(runningAgent.state.tools),
+          )
+        }
         return
       }
       await switchToSectionWriterRef.current?.(sectionId)
@@ -706,57 +716,94 @@ export function ExpertDraftAiChat(props: Props) {
       ) => {
         if (cancelled) return
         activePanelAgent = nextAgent
+        const agentInterface = chatPanel.agentInterface
+        if (
+          chatPanel.agent === nextAgent &&
+          agentInterface?.session === nextAgent
+        ) {
+          nextAgent.state.tools = stripArtifacts(toolsFactory())
+          syncWorkspaceModelButtonLabel(chatPanel, nextAgent.state.model)
+          return
+        }
         unsubscribePreferences?.()
         unsubscribePreferences = bindWorkspaceChatPreferences(nextAgent, () => {
           nudgePiLayout()
           chatPanel.requestUpdate?.()
           requestAnimationFrame(nudgePiLayout)
         })
-        await chatPanel.setAgent(nextAgent, {
-          onBeforeSend: async () => {
-            await validateWorkspaceAttachmentsBeforeSend(
-              chatPanel,
-              nextAgent.state.model,
-              showAlert,
-            )
-          },
-          onApiKeyRequired: async (provider: string) =>
-            ApiKeyPromptDialog.prompt(provider),
-          onModelSelect: async () => {
-            const selectModel = (model: typeof nextAgent.state.model) => {
-              nextAgent.state.model = model
-              syncWorkspaceModelButtonLabel(chatPanel, model)
-              nudgePiLayout()
-              requestAnimationFrame(nudgePiLayout)
-            }
-            const handled = await openWorkspaceConfiguredModelSelector(
-              nextAgent.state.model,
-              selectModel,
-            )
-            if (!handled) {
-              ModelSelector.open(nextAgent.state.model, selectModel)
-            }
-          },
-          toolsFactory,
-        })
+        const onBeforeSend = async () => {
+          await validateWorkspaceAttachmentsBeforeSend(
+            chatPanel,
+            nextAgent.state.model,
+            showAlert,
+          )
+        }
+        const onApiKeyRequired = async (provider: string) =>
+          ApiKeyPromptDialog.prompt(provider)
+        const onModelSelect = async () => {
+          const selectModel = (model: typeof nextAgent.state.model) => {
+            nextAgent.state.model = model
+            syncWorkspaceModelButtonLabel(chatPanel, model)
+            nudgePiLayout()
+            requestAnimationFrame(nudgePiLayout)
+          }
+          const handled = await openWorkspaceConfiguredModelSelector(
+            nextAgent.state.model,
+            selectModel,
+          )
+          if (!handled) {
+            ModelSelector.open(nextAgent.state.model, selectModel)
+          }
+        }
+
+        if (agentInterface) {
+          chatPanel.agent = nextAgent
+          if (chatPanel.artifactsPanel) {
+            chatPanel.artifactsPanel.agent = nextAgent
+          }
+          nextAgent.state.tools = stripArtifacts(toolsFactory())
+          agentInterface.session = nextAgent
+          agentInterface.onBeforeSend = onBeforeSend
+          agentInterface.onApiKeyRequired = onApiKeyRequired
+          agentInterface.onModelSelect = onModelSelect
+          agentInterface.requestUpdate()
+          chatPanel.requestUpdate?.()
+          await agentInterface.updateComplete
+        } else {
+          await chatPanel.setAgent(nextAgent, {
+            onBeforeSend,
+            onApiKeyRequired,
+            onModelSelect,
+            toolsFactory,
+          })
+          nextAgent.state.tools = stripArtifacts(nextAgent.state.tools)
+        }
         installWorkspaceSendValidationGuard(chatPanel)
         configureWorkspaceAttachmentOptions(chatPanel, showAlert)
         configureQuickSkillInput(chatPanel, {
           getSkills: resolveQuickSkills,
           isEnabled: () => !cancelled,
         })
-        nextAgent.state.tools = stripArtifacts(nextAgent.state.tools)
         if (!cancelled) {
           nudgePiLayout()
+          syncWorkspaceModelButtonLabel(chatPanel, nextAgent.state.model)
           chatPanel.requestUpdate?.()
         }
       }
       setPanelAgentRef.current = setPanelAgent
 
       const switchToCoordinator = async () => {
+        const switchSeq = ++panelSwitchSeqRef.current
         const agent = coordinatorAgentRef.current
         if (!agent) return
         refreshCoordinatorAgentState(propsLatestRef.current.expertDraft)
+        if (
+          cancelled ||
+          switchSeq !== panelSwitchSeqRef.current ||
+          propsLatestRef.current.expertDraft.active_section_id
+        ) {
+          return
+        }
         activePanelKindRef.current = 'coordinator'
         setActivePanelKind('coordinator')
         bindActiveAgentUi(agent)
@@ -820,6 +867,7 @@ export function ExpertDraftAiChat(props: Props) {
       }
 
       const switchToSectionWriter = async (sectionId: string) => {
+        const switchSeq = ++panelSwitchSeqRef.current
         const section = propsLatestRef.current.expertDraft.sections.find(
           (item) => item.id === sectionId,
         )
@@ -828,6 +876,13 @@ export function ExpertDraftAiChat(props: Props) {
           return
         }
         const agent = await ensureSectionWriterAgent()
+        if (
+          cancelled ||
+          switchSeq !== panelSwitchSeqRef.current ||
+          propsLatestRef.current.expertDraft.active_section_id !== sectionId
+        ) {
+          return
+        }
         refreshSectionWriterAgentState(
           sectionId,
           propsLatestRef.current.expertDraft,
@@ -864,6 +919,7 @@ export function ExpertDraftAiChat(props: Props) {
 
     return () => {
       cancelled = true
+      panelSwitchSeqRef.current += 1
       resizeObserver?.disconnect()
       resizeObserver = undefined
       setChatReady(false)
@@ -889,9 +945,14 @@ export function ExpertDraftAiChat(props: Props) {
   }, [])
 
   useEffect(() => {
-    if (!chatReady) return
-    void showSelectedPanel()
-  }, [chatReady, props.expertDraft.active_section_id, showSelectedPanel])
+    if (!chatReady || backgroundWriterActiveRef.current) return
+    const sectionId = props.expertDraft.active_section_id
+    if (sectionId) {
+      void switchToSectionWriterRef.current?.(sectionId)
+      return
+    }
+    void switchToCoordinatorRef.current?.()
+  }, [chatReady, props.expertDraft.active_section_id])
 
   useEffect(() => {
     if (!chatReady || debouncedDraft.running) return

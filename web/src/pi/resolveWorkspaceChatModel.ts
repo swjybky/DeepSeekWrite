@@ -24,6 +24,9 @@ type LegacyWorkspaceDisplayModel = Model<Api> & {
   [WORKSPACE_MODEL_PROVIDER_KEY]?: string
 }
 
+type ExtendedThinkingLevelMap = NonNullable<Model<Api>['thinkingLevelMap']> &
+  Record<string, string | null | undefined>
+
 const workspaceModelButtonLabels = new WeakMap<ParentNode, string>()
 
 type CustomProviderStoreApi =
@@ -183,6 +186,13 @@ function applyConfiguredModelLabel(
     ...model,
     [WORKSPACE_MODEL_CONFIG_ID_KEY]: config.id,
   } as LegacyWorkspaceDisplayModel
+  if (config.provider.trim().toLowerCase() === 'openai') {
+    displayModel.thinkingLevelMap = {
+      ...model.thinkingLevelMap,
+      xhigh: 'xhigh',
+      max: 'max',
+    } as ExtendedThinkingLevelMap
+  }
   const label = config.label.trim()
   if (label) displayModel.name = label
   return displayModel

@@ -18,8 +18,8 @@ ROOT="${1:-$PWD}"
 ROOT="$(cd "$ROOT" && pwd)"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-[[ "$(uname -s)" == "Darwin" ]] || fail "DeepSeekWrite-arm.dmg must be built on macOS."
-[[ "$(uname -m)" == "arm64" ]] || fail "DeepSeekWrite-arm.dmg must be built on an Apple Silicon arm64 Mac."
+[[ "$(uname -s)" == "Darwin" ]] || fail "DeepWrite-arm.dmg must be built on macOS."
+[[ "$(uname -m)" == "arm64" ]] || fail "DeepWrite-arm.dmg must be built on an Apple Silicon arm64 Mac."
 
 for cmd in node npm python3 sips iconutil hdiutil ditto codesign; do
   require_cmd "$cmd"
@@ -33,8 +33,8 @@ done
 BUILD_DIR="$ROOT/build/macos-arm"
 VENV_DIR="$ROOT/.venv-macarm-build"
 DIST_DIR="$ROOT/dist"
-APP_PATH="$DIST_DIR/DeepSeekWrite.app"
-DMG_PATH="$DIST_DIR/DeepSeekWrite-arm.dmg"
+APP_PATH="$DIST_DIR/DeepWrite.app"
+DMG_PATH="$DIST_DIR/DeepWrite-arm.dmg"
 DMG_ROOT="$BUILD_DIR/dmgroot"
 SPEC_FILE="$SCRIPT_DIR/DeepSeekWrite-macarm.spec"
 ICON_PNG="$ROOT/app/assets/app-icon.png"
@@ -91,8 +91,8 @@ else
   ICON_ICNS=""
 fi
 
-log "Building DeepSeekWrite.app with PyInstaller"
-rm -rf "$APP_PATH" "$DIST_DIR/DeepSeekWrite" "$DMG_PATH"
+log "Building DeepWrite.app with PyInstaller"
+rm -rf "$APP_PATH" "$DIST_DIR/DeepWrite" "$DMG_PATH"
 DEEPSEEKWRITE_PROJECT_ROOT="$ROOT" \
 DEEPSEEKWRITE_MAC_ICON="$ICON_ICNS" \
   "$PYTHON_BIN" -m PyInstaller \
@@ -111,10 +111,10 @@ codesign --verify --deep --strict "$APP_PATH"
 log "Creating DMG"
 rm -rf "$DMG_ROOT"
 mkdir -p "$DMG_ROOT"
-ditto "$APP_PATH" "$DMG_ROOT/DeepSeekWrite.app"
+ditto "$APP_PATH" "$DMG_ROOT/DeepWrite.app"
 ln -s /Applications "$DMG_ROOT/Applications"
 hdiutil create \
-  -volname "DeepSeekWrite" \
+  -volname "DeepWrite" \
   -srcfolder "$DMG_ROOT" \
   -ov \
   -format UDZO \
