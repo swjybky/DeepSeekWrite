@@ -1,7 +1,7 @@
 import { Agent } from '@earendil-works/pi-agent-core'
 import type { AgentMessage, AgentTool } from '@earendil-works/pi-agent-core'
 import { ApiKeyPromptDialog, ChatPanel, ModelSelector } from '@earendil-works/pi-web-ui'
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 
 import {
   deleteAiChatSession,
@@ -217,6 +217,42 @@ function stripArtifacts(tools: AgentTool[]): AgentTool[] {
   return tools.filter((tool) => tool.name !== ARTIFACTS_TOOL_NAME)
 }
 
+type ChatScrollSnapshot = {
+  distanceFromBottom: number
+  stickToBottom: boolean
+}
+
+function captureChatScroll(panel: ChatPanel | null): ChatScrollSnapshot | null {
+  const scroller = panel?.agentInterface?.querySelector<HTMLElement>(
+    '.overflow-y-auto',
+  )
+  if (!scroller) return null
+  const distanceFromBottom = Math.max(
+    0,
+    scroller.scrollHeight - scroller.clientHeight - scroller.scrollTop,
+  )
+  return {
+    distanceFromBottom,
+    stickToBottom: distanceFromBottom <= 24,
+  }
+}
+
+function restoreChatScroll(
+  panel: ChatPanel | null,
+  snapshot: ChatScrollSnapshot,
+): void {
+  const scroller = panel?.agentInterface?.querySelector<HTMLElement>(
+    '.overflow-y-auto',
+  )
+  if (!scroller) return
+  scroller.scrollTop = snapshot.stickToBottom
+    ? Math.max(0, scroller.scrollHeight - scroller.clientHeight)
+    : Math.max(
+        0,
+        scroller.scrollHeight - scroller.clientHeight - snapshot.distanceFromBottom,
+      )
+}
+
 function hasUserMessage(messages: AgentMessage[]): boolean {
   return messages.some(
     (message) =>
@@ -233,6 +269,7 @@ export function ExpertDraftAiChat(props: Props) {
   const sectionWriterAgentRef = useRef<Agent | null>(null)
   const chatPanelRef = useRef<ChatPanel | null>(null)
   const propsLatestRef = useRef(props)
+  const previousSectionIdRef = useRef(props.expertDraft.active_section_id)
   const coordinatorPromptTemplateRef = useRef('')
   const sectionWriterPromptTemplateRef = useRef('')
   const setPanelAgentRef = useRef<
@@ -277,6 +314,34 @@ export function ExpertDraftAiChat(props: Props) {
   useEffect(() => {
     propsLatestRef.current = props
   }, [props])
+
+  useLayoutEffect(() => {
+    const previousSectionId = previousSectionIdRef.current
+    const nextSectionId = props.expertDraft.active_section_id
+    previousSectionIdRef.current = nextSectionId
+    if (
+      !chatReady ||
+      !previousSectionId ||
+      !nextSectionId ||
+      previousSectionId === nextSectionId
+    ) {
+      return
+    }
+    const snapshot = captureChatScroll(chatPanelRef.current)
+    if (!snapshot) return
+    let secondFrame = 0
+    const firstFrame = requestAnimationFrame(() => {
+      restoreChatScroll(chatPanelRef.current, snapshot)
+      secondFrame = requestAnimationFrame(() => {
+        secondFrame = 0
+        restoreChatScroll(chatPanelRef.current, snapshot)
+      })
+    })
+    return () => {
+      cancelAnimationFrame(firstFrame)
+      if (secondFrame) cancelAnimationFrame(secondFrame)
+    }
+  }, [chatReady, props.expertDraft.active_section_id])
 
   const historyScopeFor = (
     kind: 'coordinator' | 'section-writer',
